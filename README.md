@@ -160,7 +160,7 @@ Each forbidden construct is either rejected outright or requires an explicit `[[
 
 ## Status
 
-Early design phase — nothing is implemented yet. This document is the design contract.
+In active development — core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the initial subset.
 
 # License
 [Apache License 2.0](LICENSE)
