@@ -1,0 +1,1378 @@
+#include "hir_builder.h"
+
+#include <algorithm>
+#include <functional>
+#include <stdexcept>
+#include <string>
+
+namespace ivy {
+namespace {
+
+// Rank: larger = wider.  Ivy fixed-width types and C++ types share a scale
+// so mixed arithmetic (`int + int32_t`) promotes correctly.
+static int typeRank(std::string_view b) {
+    if (b == "bool")     return 0;
+    if (b == "char")     return 1;
+    if (b == "int8_t" || b == "uint8_t")    return 1;
+    if (b == "short")    return 2;
+    if (b == "int16_t" || b == "uint16_t")  return 2;
+    if (b == "int" || b == "unsigned")      return 3;
+    if (b == "int32_t" || b == "uint32_t")  return 3;
+    if (b == "long" || b == "int64_t" || b == "uint64_t") return 4;
+    if (b == "long long") return 4;
+    if (b == "size_t" || b == "ptrdiff_t")  return 4;
+    if (b == "float16_t" || b == "bfloat16_t") return 5;
+    if (b == "float" || b == "float32_t")  return 6;
+    if (b == "double" || b == "long double" || b == "float64_t") return 7;
+    if (b == "float128_t") return 8;
+    return -1;
+}
+
+static bool isIvyUnsigned(std::string_view b) {
+    return b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
+           b == "size_t";
+}
+
+static bool isFloatBase(std::string_view b) {
+    return b == "float" || b == "double" || b == "long double" ||
+           b == "float16_t" || b == "float32_t" || b == "float64_t" ||
+           b == "float128_t" || b == "bfloat16_t";
+}
+
+static bool isIntegerBase(std::string_view b) {
+    return b == "bool" || b == "char" || b == "short" || b == "int" ||
+           b == "long" || b == "long long" ||
+           b == "int8_t" || b == "int16_t" || b == "int32_t" || b == "int64_t" ||
+           b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
+           b == "size_t" || b == "ptrdiff_t";
+}
+
+bool isNumeric(const hir::Type& t) {
+    if (t.pointerDepth > 0 || t.base == "void" || t.base == "nullptr") return false;
+    // Struct/enum types are not numeric (enums are handled separately
+    // — they fold to IntegerLit at HIR build time, so an enum-typed
+    // expression here means a struct, which is not usable in arithmetic).
+    if (isIntegerBase(t.base) || isFloatBase(t.base)) return true;
+    return false;  // unknown user-defined type (e.g. struct)
+}
+
+bool isIntegerLike(const hir::Type& t) {
+    if (t.pointerDepth > 0) return false;
+    return isIntegerBase(t.base);
+}
+
+// Strip reference qualifier — a reference T& behaves like T for value semantics
+// (arithmetic, comparison, etc.). Reference-ness only matters for storage
+// (params, locals, the lvalue itself).
+hir::Type stripReference(const hir::Type& t) {
+    hir::Type r = t;
+    r.isReference = false;
+    return r;
+}
+
+// Placeholder type used for expression recovery after an error.
+hir::Type dummyType() {
+    hir::Type t;
+    t.base = "int";
+    return t;
+}
+
+hir::Type intType() {
+    hir::Type t;
+    t.base = "int";
+    return t;
+}
+
+hir::Type floatType() {
+    hir::Type t;
+    t.base = "double";
+    return t;
+}
+
+hir::Type boolType() {
+    hir::Type t;
+    t.base = "bool";
+    return t;
+}
+
+// const char*
+hir::Type constCharPtrType() {
+    hir::Type t;
+    t.base = "char";
+    t.isConst = true;
+    t.pointerDepth = 1;
+    return t;
+}
+
+hir::Type nullptrType() {
+    hir::Type t;
+    t.base = "nullptr";
+    return t;
+}
+
+std::string typeToString(const hir::Type& t) {
+    std::string s;
+    if (t.isConst) s += "const ";
+    if (t.isUnsigned) s += "unsigned ";
+    s += std::string(t.base);
+    for (std::uint32_t i = 0; i < t.pointerDepth; ++i) s += "*";
+    return s;
+}
+
+}  // namespace
+
+// --- promotion helper (outside anonymous-namespace) ---
+
+hir::Type HirBuilder::promoteTypes(const hir::Type& aIn, const hir::Type& bIn) {
+    // References decay to their underlying value type for arithmetic.
+    hir::Type a = stripReference(aIn);
+    hir::Type b = stripReference(bIn);
+    if (a.pointerDepth > 0 && b.pointerDepth > 0 && a.base != b.base) return a;
+    if (a.pointerDepth > 0 && b.pointerDepth == 0) return a;
+    if (b.pointerDepth > 0 && a.pointerDepth == 0) return b;
+    if (a.base == "nullptr") return b;
+    if (b.base == "nullptr") return a;
+
+    const bool af = isFloatBase(a.base), bf = isFloatBase(b.base);
+    if (af || bf) {
+        // Mixed float + integral → float of higher rank
+        if (af && bf) return typeRank(a.base) >= typeRank(b.base) ? a : b;
+        return af ? a : b;  // float wins over integral
+    }
+
+    if (isIntegerBase(a.base) && isIntegerBase(b.base)) {
+        int ra = typeRank(a.base), rb = typeRank(b.base);
+        const bool au = a.isUnsigned || isIvyUnsigned(a.base);
+        const bool bu = b.isUnsigned || isIvyUnsigned(b.base);
+        hir::Type r = (ra >= rb) ? a : b;
+        r.isUnsigned = au || bu;
+        return r;
+    }
+    return a;
+}
+
+HirBuilder::HirBuilder(const TranslationUnit& ast) : ast_(ast) {}
+
+void HirBuilder::error(SourceLoc loc, std::string message) {
+    diagnostics_.push_back(Diagnostic{loc.line, loc.col, std::move(message)});
+    failed_ = true;
+}
+
+// --- signatures (pass 1) ---
+
+void HirBuilder::lowerLifetimeAttributes(hir::Function& fn, const Function& af) {
+    for (const Attribute& a : af.attrs) {
+        if (a.name == "lt_def") {
+            for (std::string_view arg : a.args) {
+                if (std::any_of(fn.lifetimes.begin(), fn.lifetimes.end(),
+                                [&](const hir::Lifetime& l) { return l.name == arg; })) {
+                    error(a.loc, "duplicate lifetime '" + std::string(arg) + "'");
+                    continue;
+                }
+                fn.lifetimes.push_back(hir::Lifetime{arg, a.loc});
+            }
+        } else if (a.name == "lt_ret") {
+            if (a.args.size() != 1) {
+                error(a.loc, "[[ivy::lt_ret]] expects exactly one lifetime argument");
+                continue;
+            }
+            fn.returnLifetime = a.args[0];
+        }
+    }
+    // Validate lt_ret references a declared lifetime.
+    if (!fn.returnLifetime.empty() &&
+        std::none_of(fn.lifetimes.begin(), fn.lifetimes.end(),
+                     [&](const hir::Lifetime& l) { return l.name == fn.returnLifetime; })) {
+        error(af.loc, "[[ivy::lt_ret(" + std::string(fn.returnLifetime) +
+                          ")]]: lifetime '" + std::string(fn.returnLifetime) +
+                          "' is not declared via [[ivy::lt_def(...)]]");
+    }
+}
+
+std::string_view HirBuilder::lowerParamAttribute(hir::Function& fn, const Param& ap) {
+    for (const Attribute& a : ap.attrs) {
+        if (a.name != "lt") continue;
+        if (a.args.size() != 1) {
+            error(a.loc, "[[ivy::lt]] expects exactly one lifetime argument");
+            continue;
+        }
+        const std::string_view lt = a.args[0];
+        const bool declared =
+            std::any_of(fn.lifetimes.begin(), fn.lifetimes.end(),
+                        [&](const hir::Lifetime& l) { return l.name == lt; });
+        if (!declared) {
+            error(a.loc, "[[ivy::lt(" + std::string(lt) + ")]]: lifetime '" + std::string(lt) +
+                             "' is not declared via [[ivy::lt_def(...)]]");
+            continue;
+        }
+        if (ap.type.pointerDepth == 0) {
+            error(a.loc, "[[ivy::lt]] requires a pointer parameter");
+            continue;
+        }
+        return lt;
+    }
+    return {};
+}
+
+void HirBuilder::buildEnum(const EnumDecl& ed) {
+    // Reject duplicate enum name.
+    if (enums_.contains(ed.name)) {
+        error(ed.loc, "redefinition of enum '" + std::string(ed.name) + "'");
+        return;
+    }
+    EnumDef def;
+    def.underlyingType = ed.underlyingType;
+    def.isScoped = ed.isScoped;
+    def.nsPrefix = std::string(ed.namespacePrefix);
+
+    // Resolve each enumerator value. C++ rules:
+    //   - First enumerator with no explicit value → 0.
+    //   - Subsequent with no explicit value → prev + 1.
+    //   - Explicit value → must be a compile-time integer constant.
+    //     Ivy currently supports integer literals, unary +/-, and
+    //     references to previously-defined enum constants.
+    long long nextVal = 0;
+    for (const Enumerator& en : ed.enumerators) {
+        long long val = nextVal;
+        if (en.value) {
+            // Try to evaluate as a constant expression.
+            const Expr& e = *en.value;
+            const auto& n = e.node;
+            if (std::holds_alternative<Expr::IntegerLit>(n)) {
+                val = std::get<Expr::IntegerLit>(n).value;
+            } else if (std::holds_alternative<Expr::Unary>(n)) {
+                const auto& u = std::get<Expr::Unary>(n);
+                if (u.op == "-" && u.operand &&
+                    std::holds_alternative<Expr::IntegerLit>(u.operand->node)) {
+                    val = -std::get<Expr::IntegerLit>(u.operand->node).value;
+                } else if (u.op == "+" && u.operand &&
+                           std::holds_alternative<Expr::IntegerLit>(u.operand->node)) {
+                    val = std::get<Expr::IntegerLit>(u.operand->node).value;
+                } else if (u.op == "-" && u.operand &&
+                           std::holds_alternative<Expr::IdentRef>(u.operand->node)) {
+                    const auto& ref = std::get<Expr::IdentRef>(u.operand->node);
+                    auto it = def.constants.find(ref.name);
+                    if (it != def.constants.end()) {
+                        val = -it->second;
+                    } else {
+                        error(en.loc, "enumerator '" + std::string(en.name) +
+                              "' value must be a constant expression");
+                    }
+                } else {
+                    error(en.loc, "enumerator '" + std::string(en.name) +
+                          "' value must be a constant expression");
+                }
+            } else if (std::holds_alternative<Expr::IdentRef>(n)) {
+                // Reference to a previous enumerator in the same enum.
+                const auto& ref = std::get<Expr::IdentRef>(n);
+                auto it = def.constants.find(ref.name);
+                if (it != def.constants.end()) {
+                    val = it->second;
+                } else {
+                    error(en.loc, "enumerator '" + std::string(en.name) +
+                          "' references undefined constant '" +
+                          std::string(ref.name) + "'");
+                }
+            } else if (std::holds_alternative<Expr::Binary>(n)) {
+                // Recursively evaluate a constant expression on integer
+                // literals and enum constants (e.g. A | B, A + B, (A | B) | C).
+                std::function<long long(const Expr&)> evalConst;
+                evalConst = [&](const Expr& operand) -> long long {
+                    const auto& on = operand.node;
+                    if (std::holds_alternative<Expr::IntegerLit>(on)) {
+                        return std::get<Expr::IntegerLit>(on).value;
+                    }
+                    if (std::holds_alternative<Expr::IdentRef>(on)) {
+                        const auto& ref = std::get<Expr::IdentRef>(on);
+                        auto it = def.constants.find(ref.name);
+                        if (it != def.constants.end()) return it->second;
+                        // Also check unscoped enum constants registered so far.
+                        auto ec = enumConstants_.find(ref.name);
+                        if (ec != enumConstants_.end()) return ec->second;
+                        throw std::runtime_error("not constant");
+                    }
+                    if (std::holds_alternative<Expr::Unary>(on)) {
+                        const auto& u = std::get<Expr::Unary>(on);
+                        if (u.op == "-") return -evalConst(*u.operand);
+                        if (u.op == "+") return evalConst(*u.operand);
+                        if (u.op == "~") return ~evalConst(*u.operand);
+                        throw std::runtime_error("unsupported unary");
+                    }
+                    if (std::holds_alternative<Expr::Binary>(on)) {
+                        const auto& inner = std::get<Expr::Binary>(on);
+                        long long lhs = evalConst(*inner.lhs);
+                        long long rhs = evalConst(*inner.rhs);
+                        if (inner.op == "+") return lhs + rhs;
+                        if (inner.op == "-") return lhs - rhs;
+                        if (inner.op == "*") return lhs * rhs;
+                        if (inner.op == "/") return lhs / rhs;
+                        if (inner.op == "%") return lhs % rhs;
+                        if (inner.op == "|") return lhs | rhs;
+                        if (inner.op == "&") return lhs & rhs;
+                        if (inner.op == "^") return lhs ^ rhs;
+                        if (inner.op == "<<") return lhs << rhs;
+                        if (inner.op == ">>") return lhs >> rhs;
+                        throw std::runtime_error("unsupported op");
+                    }
+                    throw std::runtime_error("not constant");
+                };
+                try {
+                    val = evalConst(e);
+                } catch (...) {
+                    error(en.loc, "enumerator '" + std::string(en.name) +
+                          "' value must be a constant expression");
+                }
+            } else {
+                error(en.loc, "enumerator '" + std::string(en.name) +
+                      "' value must be a constant expression");
+            }
+        }
+        // Reject duplicate enumerator within the same enum.
+        if (def.constants.contains(en.name)) {
+            error(en.loc, "redefinition of enumerator '" + std::string(en.name) + "'");
+            continue;
+        }
+        def.constants[en.name] = val;
+        // For unscoped enums, register the bare name too.
+        if (!ed.isScoped) {
+            enumConstants_[en.name] = val;
+        }
+        nextVal = val + 1;
+    }
+
+    // Copy the enum declaration into the HIR TU.
+    EnumDecl resolved;
+    resolved.name = ed.name;
+    resolved.namespacePrefix = ed.namespacePrefix;
+    resolved.isScoped = ed.isScoped;
+    resolved.underlyingType = ed.underlyingType;
+    resolved.loc = ed.loc;
+    for (const Enumerator& en : ed.enumerators) {
+        Enumerator copy;
+        copy.name = en.name;
+        copy.loc = en.loc;
+        copy.value = std::make_unique<Expr>();
+        copy.value->loc = en.loc;
+        copy.value->node = Expr::IntegerLit{def.constants[en.name]};
+        resolved.enumerators.push_back(std::move(copy));
+    }
+    hir_->enums.push_back(std::move(resolved));
+
+    enums_[ed.name] = std::move(def);
+}
+
+// Computes the size and alignment of a type for struct layout.
+// Uses the same rank table as codegen's sizeofType() — Ivy fixed-width
+// types and C-style types share a scale so layout matches codegen.
+static std::uint64_t typeSize(const hir::Type& t) {
+    if (t.pointerDepth > 0 || t.isReference) return 8;  // 64-bit pointers
+    const std::string_view b = t.base;
+    if (b == "bool" || b == "char" || b == "int8_t" || b == "uint8_t") return 1;
+    if (b == "short" || b == "int16_t" || b == "uint16_t" || b == "float16_t" || b == "bfloat16_t") return 2;
+    if (b == "int" || b == "unsigned" || b == "int32_t" || b == "uint32_t" ||
+        b == "float" || b == "float32_t" || b == "size_t" || b == "ptrdiff_t") return 4;
+    if (b == "long" || b == "long long" || b == "int64_t" || b == "uint64_t" ||
+        b == "double" || b == "long double" || b == "float64_t" || b == "float128_t") return 8;
+    return 4;  // fallback (e.g. unresolved enum → int)
+}
+
+static std::uint32_t typeAlign(const hir::Type& t) {
+    // Alignment = size for all Ivy scalar types (no special alignment rules).
+    return static_cast<std::uint32_t>(typeSize(t));
+}
+
+void HirBuilder::buildStruct(const StructDecl& sd) {
+    // Reject duplicate struct name.
+    if (structs_.contains(sd.name)) {
+        error(sd.loc, "redefinition of struct '" + std::string(sd.name) + "'");
+        return;
+    }
+
+    StructDef def;
+    def.nsPrefix = std::string(sd.namespacePrefix);
+
+    // Compute field layout: sequential offsets, each field aligned to
+    // its natural alignment. The struct's overall alignment is the
+    // max of all field alignments. The struct's size is rounded up
+    // to the overall alignment (C ABI rule).
+    std::uint64_t offset = 0;
+    std::uint32_t structAlign = 1;
+    for (std::size_t i = 0; i < sd.fields.size(); ++i) {
+        const Field& f = sd.fields[i];
+        const std::uint64_t sz = typeSize(f.type);
+        const std::uint32_t align = typeAlign(f.type);
+        // Pad to alignment.
+        offset = (offset + align - 1) & ~(std::uint64_t(align - 1));
+        def.fieldMap[f.name] = {i, offset, f.type};
+        offset += sz;
+        if (align > structAlign) structAlign = align;
+    }
+    def.size = (offset + structAlign - 1) & ~(std::uint64_t(structAlign - 1));
+    def.align = structAlign;
+    // Copy field type/name (skip `init` — not needed past HIR).
+    for (const Field& f : sd.fields) {
+        def.fields.push_back(Field{f.type, f.name, nullptr, f.loc});
+        def.defaultInits.push_back(f.init.get());
+    }
+
+    // Copy the struct declaration into the HIR TU.  Field has
+    // unique_ptr (move-only), so StructDecl is move-only.  However,
+    // the original lives in ast::TranslationUnit and must remain
+    // valid for later passes — we copy only the metadata needed
+    // (name, namespacePrefix, isClass, loc) and rebuild the fields
+    // vector by cloning each Field's type/name (skipping `init`).
+    StructDecl resolved;
+    resolved.name = sd.name;
+    resolved.namespacePrefix = sd.namespacePrefix;
+    resolved.isClass = sd.isClass;
+    resolved.loc = sd.loc;
+    for (const Field& f : sd.fields) {
+        Field cf;
+        cf.type = f.type;
+        cf.name = f.name;
+        cf.loc = f.loc;
+        resolved.fields.push_back(std::move(cf));
+    }
+    hir_->structs.push_back(std::move(resolved));
+
+    structs_[sd.name] = std::move(def);
+}
+
+void HirBuilder::buildSignature(const Function& af) {
+    auto fn = std::make_unique<hir::Function>();
+    fn->name = af.name;
+    fn->namespacePrefix = af.namespacePrefix;
+    fn->returnType = af.returnType;
+    fn->isExternC = af.isExternC;
+    fn->loc = af.loc;
+
+    lowerLifetimeAttributes(*fn, af);
+
+    for (const Param& ap : af.params) {
+        hir::Param p;
+        p.type = ap.type;
+        p.name = ap.name;
+        p.loc = ap.loc;
+        p.lifetime = lowerParamAttribute(*fn, ap);
+        fn->params.push_back(std::move(p));
+    }
+
+    // Safety rule: a function definition that returns a pointer must declare
+    // the returned pointer's lifetime. (Declarations — e.g. extern "C" C APIs
+    // like malloc — are exempt.)
+    if (af.body && af.returnType.pointerDepth > 0 && fn->returnLifetime.empty()) {
+        error(af.loc, "function '" + std::string(af.name) +
+                          "' returns a pointer but has no [[ivy::lt_ret(...)]] attribute");
+    }
+
+    if (auto* existing = functions_[af.name]) {
+        if (existing->body && af.body) {
+            error(af.loc, "redefinition of function '" + std::string(af.name) + "'");
+        }
+    }
+    hir::Function* raw = fn.get();
+    hir_->functions.push_back(std::move(fn));
+    functions_[af.name] = raw;
+}
+
+// --- bodies (pass 2) ---
+
+void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
+    current_ = &fn;
+    hasReturnInBody_ = false;
+    scopes_.push_back({});
+    for (const hir::Param& p : fn.params) {
+        if (!p.name.empty()) declare(p.name, p.type, p.loc);
+    }
+    std::unique_ptr<hir::Stmt> c = buildCompound(body, fn.loc);
+    scopes_.pop_back();
+    if (c) {
+        fn.body = std::make_unique<hir::Stmt::Compound>(
+            std::move(std::get<hir::Stmt::Compound>(c->node)));
+    }
+    if (!fn.returnType.isConst && fn.returnType.pointerDepth == 0 &&
+        fn.returnType.base != "void" && !hasReturnInBody_) {
+        error(fn.loc, "function '" + std::string(fn.name) +
+                          "' may reach the end without returning a value");
+    }
+}
+
+void HirBuilder::declare(std::string_view name, hir::Type type, SourceLoc loc) {
+    auto& scope = scopes_.back();
+    if (scope.contains(name)) {
+        error(loc, "redefinition of variable '" + std::string(name) + "'");
+        return;
+    }
+    scope.emplace(name, type);
+}
+
+bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const {
+    if (from.base == "nullptr") return to.pointerDepth > 0 || to.isReference;
+    if (from.isReference) {
+        // Reference can bind to reference of same type.
+        if (to.isReference && to.base == from.base &&
+            (!to.isConst || from.isConst) &&
+            to.pointerDepth == from.pointerDepth) return true;
+    }
+    // T&  can bind to lvalue of type T (or convertible).
+    // const T&  can bind to anything (incl. rvalue).
+    if (to.isReference) {
+        if (to.pointerDepth == 0 && from.pointerDepth == 0) {
+            // Reference to scalar — allow narrowing like C++.
+            return isNumeric(to) && isNumeric(from);
+        }
+        // Reference to pointer.
+        if (to.pointerDepth == from.pointerDepth && to.base == from.base &&
+            (!to.isConst || from.isConst)) return true;
+    }
+    // Assigning TO a reference is impossible (re-seating is not allowed in Ivy).
+    // Reference-to-reference assignment not allowed.
+    if (to.pointerDepth == 0 && from.pointerDepth == 0) {
+        // Struct-to-struct assignment: same type only (no implicit conversions).
+        if (structs_.contains(to.base) && to.base == from.base &&
+            !to.isConst == !from.isConst) return true;
+        // Enum-to-enum: same enum type (or enum constant folded to int).
+        if (enums_.contains(to.base)) {
+            // Same enum type, or int → enum (enum constants fold to int).
+            return to.base == from.base || isNumeric(from);
+        }
+        // Enum → numeric: implicit enum-to-int conversion (e.g. returning
+        // an enum variable from a function returning int32_t). Enum values
+        // are represented as integers at runtime, so this is safe.
+        if (enums_.contains(from.base) && isNumeric(to)) return true;
+        return isNumeric(to) && isNumeric(from);
+    }
+    if (to.pointerDepth != from.pointerDepth) return false;
+    if (to.base != from.base) return false;
+    if (!to.isConst && from.isConst) return false;
+    return true;
+}
+
+bool HirBuilder::checkCondition(const hir::Expr& e) {
+    const hir::Type& t = e.type;
+    if (isNumeric(t) || t.pointerDepth > 0 || t.base == "nullptr") return true;
+    error(e.loc, "condition must be numeric, a pointer, or nullptr (got '" +
+                     typeToString(t) + "')");
+    return false;
+}
+
+void HirBuilder::requireUnsafe(SourceLoc loc, std::string_view what) {
+    if (unsafeDepth_ == 0) {
+        error(loc, std::string(what) + " requires an [[ivy::unsafe]] block");
+    }
+}
+
+std::unique_ptr<hir::Stmt> HirBuilder::buildCompound(const Stmt::Compound& c, SourceLoc loc) {
+    auto out = std::make_unique<hir::Stmt>();
+    out->loc = loc;
+    auto& compound = out->node.emplace<hir::Stmt::Compound>();
+    scopes_.push_back({});
+    for (const auto& s : c.stmts) compound.stmts.push_back(buildStmt(*s));
+    scopes_.pop_back();
+    return out;
+}
+
+std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, SourceLoc loc,
+                                                        bool checkInit) {
+    auto out = std::make_unique<hir::Stmt>();
+    out->loc = loc;
+    auto& decl = out->node.emplace<hir::Stmt::Decl>();
+    decl.type = d.type;
+    decl.name = d.name;
+
+    if (d.type.pointerDepth == 0 && d.type.base == "void") {
+        error(loc, "variable '" + std::string(d.name) + "' cannot have type void");
+    }
+    if (d.init) {
+        // Aggregate init list for a struct: `Point p = {1, 2};`
+        // Resolve each element against the corresponding field type so
+        // implicit conversions (e.g. int → int32_t) are applied.
+        if (auto* il = std::get_if<ivy::Expr::InitList>(&d.init->node)) {
+            decl.init = buildStructInit(*il, d.type, d.name, loc);
+        } else {
+            decl.init = buildExpr(*d.init);
+            if (decl.init && !isAssignable(d.type, decl.init->type)) {
+                error(loc, "cannot initialize variable '" + std::string(d.name) + "' of type '" +
+                               typeToString(d.type) + "' with a value of type '" +
+                               typeToString(decl.init->type) + "'");
+            }
+        }
+    } else if (checkInit) {
+        // Struct variables are zero-initialized (like C) — no explicit
+        // initializer required.  All other types must be initialized.
+        if (structs_.contains(d.type.base)) {
+            // Synthesize an aggregate initializer from default member
+            // initializers (if any). Fields without a default are
+            // zero-initialized by `lowerInitListInto` (which emits a
+            // `store ... zeroinitializer` first). This preserves C
+            // value-initialization semantics while honoring `= default`.
+            const StructDef& def = structs_[d.type.base];
+            bool anyDefault = false;
+            for (auto* p : def.defaultInits) if (p) { anyDefault = true; break; }
+            if (anyDefault) {
+                // Build an InitList with one element per field, preserving
+                // field indices: fields with a default get a clone of the
+                // default expression; fields without get a nullptr
+                // placeholder (zero-initialized by codegen).
+                Expr::InitList il;
+                for (auto* p : def.defaultInits) {
+                    if (p) il.elements.push_back(cloneExpr(*p));
+                    else il.elements.push_back(nullptr);
+                }
+                decl.init = buildStructInit(il, d.type, d.name, loc);
+            }
+        } else {
+            error(loc, "variable '" + std::string(d.name) +
+                           "' must be initialized (uninitialized variables are not allowed)");
+        }
+    }
+    declare(d.name, d.type, loc);
+    return out;
+}
+
+std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, SourceLoc loc) {
+    auto out = std::make_unique<hir::Stmt>();
+    out->loc = loc;
+    auto& ret = out->node.emplace<hir::Stmt::Return>();
+    hasReturnInBody_ = true;
+    if (r.value) {
+        ret.value = buildExpr(*r.value);
+        const hir::Type& rt = current_->returnType;
+        if (rt.pointerDepth == 0 && rt.base == "void") {
+            error(loc, "void function cannot return a value");
+        } else if (ret.value && !isAssignable(rt, ret.value->type)) {
+            error(loc, "cannot return value of type '" + typeToString(ret.value->type) +
+                           "' from function returning '" + typeToString(rt) + "'");
+        }
+    } else if (current_->returnType.pointerDepth == 0 && current_->returnType.base != "void") {
+        error(loc, "function '" + std::string(current_->name) +
+                       "' must return a value of type '" +
+                       typeToString(current_->returnType) + "'");
+    }
+    return out;
+}
+
+std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
+    auto out = std::make_unique<hir::Stmt>();
+    out->loc = s.loc;
+    const auto& n = s.node;
+    using A = Stmt;
+
+    if (std::holds_alternative<A::Compound>(n)) {
+        return buildCompound(std::get<A::Compound>(n), s.loc);
+    }
+    if (std::holds_alternative<A::Decl>(n)) {
+        return buildDeclaration(std::get<A::Decl>(n), s.loc, /*checkInit=*/true);
+    }
+    if (std::holds_alternative<A::Null>(n)) {
+        out->node = hir::Stmt::Null{};
+        return out;
+    }
+    if (std::holds_alternative<A::Break>(n)) {
+        out->node = hir::Stmt::Break{};
+        return out;
+    }
+    if (std::holds_alternative<A::Continue>(n)) {
+        out->node = hir::Stmt::Continue{};
+        return out;
+    }
+    if (std::holds_alternative<A::If>(n)) {
+        const A::If& v = std::get<A::If>(n);
+        auto& ifs = out->node.emplace<hir::Stmt::If>();
+        ifs.cond = buildExpr(*v.cond);
+        if (ifs.cond) checkCondition(*ifs.cond);
+        ifs.thenBranch = buildStmt(*v.thenBranch);
+        if (v.elseBranch) ifs.elseBranch = buildStmt(*v.elseBranch);
+        return out;
+    }
+    if (std::holds_alternative<A::While>(n)) {
+        const A::While& v = std::get<A::While>(n);
+        auto& wh = out->node.emplace<hir::Stmt::While>();
+        wh.cond = buildExpr(*v.cond);
+        if (wh.cond) checkCondition(*wh.cond);
+        wh.body = buildStmt(*v.body);
+        return out;
+    }
+    if (std::holds_alternative<A::DoWhile>(n)) {
+        const A::DoWhile& v = std::get<A::DoWhile>(n);
+        auto& dw = out->node.emplace<hir::Stmt::DoWhile>();
+        dw.body = buildStmt(*v.body);
+        dw.cond = buildExpr(*v.cond);
+        if (dw.cond) checkCondition(*dw.cond);
+        return out;
+    }
+    if (std::holds_alternative<A::For>(n)) {
+        const A::For& v = std::get<A::For>(n);
+        auto& fr = out->node.emplace<hir::Stmt::For>();
+        scopes_.push_back({});
+        if (v.init) fr.init = buildStmt(*v.init);
+        if (v.cond) {
+            fr.cond = buildExpr(*v.cond);
+            if (fr.cond) checkCondition(*fr.cond);
+        }
+        if (v.incr) fr.incr = buildExpr(*v.incr);
+        fr.body = buildStmt(*v.body);
+        scopes_.pop_back();
+        return out;
+    }
+    if (std::holds_alternative<A::Return>(n)) {
+        return buildReturn(std::get<A::Return>(n), s.loc);
+    }
+    if (std::holds_alternative<A::ExprStmt>(n)) {
+        auto& es = out->node.emplace<hir::Stmt::ExprStmt>();
+        es.value = buildExpr(*std::get<A::ExprStmt>(n).value);
+        return out;
+    }
+    if (std::holds_alternative<A::Unsafe>(n)) {
+        auto& us = out->node.emplace<hir::Stmt::Unsafe>();
+        ++unsafeDepth_;
+        us.body = buildStmt(*std::get<A::Unsafe>(n).body);
+        --unsafeDepth_;
+        return out;
+    }
+    out->node = hir::Stmt::Null{};
+    return out;
+}
+
+// --- namespace helpers ---
+
+hir::Function* HirBuilder::resolveFunction(std::string_view name) const {
+    // 1. Try the name as-is (works for fully-qualified and global names).
+    auto it = functions_.find(name);
+    if (it != functions_.end()) return it->second;
+    // 2. Try prefixing with the current namespace (bare call inside a
+    //    namespace body resolving to a same-namespace function).
+    if (!currentNsPrefix_.empty()) {
+        std::string qualified;
+        qualified.reserve(currentNsPrefix_.size() + name.size());
+        qualified += currentNsPrefix_;
+        qualified += name;
+        auto it2 = functions_.find(qualified);
+        if (it2 != functions_.end()) return it2->second;
+    }
+    return nullptr;
+}
+
+bool HirBuilder::flattenMemberChain(const Expr& e, std::string& out) const {
+    // Base case: IdentRef.
+    if (std::holds_alternative<Expr::IdentRef>(e.node)) {
+        out = std::get<Expr::IdentRef>(e.node).name;
+        return true;
+    }
+    // Recursive case: Member (from `A::B`).
+    if (std::holds_alternative<Expr::Member>(e.node)) {
+        const auto& m = std::get<Expr::Member>(e.node);
+        if (m.isArrow) return false;  // `->` is not scope resolution
+        if (!m.base) return false;
+        std::string base;
+        if (!flattenMemberChain(*m.base, base)) return false;
+        out = base + "::" + std::string(m.name);
+        return true;
+    }
+    return false;
+}
+
+// --- expressions ---
+
+void HirBuilder::checkCall(hir::Expr::Call& call, SourceLoc loc) {
+    const hir::Function* fn = call.target;
+    if (!fn) return;  // error already reported
+
+    const std::size_t expected = fn->params.size();
+    const std::size_t actual = call.args.size();
+    // Variadic extern "C" functions (e.g. printf) accept extra args.
+    const bool variadic = fn->isExternC;
+    if (expected > actual || (!variadic && expected != actual)) {
+        error(loc, "call to '" + std::string(call.callee) + "' expects " + std::to_string(expected) +
+                       " argument(s), got " + std::to_string(actual));
+        return;
+    }
+    // Check fixed params (extra variadic args are unchecked — C ABI).
+    for (std::size_t i = 0; i < expected && i < actual; ++i) {
+        if (call.args[i] && !isAssignable(fn->params[i].type, call.args[i]->type)) {
+            error(call.args[i]->loc, "argument " + std::to_string(i + 1) + " of '" +
+                                         std::string(call.callee) + "' expects '" +
+                                         typeToString(fn->params[i].type) + "', got '" +
+                                         typeToString(call.args[i]->type) + "'");
+        }
+    }
+}
+
+std::unique_ptr<hir::Expr> HirBuilder::buildStructInit(const Expr::InitList& il,
+                                                       const hir::Type& structType,
+                                                       [[maybe_unused]] std::string_view varName,
+                                                       SourceLoc loc) {
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    // InitList is only supported for struct types (aggregate initialization).
+    if (structType.pointerDepth > 0 || !structs_.contains(structType.base)) {
+        error(loc, "braced initializer list can only initialize a struct variable, not '" +
+                       typeToString(structType) + "'");
+        out->type = dummyType();
+        return out;
+    }
+    const StructDef& def = structs_[structType.base];
+
+    // Empty `{}` is a value-initializer — all fields default-initialized
+    // (zero for scalars, default member init if present, recursively for
+    // nested structs).  We still emit an InitList node so codegen can apply
+    // default member initializers when present.
+    if (il.elements.size() > def.fields.size()) {
+        error(loc, "too many initializers for struct '" + std::string(structType.base) +
+                       "' (expected at most " + std::to_string(def.fields.size()) +
+                       ", got " + std::to_string(il.elements.size()) + ")");
+        out->type = structType;
+        return out;
+    }
+
+    auto& hlist = out->node.emplace<hir::Expr::InitList>();
+    for (std::size_t i = 0; i < il.elements.size(); ++i) {
+        const auto& elem = il.elements[i];
+        // A nullptr element is a placeholder for a field that has no
+        // explicit initializer and no default member initializer — it
+        // will be zero-initialized by codegen. Preserve the slot so
+        // field indices stay aligned.
+        if (!elem) {
+            hlist.elements.push_back(nullptr);
+            continue;
+        }
+        // Look up field type from the StructDef fieldMap (by index — fields
+        // are sequential). Use the StructDecl field order directly.
+        hir::Type fieldType = def.fields[i].type;
+        auto built = buildExpr(*elem);
+        if (built && !isAssignable(fieldType, built->type)) {
+            error(built->loc, "field '" + std::string(def.fields[i].name) + "' of struct '" +
+                                  std::string(structType.base) + "' expects '" +
+                                  typeToString(fieldType) + "', got '" +
+                                  typeToString(built->type) + "'");
+        }
+        hlist.elements.push_back(std::move(built));
+    }
+    // Trailing fields without an explicit initializer: apply default
+    // member initializers (e.g. `Point p = {1};` where `y` has `= 0`).
+    // Fields without a default are left to codegen, which zero-inits
+    // them via `store ... zeroinitializer`.
+    for (std::size_t i = il.elements.size(); i < def.fields.size(); ++i) {
+        if (i < def.defaultInits.size() && def.defaultInits[i]) {
+            auto built = buildExpr(*def.defaultInits[i]);
+            hlist.elements.push_back(std::move(built));
+        } else {
+            // No default — push a nullptr placeholder so the MIR/codegen
+            // can still map field indices correctly. Codegen skips null
+            // elements (leaving the field zero-initialized).
+            hlist.elements.push_back(nullptr);
+        }
+    }
+    out->type = structType;
+    return out;
+}
+
+std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = e.loc;
+    const auto& n = e.node;
+    using A = Expr;
+
+    if (std::holds_alternative<A::IntegerLit>(n)) {
+        out->node = hir::Expr::IntegerLit{std::get<A::IntegerLit>(n).value};
+        out->type = intType();
+        return out;
+    }
+    if (std::holds_alternative<A::FloatLit>(n)) {
+        out->node = hir::Expr::FloatLit{std::get<A::FloatLit>(n).value};
+        out->type = floatType();
+        return out;
+    }
+    if (std::holds_alternative<A::StringLit>(n)) {
+        out->node = hir::Expr::StringLit{std::get<A::StringLit>(n).raw};
+        out->type = constCharPtrType();
+        return out;
+    }
+    if (std::holds_alternative<A::CharLit>(n)) {
+        out->node = hir::Expr::CharLit{std::get<A::CharLit>(n).raw};
+        hir::Type t;
+        t.base = "char";
+        out->type = t;
+        return out;
+    }
+    if (std::holds_alternative<A::BoolLit>(n)) {
+        out->node = hir::Expr::BoolLit{std::get<A::BoolLit>(n).value};
+        out->type = boolType();
+        return out;
+    }
+    if (std::holds_alternative<A::NullptrLit>(n)) {
+        out->node = hir::Expr::NullptrLit{};
+        out->type = nullptrType();
+        return out;
+    }
+    if (std::holds_alternative<A::IdentRef>(n)) {
+        const std::string_view name = std::get<A::IdentRef>(n).name;
+        // Check variable scopes first.
+        bool found = false;
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+            const auto hit = it->find(name);
+            if (hit != it->end()) {
+                out->node = hir::Expr::IdentRef{name};
+                out->type = hit->second;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Check unscoped enum constants — fold to IntegerLit with
+            // the enum's underlying type. This makes MIR/codegen need
+            // zero changes (IntegerLit is already handled everywhere).
+            auto ecIt = enumConstants_.find(name);
+            if (ecIt != enumConstants_.end()) {
+                out->node = hir::Expr::IntegerLit{ecIt->second};
+                out->type = intType();
+                found = true;
+            }
+        }
+        if (!found) {
+            // Unscoped enum constant lookup failed — report error.
+            // Scoped enum constants are only accessible via `EnumName::Value`
+            // (handled in the Member branch), never as bare names.
+            out->node = hir::Expr::IdentRef{name};
+            if (functions_.contains(name)) {
+                error(e.loc, "function '" + std::string(name) +
+                                 "' cannot be used as a value (no function pointers)");
+            } else {
+                error(e.loc, "undeclared identifier '" + std::string(name) + "'");
+            }
+            out->type = dummyType();
+        }
+        return out;
+    }
+    if (std::holds_alternative<A::Unary>(n)) {
+        const A::Unary& v = std::get<A::Unary>(n);
+        auto& un = out->node.emplace<hir::Expr::Unary>();
+        un.op = v.op;
+        un.isPrefix = v.isPrefix;
+        un.operand = buildExpr(*v.operand);
+        if (!un.operand) return out;
+        const hir::Type& ot = un.operand->type;
+
+        if (v.op == "!" ) {
+            if (!isNumeric(ot) && ot.pointerDepth == 0) {
+                error(e.loc, "'!' expects a numeric or pointer operand");
+            }
+            out->type = boolType();
+            return out;
+        }
+        if (v.op == "~") {
+            if (!isIntegerLike(ot)) {
+                error(e.loc, "'~' expects an integer operand");
+            }
+            out->type = stripReference(ot);
+            return out;
+        }
+        if (v.op == "-" || v.op == "+") {
+            if (!isNumeric(ot)) error(e.loc, "unary '" + std::string(v.op) + "' expects a numeric operand");
+            out->type = stripReference(ot);
+            return out;
+        }
+        if (v.op == "*") {
+            if (ot.pointerDepth == 0) {
+                error(e.loc, "'*' expects a pointer operand");
+                out->type = dummyType();
+                return out;
+            }
+            requireUnsafe(e.loc, "pointer dereference");
+            out->type = ot;
+            --out->type.pointerDepth;
+            return out;
+        }
+        if (v.op == "&") {
+            if (!std::holds_alternative<hir::Expr::IdentRef>(un.operand->node)) {
+                error(e.loc, "'&' is only supported on variables in the Ivy subset");
+                out->type = dummyType();
+                return out;
+            }
+            out->type = ot;
+            ++out->type.pointerDepth;
+            return out;
+        }
+        if (v.op == "++" || v.op == "--") {
+            if (ot.pointerDepth > 0) {
+                requireUnsafe(e.loc, "pointer increment/decrement");
+            } else if (!isNumeric(ot)) {
+                error(e.loc, "'" + std::string(v.op) + "' expects a numeric or pointer operand");
+            }
+            out->type = ot;
+            return out;
+        }
+        out->type = dummyType();
+        return out;
+    }
+    if (std::holds_alternative<A::Binary>(n)) {
+        const A::Binary& v = std::get<A::Binary>(n);
+        auto& bin = out->node.emplace<hir::Expr::Binary>();
+        bin.op = v.op;
+        bin.lhs = buildExpr(*v.lhs);
+        bin.rhs = buildExpr(*v.rhs);
+        if (!bin.lhs || !bin.rhs) return out;
+        const hir::Type& lt = bin.lhs->type;
+        const hir::Type& rt = bin.rhs->type;
+        const bool lNum = isNumeric(lt), rNum = isNumeric(rt);
+        const bool lPtr = lt.pointerDepth > 0, rPtr = rt.pointerDepth > 0;
+        const bool lNull = lt.base == "nullptr", rNull = rt.base == "nullptr";
+
+        if (v.op == "==" || v.op == "!=") {
+            const bool ok = (lNum && rNum) || (lPtr && rPtr) || (lNull && rPtr) || (rNull && lPtr);
+            if (!ok) error(e.loc, "'" + std::string(v.op) + "' between incompatible types");
+            out->type = boolType();
+            return out;
+        }
+        if (v.op == "<" || v.op == ">" || v.op == "<=" || v.op == ">=") {
+            if (lPtr || rPtr) {
+                if (!(lPtr && rPtr)) {
+                    error(e.loc, "'" + std::string(v.op) + "' between pointer and non-pointer");
+                }
+            } else if (!(lNum && rNum)) {
+                error(e.loc, "'" + std::string(v.op) + "' expects numeric operands");
+            }
+            out->type = boolType();
+            return out;
+        }
+        if (v.op == "&&" || v.op == "||") {
+            if (!(lNum || lPtr) || !(rNum || rPtr)) {
+                error(e.loc, "'" + std::string(v.op) + "' expects numeric or pointer operands");
+            }
+            out->type = boolType();
+            return out;
+        }
+        if (v.op == "<<" || v.op == ">>" || v.op == "&" || v.op == "|" || v.op == "^") {
+            if (!lNum || !rNum) {
+                error(e.loc, "'" + std::string(v.op) + "' expects integer operands");
+            }
+            out->type = promoteTypes(lt, rt);
+            return out;
+        }
+        if (v.op == "+" || v.op == "-") {
+            if (lPtr || rPtr) {
+                requireUnsafe(e.loc, "pointer arithmetic");
+                if (lPtr && rPtr) {
+                    error(e.loc, "pointer subtraction is not supported in the Ivy subset");
+                    out->type = dummyType();
+                    return out;
+                }
+                if (lPtr && !rNum) {
+                    error(e.loc, "'" + std::string(v.op) + "' with pointer and non-numeric operand");
+                }
+                if (rPtr && !lNum) {
+                    error(e.loc, "'" + std::string(v.op) + "' with pointer and non-numeric operand");
+                }
+                out->type = lPtr ? lt : rt;  // result is a pointer
+                return out;
+            }
+            if (!(lNum && rNum)) {
+                error(e.loc, "'" + std::string(v.op) + "' expects numeric operands");
+                out->type = dummyType();
+                return out;
+            }
+            out->type = promoteTypes(lt, rt);
+            return out;
+        }
+        if (v.op == "*" || v.op == "/" || v.op == "%") {
+            if (!(lNum && rNum)) {
+                error(e.loc, "'" + std::string(v.op) + "' expects numeric operands");
+                out->type = dummyType();
+                return out;
+            }
+            if (v.op == "%" && (!isIntegerLike(lt) || !isIntegerLike(rt))) {
+                error(e.loc, "'%' expects integer operands");
+            }
+            out->type = promoteTypes(lt, rt);
+            return out;
+        }
+        out->type = dummyType();
+        return out;
+    }
+    if (std::holds_alternative<A::Ternary>(n)) {
+        const A::Ternary& v = std::get<A::Ternary>(n);
+        auto& ter = out->node.emplace<hir::Expr::Ternary>();
+        ter.cond = buildExpr(*v.cond);
+        if (ter.cond) checkCondition(*ter.cond);
+        ter.thenBranch = buildExpr(*v.thenBranch);
+        ter.elseBranch = buildExpr(*v.elseBranch);
+        if (ter.thenBranch && ter.elseBranch) {
+            // Ternary type is the promoted type of the two branches.
+            out->type = promoteTypes(ter.thenBranch->type, ter.elseBranch->type);
+            if (out->type.base == "char" || out->type.base == "bool" ||
+                out->type.base == "void" || out->type.base == "") {
+                // Fallback: if the branches are not both numeric, use the first.
+                // (E.g. pointer branches -> keep as-is.)
+                out->type = ter.thenBranch->type;
+            }
+        } else {
+            out->type = dummyType();
+        }
+        return out;
+    }
+    if (std::holds_alternative<A::Call>(n)) {
+        const A::Call& v = std::get<A::Call>(n);
+        auto& call = out->node.emplace<hir::Expr::Call>();
+        const Expr* callee = v.callee.get();
+        // Bare name call: `func(args)` — resolve with namespace fallback.
+        if (std::holds_alternative<A::IdentRef>(callee->node)) {
+            const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
+            call.target = resolveFunction(bareName);
+            if (call.target) {
+                // Use the resolved function's qualified name so codegen
+                // emits the correct (mangled) symbol.
+                call.callee = call.target->name;
+            } else {
+                call.callee = bareName;
+                error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+            }
+        } else if (std::holds_alternative<A::Member>(callee->node)) {
+            // Qualified call: `ns::func(args)` — flatten the `::` chain.
+            std::string qualified;
+            if (flattenMemberChain(*callee, qualified)) {
+                stringStorage_.push_back(std::move(qualified));
+                call.callee = stringStorage_.back();
+                call.target = functions_[call.callee];
+                if (!call.target) {
+                    error(callee->loc, "call to undeclared function '" + std::string(call.callee) + "'");
+                }
+            } else {
+                error(callee->loc, "callee must be a function name");
+            }
+        } else {
+            error(callee->loc, "callee must be a function name");
+        }
+        for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
+        if (call.target) {
+            checkCall(call, e.loc);
+            out->type = call.target->returnType;
+        } else {
+            out->type = dummyType();
+        }
+        return out;
+    }
+    if (std::holds_alternative<A::Index>(n)) {
+        const A::Index& v = std::get<A::Index>(n);
+        auto& idx = out->node.emplace<hir::Expr::Index>();
+        idx.base = buildExpr(*v.base);
+        idx.index = buildExpr(*v.index);
+        if (idx.base && idx.base->type.pointerDepth > 0) {
+            requireUnsafe(e.loc, "pointer indexing");
+        } else if (idx.base) {
+            error(e.loc, "'[]' requires a pointer operand");
+        }
+        if (idx.index && !isNumeric(idx.index->type)) {
+            error(idx.index->loc, "index expression must be numeric");
+        }
+        out->type = idx.base ? idx.base->type : dummyType();
+        if (out->type.pointerDepth > 0) --out->type.pointerDepth;
+        return out;
+    }
+    if (std::holds_alternative<A::Member>(n)) {
+        const A::Member& v = std::get<A::Member>(n);
+        // Check for scoped enum access: `EnumName::Value` or
+        // `ns::EnumName::Value`.  Flatten the `::` chain into a
+        // qualified name and try to resolve it as an enum.
+        if (!v.isArrow && v.base) {
+            // Case 1: `EnumName::Value` — base is IdentRef.
+            // Case 2: `ns::EnumName::Value` — base is a Member chain.
+            // In both cases, flatten the base into a qualified name,
+            // then append `::Value` and check if the base (without
+            // `::Value`) is an enum name.
+            std::string baseQual;
+            if (flattenMemberChain(*v.base, baseQual)) {
+                // Try the base as an enum name (qualified or unqualified).
+                auto tryEnum = [&](std::string_view enumName) -> bool {
+                    auto eIt = enums_.find(enumName);
+                    if (eIt != enums_.end()) {
+                        auto cIt = eIt->second.constants.find(v.name);
+                        if (cIt != eIt->second.constants.end()) {
+                            out->node = hir::Expr::IntegerLit{cIt->second};
+                            out->type = eIt->second.underlyingType;
+                            return true;
+                        }
+                        error(e.loc, "enum '" + std::string(enumName) +
+                              "' has no enumerator '" + std::string(v.name) + "'");
+                        out->type = dummyType();
+                        return true;  // found the enum, just bad enumerator
+                    }
+                    return false;
+                };
+                // Try qualified base name first.
+                if (tryEnum(baseQual)) return out;
+                // Try with namespace prefix (bare enum name inside
+                // a namespace body).
+                if (!currentNsPrefix_.empty()) {
+                    std::string prefixed;
+                    prefixed += currentNsPrefix_;
+                    prefixed += baseQual;
+                    if (tryEnum(prefixed)) return out;
+                }
+                // Try `ns::Constant` — the base is a namespace name
+                // and `v.name` is an unscoped enum constant defined
+                // inside that namespace.  Search all enums with a
+                // matching namespace prefix.
+                for (const auto& [enumName, edef] : enums_) {
+                    if (edef.nsPrefix == baseQual + "::" &&
+                        !edef.isScoped) {
+                        auto cIt = edef.constants.find(v.name);
+                        if (cIt != edef.constants.end()) {
+                            out->node = hir::Expr::IntegerLit{cIt->second};
+                            out->type = edef.underlyingType;
+                            return out;
+                        }
+                    }
+                }
+            }
+        }
+        // If the `::` chain didn't resolve as an enum constant, it
+        // might be a qualified struct type name (e.g. `ns::Point`)
+        // used in a member access — but Ivy doesn't support static
+        // member access on struct types, so fall through to the
+        // runtime member access path below.
+    // Runtime member access: `p.x` or `p->x` where `p` is a
+    // struct-typed lvalue (or pointer-to-struct for `->`).
+    {
+        auto base = buildExpr(*v.base);
+        if (base) {
+            hir::Type baseType = base->type;
+            // For `->`, the base must be a pointer-to-struct.
+            // Strip one pointer level to get the struct type.
+            if (v.isArrow) {
+                if (baseType.pointerDepth == 0) {
+                    error(e.loc, "'->' requires a pointer to struct (got '" +
+                                     typeToString(baseType) + "')");
+                    out->type = dummyType();
+                    return out;
+                }
+                --baseType.pointerDepth;
+            } else {
+                // For `.`, the base must be a struct (or reference-to-struct).
+                if (baseType.isReference) baseType.isReference = false;
+            }
+            // Look up the struct type.
+            auto sIt = structs_.find(baseType.base);
+            if (sIt == structs_.end()) {
+                error(e.loc, "'" + typeToString(baseType) +
+                                 "' is not a struct type — cannot access member '" +
+                                 std::string(v.name) + "'");
+                out->type = dummyType();
+                return out;
+            }
+            // Look up the field.
+            auto fIt = sIt->second.fieldMap.find(v.name);
+            if (fIt == sIt->second.fieldMap.end()) {
+                error(e.loc, "struct '" + std::string(baseType.base) +
+                                 "' has no member '" + std::string(v.name) + "'");
+                out->type = dummyType();
+                return out;
+            }
+            out->node = hir::Expr::Member{};
+            auto& mem = std::get<hir::Expr::Member>(out->node);
+            mem.base = std::move(base);
+            mem.name = v.name;
+            mem.isArrow = v.isArrow;
+            out->type = fIt->second.type;
+            return out;
+        }
+    }
+    // Fallback: base could not be built or struct lookup failed.
+    out->node = hir::Expr::Member{};
+    auto& mem = std::get<hir::Expr::Member>(out->node);
+    mem.base = buildExpr(*v.base);
+    mem.name = v.name;
+    mem.isArrow = v.isArrow;
+    out->type = dummyType();
+    return out;
+    }
+    if (std::holds_alternative<A::Assign>(n)) {
+        const A::Assign& v = std::get<A::Assign>(n);
+        auto& as = out->node.emplace<hir::Expr::Assign>();
+        as.op = v.op;
+        as.lhs = buildExpr(*v.lhs);
+        // Aggregate init on assignment: `p = {1, 2};` — resolve elements
+        // against the lhs struct type so implicit conversions are applied.
+        if (v.op == "=" && as.lhs && std::holds_alternative<ivy::Expr::InitList>(v.rhs->node)) {
+            as.rhs = buildStructInit(std::get<ivy::Expr::InitList>(v.rhs->node),
+                                     as.lhs->type, {}, e.loc);
+        } else {
+            as.rhs = buildExpr(*v.rhs);
+        }
+        if (as.lhs && as.rhs) {
+            const bool lhsIsVar = std::holds_alternative<hir::Expr::IdentRef>(as.lhs->node);
+            const bool lhsIsIdx = std::holds_alternative<hir::Expr::Index>(as.lhs->node);
+            const bool lhsIsMem = std::holds_alternative<hir::Expr::Member>(as.lhs->node);
+            if (!lhsIsVar && !lhsIsIdx && !lhsIsMem) {
+                error(e.loc, "left-hand side of assignment is not assignable");
+            } else if (as.op == "=") {
+                if (as.lhs->type.isConst && as.lhs->type.pointerDepth == 0) {
+                    error(e.loc, "cannot assign to const variable");
+                } else if (!isAssignable(as.lhs->type, as.rhs->type)) {
+                    error(e.loc, "cannot assign value of type '" + typeToString(as.rhs->type) +
+                                     "' to '" + typeToString(as.lhs->type) + "'");
+                }
+            } else if (!(isNumeric(as.lhs->type) && isNumeric(as.rhs->type))) {
+                error(e.loc, "compound assignment '" + std::string(as.op) +
+                                 "' expects numeric operands");
+            }
+        }
+        out->type = as.lhs ? as.lhs->type : dummyType();
+        return out;
+    }
+    if (std::holds_alternative<A::New>(n)) {
+        const A::New& v = std::get<A::New>(n);
+        auto& nw = out->node.emplace<hir::Expr::New>();
+        nw.type = v.type;
+        for (const auto& a : v.args) nw.args.push_back(buildExpr(*a));
+        out->type = v.type;
+        ++out->type.pointerDepth;  // `new T` yields T*
+        return out;
+    }
+    if (std::holds_alternative<A::Delete>(n)) {
+        const A::Delete& v = std::get<A::Delete>(n);
+        auto& dl = out->node.emplace<hir::Expr::Delete>();
+        dl.isArray = v.isArray;
+        dl.operand = buildExpr(*v.operand);
+        if (dl.operand && dl.operand->type.pointerDepth == 0) {
+            error(e.loc, "'delete' expects a pointer operand");
+        }
+        out->type = dummyType();  // `delete` yields void
+        return out;
+    }
+    if (std::holds_alternative<A::InitList>(n)) {
+        // InitList reached buildExpr without a target struct type — only
+        // valid in declaration initializers (handled via buildStructInit).
+        error(e.loc, "braced initializer list is only valid in a declaration initializer");
+        out->type = dummyType();
+        return out;
+    }
+
+    error(e.loc, "internal: unknown expression kind");
+    out->type = dummyType();
+    return out;
+}
+
+std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
+    hir_ = std::make_unique<hir::TranslationUnit>();
+    // Register enums first (pass 1a) so enum constants are resolvable
+    // in function bodies (pass 2) and enum type names are usable as types.
+    for (const EnumDecl& ed : ast_.enums) buildEnum(ed);
+    // Register structs (pass 1b) so struct types are usable as types and
+    // field layout is available for Member resolution in function bodies.
+    for (const StructDecl& sd : ast_.structs) buildStruct(sd);
+    for (const Function& af : ast_.functions) buildSignature(af);
+    for (const Function& af : ast_.functions) {
+        if (af.body) {
+            hir::Function* fn = functions_[af.name];
+            if (fn) {
+                currentNsPrefix_ = af.namespacePrefix;
+                buildBody(*fn, *af.body);
+                currentNsPrefix_ = {};
+            }
+        }
+    }
+    if (failed_) return nullptr;
+    return std::move(hir_);
+}
+
+}  // namespace ivy
