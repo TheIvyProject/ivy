@@ -11,6 +11,7 @@
 #include "codegen/codegen.h"
 #include "hir/hir.h"
 #include "hir/hir_builder.h"
+#include "interpret/interpreter.h"
 #include "mir/mir.h"
 #include "mir/mir_builder.h"
 #include "parsing/ast.h"
@@ -30,6 +31,7 @@ void printUsage() {
                  "  --hir      print the analyzed HIR (debug)\n"
                  "  --mir      print the lowered MIR with lifetime annotations (debug)\n"
                  "  --llvm     emit LLVM IR to stdout\n"
+                 "  --run      interpret the program via IvyInterpret (no codegen)\n"
                  "  --target <abi>  set the C++ ABI for name mangling:\n"
                  "               itanium (POSIX) or msvc (Windows)\n"
                  "               (default: auto-detect from host)\n"
@@ -644,7 +646,7 @@ bool hasExtension(const std::string& path, std::string_view ext) {
 }
 
 int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool showHir,
-        bool showMir, bool showLlvm, const std::string& outPath,
+        bool showMir, bool showLlvm, bool doRun, const std::string& outPath,
         const std::vector<std::filesystem::path>& includePaths,
         std::optional<ivy::CodeGen::Platform> targetPlatform) {
     std::ifstream in(path, std::ios::binary);
@@ -723,6 +725,21 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
 
     if (showHir && hir) dumpHir(*hir, std::cout);
 
+    // --run mode: interpret the HIR directly via IvyInterpret.
+    // No MIR / codegen / native compiler needed.
+    if (doRun && hir) {
+        ivy::interp::Interpreter interp(*hir);
+        ivy::interp::Value result = interp.callMain();
+        for (const auto& d : interp.diagnostics()) {
+            std::cerr << path << ":" << d.line << ":" << d.col
+                      << ": error: " << d.message << "\n";
+        }
+        if (interp.failed()) return 1;
+        // If main returned a non-void exit code, forward it.
+        if (result.isInt()) return static_cast<int>(result.asInt());
+        return 0;
+    }
+
     ivy::MirBuilder mirBuilder(*hir);
     std::unique_ptr<ivy::mir::TranslationUnit> mir = mirBuilder.build();
     for (const ivy::Diagnostic& d : mirBuilder.diagnostics()) {
@@ -765,6 +782,7 @@ int main(int argc, char** argv) {
     bool showHir = false;
     bool showMir = false;
     bool showLlvm = false;
+    bool doRun = false;
     std::string outPath;
     std::vector<std::filesystem::path> includePaths;
     std::optional<ivy::CodeGen::Platform> targetPlatform;
@@ -781,6 +799,8 @@ int main(int argc, char** argv) {
             showMir = true;
         } else if (arg == "--llvm") {
             showLlvm = true;
+        } else if (arg == "--run") {
+            doRun = true;
         } else if (arg == "--target") {
             if (i + 1 >= argc) {
                 std::cerr << "ivyc: error: option '--target' requires an ABI name\n";
@@ -827,6 +847,6 @@ int main(int argc, char** argv) {
         printUsage();
         return 2;
     }
-    return run(file, showTokens, showAst, showHir, showMir, showLlvm, outPath,
+    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun, outPath,
                includePaths, targetPlatform);
 }

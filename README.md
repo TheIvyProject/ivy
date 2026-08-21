@@ -12,6 +12,8 @@ Lexer → Preprocessor → Parser → HIR → MIR → LLVM IR
 
 It accepts only the restricted C++ subset; anything outside it is a compile error. By default, Ivy uses its own fixed-width integer and floating-point types (`int8_t`…`int64_t`, `uint8_t`…`uint64_t`, `float16_t`…`float128_t`, `bfloat16_t`, `size_t`, `ptrdiff_t`, `bool`, `void`) and rejects C-style number types (`int`, `unsigned`, `long`, `short`, `char`, `float`, `double`, `long long`); `#pragma ivy cnumber` opts into the C-style types. Hex/octal/binary integer literals (`0xFF`, `017`, `0b1010`) are always allowed regardless of the pragma. The output is LLVM IR, which the LLVM backend lowers to native code. The `Preprocessor` stage currently expands `#include` (quoted and angle-bracket forms), object-like macros (`#define NAME body...`), function-like macros (`#define NAME(params) body...`, including variadic `...`/`__VA_ARGS__`), conditional compilation (`#ifdef`/`#ifndef`/`#if EXPR`/`#elif EXPR`/`#else`/`#endif`/`#undef`, with `#if`/`#elif` evaluating C++ integral constant expressions over integer literals, `defined()`, macro expansion, arithmetic, bitwise, logical, comparison, and ternary operators), predefined macros (`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__cplusplus`), and `#pragma ivy cnumber`, and is invoked between the lexer and the parser; `ivyc -o file.i` (or `.ii`) dumps the preprocessed C++ source text instead of continuing down the pipeline, mirroring `g++ -E`.
 
+In addition to native compilation, `ivyc` can **interpret** a program directly from HIR via `--run` — no LLVM IR or native code generation required. This is powered by **IvyInterpret**, a self-contained tree-walking interpreter that consumes HIR and executes it in-memory. See [IvyInterpret](#ivyinterpret) below.
+
 ## Design Philosophy
 
 **One-way source compatibility.**
@@ -122,6 +124,37 @@ void raw_alloc() {
 
 Raw memory management is invisible outside `[[ivy::unsafe]]` blocks. Any `malloc`, `free`, `new`, `delete`, or raw-pointer operation outside such a block is a compile error in Ivy.
 
+## IvyInterpret
+
+**IvyInterpret** is a self-contained tree-walking interpreter that executes Ivy programs directly from HIR — no MIR, LLVM IR, or native code generation required. It is an independent module (`src/interpret/`) that depends only on the HIR data structures and the C++ standard library.
+
+### Usage
+
+```
+ivyc --run source.cpp
+```
+
+The `--run` flag tells `ivyc` to build HIR and then hand it to the interpreter instead of continuing down the MIR → LLVM IR pipeline. The interpreter calls `main()` and returns its exit code. Diagnostics (if any) are printed to `stderr`.
+
+### What it supports
+
+- **Functions**: user-defined functions, recursion, `extern "C"` built-ins (`printf`, `puts`, `putchar`, `exit`, `abort`).
+- **Types**: integers, floating-point, booleans, strings, pointers, structs (including nested structs and struct copy).
+- **Expressions**: integer/float/bool/string/char/nullptr literals, identifiers, unary (`+ - ! ~ & * ++ --`), binary (arithmetic, comparison, logical short-circuit, bitwise, shift), ternary, assignment (simple + compound), member access (`.` and `->`), aggregate init lists, function calls.
+- **Statements**: declarations, `if`/`else`, `while`, `do-while`, `for`, `return`, `break`, `continue`, expression statements, `[[ivy::unsafe]]` blocks.
+- **Structs**: aggregate initialization (`Point p = {1, 2}`), partial init (`Vec3 v = {100}` → `{100, 0, 0}`), empty init (`Vec3 v = {}`), default construction (`Point p;`), member assignment (`p.x = 10`), nested struct access (`line.start.x`), pointer-to-struct arrow (`pp->x`), struct copy assignment.
+- **Lambdas**: no-capture, by-value capture (`[x]`), by-reference capture (`[&x]`). Closures are represented as runtime struct values; capture fields are initialized from the closure struct definition in the HIR translation unit.
+
+### Runtime value model
+
+The interpreter uses a tagged-union `Value` type (`src/interpret/value.h`) with variants for `Void`, `Int`, `Float`, `Str`, `Struct`, and `Ptr`. A `Cell` (`shared_ptr<Value>`) provides heap allocation with shared ownership so that references and pointers alias the same storage. Control flow is managed via a `Signal` variant (`Return`/`Break`/`Continue`) returned from statement execution. Function call frames are `unordered_map<string, Cell>` stacks.
+
+### Design goals
+
+- **Independent**: `IvyInterpret` depends only on HIR — it does not touch parsing, MIR, or codegen. This makes it usable for REPL, testing, and `constexpr`/`consteval` evaluation in the future.
+- **Fast feedback**: `--run` lets you execute Ivy code immediately without a native compiler, useful for quick experiments and CI smoke tests.
+- **Foundation for `constexpr`**: per the roadmap, `constexpr`/`consteval` evaluation will be built on top of IvyInterpret.
+
 ## Restrictions (The Subset)
 
 `ivyc` accepts only a subset of C++. By default it forbids constructs that cannot be made safe, such as:
@@ -151,17 +184,20 @@ Each forbidden construct is either rejected outright or requires an explicit `[[
 
 ## Roadmap
 
-- [ ] Subset definition: the exact set of accepted C++ features and restrictions
-- [ ] Lexer: token definitions incl. attributes
-- [ ] Parser: AST for the restricted grammar
-- [ ] HIR: type checking, attribute lowering
-- [ ] MIR: CFG construction, lifetime checker, `[[ivy::unsafe]]` enforcement
-- [ ] LLVM IR emission (LLVM infrastructure)
+- [x] Lexer: token definitions incl. attributes
+- [x] Preprocessor: `#include`, `#define` (object-like, function-like, variadic), conditional compilation, predefined macros, `#pragma ivy cnumber`
+- [x] Parser: AST for the restricted grammar
+- [x] HIR: type checking, attribute lowering
+- [x] MIR: CFG construction, lifetime checker, `[[ivy::unsafe]]` enforcement
+- [x] LLVM IR emission (LLVM infrastructure)
+- [x] IvyInterpret: tree-walking interpreter consuming HIR; `--run` flag for immediate execution
+- [ ] `constexpr`/`consteval` evaluation via IvyInterpret
+- [ ] IvyMake: C++-based build configuration system (replace CMake)
 - [ ] Test suite: safe programs compile clean, unsafe programs are rejected
 
 ## Status
 
-In active development — core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the initial subset.
+In active development. The core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the initial subset, and **IvyInterpret** provides immediate execution via `--run`. Work continues on `constexpr`/`consteval` evaluation and IvyMake.
 
 # License
 [Apache License 2.0](LICENSE)

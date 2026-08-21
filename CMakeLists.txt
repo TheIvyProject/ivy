@@ -13,6 +13,7 @@ add_executable(ivyc
     src/hir/hir_builder.cpp
     src/mir/mir_builder.cpp
     src/codegen/codegen.cpp
+    src/interpret/interpreter.cpp
 )
 
 target_include_directories(ivyc PRIVATE src)
