@@ -8,9 +8,9 @@
 #include <string_view>
 #include <vector>
 
-#include "ast.h"
-#include "diagnostic.h"
-#include "token.h"
+#include "common/diagnostic.h"
+#include "parsing/ast.h"
+#include "parsing/token.h"
 
 namespace ivy {
 

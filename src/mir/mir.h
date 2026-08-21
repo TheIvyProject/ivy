@@ -6,7 +6,7 @@
 #include <variant>
 #include <vector>
 
-#include "hir.h"  // ivy::Type, ivy::SourceLoc
+#include "hir/hir.h"  // ivy::Type, ivy::SourceLoc
 
 namespace ivy {
 namespace mir {

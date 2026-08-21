@@ -6,7 +6,7 @@
 #include <variant>
 #include <vector>
 
-#include "ast.h"  // ivy::Type, ivy::SourceLoc
+#include "parsing/ast.h"  // ivy::Type, ivy::SourceLoc
 
 namespace ivy {
 namespace hir {

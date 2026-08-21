@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "diagnostic.h"
-#include "hir.h"
-#include "mir.h"
+#include "common/diagnostic.h"
+#include "hir/hir.h"
+#include "mir/mir.h"
 
 namespace ivy {
 

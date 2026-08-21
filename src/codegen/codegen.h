@@ -8,8 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "diagnostic.h"
-#include "mir.h"
+#include "common/diagnostic.h"
+#include "mir/mir.h"
 
 namespace ivy {
 

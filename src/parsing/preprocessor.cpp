@@ -1,4 +1,4 @@
-#include "preprocessor.h"
+#include "parsing/preprocessor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -14,7 +14,7 @@
 #include <system_error>
 #include <unordered_map>
 
-#include "lexer.h"
+#include "parsing/lexer.h"
 
 namespace ivy {
 

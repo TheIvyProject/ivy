@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "diagnostic.h"
-#include "token.h"
+#include "common/diagnostic.h"
+#include "parsing/token.h"
 
 namespace ivy {
 

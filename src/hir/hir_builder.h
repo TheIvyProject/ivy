@@ -7,9 +7,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ast.h"
-#include "diagnostic.h"
-#include "hir.h"
+#include "common/diagnostic.h"
+#include "hir/hir.h"
+#include "parsing/ast.h"
 
 namespace ivy {
 

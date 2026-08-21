@@ -6,13 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(ivyc
-    src/main.cpp
-    src/lexer.cpp
-    src/preprocessor.cpp
-    src/parser.cpp
-    src/hir_builder.cpp
-    src/mir_builder.cpp
-    src/codegen.cpp
+    src/app/main.cpp
+    src/parsing/lexer.cpp
+    src/parsing/preprocessor.cpp
+    src/parsing/parser.cpp
+    src/hir/hir_builder.cpp
+    src/mir/mir_builder.cpp
+    src/codegen/codegen.cpp
 )
 
 target_include_directories(ivyc PRIVATE src)

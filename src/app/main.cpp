@@ -8,16 +8,16 @@
 #include <variant>
 #include <vector>
 
-#include "ast.h"
-#include "codegen.h"
-#include "hir.h"
-#include "hir_builder.h"
-#include "lexer.h"
-#include "mir.h"
-#include "mir_builder.h"
-#include "parser.h"
-#include "preprocessor.h"
-#include "token.h"
+#include "codegen/codegen.h"
+#include "hir/hir.h"
+#include "hir/hir_builder.h"
+#include "mir/mir.h"
+#include "mir/mir_builder.h"
+#include "parsing/ast.h"
+#include "parsing/lexer.h"
+#include "parsing/parser.h"
+#include "parsing/preprocessor.h"
+#include "parsing/token.h"
 
 namespace {
 
