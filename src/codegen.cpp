@@ -93,6 +93,24 @@ std::string CodeGen::newTemp() { return "%tmp." + std::to_string(temp_++); }
 
 std::string CodeGen::newInlineBlock() { return "bb.i" + std::to_string(inlineBlock_++); }
 
+std::string CodeGen::llvmGlobalName(std::string_view name) const {
+    // LLVM IR identifiers may contain [A-Za-z0-9_.$-] unquoted.
+    // Mangled names (MSVC: "?foo@@...@Z", Itanium: "_Z3foov")
+    // contain '@' and '?' which require quoting.
+    const std::string s(name);
+    bool needsQuote = false;
+    for (char c : s) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '.' ||
+              c == '$' || c == '-')) {
+            needsQuote = true;
+            break;
+        }
+    }
+    if (needsQuote) return "\"" + s + "\"";
+    return s;
+}
+
 std::string CodeGen::llvmType(const mir::Type& t) const {
     if (t.pointerDepth > 0 || t.isReference) return "ptr";
     if (t.base == "void") return "void";
@@ -421,6 +439,10 @@ void CodeGen::collectExpr(const mir::Expr& e) {
         const M::InitList& v = std::get<M::InitList>(n);
         for (const auto& el : v.elements)
             if (el) collectExpr(*el);
+    } else if (std::holds_alternative<M::Lambda>(n)) {
+        const M::Lambda& v = std::get<M::Lambda>(n);
+        for (const auto& ci : v.captureInits)
+            if (ci) collectExpr(*ci);
     }
 }
 
@@ -590,9 +612,19 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     if (std::holds_alternative<M::Unary>(n)) {
         const M::Unary& v = std::get<M::Unary>(n);
         if (v.op == "&") {
-            // operand is guaranteed to be an IdentRef (HIR)
-            const auto& ir = std::get<M::IdentRef>(v.operand->node);
-            return vars_.at(ir.name);
+            // Address-of. For an IdentRef, the variable's alloca slot
+            // is its address. For a Lambda, lowerExpr returns the
+            // closure struct alloca slot (already an address). For
+            // other lvalues, use lowerLValue.
+            if (std::holds_alternative<M::IdentRef>(v.operand->node)) {
+                const auto& ir = std::get<M::IdentRef>(v.operand->node);
+                return vars_.at(ir.name);
+            }
+            if (std::holds_alternative<M::Lambda>(v.operand->node)) {
+                // lowerExpr on a Lambda returns the closure alloca slot.
+                return lowerExpr(*v.operand);
+            }
+            return lowerLValue(*v.operand);
         }
         if (v.op == "*") {
             const std::string p = lowerExpr(*v.operand);
@@ -812,8 +844,8 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         }
         const std::string rt = llvmType(e.type);
         const bool isExternC = callee && callee->isExternC;
-        const std::string sym = isExternC ? std::string(v.callee)
-                                          : mangleFunction(v.callee, callee);
+        const std::string sym = isExternC ? llvmGlobalName(v.callee)
+                                          : llvmGlobalName(mangleFunction(v.callee, callee));
         if (rt == "void") {
             emitLine("call void @" + sym + "(" + args + ")");
             return "";
@@ -919,6 +951,42 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         std::string t = newTemp();
         emitLine(t + " = load " + ty + ", ptr " + slot);
         return t;
+    }
+    if (std::holds_alternative<M::Lambda>(n)) {
+        // A lambda expression produces a closure struct value. We
+        // allocate a closure struct on the stack, initialize each
+        // capture field, and return the alloca slot name (the struct
+        // lvalue). This is consumed by the enclosing `&` (address-of)
+        // when used as a lambda call callee, or stored into a variable
+        // when assigned to a local.
+        const M::Lambda& v = std::get<M::Lambda>(n);
+        const std::string slot = newAllocaSlot();
+        const std::string ty = llvmType(e.type);
+        emitLine(slot + " = alloca " + ty);
+        // Zero-initialize the closure struct first.
+        emitLine("store " + ty + " zeroinitializer, ptr " + slot);
+        // Store each capture value into its field via GEP.
+        const auto sIt = structTypes_.find(e.type.base);
+        if (sIt != structTypes_.end()) {
+            for (std::size_t i = 0; i < v.captureInits.size() &&
+                                 i < sIt->second.fields.size(); ++i) {
+                const auto& ci = v.captureInits[i];
+                if (!ci) continue;
+                const std::string val = lowerExpr(*ci);
+                const std::string fieldTy = llvmType(sIt->second.fields[i].type);
+                const std::string c = emitCast(val, valueLlvmType(ci->type),
+                                               fieldTy, e.loc);
+                std::string gep = newTemp();
+                emitLine(gep + " = getelementptr " + sIt->second.llvmType +
+                         ", ptr " + slot + ", i32 0, i32 " + std::to_string(i));
+                emitLine("store " + fieldTy + " " + c + ", ptr " + gep);
+            }
+        }
+        // Return the alloca slot — the closure struct lvalue. When this
+        // is used as `&lambda`, lowerLValue will return the slot directly
+        // (since the Lambda node is not an IdentRef). We handle the
+        // `&Lambda` case in lowerExpr's Unary handler below.
+        return slot;
     }
     error(e.loc, "unsupported expression");
     return "undef";
@@ -1318,7 +1386,7 @@ void CodeGen::lowerFunction(const mir::Function& fn) {
                std::to_string(i);
     }
     emitLine("define " + llvmType(fn.returnType) + " @" +
-             (fn.isExternC ? std::string(fn.name) : mangleFunction(fn.name, &fn)) + "(" +
+             (fn.isExternC ? llvmGlobalName(fn.name) : llvmGlobalName(mangleFunction(fn.name, &fn))) + "(" +
              sig + ") {");
 
     // prologue: materialize parameters in alloca slots
@@ -1405,7 +1473,7 @@ bool CodeGen::generate(std::ostream& out) {
             for (const mir::Param& p : fn->params) {
                 sig += (sig.empty() ? "" : ", ") + llvmType(p.type);
             }
-            emitLine("declare " + llvmType(fn->returnType) + " @" + std::string(fn->name) +
+            emitLine("declare " + llvmType(fn->returnType) + " @" + llvmGlobalName(fn->name) +
                      "(" + sig + ")");
         }
     }

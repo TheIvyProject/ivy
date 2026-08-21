@@ -200,6 +200,12 @@ private:
         return "%a." + std::to_string(alloca_++);
     }
 
+    // Returns the LLVM IR reference for a global/function symbol.
+    // Names containing characters outside [A-Za-z0-9_.$-] must be
+    // quoted in double quotes in LLVM IR (e.g. MSVC-mangled names
+    // like "?foo@@YA...@Z"). This helper wraps such names in quotes.
+    std::string llvmGlobalName(std::string_view name) const;
+
     // Lowers an expression to its value (an SSA name or literal).
     // For lvalue-only expressions (e.g. IdentRef of a variable), this
     // emits a `load` and returns the loaded value.

@@ -43,11 +43,23 @@ struct Expr {
     // Aggregate initializer for a struct: `Point p = {1, 2};`.
     // Elements map positionally to struct fields; type is the struct type.
     struct InitList { std::vector<std::unique_ptr<Expr>> elements; };
+    // Lambda closure value. After HIR lowering, a lambda expression
+    // becomes an InitList that initializes a closure struct whose
+    // fields are the captured variables. `funcName` is the synthesized
+    // call-operator function that takes a closure pointer as its first
+    // parameter. The `type` field (on the enclosing Expr) is set to
+    // the closure struct type so codegen can emit the correct alloca.
+    struct Lambda {
+        std::string_view funcName;       // e.g. "__lambda0"
+        std::string_view closureType;    // e.g. "__lambda0_closure"
+        std::vector<std::unique_ptr<Expr>> captureInits;  // values for each capture field
+    };
 
     Type type;  // resolved type
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef,
-                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList>
+                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
+                 Lambda>
         node;
 };
 

@@ -71,6 +71,9 @@ void dumpType(const ivy::Type& t, std::ostream& os) {
     for (std::uint32_t i = 0; i < t.pointerDepth; ++i) os << "*";
 }
 
+// Forward declarations — lambda bodies need dumpStmt inside dumpExpr.
+void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth);
+
 void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
     const std::string pad(depth * 2, ' ');
     std::visit(Overloaded{
@@ -127,13 +130,35 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                    },
                    [&](const ivy::Expr::InitList& v) {
                        os << pad << "init-list (" << v.elements.size() << ")\n";
-                       for (const auto& el : v.elements) dumpExpr(*el, os, depth + 1);
+                       for (const auto& el : v.elements) {
+                           if (el) dumpExpr(*el, os, depth + 1);
+                           else os << (pad) << "  <zero-init>\n";
+                       }
+                   },
+                   [&](const ivy::Expr::Lambda& v) {
+                       os << pad << "lambda [";
+                       for (std::size_t i = 0; i < v.captures.size(); ++i) {
+                           if (i > 0) os << ", ";
+                           if (v.captures[i].byRef) os << "&";
+                           os << v.captures[i].name;
+                       }
+                       os << "](";
+                       for (std::size_t i = 0; i < v.params.size(); ++i) {
+                           if (i > 0) os << ", ";
+                           dumpType(v.params[i].type, os);
+                           if (!v.params[i].name.empty()) os << " " << v.params[i].name;
+                       }
+                       os << "]";
+                       if (!v.returnType.base.empty()) {
+                           os << " -> ";
+                           dumpType(v.returnType, os);
+                       }
+                       os << "\n";
+                       if (v.body) dumpStmt(*v.body, os, depth + 1);
                    },
                },
                e.node);
 }
-
-void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth);
 
 // Stmt::Compound cannot be copied (owns unique_ptr<Stmt>), so dump it via its
 // own entry point; dumpStmt's Compound visitor delegates here.
@@ -320,6 +345,14 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                        dumpHirType(e.type, os);
                        os << " (" << v.elements.size() << ")\n";
                        for (const auto& el : v.elements) dumpHirExpr(*el, os, depth + 1);
+                   },
+                   [&](const ivy::hir::Expr::Lambda& v) {
+                       os << pad << "lambda : ";
+                       dumpHirType(e.type, os);
+                       os << " func=" << v.funcName << " closure=" << v.closureType
+                          << " (" << v.captureInits.size() << " captures)\n";
+                       for (const auto& ci : v.captureInits)
+                           if (ci) dumpHirExpr(*ci, os, depth + 1);
                    },
                },
                e.node);
@@ -514,6 +547,14 @@ void dumpMirExpr(const ivy::mir::Expr& e, std::ostream& os, int depth) {
                        dumpHirType(e.type, os);
                        os << lts << " (" << v.elements.size() << ")\n";
                        for (const auto& el : v.elements) dumpMirExpr(*el, os, depth + 1);
+                   },
+                   [&](const ivy::mir::Expr::Lambda& v) {
+                       os << pad << "lambda : ";
+                       dumpHirType(e.type, os);
+                       os << lts << " func=" << v.funcName << " closure=" << v.closureType
+                          << " (" << v.captureInits.size() << " captures)\n";
+                       for (const auto& ci : v.captureInits)
+                           if (ci) dumpMirExpr(*ci, os, depth + 1);
                    },
                },
                e.node);

@@ -1139,6 +1139,40 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             } else {
                 error(callee->loc, "callee must be a function name");
             }
+        } else if (std::holds_alternative<A::Lambda>(callee->node)) {
+            // Lambda callee: build the lambda expression, which yields a
+            // hir::Expr::Lambda carrying the closure struct value and the
+            // call-operator function name. We convert this into a direct
+            // call to the call-operator with the closure pointer as the
+            // first argument.
+            auto lambdaExpr = buildExpr(*callee);
+            if (!lambdaExpr || !std::holds_alternative<hir::Expr::Lambda>(lambdaExpr->node)) {
+                out->type = dummyType();
+                return out;
+            }
+            auto& lamNode = std::get<hir::Expr::Lambda>(lambdaExpr->node);
+            // We need a call-operator function. Look it up so we get the
+            // proper signature and callee name.
+            call.callee = lamNode.funcName;
+            call.target = functions_[lamNode.funcName];
+            // The first argument is a pointer to the closure struct.
+            // We build it as an lvalue: first the lambda expression is an
+            // rvalue of closure-struct type; we lower it to a temporary
+            // alloca at codegen time. To keep things simple, we emit the
+            // Lambda node as-is and let codegen allocate the closure slot.
+            // The closure pointer is `&closure` — modeled here as a Unary
+            // address-of on the Lambda value.
+            auto closureVal = std::move(lambdaExpr);
+            auto closurePtr = std::make_unique<hir::Expr>();
+            closurePtr->loc = e.loc;
+            closurePtr->node.emplace<hir::Expr::Unary>(
+                hir::Expr::Unary{"&", true, std::move(closureVal)});
+            // The closure pointer's type is the closure struct type + 1 ptr.
+            // We'll fill the actual type after we know the closure type.
+            closurePtr->type.pointerDepth = 1;
+            // Recover closure type name from the Lambda node before move.
+            closurePtr->type.base = lamNode.closureType;
+            call.args.push_back(std::move(closurePtr));
         } else {
             error(callee->loc, "callee must be a function name");
         }
@@ -1346,9 +1380,270 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         out->type = dummyType();
         return out;
     }
+    if (std::holds_alternative<A::Lambda>(n)) {
+        const A::Lambda& v = std::get<A::Lambda>(n);
+        return buildLambda(v, e.loc);
+    }
 
     error(e.loc, "internal: unknown expression kind");
     out->type = dummyType();
+    return out;
+}
+
+std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, SourceLoc loc) {
+    // Generate unique names for the closure struct type and call function.
+    const int id = lambdaCounter_++;
+    const std::string funcName = "__lambda" + std::to_string(id);
+    const std::string closureTypeName = "__lambda" + std::to_string(id) + "_closure";
+    // Store names in stable storage so string_views remain valid.
+    stringStorage_.push_back(funcName);
+    stringStorage_.push_back(closureTypeName);
+    const std::string_view funcNameSv = stringStorage_[stringStorage_.size() - 2];
+    const std::string_view closureTypeSv = stringStorage_.back();
+
+    // Resolve capture types from current variable scopes.
+    // Each capture becomes a field in the closure struct.
+    StructDecl closureDecl;
+    closureDecl.name = closureTypeSv;
+    closureDecl.loc = loc;
+    // Also build the capture init expressions (values to store in the closure).
+    std::vector<std::unique_ptr<hir::Expr>> captureInits;
+    // Remember the resolved capture info so we can inject local-variable
+    // declarations (initialized from `__closure->field`) before building
+    // the lambda body. This makes the body's references to captured names
+    // resolve naturally to local variables.
+    struct CapInfo { std::string_view name; hir::Type type; bool byRef; };
+    std::vector<CapInfo> capInfos;
+
+    for (const auto& cap : lam.captures) {
+        // Look up the captured variable's type in the current scopes.
+        hir::Type capType;
+        bool found = false;
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+            if (it->contains(cap.name)) {
+                capType = (*it)[cap.name];
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            error(loc, "lambda captures undeclared variable '" + std::string(cap.name) + "'");
+            continue;
+        }
+        capInfos.push_back({cap.name, capType, cap.byRef});
+        // For by-reference capture, the closure field is a pointer.
+        hir::Type fieldType = capType;
+        if (cap.byRef) {
+            fieldType.pointerDepth += 1;
+            fieldType.isReference = false;
+        }
+        Field f;
+        f.type = fieldType;
+        f.name = cap.name;
+        f.loc = loc;
+        closureDecl.fields.push_back(std::move(f));
+        // Build the capture init expression: for by-value, it's the
+        // variable itself (IdentRef); for by-reference, it's &var.
+        if (cap.byRef) {
+            // Build &var as UnaryAddr
+            auto ref = std::make_unique<hir::Expr>();
+            ref->loc = loc;
+            ref->node.emplace<hir::Expr::IdentRef>(hir::Expr::IdentRef{cap.name});
+            ref->type = capType;
+            auto addr = std::make_unique<hir::Expr>();
+            addr->loc = loc;
+            addr->node.emplace<hir::Expr::Unary>(hir::Expr::Unary{"&", true, std::move(ref)});
+            addr->type = fieldType;
+            captureInits.push_back(std::move(addr));
+        } else {
+            auto ref = std::make_unique<hir::Expr>();
+            ref->loc = loc;
+            ref->node.emplace<hir::Expr::IdentRef>(hir::Expr::IdentRef{cap.name});
+            ref->type = capType;
+            captureInits.push_back(std::move(ref));
+        }
+    }
+
+    // Register the closure struct type (layout computation + HIR TU entry).
+    buildStruct(closureDecl);
+
+    // Determine the lambda's return type. If `-> ret` was omitted,
+    // try to deduce from the first return statement in the body.
+    hir::Type retType = lam.returnType;
+    if (retType.base.empty()) {
+        // Scan body for first return statement to deduce return type.
+        if (lam.body) {
+            const auto& compound = std::get<Stmt::Compound>(lam.body->node);
+            for (const auto& stmt : compound.stmts) {
+                if (std::holds_alternative<Stmt::Return>(stmt->node)) {
+                    const auto& ret = std::get<Stmt::Return>(stmt->node);
+                    if (ret.value) {
+                        auto built = buildExpr(*ret.value);
+                        if (built) retType = built->type;
+                    }
+                    break;
+                }
+            }
+        }
+        if (retType.base.empty()) {
+            retType.base = "void";
+        }
+    }
+
+    // Create the call-operator function signature.
+    // First param is always `__closure*` (pointer to closure struct).
+    auto fn = std::make_unique<hir::Function>();
+    fn->name = funcNameSv;
+    fn->returnType = retType;
+    fn->loc = loc;
+    // closure pointer param
+    hir::Param closureParam;
+    closureParam.type = hir::Type{closureTypeSv, false, false, false, 1};
+    closureParam.name = "__closure";
+    closureParam.loc = loc;
+    fn->params.push_back(std::move(closureParam));
+    // user params
+    for (const auto& p : lam.params) {
+        hir::Param hp;
+        hp.type = p.type;
+        hp.name = p.name;
+        hp.loc = p.loc;
+        fn->params.push_back(std::move(hp));
+    }
+
+    hir::Function* rawFn = fn.get();
+    hir_->functions.push_back(std::move(fn));
+    functions_[funcNameSv] = rawFn;
+
+    // Build the function body. The closure's captured variables are
+    // accessed via `__closure->fieldName` — we declare them as local
+    // variables initialized from the closure struct fields.
+    // Save current state.
+    hir::Function* savedCurrent = current_;
+    bool savedHasReturn = hasReturnInBody_;
+    std::string_view savedNs = currentNsPrefix_;
+
+    current_ = rawFn;
+    hasReturnInBody_ = false;
+    scopes_.push_back({});
+    // Declare the closure pointer parameter.
+    declare("__closure", hir::Type{closureTypeSv, false, false, false, 1}, loc);
+    // Declare user parameters.
+    for (const auto& p : lam.params) {
+        if (!p.name.empty()) declare(p.name, p.type, p.loc);
+    }
+    // For each capture, we inject a local-variable declaration at the
+    // top of the lambda body, initialized from the corresponding
+    // closure struct field (`__closure->fieldName`). This way, the
+    // body's references to captured names resolve naturally to local
+    // variables — no AST rewriting needed. For by-reference captures,
+    // the local is a reference/pointer aliasing the closure field.
+    //
+    // Build injected declarations for each capture, then build the user
+    // body. The capture declarations access `__closure->field` and, for
+    // by-reference captures, dereference a pointer — these are
+    // compiler-generated operations on a trusted closure pointer, so
+    // they are built under an implicit unsafe scope (see below). The
+    // user-written body is built with the original unsafe depth so its
+    // own pointer operations are still checked normally.
+    std::vector<std::unique_ptr<Stmt>> capDeclStmts;
+    for (const auto& ci : capInfos) {
+        // The closure field type: by-ref => pointer to capType;
+        // by-value => capType.
+        hir::Type fieldType = ci.type;
+        if (ci.byRef) {
+            fieldType.pointerDepth += 1;
+            fieldType.isReference = false;
+        }
+        // Build the init expression: `__closure->capName`.
+        // Member access on the `__closure` pointer (IdentRef).
+        auto base = std::make_unique<Expr>();
+        base->loc = loc;
+        base->node.emplace<Expr::IdentRef>(Expr::IdentRef{"__closure"});
+        auto mem = std::make_unique<Expr>();
+        mem->loc = loc;
+        mem->node.emplace<Expr::Member>(Expr::Member{std::move(base), ci.name, true});
+        // Build the Decl statement: `T capName = __closure->capName;`
+        auto decl = std::make_unique<Stmt>();
+        decl->loc = loc;
+        Stmt::Decl d;
+        if (ci.byRef) {
+            // By-reference capture: the closure field stores a pointer
+            // to the original variable. We want the local `capName` to
+            // be a reference (`T&`) that aliases the pointee — so the
+            // body can read/write the original variable through `capName`.
+            // The init expression is `*(__closure->capName)` — a deref
+            // of the pointer stored in the closure field.
+            d.type = ci.type;
+            d.type.isReference = true;
+            // Wrap the member access in a deref: `*( __closure->capName )`
+            auto deref = std::make_unique<Expr>();
+            deref->loc = loc;
+            deref->node.emplace<Expr::Unary>(Expr::Unary{"*", true, std::move(mem)});
+            d.init = std::move(deref);
+        } else {
+            d.type = ci.type;
+            d.init = std::move(mem);
+        }
+        d.name = ci.name;
+        decl->node.emplace<Stmt::Decl>(std::move(d));
+        capDeclStmts.push_back(std::move(decl));
+    }
+    // Build the lambda body compound. We push a fresh scope and build
+    // the injected capture declarations under an implicit unsafe scope
+    // (compiler-generated closure access), then build the user-written
+    // body statements with the original unsafe depth.
+    {
+        auto out = std::make_unique<hir::Stmt>();
+        out->loc = loc;
+        auto& compound = out->node.emplace<hir::Stmt::Compound>();
+        scopes_.push_back({});
+
+        // Build injected capture declarations under an implicit unsafe
+        // scope (compiler-generated closure access is always safe).
+        ++unsafeDepth_;
+        for (const auto& cs : capDeclStmts) {
+            if (cs) compound.stmts.push_back(buildStmt(*cs));
+        }
+        --unsafeDepth_;
+
+        // Build the user-written body statements with the original
+        // unsafe depth so user code is checked normally.
+        if (lam.body) {
+            const auto& userCompound = std::get<Stmt::Compound>(lam.body->node);
+            for (const auto& s : userCompound.stmts) {
+                compound.stmts.push_back(buildStmt(*s));
+            }
+        }
+        scopes_.pop_back();
+
+        rawFn->body = std::make_unique<hir::Stmt::Compound>(
+            std::move(compound));
+    }
+
+    scopes_.pop_back();
+    // Check for missing return (unless void).
+    if (!rawFn->returnType.isConst && rawFn->returnType.pointerDepth == 0 &&
+        rawFn->returnType.base != "void" && !hasReturnInBody_) {
+        // Lambda may reach end without return — not an error for now
+        // (Ivy is lenient with lambdas used for side effects).
+    }
+
+    // Restore state.
+    current_ = savedCurrent;
+    hasReturnInBody_ = savedHasReturn;
+    currentNsPrefix_ = savedNs;
+
+    // Build the Lambda HIR expression: a closure struct value (InitList
+    // of capture values) plus the function name.
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    auto& lambdaNode = out->node.emplace<hir::Expr::Lambda>();
+    lambdaNode.funcName = funcNameSv;
+    lambdaNode.closureType = closureTypeSv;
+    lambdaNode.captureInits = std::move(captureInits);
+    // The type of the lambda expression is the closure struct type.
+    out->type = hir::Type{closureTypeSv, false, false, false, 0};
     return out;
 }
 

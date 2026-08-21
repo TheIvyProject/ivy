@@ -123,6 +123,14 @@ private:
                                                const hir::Type& structType,
                                                [[maybe_unused]] std::string_view varName,
                                                SourceLoc loc);
+    // Lower a lambda expression into a closure struct value + call-operator
+    // function. The lambda's captures become fields of a synthesized
+    // closure struct type; the body becomes a function that takes a
+    // closure pointer as its first parameter. Returns a hir::Expr::Lambda
+    // whose type is the closure struct type.
+    std::unique_ptr<hir::Expr> buildLambda(const Expr::Lambda& lam, SourceLoc loc);
+    // Counter for generating unique lambda names.
+    int lambdaCounter_ = 0;
 
     // helpers
     void declare(std::string_view name, hir::Type type, SourceLoc loc);

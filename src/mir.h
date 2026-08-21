@@ -59,12 +59,19 @@ struct Expr {
     // may be fewer than the struct's fields (the rest are zero-init or use
     // default member initializers at codegen time).
     struct InitList { std::vector<std::unique_ptr<Expr>> elements; };
+    // Lambda closure value — mirrors hir::Expr::Lambda.
+    struct Lambda {
+        std::string_view funcName;
+        std::string_view closureType;
+        std::vector<std::unique_ptr<Expr>> captureInits;
+    };
 
     Type type;
     Lifetime lifetime;  // result of the lifetime analysis
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef,
-                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList>
+                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
+                 Lambda>
         node;
 };
 

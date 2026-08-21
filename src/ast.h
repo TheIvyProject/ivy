@@ -28,6 +28,17 @@ struct Type {
     std::uint32_t pointerDepth = 0;
 };
 
+// Forward declaration so that Expr::Lambda can reference Stmt::Compound.
+struct Stmt;
+
+// Defined early because Expr::Lambda uses std::vector<Param>.
+struct Param {
+    Type type;
+    std::string_view name;  // empty if unnamed
+    std::vector<Attribute> attrs;
+    SourceLoc loc;
+};
+
 struct Expr {
     struct IntegerLit { long long value; };
     struct FloatLit { double value; };
@@ -48,10 +59,22 @@ struct Expr {
     // Braced aggregate initializer: `Point p = {1, 2};` or `Point p{1, 2};`.
     // Used for struct types — elements map positionally to struct fields.
     struct InitList { std::vector<std::unique_ptr<Expr>> elements; };
+    // Lambda expression: `[cap](params) -> ret { body }`.
+    // `returnType.base` is empty when `-> ret` is omitted (deduced).
+    // `body` is a `Stmt::Compound` stored as `std::unique_ptr<Stmt>`
+    // because `Stmt` is only forward-declared at this point.
+    struct Capture { std::string_view name; bool byRef; };
+    struct Lambda {
+        std::vector<Capture> captures;
+        std::vector<Param> params;
+        Type returnType;  // base.empty() => deduced
+        std::unique_ptr<Stmt> body;  // actually a Stmt::Compound
+    };
 
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef,
-                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList>
+                 Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
+                 Lambda>
         node;
 };
 
@@ -99,8 +122,20 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 v.operand ? cloneExpr(*v.operand) : nullptr, v.isArray});
         } else if constexpr (std::is_same_v<V, Expr::InitList>) {
             Expr::InitList il;
-            for (const auto& el : v.elements) il.elements.push_back(cloneExpr(*el));
+            for (const auto& el : v.elements) {
+                if (el) il.elements.push_back(cloneExpr(*el));
+                else il.elements.push_back(nullptr);
+            }
             out->node.emplace<Expr::InitList>(std::move(il));
+        } else if constexpr (std::is_same_v<V, Expr::Lambda>) {
+            // Lambdas are not cloned — they are unique AST nodes owned
+            // by the enclosing expression. If we reach here, just copy
+            // the captures/params/returnType and leave body null.
+            Expr::Lambda lam;
+            lam.captures = v.captures;
+            lam.params = v.params;
+            lam.returnType = v.returnType;
+            out->node.emplace<Expr::Lambda>(std::move(lam));
         } else {
             out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
         }
@@ -133,12 +168,55 @@ struct Stmt {
         node;
 };
 
-struct Param {
-    Type type;
-    std::string_view name;  // empty if unnamed
-    std::vector<Attribute> attrs;
-    SourceLoc loc;
-};
+// Deep-copy a statement tree. Used by the HIR builder when prepending
+// synthesized declarations (e.g. lambda capture locals) to a user-
+// written body that must not be moved out of the AST.
+inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
+    auto out = std::make_unique<Stmt>();
+    out->loc = s.loc;
+    std::visit([&]<typename V>(const V& v) {
+        if constexpr (std::is_same_v<V, Stmt::Compound>) {
+            Stmt::Compound c;
+            for (const auto& st : v.stmts) c.stmts.push_back(cloneStmt(*st));
+            out->node.emplace<Stmt::Compound>(std::move(c));
+        } else if constexpr (std::is_same_v<V, Stmt::Decl>) {
+            out->node.emplace<Stmt::Decl>(Stmt::Decl{v.type, v.name,
+                v.init ? cloneExpr(*v.init) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::If>) {
+            out->node.emplace<Stmt::If>(Stmt::If{
+                v.cond ? cloneExpr(*v.cond) : nullptr,
+                v.thenBranch ? cloneStmt(*v.thenBranch) : nullptr,
+                v.elseBranch ? cloneStmt(*v.elseBranch) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::While>) {
+            out->node.emplace<Stmt::While>(Stmt::While{
+                v.cond ? cloneExpr(*v.cond) : nullptr,
+                v.body ? cloneStmt(*v.body) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::DoWhile>) {
+            out->node.emplace<Stmt::DoWhile>(Stmt::DoWhile{
+                v.body ? cloneStmt(*v.body) : nullptr,
+                v.cond ? cloneExpr(*v.cond) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::For>) {
+            out->node.emplace<Stmt::For>(Stmt::For{
+                v.init ? cloneStmt(*v.init) : nullptr,
+                v.cond ? cloneExpr(*v.cond) : nullptr,
+                v.incr ? cloneExpr(*v.incr) : nullptr,
+                v.body ? cloneStmt(*v.body) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::Return>) {
+            out->node.emplace<Stmt::Return>(Stmt::Return{
+                v.value ? cloneExpr(*v.value) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::ExprStmt>) {
+            out->node.emplace<Stmt::ExprStmt>(Stmt::ExprStmt{
+                v.value ? cloneExpr(*v.value) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::Unsafe>) {
+            out->node.emplace<Stmt::Unsafe>(Stmt::Unsafe{
+                v.body ? cloneStmt(*v.body) : nullptr});
+        } else {
+            out->node = v;  // Break, Continue, Null
+        }
+    }, s.node);
+    return out;
+}
+
 
 struct Function {
     std::vector<Attribute> attrs;  // [[ivy::lt_def(a)]], [[ivy::lt_ret(a)]]

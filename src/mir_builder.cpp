@@ -267,6 +267,19 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         }
         return out;
     }
+    if (std::holds_alternative<H::Lambda>(n)) {
+        const H::Lambda& v = std::get<H::Lambda>(n);
+        auto& lam = out->node.emplace<mir::Expr::Lambda>();
+        lam.funcName = v.funcName;
+        lam.closureType = v.closureType;
+        for (const auto& ci : v.captureInits) {
+            if (ci) lam.captureInits.push_back(buildExpr(*ci));
+            else lam.captureInits.push_back(nullptr);
+        }
+        // A lambda value is a closure struct — it lives as long as the
+        // enclosing function (it's a local aggregate). No pointer lifetime.
+        return out;
+    }
 
     out->lifetime.kind = mir::Lifetime::Kind::Unknown;
     return out;

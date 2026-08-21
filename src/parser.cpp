@@ -1275,6 +1275,55 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         expect(TokenKind::RBrace, "expected '}' to close braced initializer");
         return out;
     }
+    if (at(TokenKind::LBracket)) {
+        // Lambda expression: `[caps](params) -> ret { body }` or `[](params){ body }`.
+        // Capture list: `[x, &y, =, &]` — Ivy supports `[x, &y]` and empty `[]`.
+        // `[=]` and `[&]` (capture-all) are not supported.
+        next();  // consume '['
+        auto out = makeExpr<Expr::Lambda>(loc);
+        auto& lam = std::get<Expr::Lambda>(out->node);
+        // Parse capture list
+        if (!at(TokenKind::RBracket)) {
+            do {
+                bool byRef = false;
+                if (at(TokenKind::Amp)) {
+                    byRef = true;
+                    next();  // consume '&'
+                }
+                if (!at(TokenKind::Identifier)) {
+                    errorAt(peek(), "expected capture name in lambda capture list");
+                    break;
+                }
+                Expr::Capture cap;
+                cap.name = next().lexeme;
+                cap.byRef = byRef;
+                lam.captures.push_back(cap);
+            } while (at(TokenKind::Comma) && (next(), true));
+        }
+        expect(TokenKind::RBracket, "expected ']' to close lambda capture list");
+        // Parse parameter list (optional — `()` required in Ivy)
+        expect(TokenKind::LParen, "expected '(' for lambda parameter list");
+        lam.params = parseParams();
+        expect(TokenKind::RParen, "expected ')' to close lambda parameter list");
+        // Parse optional trailing return type: `-> ret`
+        if (at(TokenKind::Arrow)) {
+            next();  // consume '->'
+            lam.returnType = parseType();
+            if (lam.returnType.base.empty()) {
+                errorAt(peek(), "expected return type after '->' in lambda");
+            }
+        }
+        // Parse body — parseCompound() expects and consumes '{' itself.
+        if (at(TokenKind::LBrace)) {
+            auto bodyStmt = parseCompound();
+            if (bodyStmt) {
+                lam.body = std::move(bodyStmt);
+            }
+        } else {
+            errorAt(peek(), "expected '{' for lambda body");
+        }
+        return out;
+    }
     if (at(TokenKind::LParen)) {
         next();
         std::unique_ptr<Expr> inner = parseExpr();
