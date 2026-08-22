@@ -110,6 +110,8 @@ struct Function {
     std::string_view returnLifetime;  // lowered [[ivy::lt_ret(a)]]
     std::unique_ptr<Stmt::Compound> body;  // null => declaration only
     bool isExternC = false;
+    bool isConstexpr = false;
+    bool isConsteval = false;
     SourceLoc loc;
 };
 

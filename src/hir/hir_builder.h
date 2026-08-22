@@ -139,6 +139,28 @@ private:
     void requireUnsafe(SourceLoc loc, std::string_view what);
     void checkCall(hir::Expr::Call& call, SourceLoc loc);
 
+    // --- constexpr evaluation ---
+    // Attempts to evaluate a constexpr/consteval function call at
+    // compile time.  If all arguments are compile-time constants and
+    // the function body can be fully evaluated (no I/O, no dynamic
+    // memory, ...), replaces the Call expression with a literal.
+    // Returns true if the call was folded (out is set), false otherwise.
+    bool tryEvalConstexprCall(hir::Expr& out, const hir::Expr::Call& call,
+                              const hir::Function& fn, SourceLoc loc);
+
+    // Recursive tree-walk evaluator for constexpr function bodies.
+    // Returns the folded value or sets `ok=false` on the first non-
+    // constant sub-expression.
+    struct ConstValue {
+        bool isInt = true;
+        long long i = 0;
+        double f = 0.0;
+    };
+    bool evalConstExpr(const hir::Expr& e, const hir::Function& fn,
+                       ConstValue& result) const;
+    bool evalConstStmt(const hir::Stmt& s, const hir::Function& fn,
+                       ConstValue& result) const;
+
     // Namespace-aware name resolution helpers.
     // Tries `name` first, then `currentNsPrefix_ + name`.
     hir::Function* resolveFunction(std::string_view name) const;

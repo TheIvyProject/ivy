@@ -645,6 +645,8 @@ std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
         }
         fn->isExternC = hf->isExternC;
         fn->hasBody = hf->body != nullptr;
+        fn->isConstexpr = hf->isConstexpr;
+        fn->isConsteval = hf->isConsteval;
         fn->loc = hf->loc;
         mir::Function* raw = fn.get();
         mir_->functions.push_back(std::move(fn));

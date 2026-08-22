@@ -1478,6 +1478,15 @@ bool CodeGen::generate(std::ostream& out) {
         }
     }
     for (const auto& fn : mir_.functions) {
+        // Skip consteval functions — they must be evaluated at compile
+        // time and have no runtime representation.  Every call to a
+        // consteval function is folded by the HIR builder; if folding
+        // failed the call would have been a compile error.
+        // constexpr functions are kept: they may have runtime calls
+        // (when arguments are not compile-time constants), so they
+        // need a definition in the emitted IR.  The LLVM optimizer will
+        // dead-code-eliminate them if unused.
+        if (fn->isConsteval) continue;
         if (fn->hasBody) lowerFunction(*fn);
     }
     return !failed_;

@@ -121,6 +121,8 @@ struct Function {
     std::vector<std::unique_ptr<Block>> blocks;
     bool isExternC = false;
     bool hasBody = false;  // false = declaration only (extern "C" prototype)
+    bool isConstexpr = false;
+    bool isConsteval = false;
     SourceLoc loc;
 };
 

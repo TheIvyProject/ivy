@@ -145,7 +145,7 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
 
 struct Stmt {
     struct Compound { std::vector<std::unique_ptr<Stmt>> stmts; };
-    struct Decl { Type type; std::string_view name; std::unique_ptr<Expr> init; };
+    struct Decl { Type type; std::string_view name; std::unique_ptr<Expr> init; bool isConstexpr = false; };
     struct If { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> thenBranch, elseBranch; };
     struct While { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> body; };
     struct DoWhile { std::unique_ptr<Stmt> body; std::unique_ptr<Expr> cond; };
@@ -181,7 +181,7 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
             out->node.emplace<Stmt::Compound>(std::move(c));
         } else if constexpr (std::is_same_v<V, Stmt::Decl>) {
             out->node.emplace<Stmt::Decl>(Stmt::Decl{v.type, v.name,
-                v.init ? cloneExpr(*v.init) : nullptr});
+                v.init ? cloneExpr(*v.init) : nullptr, v.isConstexpr});
         } else if constexpr (std::is_same_v<V, Stmt::If>) {
             out->node.emplace<Stmt::If>(Stmt::If{
                 v.cond ? cloneExpr(*v.cond) : nullptr,
@@ -226,6 +226,8 @@ struct Function {
     std::vector<Param> params;
     std::unique_ptr<Stmt::Compound> body;  // null => declaration only
     bool isExternC = false;
+    bool isConstexpr = false;   // `constexpr` function / variable
+    bool isConsteval = false;   // `consteval` function (implies constexpr)
     SourceLoc loc;
 };
 

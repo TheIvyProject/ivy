@@ -104,13 +104,19 @@ private:
     // --- declarations ---
     bool isTypeStart() const;
     Type parseType();
+
+    // Parses optional `constexpr`/`consteval` specifiers before a type.
+    // Returns flags; consumes the keyword if present.
+    struct ConstexprSpec { bool isConstexpr = false; bool isConsteval = false; };
+    ConstexprSpec parseConstexprSpec();
+
     void parseTopLevel(TranslationUnit& tu);
     void parseNamespace(TranslationUnit& tu, SourceLoc loc);
     void parseEnum(TranslationUnit& tu, SourceLoc loc);
     void parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass);
     void parseExternC(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
-                       bool isExternC);
+                       bool isExternC, bool isConstexpr = false, bool isConsteval = false);
     std::vector<Param> parseParams();
 
     // Builds a qualified name from the current namespace stack + `name`.

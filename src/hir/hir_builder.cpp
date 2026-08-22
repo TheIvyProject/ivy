@@ -444,6 +444,8 @@ void HirBuilder::buildSignature(const Function& af) {
     fn->namespacePrefix = af.namespacePrefix;
     fn->returnType = af.returnType;
     fn->isExternC = af.isExternC;
+    fn->isConstexpr = af.isConstexpr;
+    fn->isConsteval = af.isConsteval;
     fn->loc = af.loc;
 
     lowerLifetimeAttributes(*fn, af);
@@ -1180,6 +1182,31 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         if (call.target) {
             checkCall(call, e.loc);
             out->type = call.target->returnType;
+            // --- constexpr folding ---
+            // If the target is constexpr/consteval, try to evaluate the
+            // call at compile time and replace the Call with a literal.
+            if (call.target->isConstexpr && !call.args.empty()) {
+                // All args must be literals (IntegerLit/FloatLit/BoolLit).
+                bool allConst = true;
+                for (const auto& a : call.args) {
+                    if (!a) { allConst = false; break; }
+                    if (!std::holds_alternative<hir::Expr::IntegerLit>(a->node) &&
+                        !std::holds_alternative<hir::Expr::FloatLit>(a->node) &&
+                        !std::holds_alternative<hir::Expr::BoolLit>(a->node)) {
+                        allConst = false;
+                        break;
+                    }
+                }
+                if (allConst) {
+                    // Try constexpr folding — if successful, replace
+                    // the Call expression with a literal.
+                    hir::Expr folded;
+                    if (tryEvalConstexprCall(folded, call, *call.target, e.loc)) {
+                        out = std::make_unique<hir::Expr>(std::move(folded));
+                        return out;
+                    }
+                }
+            }
         } else {
             out->type = dummyType();
         }
@@ -1668,6 +1695,343 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     }
     if (failed_) return nullptr;
     return std::move(hir_);
+}
+
+// ---------------------------------------------------------------------------
+//                      constexpr evaluation
+// ---------------------------------------------------------------------------
+
+// A simple tree-walking constant evaluator for constexpr function bodies.
+// It operates on HIR expressions, which have already been type-checked
+// and had names resolved.  Only integer and float literals, unary/binary
+// arithmetic, conditional (ternary), and calls to other constexpr
+// functions are supported — anything else (pointers, structs, strings,
+// builtins like printf) causes the evaluation to fail gracefully.
+
+bool HirBuilder::evalConstExpr(const hir::Expr& e, const hir::Function& fn,
+                               ConstValue& result) const {
+    using E = hir::Expr;
+    if (std::holds_alternative<E::IntegerLit>(e.node)) {
+        result.isInt = true;
+        result.i = std::get<E::IntegerLit>(e.node).value;
+        return true;
+    }
+    if (std::holds_alternative<E::FloatLit>(e.node)) {
+        result.isInt = false;
+        result.f = std::get<E::FloatLit>(e.node).value;
+        return true;
+    }
+    if (std::holds_alternative<E::BoolLit>(e.node)) {
+        result.isInt = true;
+        result.i = std::get<E::BoolLit>(e.node).value ? 1 : 0;
+        return true;
+    }
+    if (std::holds_alternative<E::NullptrLit>(e.node)) {
+        result.isInt = true;
+        result.i = 0;
+        return true;
+    }
+    // Parameter reference: look up the argument value.
+    if (std::holds_alternative<E::IdentRef>(e.node)) {
+        const auto& ref = std::get<E::IdentRef>(e.node);
+        // Check if it's a parameter of the current constexpr function.
+        for (const auto& p : fn.params) {
+            if (p.name == ref.name) {
+                // Parameter values are stored in a separate map —
+                // but we don't have one here in the const evaluator.
+                // Instead, constexpr call args are pre-folded into
+                // the body via tryEvalConstexprCall's paramValues.
+                return false;  // handled by tryEvalConstexprCall
+            }
+        }
+        // Check enum constants.
+        auto it = enumConstants_.find(ref.name);
+        if (it != enumConstants_.end()) {
+            result.isInt = true;
+            result.i = it->second;
+            return true;
+        }
+        return false;
+    }
+    if (std::holds_alternative<E::Unary>(e.node)) {
+        const auto& u = std::get<E::Unary>(e.node);
+        ConstValue operand;
+        if (!evalConstExpr(*u.operand, fn, result)) return false;
+        if (u.isPrefix && (u.op == "++" || u.op == "--")) return false;  // side-effect
+        if (u.op == "-") { result.i = -result.i; result.f = -result.f; return true; }
+        if (u.op == "+") { return true; }
+        if (u.op == "!") { result.isInt = true; result.i = !result.i; return true; }
+        if (u.op == "~") { result.isInt = true; result.i = ~result.i; return true; }
+        return false;
+    }
+    if (std::holds_alternative<E::Binary>(e.node)) {
+        const auto& b = std::get<E::Binary>(e.node);
+        // Short-circuit && and ||.
+        if (b.op == "&&" || b.op == "||") {
+            ConstValue lhs;
+            if (!evalConstExpr(*b.lhs, fn, lhs)) return false;
+            bool lb = lhs.i != 0;
+            if (b.op == "&&" && !lb) { result.isInt = true; result.i = 0; return true; }
+            if (b.op == "||" && lb)  { result.isInt = true; result.i = 1; return true; }
+            if (!evalConstExpr(*b.rhs, fn, result)) return false;
+            result.isInt = true;
+            result.i = (result.i != 0) ? 1 : 0;
+            return true;
+        }
+        ConstValue lhs, rhs;
+        if (!evalConstExpr(*b.lhs, fn, lhs)) return false;
+        if (!evalConstExpr(*b.rhs, fn, rhs)) return false;
+        if (lhs.isInt && rhs.isInt) {
+            result.isInt = true;
+            if (b.op == "+") result.i = lhs.i + rhs.i;
+            else if (b.op == "-") result.i = lhs.i - rhs.i;
+            else if (b.op == "*") result.i = lhs.i * rhs.i;
+            else if (b.op == "/") { if (rhs.i == 0) return false; result.i = lhs.i / rhs.i; }
+            else if (b.op == "%") { if (rhs.i == 0) return false; result.i = lhs.i % rhs.i; }
+            else if (b.op == "==") result.i = lhs.i == rhs.i;
+            else if (b.op == "!=") result.i = lhs.i != rhs.i;
+            else if (b.op == "<") result.i = lhs.i < rhs.i;
+            else if (b.op == "<=") result.i = lhs.i <= rhs.i;
+            else if (b.op == ">") result.i = lhs.i > rhs.i;
+            else if (b.op == ">=") result.i = lhs.i >= rhs.i;
+            else if (b.op == "&") result.i = lhs.i & rhs.i;
+            else if (b.op == "|") result.i = lhs.i | rhs.i;
+            else if (b.op == "^") result.i = lhs.i ^ rhs.i;
+            else if (b.op == "<<") result.i = lhs.i << rhs.i;
+            else if (b.op == ">>") result.i = lhs.i >> rhs.i;
+            else return false;
+            return true;
+        }
+        // Float arithmetic.
+        double lv = lhs.isInt ? static_cast<double>(lhs.i) : lhs.f;
+        double rv = rhs.isInt ? static_cast<double>(rhs.i) : rhs.f;
+        result.isInt = false;
+        if (b.op == "+") result.f = lv + rv;
+        else if (b.op == "-") result.f = lv - rv;
+        else if (b.op == "*") result.f = lv * rv;
+        else if (b.op == "/") { if (rv == 0.0) return false; result.f = lv / rv; }
+        else if (b.op == "==") { result.isInt = true; result.i = lv == rv; }
+        else if (b.op == "!=") { result.isInt = true; result.i = lv != rv; }
+        else if (b.op == "<")  { result.isInt = true; result.i = lv < rv; }
+        else if (b.op == "<=") { result.isInt = true; result.i = lv <= rv; }
+        else if (b.op == ">")  { result.isInt = true; result.i = lv > rv; }
+        else if (b.op == ">=") { result.isInt = true; result.i = lv >= rv; }
+        else return false;
+        return true;
+    }
+    if (std::holds_alternative<E::Ternary>(e.node)) {
+        const auto& t = std::get<E::Ternary>(e.node);
+        if (!evalConstExpr(*t.cond, fn, result)) return false;
+        if (result.i != 0) return evalConstExpr(*t.thenBranch, fn, result);
+        return evalConstExpr(*t.elseBranch, fn, result);
+    }
+    // Call to another constexpr function.
+    if (std::holds_alternative<E::Call>(e.node)) {
+        const auto& c = std::get<E::Call>(e.node);
+        if (!c.target || !c.target->isConstexpr) return false;
+        // Check all args are constant.
+        std::vector<ConstValue> argVals;
+        for (const auto& a : c.args) {
+            ConstValue v;
+            if (!a || !evalConstExpr(*a, fn, v)) return false;
+            argVals.push_back(v);
+        }
+        // Recursive constexpr call — bind params and eval body.
+        const hir::Function& inner = *c.target;
+        // Build a paramValues map for the inner function.
+        // We use a thread_local map for simplicity.
+        // Actually, we can just recursively evaluate the body with
+        // param values substituted.  For now, we only support
+        // functions that don't reference their params in complex ways.
+        // This is a limitation — will be improved later.
+        return false;  // TODO: recursive constexpr calls
+    }
+    return false;
+}
+
+bool HirBuilder::evalConstStmt(const hir::Stmt& s, const hir::Function& fn,
+                               ConstValue& result) const {
+    using S = hir::Stmt;
+    if (std::holds_alternative<S::Return>(s.node)) {
+        const auto& r = std::get<S::Return>(s.node);
+        if (!r.value) { result.isInt = true; result.i = 0; return true; }
+        return evalConstExpr(*r.value, fn, result);
+    }
+    if (std::holds_alternative<S::Compound>(s.node)) {
+        const auto& c = std::get<S::Compound>(s.node);
+        for (const auto& st : c.stmts) {
+            if (evalConstStmt(*st, fn, result)) return true;
+        }
+        result.isInt = true; result.i = 0;
+        return true;
+    }
+    if (std::holds_alternative<S::If>(s.node)) {
+        const auto& ifst = std::get<S::If>(s.node);
+        ConstValue cond;
+        if (!evalConstExpr(*ifst.cond, fn, cond)) return false;
+        if (cond.i != 0) {
+            if (ifst.thenBranch) return evalConstStmt(*ifst.thenBranch, fn, result);
+        } else {
+            if (ifst.elseBranch) return evalConstStmt(*ifst.elseBranch, fn, result);
+        }
+        result.isInt = true; result.i = 0;
+        return true;
+    }
+    return false;
+}
+
+bool HirBuilder::tryEvalConstexprCall(hir::Expr& out, const hir::Expr::Call& call,
+                                      const hir::Function& fn, SourceLoc loc) {
+    // Check: function must have a body.
+    if (!fn.body) return false;
+    // Collect argument values.
+    std::vector<ConstValue> argVals;
+    for (const auto& a : call.args) {
+        if (!a) return false;
+        ConstValue v;
+        if (!evalConstExpr(*a, fn, v)) return false;
+        argVals.push_back(v);
+    }
+    // For now, we can only evaluate functions whose body consists of
+    // a single return statement (possibly wrapped in a compound) that
+    // uses only the function parameters and constants.  We handle
+    // parameter substitution by creating a modified copy of the body
+    // where IdentRef to a param is replaced by the argument literal.
+    //
+    // This is a simple approach that works for most constexpr functions.
+    // A full implementation would use the MIR interpreter.
+
+    // Create a clone of the body with parameters substituted.
+    // We do this by walking the HIR Expr tree and replacing IdentRef
+    // nodes that match parameter names with the corresponding literal.
+
+    std::unordered_map<std::string_view, ConstValue> paramValues;
+    for (std::size_t i = 0; i < fn.params.size() && i < argVals.size(); ++i) {
+        paramValues[fn.params[i].name] = argVals[i];
+    }
+
+    // Helper: substitute params in an expression tree.
+    // Uses if-else chain (not std::visit) to avoid instantiating
+    // copy-constructors for variants containing unique_ptr members
+    // (Call, New, InitList, Lambda, etc.) which are non-copyable.
+    std::function<std::unique_ptr<hir::Expr>(const hir::Expr&)> substituteParams =
+        [&](const hir::Expr& src) -> std::unique_ptr<hir::Expr> {
+        using E = hir::Expr;
+        auto dst = std::make_unique<hir::Expr>();
+        dst->loc = src.loc;
+        dst->type = src.type;
+
+        if (std::holds_alternative<E::IntegerLit>(src.node)) {
+            dst->node = std::get<E::IntegerLit>(src.node);
+        } else if (std::holds_alternative<E::FloatLit>(src.node)) {
+            dst->node = std::get<E::FloatLit>(src.node);
+        } else if (std::holds_alternative<E::BoolLit>(src.node)) {
+            dst->node = std::get<E::BoolLit>(src.node);
+        } else if (std::holds_alternative<E::NullptrLit>(src.node)) {
+            dst->node = std::get<E::NullptrLit>(src.node);
+        } else if (std::holds_alternative<E::IdentRef>(src.node)) {
+            const auto& ref = std::get<E::IdentRef>(src.node);
+            auto it = paramValues.find(ref.name);
+            if (it != paramValues.end()) {
+                if (it->second.isInt) {
+                    dst->node = E::IntegerLit{it->second.i};
+                } else {
+                    dst->node = E::FloatLit{it->second.f};
+                }
+            } else {
+                dst->node = ref;
+            }
+        } else if (std::holds_alternative<E::Unary>(src.node)) {
+            const auto& u = std::get<E::Unary>(src.node);
+            E::Unary copy{u.op, u.isPrefix,
+                          u.operand ? substituteParams(*u.operand) : nullptr};
+            dst->node = std::move(copy);
+        } else if (std::holds_alternative<E::Binary>(src.node)) {
+            const auto& b = std::get<E::Binary>(src.node);
+            E::Binary copy{b.op,
+                           b.lhs ? substituteParams(*b.lhs) : nullptr,
+                           b.rhs ? substituteParams(*b.rhs) : nullptr};
+            dst->node = std::move(copy);
+        } else if (std::holds_alternative<E::Ternary>(src.node)) {
+            const auto& t = std::get<E::Ternary>(src.node);
+            E::Ternary copy{
+                t.cond ? substituteParams(*t.cond) : nullptr,
+                t.thenBranch ? substituteParams(*t.thenBranch) : nullptr,
+                t.elseBranch ? substituteParams(*t.elseBranch) : nullptr};
+            dst->node = std::move(copy);
+        } else {
+            // Unsupported node type (Call, New, Delete, InitList,
+            // Member, Index, Assign, Lambda, StringLit, CharLit) —
+            // return nullptr to signal failure.
+            return nullptr;
+        }
+        return dst;
+    };
+
+    // Substitute params in the body and evaluate.
+    // We need to find the return statement.
+    ConstValue result;
+    bool ok = false;
+
+    // Walk the body (a Stmt::Compound) looking for the return.
+    // Handle simple: compound → return, or compound → if → return.
+    std::function<bool(const hir::Stmt&)> evalStmt = [&](const hir::Stmt& s) -> bool {
+        using S = hir::Stmt;
+        if (std::holds_alternative<S::Compound>(s.node)) {
+            const auto& c = std::get<S::Compound>(s.node);
+            for (const auto& st : c.stmts) {
+                if (evalStmt(*st)) return true;
+            }
+            return false;
+        }
+        if (std::holds_alternative<S::Return>(s.node)) {
+            const auto& r = std::get<S::Return>(s.node);
+            if (!r.value) { result.isInt = true; result.i = 0; return true; }
+            auto substituted = substituteParams(*r.value);
+            if (!substituted) return false;
+            return evalConstExpr(*substituted, fn, result);
+        }
+        if (std::holds_alternative<S::If>(s.node)) {
+            const auto& ifst = std::get<S::If>(s.node);
+            auto condSub = substituteParams(*ifst.cond);
+            if (!condSub) return false;
+            ConstValue cond;
+            if (!evalConstExpr(*condSub, fn, cond)) return false;
+            if (cond.i != 0 && ifst.thenBranch) return evalStmt(*ifst.thenBranch);
+            if (cond.i == 0 && ifst.elseBranch) return evalStmt(*ifst.elseBranch);
+            return false;
+        }
+        if (std::holds_alternative<S::ExprStmt>(s.node)) {
+            // Skip expression statements (no side effects in constexpr).
+            return false;
+        }
+        if (std::holds_alternative<S::Decl>(s.node)) {
+            // Local variable declaration in a constexpr function.
+            // For now, we don't support local variables — skip.
+            return false;
+        }
+        return false;
+    };
+
+    // The body is a unique_ptr<Stmt::Compound>. We can't copy it into
+    // a Stmt (unique_ptr members), so evaluate directly.
+    ok = false;
+    if (fn.body) {
+        for (const auto& st : fn.body->stmts) {
+            if (evalStmt(*st)) { ok = true; break; }
+        }
+    }
+    if (!ok) return false;
+
+    // Build the folded literal.
+    out.loc = loc;
+    out.type = fn.returnType;
+    if (result.isInt) {
+        out.node = hir::Expr::IntegerLit{result.i};
+    } else {
+        out.node = hir::Expr::FloatLit{result.f};
+    }
+    return true;
 }
 
 }  // namespace ivy

@@ -80,6 +80,9 @@ constexpr struct {
     {"enum", ""},  // enums ARE supported (P4.1) — handled in parseTopLevel
     {"template", "templates are not supported in the Ivy subset"},
     {"namespace", ""},  // namespaces ARE supported (P4.2) — handled in parseTopLevel
+    {"constexpr", ""},   // constexpr IS supported — handled in parseTopLevel
+    {"consteval", ""},   // consteval IS supported — handled in parseTopLevel
+    {"constinit", "constinit is not supported in the Ivy subset yet"},
     {"using", "'using' declarations are not supported in the Ivy subset"},
     {"typedef", "typedefs are not supported in the Ivy subset"},
     {"static_assert", "static_assert is not supported in the Ivy subset"},
@@ -462,6 +465,24 @@ Type Parser::parseType() {
     return t;
 }
 
+Parser::ConstexprSpec Parser::parseConstexprSpec() {
+    ConstexprSpec spec;
+    // Allow constexpr and consteval in any order (though typically only one).
+    for (;;) {
+        if (atKeyword("constexpr")) {
+            spec.isConstexpr = true;
+            next();
+        } else if (atKeyword("consteval")) {
+            spec.isConsteval = true;
+            spec.isConstexpr = true;  // consteval implies constexpr
+            next();
+        } else {
+            break;
+        }
+    }
+    return spec;
+}
+
 void Parser::parseTopLevel(TranslationUnit& tu) {
     while (!at(TokenKind::EndOfFile)) {
         if (at(TokenKind::Hash)) {
@@ -516,6 +537,25 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
         if (atKeyword("namespace")) {
             const SourceLoc loc = locOf(peek());
             parseNamespace(tu, loc);
+            continue;
+        }
+
+        // `constexpr` / `consteval` — consume and fall through to
+        // parseFunction (with the flags).  This lets Ivy support
+        // compile-time evaluation without a separate dispatch path.
+        if (atKeyword("constexpr") || atKeyword("consteval")) {
+            ConstexprSpec spec = parseConstexprSpec();
+            // After consuming constexpr/consteval, the rest must be a
+            // function or variable declaration.
+            if (!isTypeStart()) {
+                errorAt(peek(), "expected a type after constexpr/consteval");
+                synchronize();
+                continue;
+            }
+            const SourceLoc loc = locOf(peek());
+            std::vector<Attribute> attrs = parseAttributeList();
+            parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                          spec.isConstexpr, spec.isConsteval);
             continue;
         }
 
@@ -634,6 +674,20 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
         if (atKeyword("namespace")) {
             const SourceLoc eloc = locOf(peek());
             parseNamespace(tu, eloc);
+            continue;
+        }
+        // `constexpr` / `consteval` inside namespace
+        if (atKeyword("constexpr") || atKeyword("consteval")) {
+            ConstexprSpec spec = parseConstexprSpec();
+            if (!isTypeStart()) {
+                errorAt(peek(), "expected a type after constexpr/consteval");
+                synchronize();
+                continue;
+            }
+            const SourceLoc floc = locOf(peek());
+            std::vector<Attribute> attrs = parseAttributeList();
+            parseFunction(tu, floc, std::move(attrs), /*isExternC=*/false,
+                          spec.isConstexpr, spec.isConsteval);
             continue;
         }
         // Unsupported constructs
@@ -818,7 +872,7 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
 }
 
 void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
-                           bool isExternC) {
+                           bool isExternC, bool isConstexpr, bool isConsteval) {
     Type returnType = parseType();
     if (returnType.base.empty()) {
         // parseType already reported the error; recover at statement-ish boundary.
@@ -850,6 +904,8 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     fn.namespacePrefix = currentNamespacePrefix();
     fn.params = std::move(params);
     fn.isExternC = isExternC;
+    fn.isConstexpr = isConstexpr;
+    fn.isConsteval = isConsteval;
     fn.loc = loc;
 
     if (at(TokenKind::LBrace)) {
@@ -1039,6 +1095,19 @@ std::unique_ptr<Stmt> Parser::parseReturn() {
 }
 
 std::unique_ptr<Stmt> Parser::parseDeclOrExprStmt() {
+    // `constexpr` variable declaration: `constexpr int x = 5;`
+    if (atKeyword("constexpr")) {
+        ConstexprSpec spec = parseConstexprSpec();
+        if (!isTypeStart()) {
+            errorAt(peek(), "expected a type after constexpr");
+            synchronize();
+            return makeStmt<Stmt::Null>(SourceLoc{});
+        }
+        auto stmt = parseDeclaration(/*expectSemi=*/true);
+        if (auto* decl = std::get_if<Stmt::Decl>(&stmt->node))
+            decl->isConstexpr = spec.isConstexpr;
+        return stmt;
+    }
     if (isTypeStart()) return parseDeclaration(/*expectSemi=*/true);
     return parseExpressionStatement();
 }
