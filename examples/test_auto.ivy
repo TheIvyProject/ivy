@@ -1,0 +1,39 @@
+#pragma ivy cnumber
+extern "C" int printf(const char* fmt, ...);
+
+int add(int a, int b) { return a + b; }
+double square(double x) { return x * x; }
+
+int main() {
+    // Basic auto deduction from literals
+    auto i = 42;
+    auto f = 3.14;
+    auto b = true;
+
+    printf("i=%d\n", i);
+    printf("f=%.2f\n", f);
+    printf("b=%d\n", b ? 1 : 0);
+
+    // Auto from arithmetic expression
+    auto sum = i + 8;
+    printf("sum=%d\n", sum);
+
+    // Auto from function call
+    auto r1 = add(10, 20);
+    auto r2 = square(4.0);
+    printf("r1=%d\n", r1);
+    printf("r2=%.1f\n", r2);
+
+    // Auto in for loop (int counter)
+    auto total = 0;
+    for (auto j = 0; j < 5; j = j + 1) {
+        total = total + j;
+    }
+    printf("total=%d\n", total);
+
+    // const auto
+    const auto pi = 3.14159;
+    printf("pi=%.5f\n", pi);
+
+    return 0;
+}

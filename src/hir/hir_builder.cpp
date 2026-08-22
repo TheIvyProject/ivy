@@ -591,6 +591,38 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     if (d.type.pointerDepth == 0 && d.type.base == "void") {
         error(loc, "variable '" + std::string(d.name) + "' cannot have type void");
     }
+
+    // `auto` type deduction: infer type from the initializer expression.
+    // `auto x = expr;`  →  type = expr.type (with pointer/ref from the declared auto)
+    // `auto* p = &x;`   →  type = expr.type (already a pointer)
+    // `auto& r = x;`    →  type = expr.type with isReference = true
+    const bool isAuto = (d.type.base == "auto");
+    if (isAuto) {
+        if (!d.init) {
+            error(loc, "'auto' variable '" + std::string(d.name) +
+                           "' must have an initializer");
+            declare(d.name, d.type, loc);
+            return out;
+        }
+        decl.init = buildExpr(*d.init);
+        if (!decl.init) {
+            declare(d.name, d.type, loc);
+            return out;
+        }
+        // Infer the concrete type from the initializer.
+        hir::Type inferred = decl.init->type;
+        // Propagate pointer/ref qualifiers from the `auto` declaration:
+        // e.g. `auto* p = expr` keeps inferred pointer depth but adds declared depth.
+        inferred.pointerDepth += d.type.pointerDepth;
+        if (d.type.isReference) inferred.isReference = true;
+        if (d.type.isConst) inferred.isConst = true;
+        // Strip reference from plain `auto x = ref_expr` (copy semantics).
+        if (!d.type.isReference) inferred.isReference = false;
+        decl.type = inferred;
+        declare(d.name, inferred, loc);
+        return out;
+    }
+
     if (d.init) {
         // Aggregate init list for a struct: `Point p = {1, 2};`
         // Resolve each element against the corresponding field type so

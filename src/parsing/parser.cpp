@@ -94,7 +94,7 @@ constexpr struct {
     {"default", "switch statements are not supported in the Ivy subset yet"},
     {"goto", "goto is not supported in the Ivy subset"},
     {"lambda", ""},  // lambdas have no keyword; handled via '[' in parsePrimary
-    {"auto", "'auto' type deduction is not supported in the Ivy subset yet"},
+    {"auto", ""},  // auto type deduction IS supported — handled in isTypeStart/parseType
     {"decltype", "'decltype' is not supported in the Ivy subset"},
     {"operator", "operator overloading is not supported in the Ivy subset"},
     {"asm", "'asm' is not supported in the Ivy subset"},
@@ -280,6 +280,7 @@ bool Parser::isTypeStart() const {
     if (kw == "const" || kw == "unsigned" || kw == "signed" || kw == "void" ||
         kw == "bool" || kw == "char" || kw == "short" || kw == "int" ||
         kw == "long" || kw == "float" || kw == "double" ||
+        kw == "auto" ||  // type deduction
         // Ivy builtin types
         kw == "int8_t" || kw == "int16_t" || kw == "int32_t" || kw == "int64_t" ||
         kw == "uint8_t" || kw == "uint16_t" || kw == "uint32_t" || kw == "uint64_t" ||
@@ -297,6 +298,15 @@ Type Parser::parseType() {
     if (atKeyword("const")) {
         t.isConst = true;
         next();
+    }
+    // `auto`: placeholder for type deduction — HIR builder infers from init.
+    if (atKeyword("auto")) {
+        next();
+        t.base = "auto";
+        // still parse pointer/ref qualifiers: `auto*`, `auto&`
+        while (at(TokenKind::Star)) { next(); ++t.pointerDepth; }
+        if (at(TokenKind::Amp)) { next(); t.isReference = true; }
+        return t;
     }
     // User-defined enum/struct type name (Identifier, not Keyword).
     if (at(TokenKind::Identifier)) {
