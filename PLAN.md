@@ -247,7 +247,7 @@ i| 4 | `test_cast.cpp` | **Pending P0** | C-style cast trong/ngoài unsafe |
 | 6 | `IvyInterpret` (MIR Interpreter & REPL) | ★★★ Khó | **v0.1** (hoàn thành): HIR-based interpreter — fast-path, không safety guarantee. **v0.2** (hoàn thành): MIR-based interpreter — safety check (lifetime + unsafe), dùng cho `--run`/consteval/IvyMake. Xem [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) |
 | 7 | `constexpr` & `consteval` ✅ | ★★★ Khó | Đánh giá hằng số compile-time. Đã hoàn thành (P4.7): Parser parse `constexpr`/`consteval` keyword (`parseConstexprSpec()`), AST flags (`Function.isConstexpr`/`isConsteval`, `Stmt::Decl.isConstexpr`), HIR/MIR propagate flags, HIR Builder constexpr call folding (`tryEvalConstexprCall` — tree-walking evaluator với parameter substitution, hỗ trợ Unary/Binary/Ternary/If/Return/Compound), codegen skip `consteval` functions (không emit LLVM IR — đã được fold tại compile-time), `constexpr` functions vẫn emit (fallback cho runtime calls). Test: `square(4)→16`, `cube(3)→27` |
 | 8 | `IvyMake` | ★★★ Khó | Hệ thống build cấu hình trực tiếp bằng C++/Ivy (file `build.ivy`), tự thông dịch qua `IvyInterpret` v0.2 thay thế cho CMake |
-| 9 | `exception` | ★★★ Khó | Runtime ABI (unwinding / landing pad), tương tác ownership — *cân nhắc loại hẳn khỏi Ivy theo triết lý subset* |
+| 9 | ~~`exception`~~ | ★★★ Khó | **Cấm hoàn toàn** — Ivy là subset an toàn, không hỗ trợ `try`/`catch`/`throw`/exception ABI. Lỗi được xử lý qua return code / `Result<T>` (sẽ thêm sau). Loại khỏi Ivy theo triết lý subset |
 | 10 | `template` | ★★★ Khó nhất | Generics chạm cả pipeline: parameterization, instantiation, type deduction |
 
 ---
