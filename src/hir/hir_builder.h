@@ -38,7 +38,9 @@ private:
     std::vector<Diagnostic> diagnostics_;
     bool failed_ = false;
 
-    std::unordered_map<std::string_view, hir::Function*> functions_;
+    // Function registry: name → overload set.  Each name maps to a
+    // vector of Function pointers (all overloads with that name).
+    std::unordered_map<std::string_view, std::vector<hir::Function*>> functions_;
     // Template registry: template name → AST Function* (the template definition).
     // Templates are NOT registered in `functions_` — they are instantiated
     // on demand when a template-id call is encountered.
@@ -166,7 +168,21 @@ private:
                        ConstValue& result) const;
 
     // Namespace-aware name resolution helpers.
-    // Tries `name` first, then `currentNsPrefix_ + name`.
+    // Collects all overloads for `name` (tries `name`, then `ns+name`).
+    std::vector<hir::Function*> resolveOverloads(std::string_view name) const;
+    // Overload resolution: pick the best-matching function from
+    // `candidates` for the given argument types.  Resolution rules:
+    //   1. Exact match on all params (count + type).
+    //   2. Promotion match (e.g. i32→i64, float→double).
+    //   3. Ambiguous → error.
+    // Returns nullptr if no match (error already reported via `error()`).
+    hir::Function* resolveOverload(const std::vector<hir::Function*>& candidates,
+                                   const std::vector<hir::Type>& argTypes,
+                                   SourceLoc loc);
+    // Legacy single-function lookup: returns the first overload (or
+    // nullptr if none).  Used by code paths that don't do overload
+    // resolution (e.g. lambda call-operator, qualified calls where the
+    // name is already unique).
     hir::Function* resolveFunction(std::string_view name) const;
 
     // Flattens a chain of `Expr::Member` (from `A::B::C`) into a

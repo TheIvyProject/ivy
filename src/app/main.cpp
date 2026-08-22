@@ -8,6 +8,10 @@
 #include <variant>
 #include <vector>
 
+#ifdef _DEBUG
+#include <crtdbg.h>
+#endif
+
 #include "codegen/codegen.h"
 #include "hir/hir.h"
 #include "hir/hir_builder.h"
@@ -827,6 +831,15 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _DEBUG
+    // Chuyển toàn bộ báo cáo Error, Assert, Warning ra stderr thay vì MessageBox
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+
     std::filesystem::path file;
     std::string fileArg;  // original argv string for extension checks
     bool showTokens = false;

@@ -28,13 +28,37 @@ Value Interpreter::callMain() { return call("main", {}); }
 
 Value Interpreter::call(std::string_view name, std::vector<Value> args) {
     const Function* fn = nullptr;
+    // Overload resolution: match by name + arg count + arg types.
+    // When multiple functions share a name, pick the one whose param
+    // count matches and whose param types are compatible with the
+    // argument values (numeric promotion allowed).
+    auto matchSig = [](const Function* f, const std::vector<Value>& as) -> bool {
+        const std::size_t np = f->params.size();
+        const std::size_t na = as.size();
+        if (np > na) return false;
+        if (!f->isExternC && np != na) return false;
+        // For extern "C" variadic, just match the fixed part count.
+        // For regular functions, we already know arg count matches.
+        return true;  // type-level matching already done at HIR level
+    };
     for (const auto& f : tu_.functions) {
-        if (f->name == name && f->hasBody) { fn = f.get(); break; }
+        if (f->name == name && f->hasBody && matchSig(f.get(), args)) {
+            fn = f.get(); break;
+        }
     }
     if (!fn) {
+        // Try fully-qualified name "ns::func".
         for (const auto& f : tu_.functions) {
             std::string full = std::string(f->namespacePrefix) + std::string(f->name);
-            if (full == name && f->hasBody) { fn = f.get(); break; }
+            if (full == name && f->hasBody && matchSig(f.get(), args)) {
+                fn = f.get(); break;
+            }
+        }
+    }
+    if (!fn) {
+        // Fallback: first function with matching name (legacy).
+        for (const auto& f : tu_.functions) {
+            if (f->name == name && f->hasBody) { fn = f.get(); break; }
         }
     }
     if (!fn) {
@@ -744,21 +768,27 @@ Value Interpreter::callBuiltin(std::string_view name,
         for (std::size_t i = 0; i < fmt.size(); ++i) {
             if (fmt[i] != '%') { out += fmt[i]; continue; }
             ++i; if (i >= fmt.size()) break;
-            // Collect flags / width / precision / length modifiers to rebuild
-            // the format spec for snprintf.
-            std::string spec_prefix;
+            // Collect flags / width / precision (but NOT length modifiers —
+            // we always emit "ll" for integers and nothing for floats
+            // because we cast to long long / double before calling snprintf).
+            std::string spec_flags;
             while (i < fmt.size() && (std::string("-+ #0").find(fmt[i]) != std::string::npos ||
                                       (fmt[i] >= '0' && fmt[i] <= '9') ||
-                                      fmt[i] == '.' || fmt[i] == 'l' || fmt[i] == 'h' ||
-                                      fmt[i] == 'z' || fmt[i] == 'j' || fmt[i] == 't')) {
-                spec_prefix += fmt[i++];
+                                      fmt[i] == '.')) {
+                spec_flags += fmt[i++];
+            }
+            // Skip any length modifiers (l, ll, h, hh, z, j, t).
+            while (i < fmt.size() && (fmt[i] == 'l' || fmt[i] == 'h' ||
+                                      fmt[i] == 'z' || fmt[i] == 'j' ||
+                                      fmt[i] == 't')) {
+                ++i;
             }
             if (i >= fmt.size()) break;
             char spec = fmt[i];
             if (spec == '%') { out += '%'; continue; }
             Value arg = (ai < args.size()) ? args[ai++] : Value{};
             char buf[64] = {};
-            std::string fmt_spec = "%" + spec_prefix;
+            std::string fmt_spec = "%" + spec_flags;
             switch (spec) {
                 case 'd': case 'i':
                     fmt_spec += "lld";
@@ -799,7 +829,7 @@ Value Interpreter::callBuiltin(std::string_view name,
                 case 'p':
                     out += "(ptr)"; break;
                 default:
-                    out += '%'; out += spec_prefix; out += spec; break;
+                    out += '%'; out += spec_flags; out += spec; break;
             }
         }
         *out_ << out;

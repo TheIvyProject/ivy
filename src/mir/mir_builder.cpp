@@ -5,6 +5,25 @@
 namespace ivy {
 namespace {
 
+// Check if a type base name is a numeric type (integer or float).
+bool isNumericM(const mir::Type& t) {
+    if (t.pointerDepth > 0 || t.base == "void" || t.base == "nullptr") return false;
+    if (t.arraySize > 0) return false;
+    static const std::string_view intBases[] = {
+        "int8_t","int16_t","int32_t","int64_t","uint8_t","uint16_t",
+        "uint32_t","uint64_t","size_t","ptrdiff_t","int","long",
+        "long long","short","unsigned","char","unsigned char",
+        "signed char","bool"
+    };
+    static const std::string_view floatBases[] = {
+        "float16_t","float32_t","float64_t","float128_t","bfloat16_t",
+        "float","double","long double"
+    };
+    for (auto b : intBases) if (t.base == b) return true;
+    for (auto b : floatBases) if (t.base == b) return true;
+    return false;
+}
+
 // Merges the lifetimes of the two branches of a ternary expression.
 mir::Lifetime mergeLifetime(const mir::Lifetime& a, const mir::Lifetime& b) {
     if (a.kind == mir::Lifetime::Kind::Named && b.kind == mir::Lifetime::Kind::Named &&
@@ -732,9 +751,37 @@ void MirBuilder::walkExpr(mir::Expr& e) {
         } else if constexpr (std::is_same_v<V, M::CharLit>) {
             decodeChar(v.raw, v.decoded);
         } else if constexpr (std::is_same_v<V, M::Call>) {
-            // Resolve target by matching name + namespacePrefix.
+            // Resolve target by matching name + param types (overload
+            // resolution at MIR level — HIR already resolved the correct
+            // overload, so we just need to find the MIR function with
+            // the same name and matching param signature).
             for (const auto& fn : mir_->functions) {
-                if (fn->name == v.callee) { v.target = fn.get(); break; }
+                if (fn->name != v.callee) continue;
+                // Match param count (variadic extern "C" accepts extra).
+                const std::size_t np = fn->params.size();
+                const std::size_t na = v.args.size();
+                if (np > na) continue;
+                if (!fn->isExternC && np != na) continue;
+                bool sigMatch = true;
+                for (std::size_t i = 0; i < np && sigMatch; ++i) {
+                    mir::Type p = fn->params[i].type; p.isReference = false;
+                    mir::Type a = v.args[i] ? v.args[i]->type : mir::Type{};
+                    a.isReference = false;
+                    if (!(p == a)) {
+                        // Allow numeric promotion (overload resolution
+                        // already done at HIR; here we just pick the
+                        // best-effort match).
+                        if (isNumericM(p) && isNumericM(a)) continue;
+                        sigMatch = false;
+                    }
+                }
+                if (sigMatch) { v.target = fn.get(); break; }
+            }
+            // Fallback: if no signature match, try name-only (legacy).
+            if (!v.target) {
+                for (const auto& fn : mir_->functions) {
+                    if (fn->name == v.callee) { v.target = fn.get(); break; }
+                }
             }
             for (auto& a : v.args) if (a) walkExpr(*a);
         } else if constexpr (std::is_same_v<V, M::Unary>) {

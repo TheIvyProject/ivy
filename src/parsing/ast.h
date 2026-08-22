@@ -27,6 +27,17 @@ struct Type {
     bool isReference = false;  // T&
     std::uint32_t pointerDepth = 0;
     std::uint32_t arraySize = 0;  // 0 = not an array; >0 = T[N] with N elements
+
+    // Equality comparison for overload resolution and signature matching.
+    // Compares all fields that affect type identity (base, unsigned,
+    // const, pointer depth, array size).  Reference-ness is intentionally
+    // NOT compared here — callers that need to ignore references should
+    // clear `isReference` on both operands before comparing.
+    bool operator==(const Type& o) const {
+        return base == o.base && isUnsigned == o.isUnsigned &&
+               isConst == o.isConst && pointerDepth == o.pointerDepth &&
+               arraySize == o.arraySize;
+    }
 };
 
 // Forward declaration so that Expr::Lambda can reference Stmt::Compound.

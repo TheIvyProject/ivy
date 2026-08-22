@@ -843,10 +843,29 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::Call>(n)) {
         const M::Call& v = std::get<M::Call>(n);
-        // Look up the callee's parameter types (to handle reference params).
+        // Look up the callee's parameter types (to handle reference params
+        // and overload resolution — match by name + param signature).
         const mir::Function* callee = nullptr;
         for (const auto& f : mir_.functions) {
-            if (f->name == v.callee) { callee = f.get(); break; }
+            if (f->name != v.callee) continue;
+            const std::size_t np = f->params.size();
+            const std::size_t na = v.args.size();
+            if (np > na) continue;
+            if (!f->isExternC && np != na) continue;
+            bool sigMatch = true;
+            for (std::size_t i = 0; i < np && sigMatch; ++i) {
+                mir::Type p = f->params[i].type; p.isReference = false;
+                mir::Type a = v.args[i] ? v.args[i]->type : mir::Type{};
+                a.isReference = false;
+                if (!(p == a)) sigMatch = false;
+            }
+            if (sigMatch) { callee = f.get(); break; }
+        }
+        // Fallback: name-only match (e.g. extern "C" variadic).
+        if (!callee) {
+            for (const auto& f : mir_.functions) {
+                if (f->name == v.callee) { callee = f.get(); break; }
+            }
         }
         std::string args;
         for (std::size_t i = 0; i < v.args.size(); ++i) {

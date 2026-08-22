@@ -25,14 +25,32 @@ Value Interpreter::callMain() { return call("main", {}); }
 
 Value Interpreter::call(std::string_view name, std::vector<Value> args) {
     const hir::Function* fn = nullptr;
+    // Overload resolution: match by name + arg count.
+    auto matchSig = [](const hir::Function* f, const std::vector<Value>& as) -> bool {
+        const std::size_t np = f->params.size();
+        const std::size_t na = as.size();
+        if (np > na) return false;
+        if (!f->isExternC && np != na) return false;
+        return true;  // type-level matching done at HIR level
+    };
     for (const auto& f : tu_.functions) {
-        if (f->name == name && f->body) { fn = f.get(); break; }
+        if (f->name == name && f->body && matchSig(f.get(), args)) {
+            fn = f.get(); break;
+        }
     }
     if (!fn) {
         // Try full qualified name "ns::func".
         for (const auto& f : tu_.functions) {
             std::string full = std::string(f->namespacePrefix) + std::string(f->name);
-            if (full == name && f->body) { fn = f.get(); break; }
+            if (full == name && f->body && matchSig(f.get(), args)) {
+                fn = f.get(); break;
+            }
+        }
+    }
+    if (!fn) {
+        // Fallback: first function with matching name (legacy).
+        for (const auto& f : tu_.functions) {
+            if (f->name == name && f->body) { fn = f.get(); break; }
         }
     }
     if (!fn) {
@@ -221,6 +239,28 @@ Interpreter::Signal Interpreter::execStmt(const hir::Stmt& s) {
 
         } else if constexpr (std::is_same_v<V, S::Unsafe>) {
             return execStmt(*v.body);
+
+        } else if constexpr (std::is_same_v<V, S::Switch>) {
+            Value condVal = evalExpr(*v.cond);
+            long long condInt = condVal.isInt() ? condVal.asInt() : 0LL;
+            // Find matching case or default.
+            const hir::Stmt::CaseClause* defaultClause = nullptr;
+            const hir::Stmt::CaseClause* matchedClause = nullptr;
+            for (const auto& c : v.cases) {
+                if (!c.value) { defaultClause = &c; continue; }
+                Value cv = evalExpr(*c.value);
+                if (cv.isInt() && cv.asInt() == condInt) { matchedClause = &c; break; }
+            }
+            if (!matchedClause) matchedClause = defaultClause;
+            if (matchedClause) {
+                for (const auto& st : matchedClause->stmts) {
+                    Signal sig = execStmt(*st);
+                    if (std::holds_alternative<ReturnSignal>(sig)) return sig;
+                    if (std::holds_alternative<BreakSignal>(sig))  break;
+                    if (std::holds_alternative<ContinueSignal>(sig)) return sig;
+                }
+            }
+            return std::monostate{};
 
         } else {  // Null
             return std::monostate{};

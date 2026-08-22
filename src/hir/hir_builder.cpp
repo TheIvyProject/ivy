@@ -47,6 +47,22 @@ static bool isIntegerBase(std::string_view b) {
            b == "size_t" || b == "ptrdiff_t";
 }
 
+// Approximate bit-width of a numeric type base name.  Used for overload
+// resolution ranking: narrower conversions are preferred over wider ones.
+// Returns 0 for unknown types.
+static int typeWidth(std::string_view b) {
+    if (b == "bool" || b == "char" || b == "int8_t" || b == "uint8_t" ||
+        b == "signed char" || b == "unsigned char") return 8;
+    if (b == "short" || b == "int16_t" || b == "uint16_t") return 16;
+    if (b == "int" || b == "int32_t" || b == "uint32_t" || b == "float" ||
+        b == "float32_t" || b == "bfloat16_t" || b == "float16_t") return 32;
+    if (b == "long" || b == "int64_t" || b == "uint64_t" || b == "size_t" ||
+        b == "ptrdiff_t" || b == "long long" || b == "double" ||
+        b == "float64_t") return 64;
+    if (b == "long double" || b == "float128_t") return 128;
+    return 0;
+}
+
 bool isNumeric(const hir::Type& t) {
     if (t.pointerDepth > 0 || t.base == "void" || t.base == "nullptr") return false;
     // Struct/enum types are not numeric (enums are handled separately
@@ -473,14 +489,29 @@ void HirBuilder::buildSignature(const Function& af) {
                           "' returns a pointer but has no [[ivy::lt_ret(...)]] attribute");
     }
 
-    if (auto* existing = functions_[af.name]) {
+    // Check for redefinition and register the overload.
+    auto& overloads = functions_[af.name];
+    for (const auto* existing : overloads) {
         if (existing->body && af.body) {
-            error(af.loc, "redefinition of function '" + std::string(af.name) + "'");
+            // Two definitions with bodies — check if they're truly the
+            // same signature (same param count + types).  If so, it's a
+            // redefinition error; if params differ, it's a valid overload.
+            bool sameSig = (existing->params.size() == fn->params.size());
+            if (sameSig) {
+                for (std::size_t i = 0; i < fn->params.size() && sameSig; ++i) {
+                    hir::Type a = existing->params[i].type; a.isReference = false;
+                    hir::Type b = fn->params[i].type;    b.isReference = false;
+                    if (!(a == b)) sameSig = false;
+                }
+            }
+            if (sameSig) {
+                error(af.loc, "redefinition of function '" + std::string(af.name) + "'");
+            }
         }
     }
     hir::Function* raw = fn.get();
     hir_->functions.push_back(std::move(fn));
-    functions_[af.name] = raw;
+    overloads.push_back(raw);
 }
 
 // --- bodies (pass 2) ---
@@ -824,21 +855,97 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
 
 // --- namespace helpers ---
 
-hir::Function* HirBuilder::resolveFunction(std::string_view name) const {
+std::vector<hir::Function*> HirBuilder::resolveOverloads(std::string_view name) const {
+    std::vector<hir::Function*> result;
     // 1. Try the name as-is (works for fully-qualified and global names).
     auto it = functions_.find(name);
-    if (it != functions_.end()) return it->second;
+    if (it != functions_.end()) result = it->second;
     // 2. Try prefixing with the current namespace (bare call inside a
     //    namespace body resolving to a same-namespace function).
-    if (!currentNsPrefix_.empty()) {
+    if (result.empty() && !currentNsPrefix_.empty()) {
         std::string qualified;
         qualified.reserve(currentNsPrefix_.size() + name.size());
         qualified += currentNsPrefix_;
         qualified += name;
         auto it2 = functions_.find(qualified);
-        if (it2 != functions_.end()) return it2->second;
+        if (it2 != functions_.end()) result = it2->second;
     }
-    return nullptr;
+    return result;
+}
+
+hir::Function* HirBuilder::resolveFunction(std::string_view name) const {
+    auto overloads = resolveOverloads(name);
+    return overloads.empty() ? nullptr : overloads[0];
+}
+
+hir::Function* HirBuilder::resolveOverload(
+        const std::vector<hir::Function*>& candidates,
+        const std::vector<hir::Type>& argTypes,
+        SourceLoc loc) {
+    if (candidates.empty()) return nullptr;
+    if (candidates.size() == 1) {
+        // Fast path: single candidate — skip ranking (checkCall does
+        // the detailed arg-type checking later).
+        return candidates[0];
+    }
+    // Rank each candidate by how well its param types match argTypes.
+    // Score: 0 = no match, higher = better.
+    auto rank = [this](const hir::Function* fn,
+                   const std::vector<hir::Type>& args) -> int {
+        const std::size_t expected = fn->params.size();
+        const std::size_t actual = args.size();
+        // Variadic extern "C" functions: must have at least expected args.
+        if (expected > actual) return 0;
+        if (!fn->isExternC && expected != actual) return 0;
+        int score = 0;
+        for (std::size_t i = 0; i < expected; ++i) {
+            const hir::Type& pt = fn->params[i].type;
+            const hir::Type& at = args[i];
+            // Strip reference-ness for comparison (reference params bind
+            // to lvalues, but the type is the same).
+            hir::Type p = pt; p.isReference = false;
+            hir::Type a = at; a.isReference = false;
+            if (p == a) {
+                score += 100;  // exact match
+            } else if (isNumeric(p) && isNumeric(a)) {
+                // Promotion: e.g. int → int64_t, float → double.
+                // Rank by width closeness: the closer the widths, the
+                // better the match.  Exact width match (even if base
+                // names differ, e.g. int vs int32_t) is near-exact.
+                int pw = typeWidth(p.base);
+                int aw = typeWidth(a.base);
+                if (pw > 0 && aw > 0) {
+                    int diff = (pw > aw) ? (pw - aw) : (aw - pw);
+                    // Score: 90 - diff (so 0-diff = 90, 32-diff = 58, ...)
+                    // This makes narrower promotions better than wider ones.
+                    score += 90 - diff;
+                } else {
+                    score += 50;  // unknown widths — generic promotion
+                }
+            } else if (isAssignable(pt, at)) {
+                score += 1;  // implicit conversion (lowest rank)
+            } else {
+                return 0;  // param type doesn't match at all
+            }
+        }
+        return score;
+    };
+    int bestScore = 0;
+    hir::Function* best = nullptr;
+    bool ambiguous = false;
+    for (hir::Function* fn : candidates) {
+        int s = rank(fn, argTypes);
+        if (s > bestScore) { bestScore = s; best = fn; ambiguous = false; }
+        else if (s == bestScore && s > 0) { ambiguous = true; }
+    }
+    if (ambiguous) {
+        error(loc, "ambiguous call to overloaded function");
+        return nullptr;
+    }
+    if (!best) {
+        error(loc, "no matching overload for argument types");
+    }
+    return best;
 }
 
 bool HirBuilder::flattenMemberChain(const Expr& e, std::string& out) const {
@@ -1204,6 +1311,10 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         const Expr* callee = v.callee.get();
         // Copy template args (AST Type → HIR Type, same struct).
         for (const auto& ta : v.tplArgs) call.tplArgs.push_back(ta);
+        // Build arguments upfront so their types are available for
+        // overload resolution.  (Lambda calls add a closure-pointer arg
+        // as the first element; we handle that in the lambda branch.)
+        for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
         // Bare name call: `func(args)` — resolve with namespace fallback.
         if (std::holds_alternative<A::IdentRef>(callee->node)) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
@@ -1224,12 +1335,22 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                     error(e.loc, "'" + std::string(bareName) + "' is not a template");
                 }
             } else {
-                call.target = resolveFunction(bareName);
-                if (call.target) {
-                    call.callee = call.target->name;
-                } else {
+                auto overloads = resolveOverloads(bareName);
+                if (overloads.empty()) {
                     call.callee = bareName;
                     error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                } else {
+                    std::vector<hir::Type> argTypes;
+                    argTypes.reserve(call.args.size());
+                    for (const auto& a : call.args) {
+                        argTypes.push_back(a ? a->type : dummyType());
+                    }
+                    call.target = resolveOverload(overloads, argTypes, e.loc);
+                    if (call.target) {
+                        call.callee = call.target->name;
+                    } else {
+                        call.callee = bareName;
+                    }
                 }
             }
         } else if (std::holds_alternative<A::Member>(callee->node)) {
@@ -1238,7 +1359,11 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             if (flattenMemberChain(*callee, qualified)) {
                 stringStorage_.push_back(std::move(qualified));
                 call.callee = stringStorage_.back();
-                call.target = functions_[call.callee];
+                // Qualified calls use the first overload (qualified names
+                // are typically unique, e.g. `ns::func`).  If there are
+                // multiple overloads, overload resolution is done below
+                // after args are built.
+                call.target = resolveFunction(call.callee);
                 if (!call.target) {
                     error(callee->loc, "call to undeclared function '" + std::string(call.callee) + "'");
                 }
@@ -1260,7 +1385,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             // We need a call-operator function. Look it up so we get the
             // proper signature and callee name.
             call.callee = lamNode.funcName;
-            call.target = functions_[lamNode.funcName];
+            call.target = resolveFunction(lamNode.funcName);
             // The first argument is a pointer to the closure struct.
             // We build it as an lvalue: first the lambda expression is an
             // rvalue of closure-struct type; we lower it to a temporary
@@ -1278,11 +1403,12 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             closurePtr->type.pointerDepth = 1;
             // Recover closure type name from the Lambda node before move.
             closurePtr->type.base = lamNode.closureType;
-            call.args.push_back(std::move(closurePtr));
+            // Prepend the closure pointer as the first argument (before
+            // the user-supplied args which were already built).
+            call.args.insert(call.args.begin(), std::move(closurePtr));
         } else {
             error(callee->loc, "callee must be a function name");
         }
-        for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
         if (call.target) {
             checkCall(call, e.loc);
             out->type = call.target->returnType;
@@ -1655,7 +1781,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
 
     hir::Function* rawFn = fn.get();
     hir_->functions.push_back(std::move(fn));
-    functions_[funcNameSv] = rawFn;
+    functions_[funcNameSv].push_back(rawFn);
 
     // Build the function body. The closure's captured variables are
     // accessed via `__closure->fieldName` — we declare them as local
@@ -1800,7 +1926,22 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     for (const Function& af : ast_.functions) buildSignature(af);
     for (const Function& af : ast_.functions) {
         if (af.body && af.tplParams.empty()) {
-            hir::Function* fn = functions_[af.name];
+            // Find the matching HIR function in the overload set.
+            // Match by signature: same param count + types.
+            hir::Function* fn = nullptr;
+            auto it = functions_.find(af.name);
+            if (it != functions_.end()) {
+                for (hir::Function* cand : it->second) {
+                    if (cand->params.size() != af.params.size()) continue;
+                    bool match = true;
+                    for (std::size_t i = 0; i < af.params.size() && match; ++i) {
+                        hir::Type a = cand->params[i].type; a.isReference = false;
+                        hir::Type b = af.params[i].type;    b.isReference = false;
+                        if (!(a == b)) match = false;
+                    }
+                    if (match) { fn = cand; break; }
+                }
+            }
             if (fn) {
                 currentNsPrefix_ = af.namespacePrefix;
                 buildBody(*fn, *af.body);
@@ -2245,7 +2386,7 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     // calls can resolve it).
     hir::Function* raw = fn.get();
     hir_->functions.push_back(std::move(fn));
-    functions_[raw->name] = raw;
+    functions_[raw->name].push_back(raw);
     instantiated_[raw->name] = raw;
 
     // Build the body using the same mechanism as buildBody, but on the

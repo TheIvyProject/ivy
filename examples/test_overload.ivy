@@ -1,0 +1,53 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// Overload by param count
+int add(int a, int b) { return a + b; }
+int add(int a, int b, int c) { return a + b + c; }
+
+// Overload by param type
+int32_t square(int32_t x) { return x * x; }
+int64_t square(int64_t x) { return x * x; }
+
+// Overload with different param types
+int32_t power(int32_t base, int32_t exp) {
+    int32_t result = 1;
+    for (int32_t i = 0; i < exp; i = i + 1) result = result * base;
+    return result;
+}
+int64_t power(int64_t base, int64_t exp) {
+    int64_t result = 1;
+    for (int64_t i = 0; i < exp; i = i + 1) result = result * base;
+    return result;
+}
+
+int main() {
+    // Overload by param count
+    int r1 = add(10, 20);
+    int r2 = add(10, 20, 30);
+    printf("add(10,20) = %d\n", r1);        // 30
+    printf("add(10,20,30) = %d\n", r2);     // 60
+
+    // Overload by param type — use typed variables to force resolution.
+    int32_t s1 = square(5);
+    int64_t big = 100000;
+    int64_t s2 = square(big);
+    printf("square(5) = %d\n", s1);          // 25
+    printf("square(100000) = %lld\n", s2);   // 10000000000
+
+    // Overload with int32_t params
+    int32_t p1 = power(2, 10);
+    printf("power(2,10) = %d\n", p1);        // 1024
+
+    // Overload with int64_t params
+    int64_t b3 = 3;
+    int64_t e20 = 20;
+    int64_t p2 = power(b3, e20);
+    printf("power(3,20) = %lld\n", p2);      // 3486784401
+
+    printf("all overload tests passed\n");
+    return 0;
+}
