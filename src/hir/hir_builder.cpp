@@ -638,9 +638,13 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
             }
         }
     } else if (checkInit) {
-        // Struct variables are zero-initialized (like C) — no explicit
-        // initializer required.  All other types must be initialized.
-        if (structs_.contains(d.type.base)) {
+        // Array variables (T[N]) are zero-initialized — no explicit
+        // initializer required (like C arrays and Ivy struct variables).
+        if (d.type.arraySize > 0) {
+            // No error — codegen will emit zeroinitializer for the [N x T] alloca.
+        } else if (structs_.contains(d.type.base)) {
+            // Struct variables are zero-initialized (like C) — no explicit
+            // initializer required.  All other types must be initialized.
             // Synthesize an aggregate initializer from default member
             // initializers (if any). Fields without a default are
             // zero-initialized by `lowerInitListInto` (which emits a
@@ -1317,16 +1321,27 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         auto& idx = out->node.emplace<hir::Expr::Index>();
         idx.base = buildExpr(*v.base);
         idx.index = buildExpr(*v.index);
-        if (idx.base && idx.base->type.pointerDepth > 0) {
-            requireUnsafe(e.loc, "pointer indexing");
-        } else if (idx.base) {
-            error(e.loc, "'[]' requires a pointer operand");
+        if (idx.base) {
+            const hir::Type& bt = idx.base->type;
+            if (bt.arraySize > 0) {
+                // Array indexing: safe (bounds check injected by codegen unless unsafe).
+                // Result type = element type (array without the size).
+                out->type = bt;
+                out->type.arraySize = 0;
+            } else if (bt.pointerDepth > 0) {
+                requireUnsafe(e.loc, "pointer indexing");
+                out->type = bt;
+                if (out->type.pointerDepth > 0) --out->type.pointerDepth;
+            } else {
+                error(e.loc, "'[]' requires an array or pointer operand");
+                out->type = dummyType();
+            }
+        } else {
+            out->type = dummyType();
         }
         if (idx.index && !isNumeric(idx.index->type)) {
             error(idx.index->loc, "index expression must be numeric");
         }
-        out->type = idx.base ? idx.base->type : dummyType();
-        if (out->type.pointerDepth > 0) --out->type.pointerDepth;
         return out;
     }
     if (std::holds_alternative<A::Member>(n)) {

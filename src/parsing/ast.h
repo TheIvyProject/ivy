@@ -26,6 +26,7 @@ struct Type {
     bool isConst = false;
     bool isReference = false;  // T&
     std::uint32_t pointerDepth = 0;
+    std::uint32_t arraySize = 0;  // 0 = not an array; >0 = T[N] with N elements
 };
 
 // Forward declaration so that Expr::Lambda can reference Stmt::Compound.

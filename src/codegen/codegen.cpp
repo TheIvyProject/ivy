@@ -112,6 +112,12 @@ std::string CodeGen::llvmGlobalName(std::string_view name) const {
 }
 
 std::string CodeGen::llvmType(const mir::Type& t) const {
+    // Array type T[N] → [N x T_element]
+    if (t.arraySize > 0) {
+        mir::Type elem = t;
+        elem.arraySize = 0;
+        return "[" + std::to_string(t.arraySize) + " x " + llvmType(elem) + "]";
+    }
     if (t.pointerDepth > 0 || t.isReference) return "ptr";
     if (t.base == "void") return "void";
     if (t.base == "bool") return "i1";
@@ -510,11 +516,21 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::Index>(n)) {
         const M::Index& v = std::get<M::Index>(n);
-        const std::string base = lowerExpr(*v.base);
         const std::string idx = lowerExpr(*v.index);
+        const std::string idxTy = llvmType(v.index->type);
+        const mir::Type& baseTy = v.base->type;
         std::string gep = newTemp();
-        emitLine(gep + " = getelementptr " + llvmElemType(e.type) + ", ptr " + base +
-                 ", " + llvmType(v.index->type) + " " + idx);
+        if (baseTy.arraySize > 0) {
+            const std::string base = lowerExpr(*v.base);  // slot (decayed ptr)
+            emitBoundsCheck(idx, idxTy, baseTy.arraySize, e.loc);
+            const std::string arrTy = llvmType(baseTy);
+            emitLine(gep + " = getelementptr " + arrTy + ", ptr " + base +
+                     ", i32 0, " + idxTy + " " + idx);
+        } else {
+            const std::string base = lowerExpr(*v.base);
+            emitLine(gep + " = getelementptr " + llvmElemType(e.type) + ", ptr " + base +
+                     ", " + llvmType(v.index->type) + " " + idx);
+        }
         return gep;
     }
     if (std::holds_alternative<M::Unary>(n)) {
@@ -604,6 +620,12 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             std::string t = newTemp();
             emitLine(t + " = load " + llvmType(valTy) + ", ptr " + addr);
             return t;
+        }
+        if (e.type.arraySize > 0) {
+            // Array decay: an array variable used as an expression decays
+            // to a pointer to its first element — return the slot address
+            // directly (like C's array-to-pointer decay).
+            return it->second;
         }
         std::string t = newTemp();
         emitLine(t + " = load " + llvmType(e.type) + ", ptr " + it->second);
@@ -856,13 +878,27 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::Index>(n)) {
         const M::Index& v = std::get<M::Index>(n);
-        const std::string base = lowerExpr(*v.base);
         const std::string idx = lowerExpr(*v.index);
+        const std::string idxTy = llvmType(v.index->type);
+        const mir::Type& baseTy = v.base->type;
+        std::string elemTy = llvmType(e.type);  // element type (result type)
         std::string gep = newTemp();
-        emitLine(gep + " = getelementptr " + llvmType(e.type) + ", ptr " + base + ", " +
-                 llvmType(v.index->type) + " " + idx);
+        if (baseTy.arraySize > 0) {
+            // Array indexing: base decays to pointer to [N x T].
+            // Emit bounds check unless inUnsafe_.
+            const std::string base = lowerExpr(*v.base);  // slot (ptr to array)
+            emitBoundsCheck(idx, idxTy, baseTy.arraySize, e.loc);
+            const std::string arrTy = llvmType(baseTy);
+            emitLine(gep + " = getelementptr " + arrTy + ", ptr " + base +
+                     ", i32 0, " + idxTy + " " + idx);
+        } else {
+            // Pointer indexing (already gated unsafe in HIR).
+            const std::string base = lowerExpr(*v.base);
+            emitLine(gep + " = getelementptr " + elemTy + ", ptr " + base + ", " +
+                     idxTy + " " + idx);
+        }
         std::string t = newTemp();
-        emitLine(t + " = load " + llvmType(e.type) + ", ptr " + gep);
+        emitLine(t + " = load " + elemTy + ", ptr " + gep);
         return t;
     }
     if (std::holds_alternative<M::Member>(n)) {
@@ -1025,9 +1061,74 @@ void CodeGen::lowerInitListInto(const mir::Expr::InitList& il,
 
 // --- instructions ---
 
+// Emits bounds-check IR for array index. Pattern (Rust-style panic):
+//
+//   %oob = icmp uge i64 %idx, N      ; unsigned >= catches both negative and >= N
+//   br i1 %oob, label %panic, label %ok
+// panic:
+//   call void @__ivy_panic(ptr @.panic_msg, i32 line)
+//   unreachable
+// ok:
+//
+// When inUnsafe_ is true, no IR is emitted (caller already checked).
+void CodeGen::emitBoundsCheck(const std::string& idxVal, const std::string& idxTy,
+                               std::uint32_t arrayN, SourceLoc loc) {
+    if (inUnsafe_) return;
+
+    // Ensure __ivy_panic is declared once per module.
+    if (!declaredIvyPanic_) {
+        emitLine("declare void @__ivy_panic(ptr, i32)");
+        declaredIvyPanic_ = true;
+    }
+
+    // Cast idx to i64 for comparison (handles signed negative → becomes huge uint).
+    const std::string idx64 = newTemp();
+    if (idxTy == "i64") {
+        // Already i64 — use directly without cast.
+        // (We'll just alias by using idxVal below.)
+    }
+    // Use unsigned comparison: idx >= N  (catches negative indices too).
+    const std::string oob = newTemp();
+    // Extend/truncate idx to i64 for comparison.
+    std::string idxCasted = idxVal;
+    if (idxTy != "i64") {
+        emitLine(idx64 + " = sext " + idxTy + " " + idxVal + " to i64");
+        idxCasted = idx64;
+    }
+    emitLine(oob + " = icmp uge i64 " + idxCasted + ", " + std::to_string(arrayN));
+
+    const std::string panicB = newInlineBlock();
+    const std::string okB = newInlineBlock();
+    emitLine("br i1 " + oob + ", label %" + panicB + ", label %" + okB);
+
+    // panic block
+    curBlock_ = panicB;
+    emitLine(panicB + ":");
+    // Build a panic message string constant (module-level).
+    const std::string msgBytes = "index out of bounds (line " +
+                                  std::to_string(loc.line) + ")";
+    auto strIt = strings_.find(msgBytes);
+    if (strIt == strings_.end()) {
+        const std::string gname = "@.str." + std::to_string(stringList_.size());
+        strings_.emplace(msgBytes, gname);
+        stringList_.emplace_back(gname, msgBytes);
+        strIt = strings_.find(msgBytes);
+    }
+    const std::string msgPtr = newTemp();
+    emitLine(msgPtr + " = getelementptr i8, ptr " + strIt->second + ", i64 0");
+    emitLine("call void @__ivy_panic(ptr " + msgPtr + ", i32 " +
+             std::to_string(loc.line) + ")");
+    emitLine("unreachable");
+
+    // ok block
+    curBlock_ = okB;
+    emitLine(okB + ":");
+}
+
 void CodeGen::lowerInst(const mir::Inst& inst) {
     const auto& n = inst.node;
     using I = mir::Inst;
+    inUnsafe_ = inst.inUnsafe;  // propagate unsafe flag to expression lowering
 
     if (std::holds_alternative<I::Alloca>(n)) {
         const I::Alloca& a = std::get<I::Alloca>(n);
@@ -1060,6 +1161,9 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
             }
         } else if (structTypes_.contains(a.type.base)) {
             // Uninitialized struct variable — zero-initialize (C semantics).
+            emitLine("store " + slotTy + " zeroinitializer, ptr " + slot);
+        } else if (a.type.arraySize > 0) {
+            // Array variable — zero-initialize all elements (C semantics).
             emitLine("store " + slotTy + " zeroinitializer, ptr " + slot);
         }
         return;

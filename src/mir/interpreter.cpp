@@ -134,6 +134,18 @@ void Interpreter::execInst(FrameCtx& frame, const Inst& inst) {
         case K::Alloca: {
             const auto& a = std::get<Inst::Alloca>(inst.node);
             Value init;
+            if (a.type.arraySize > 0) {
+                // Array: create a Struct-based representation where each
+                // element is a field named by its index ("0", "1", ...).
+                Value arr;
+                arr.kind = Value::Struct;
+                arr.strct.typeName = "__array";
+                for (std::uint32_t i = 0; i < a.type.arraySize; ++i) {
+                    arr.strct.fields[std::to_string(i)] = makeCell(makeInt(0));
+                }
+                declareCell(a.var, makeCell(std::move(arr)));
+                break;
+            }
             if (a.init) {
                 init = evalExpr(*a.init);
             } else {
@@ -237,6 +249,8 @@ Value Interpreter::evalExpr(const Expr& e) {
         } else if constexpr (std::is_same_v<V, E::IdentRef>) {
             Cell c = lookupCell(v.name);
             if (!c) { error(e.loc, "undefined variable '" + std::string(v.name) + "'"); return makeVoid(); }
+            // Array: return the array value directly (no decay in interpreter).
+            if (e.type.arraySize > 0) return *c;
             // If the variable is a pointer, return a Ptr value (don't deref).
             if (e.type.pointerDepth > 0 && !e.type.isReference) {
                 return makePtr(c);
@@ -282,7 +296,24 @@ Value Interpreter::evalExpr(const Expr& e) {
             out.strct = std::move(sv);
             return out;
         } else if constexpr (std::is_same_v<V, E::Index>) {
-            error(e.loc, "IvyInterpret v0.2: array index not yet supported");
+            // Array indexing: base is an array (Struct __array) or pointer.
+            // For the interpreter we only handle the array case.
+            Value baseVal = evalExpr(*v.base);
+            Value idxVal = evalExpr(*v.index);
+            long long idx = idxVal.isInt() ? idxVal.asInt() : 0LL;
+            if (baseVal.isStruct() && baseVal.strct.typeName == "__array") {
+                // Bounds check (always done in interpreter, even in unsafe).
+                const std::uint32_t sz = static_cast<std::uint32_t>(baseVal.strct.fields.size());
+                if (idx < 0 || static_cast<std::uint64_t>(idx) >= sz) {
+                    error(e.loc, "index out of bounds: index " + std::to_string(idx) +
+                                 " out of range [0, " + std::to_string(sz) + ")");
+                    return makeVoid();
+                }
+                auto it = baseVal.strct.fields.find(std::to_string(idx));
+                if (it != baseVal.strct.fields.end() && it->second) return *it->second;
+                return makeInt(0);
+            }
+            error(e.loc, "IvyInterpret v0.2: pointer index not yet supported");
             return makeVoid();
         } else if constexpr (std::is_same_v<V, E::New>) {
             error(e.loc, "IvyInterpret v0.2: 'new' not yet supported");
@@ -503,6 +534,23 @@ Cell Interpreter::lvalueCell(const Expr& e) {
         // If cell IS itself a reference (Ptr), return the pointed-to cell.
         if (c && c->isPtr() && !c->ptr.isNull) return c->ptr.cell;
         return c;
+    }
+    if (const auto* idx = std::get_if<E::Index>(&e.node)) {
+        // Array element lvalue: get the array cell, find element by index.
+        Cell arrCell = lvalueCell(*idx->base);
+        Value idxVal = evalExpr(*idx->index);
+        long long i = idxVal.isInt() ? idxVal.asInt() : 0LL;
+        if (arrCell && arrCell->isStruct() && arrCell->strct.typeName == "__array") {
+            const std::uint32_t sz = static_cast<std::uint32_t>(arrCell->strct.fields.size());
+            if (i < 0 || static_cast<std::uint64_t>(i) >= sz) {
+                error(e.loc, "index out of bounds: index " + std::to_string(i) +
+                             " out of range [0, " + std::to_string(sz) + ")");
+                return nullptr;
+            }
+            auto it = arrCell->strct.fields.find(std::to_string(i));
+            if (it != arrCell->strct.fields.end()) return it->second;
+        }
+        return nullptr;
     }
     if (const auto* u = std::get_if<E::Unary>(&e.node)) {
         if (u->op == "*") {

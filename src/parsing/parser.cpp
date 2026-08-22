@@ -1281,6 +1281,22 @@ std::unique_ptr<Stmt> Parser::parseDeclaration(bool expectSemi) {
             return d;
         }
         d.name = next().lexeme;
+        // C-style array declarator: `T name[N]` — read [N] after the name.
+        if (at(TokenKind::LBracket)) {
+            next();  // consume '['
+            if (at(TokenKind::Integer)) {
+                const Token& t = peek();
+                long long n = parseIntegerValue(t.lexeme, t);
+                next();  // consume the integer token
+                if (n <= 0)
+                    errorAt(t, "array size must be a positive integer");
+                d.type.arraySize = static_cast<std::uint32_t>(n > 0 ? n : 1);
+            } else {
+                errorAt(peek(), "array size must be an integer constant (variable-length arrays are not supported)");
+                synchronize();
+            }
+            expect(TokenKind::RBracket, "expected ']' after array size");
+        }
         if (at(TokenKind::Assign)) {
             next();
             d.init = parseExpr();

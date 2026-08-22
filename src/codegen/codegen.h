@@ -61,6 +61,11 @@ private:
     int alloca_ = 0;
     int inlineBlock_ = 0;
     mir::Type curFnReturnType_;  // for implicit cast in Ret
+    // true when the current instruction is inside an [[ivy::unsafe]] block;
+    // array bounds checks are suppressed in this mode.
+    bool inUnsafe_ = false;
+    // true when the __ivy_panic function declaration has been emitted.
+    bool declaredIvyPanic_ = false;
 
     // Enum name → underlying type base (e.g. "Color" → "int"). Populated
     // in the pre-pass from mir::TranslationUnit::enums so llvmType() can
@@ -221,6 +226,11 @@ private:
                            const mir::Type& structType, SourceLoc loc);
     // Lowers a single MIR instruction.
     void lowerInst(const mir::Inst& inst);
+    // Emits array bounds-check LLVM IR for index `idxVal` into array of
+    // size `arrayN`. If the check fails, calls __ivy_panic and aborts.
+    // Skipped when inUnsafe_ is true.
+    void emitBoundsCheck(const std::string& idxVal, const std::string& idxTy,
+                         std::uint32_t arrayN, SourceLoc loc);
     // Lowers all instructions in a basic block.
     void lowerBlock(const mir::Block& b, int index, bool isVoidRet);
     // Lowers a function definition to LLVM IR.
