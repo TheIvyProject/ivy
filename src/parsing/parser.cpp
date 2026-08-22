@@ -1095,11 +1095,7 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
         expect(TokenKind::Semi, "expected ';' after 'continue'");
         return makeStmt<Stmt::Continue>(loc);
     }
-    if (atKeyword("switch")) {
-        errorAt(peek(), "switch statements are not supported in the Ivy subset yet");
-        synchronize();
-        return makeStmt<Stmt::Null>(loc);
-    }
+    if (atKeyword("switch")) return parseSwitch();
     if (atKeyword("goto")) {
         errorAt(peek(), "goto is not supported in the Ivy subset");
         synchronize();
@@ -1202,6 +1198,43 @@ std::unique_ptr<Stmt> Parser::parseReturn() {
     if (!at(TokenKind::Semi)) value = parseExpr();
     expect(TokenKind::Semi, "expected ';' after return statement");
     return makeStmt<Stmt::Return>(loc, std::move(value));
+}
+
+std::unique_ptr<Stmt> Parser::parseSwitch() {
+    const SourceLoc loc = locOf(peek());
+    next();  // switch
+    expect(TokenKind::LParen, "expected '(' after 'switch'");
+    std::unique_ptr<Expr> cond = parseExpr();
+    expect(TokenKind::RParen, "expected ')' after switch condition");
+    expect(TokenKind::LBrace, "expected '{' to start switch body");
+
+    Stmt::Switch sw;
+    sw.cond = std::move(cond);
+
+    while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile)) {
+        Stmt::CaseClause clause;
+        if (atKeyword("case")) {
+            next();  // case
+            clause.value = parseExpr();
+            expect(TokenKind::Colon, "expected ':' after case value");
+        } else if (atKeyword("default")) {
+            next();  // default
+            expect(TokenKind::Colon, "expected ':' after 'default'");
+            clause.value = nullptr;  // null => default
+        } else {
+            errorAt(peek(), "expected 'case' or 'default' inside switch");
+            synchronize();
+            break;
+        }
+        // Parse statements until the next case/default/}
+        while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile) &&
+               !atKeyword("case") && !atKeyword("default")) {
+            clause.stmts.push_back(parseStatement());
+        }
+        sw.cases.push_back(std::move(clause));
+    }
+    expect(TokenKind::RBrace, "expected '}' to close switch");
+    return makeStmt<Stmt::Switch>(loc, std::move(sw));
 }
 
 std::unique_ptr<Stmt> Parser::parseDeclOrExprStmt() {

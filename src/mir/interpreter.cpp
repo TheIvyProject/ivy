@@ -194,6 +194,21 @@ void Interpreter::execInst(FrameCtx& frame, const Inst& inst) {
             frame.curInst = 0;
             break;
         }
+        case K::Switch: {
+            const auto& sw = std::get<Inst::Switch>(inst.node);
+            long long condInt = 0;
+            if (sw.cond) {
+                Value cv = evalExpr(*sw.cond);
+                condInt = cv.isInt() ? cv.asInt() : 0LL;
+            }
+            Block* dest = sw.defaultBlock;
+            for (const auto& arm : sw.arms) {
+                if (arm.value == condInt) { dest = arm.block; break; }
+            }
+            frame.curBlock = dest;
+            frame.curInst = 0;
+            break;
+        }
     }
 }
 

@@ -92,7 +92,7 @@ struct Param {
 // Flat instruction list. `inUnsafe` records that the instruction was built
 // inside an [[ivy::unsafe]] block (safety checks are relaxed there).
 struct Inst {
-    enum class Kind { Alloca, Store, Eval, Ret, CondBranch, Jump };
+    enum class Kind { Alloca, Store, Eval, Ret, CondBranch, Jump, Switch };
 
     struct Alloca { std::string_view var; Type type; std::unique_ptr<Expr> init; };
     struct Store { std::unique_ptr<Expr> target; std::unique_ptr<Expr> value; };
@@ -100,11 +100,19 @@ struct Inst {
     struct Ret { std::unique_ptr<Expr> value; };  // may be null
     struct CondBranch { std::unique_ptr<Expr> cond; Block* thenBlock; Block* elseBlock; };
     struct Jump { Block* target; };
+    // switch: one arm per case label. defaultBlock is the block to jump to
+    // when no case matches (may equal exitBlock if there is no 'default').
+    struct SwitchArm { long long value; Block* block; };
+    struct Switch {
+        std::unique_ptr<Expr> cond;
+        std::vector<SwitchArm> arms;
+        Block* defaultBlock;  // never null
+    };
 
     Kind kind;
     bool inUnsafe = false;
     SourceLoc loc;
-    std::variant<Alloca, Store, Eval, Ret, CondBranch, Jump> node;
+    std::variant<Alloca, Store, Eval, Ret, CondBranch, Jump, Switch> node;
 };
 
 struct Block {

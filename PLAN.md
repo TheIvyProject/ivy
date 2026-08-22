@@ -116,7 +116,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| 6.1 | **`switch`/`case`/`default`** | ★★ | Parser: `Stmt::Switch` + case list. HIR/MIR: CFG switch block (`switch i32`). Codegen: LLVM `switch` instruction. Ràng buộc: cond là integral, case là constant expression, cấm fallthrough (an toàn) hoặc yêu cầu `break` |
+| 6.1 | **`switch`/`case`/`default`** ✅ | ★★ | Parser: `Stmt::Switch` + case list. HIR: integral condition check, no-fallthrough enforcement (error nếu case không kết thúc bằng break/return/continue). MIR: `Inst::Switch` + `SwitchArm`. Codegen: LLVM `switch` instruction. MIR Interpreter: `K::Switch` dispatch. Test: `classify`, `fibonacci`, switch-with-break ✅ |
 | 6.2 | **`auto` type deduction** | ★★ | Parser: accept `auto` làm type placeholder. HIR: infer từ initializer expression (`deduceType(expr)`), reject không init. Là nền cho range-for + structured bindings |
 | 6.3 | **Array type `T[N]`** | ★★ | `Type` struct: thêm `arraySize`. Parser: parse `T name[N]` trong declaration + param. HIR: layout (N × sizeof). Codegen: `alloca [N x T]`, `getelementptr [N x T]`. Bounds check ở MIR interpreter (an toàn hơn C) |
 | 6.4 | **Global variables** | ★★ | AST: `TranslationUnit.globalVars`. Parser: parse top-level declaration. Codegen: emit `@global = global T init`. Static init order: `@llvm.global_ctors` nếu cần |

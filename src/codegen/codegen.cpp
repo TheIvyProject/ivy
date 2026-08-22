@@ -1106,6 +1106,21 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
         emitLine("br label %" + blockNames_[j.target]);
         return;
     }
+    if (std::holds_alternative<I::Switch>(n)) {
+        const I::Switch& sw = std::get<I::Switch>(n);
+        if (!sw.cond) return;
+        const std::string condV = lowerExpr(*sw.cond);
+        const std::string condTy = llvmType(sw.cond->type);
+        std::string line = "switch " + condTy + " " + condV +
+                           ", label %" + blockNames_[sw.defaultBlock] + " [\n";
+        for (const auto& arm : sw.arms) {
+            line += "    " + condTy + " " + std::to_string(arm.value) +
+                    ", label %" + blockNames_[arm.block] + "\n";
+        }
+        line += "  ]";
+        emitLine(line);
+        return;
+    }
 }
 
 void CodeGen::lowerBlock(const mir::Block& b, int index, bool isVoidRet) {
@@ -1116,7 +1131,8 @@ void CodeGen::lowerBlock(const mir::Block& b, int index, bool isVoidRet) {
     if (b.insts.empty() ||
         (b.insts.back()->kind != mir::Inst::Kind::Ret &&
          b.insts.back()->kind != mir::Inst::Kind::Jump &&
-         b.insts.back()->kind != mir::Inst::Kind::CondBranch)) {
+         b.insts.back()->kind != mir::Inst::Kind::CondBranch &&
+         b.insts.back()->kind != mir::Inst::Kind::Switch)) {
         emitLine(isVoidRet ? "ret void" : "unreachable");
     }
 }

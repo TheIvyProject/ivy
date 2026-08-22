@@ -82,10 +82,20 @@ struct Stmt {
     struct ExprStmt { std::unique_ptr<Expr> value; };
     struct Unsafe { std::unique_ptr<Stmt> body; };  // [[ivy::unsafe]] lowered
     struct Null {};
+    // switch: cond is integral; default case has value == nullptr.
+    // Ivy requires every case to end with break/return/continue (no fallthrough).
+    struct CaseClause {
+        std::unique_ptr<Expr> value;  // null => default
+        std::vector<std::unique_ptr<Stmt>> stmts;
+    };
+    struct Switch {
+        std::unique_ptr<Expr> cond;
+        std::vector<CaseClause> cases;
+    };
 
     SourceLoc loc;
     std::variant<Compound, Decl, If, While, DoWhile, For, Return, Break, Continue, ExprStmt,
-                 Unsafe, Null>
+                 Unsafe, Null, Switch>
         node;
 };
 

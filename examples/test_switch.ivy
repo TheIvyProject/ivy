@@ -1,0 +1,60 @@
+#pragma ivy cnumber
+extern "C" int printf(const char* fmt, ...);
+
+int classify(int x) {
+    switch (x) {
+        case 0:
+            return 0;
+        case 1:
+            return 1;
+        case 2:
+            return 2;
+        default:
+            return -1;
+    }
+}
+
+int fibonacci(int n) {
+    switch (n) {
+        case 0:
+            return 0;
+        case 1:
+            return 1;
+        default:
+            return fibonacci(n - 1) + fibonacci(n - 2);
+    }
+}
+
+int main() {
+    // test switch with default
+    printf("classify(0)=%d\n", classify(0));
+    printf("classify(1)=%d\n", classify(1));
+    printf("classify(2)=%d\n", classify(2));
+    printf("classify(5)=%d\n", classify(5));
+
+    // test switch in recursive function
+    printf("fib(0)=%d\n", fibonacci(0));
+    printf("fib(1)=%d\n", fibonacci(1));
+    printf("fib(6)=%d\n", fibonacci(6));
+
+    // test switch with break
+    int x = 3;
+    int result = 0;
+    switch (x) {
+        case 1:
+            result = 10;
+            break;
+        case 2:
+            result = 20;
+            break;
+        case 3:
+            result = 30;
+            break;
+        default:
+            result = 99;
+            break;
+    }
+    printf("result=%d\n", result);
+
+    return 0;
+}

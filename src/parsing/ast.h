@@ -171,10 +171,22 @@ struct Stmt {
     struct ExprStmt { std::unique_ptr<ivy::Expr> value; };
     struct Unsafe { std::unique_ptr<Stmt> body; };
     struct Null {};
+    // switch/case: cond is integral; each CaseClause has a constant value
+    // (null => default). Ivy forbids implicit fallthrough: every case must
+    // end with break/return/continue or be provably unreachable — this is
+    // checked in the HIR builder.
+    struct CaseClause {
+        std::unique_ptr<Expr> value;  // null => default
+        std::vector<std::unique_ptr<Stmt>> stmts;
+    };
+    struct Switch {
+        std::unique_ptr<Expr> cond;
+        std::vector<CaseClause> cases;
+    };
 
     SourceLoc loc;
     std::variant<Compound, Decl, If, While, DoWhile, For, Return, Break, Continue, ExprStmt,
-                 Unsafe, Null>
+                 Unsafe, Null, Switch>
         node;
 };
 
@@ -220,6 +232,16 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
         } else if constexpr (std::is_same_v<V, Stmt::Unsafe>) {
             out->node.emplace<Stmt::Unsafe>(Stmt::Unsafe{
                 v.body ? cloneStmt(*v.body) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::Switch>) {
+            Stmt::Switch sw;
+            sw.cond = v.cond ? cloneExpr(*v.cond) : nullptr;
+            for (const auto& c : v.cases) {
+                Stmt::CaseClause cc;
+                cc.value = c.value ? cloneExpr(*c.value) : nullptr;
+                for (const auto& st : c.stmts) cc.stmts.push_back(cloneStmt(*st));
+                sw.cases.push_back(std::move(cc));
+            }
+            out->node.emplace<Stmt::Switch>(std::move(sw));
         } else {
             out->node = v;  // Break, Continue, Null
         }

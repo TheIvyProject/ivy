@@ -590,6 +590,52 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         --unsafeDepth_;
         return;
     }
+    if (std::holds_alternative<H::Switch>(n)) {
+        const H::Switch& v = std::get<H::Switch>(n);
+        mir::Block* exitB = newBlock();
+
+        // Create one block per case clause.
+        std::vector<mir::Block*> caseBlocks;
+        caseBlocks.reserve(v.cases.size());
+        for (std::size_t i = 0; i < v.cases.size(); ++i)
+            caseBlocks.push_back(newBlock());
+
+        // Find default block (or use exitB if no default clause).
+        mir::Block* defaultBlock = exitB;
+        for (std::size_t i = 0; i < v.cases.size(); ++i) {
+            if (!v.cases[i].value) { defaultBlock = caseBlocks[i]; break; }
+        }
+
+        // Emit the switch instruction in the current block.
+        auto* swInst = emit(mir::Inst::Kind::Switch, s.loc);
+        auto& sw = swInst->node.emplace<mir::Inst::Switch>();
+        sw.cond = v.cond ? buildExpr(*v.cond) : nullptr;
+        sw.defaultBlock = defaultBlock;
+        for (std::size_t i = 0; i < v.cases.size(); ++i) {
+            if (!v.cases[i].value) continue;  // skip default — handled above
+            // Evaluate the case value constant.
+            const hir::Expr& cv = *v.cases[i].value;
+            long long intVal = 0;
+            if (std::holds_alternative<hir::Expr::IntegerLit>(cv.node))
+                intVal = std::get<hir::Expr::IntegerLit>(cv.node).value;
+            else if (std::holds_alternative<hir::Expr::BoolLit>(cv.node))
+                intVal = std::get<hir::Expr::BoolLit>(cv.node).value ? 1 : 0;
+            sw.arms.push_back({intVal, caseBlocks[i]});
+        }
+
+        // Build each case body. break → jumpTo(exitB).
+        for (std::size_t i = 0; i < v.cases.size(); ++i) {
+            cur_ = caseBlocks[i];
+            loops_.push_back(LoopCtx{nullptr, nullptr, exitB});
+            for (const auto& st : v.cases[i].stmts) buildStmt(*st);
+            loops_.pop_back();
+            // If the block isn't already terminated (break emitted a Jump),
+            // add a fall-through jump to exitB (safety net for return/continue).
+            jumpTo(exitB);
+        }
+        cur_ = exitB;
+        return;
+    }
 }
 
 // --- functions ---

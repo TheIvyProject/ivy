@@ -145,6 +145,7 @@ private:
     std::unique_ptr<Stmt> parseStatement();
     std::unique_ptr<Stmt> parseCompound();
     std::unique_ptr<Stmt> parseIf();
+    std::unique_ptr<Stmt> parseSwitch();
     std::unique_ptr<Stmt> parseWhile();
     std::unique_ptr<Stmt> parseDoWhile();
     std::unique_ptr<Stmt> parseFor();

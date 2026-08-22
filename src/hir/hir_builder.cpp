@@ -738,6 +738,50 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         --unsafeDepth_;
         return out;
     }
+    if (std::holds_alternative<A::Switch>(n)) {
+        const A::Switch& v = std::get<A::Switch>(n);
+        auto& sw = out->node.emplace<hir::Stmt::Switch>();
+        sw.cond = buildExpr(*v.cond);
+        // Condition must be an integer type.
+        if (sw.cond) {
+            const auto& t = sw.cond->type;
+            bool isIntegral = (!t.base.empty() && t.pointerDepth == 0 && !t.isReference &&
+                               (t.base == "bool" ||
+                                t.base.find("int") != std::string_view::npos ||
+                                t.base.find("char") != std::string_view::npos ||
+                                t.base == "long" || t.base == "short" || t.base == "unsigned" ||
+                                t.base == "long long" || t.base == "unsigned long" ||
+                                t.base == "unsigned long long"));
+            if (!isIntegral)
+                error(s.loc, "switch condition must be an integral type");
+        }
+        bool hasDefault = false;
+        for (const auto& ac : v.cases) {
+            hir::Stmt::CaseClause cc;
+            if (ac.value) {
+                cc.value = buildExpr(*ac.value);
+            } else {
+                if (hasDefault)
+                    error(s.loc, "switch has more than one 'default' case");
+                hasDefault = true;
+            }
+            for (const auto& st : ac.stmts)
+                cc.stmts.push_back(buildStmt(*st));
+            // Ivy no-fallthrough: last stmt of each case must be break/return/continue/switch.
+            // We emit a compile error only if the case is non-empty and doesn't end that way.
+            if (!cc.stmts.empty()) {
+                const hir::Stmt* last = cc.stmts.back().get();
+                bool terminated = std::holds_alternative<hir::Stmt::Break>(last->node) ||
+                                  std::holds_alternative<hir::Stmt::Return>(last->node) ||
+                                  std::holds_alternative<hir::Stmt::Continue>(last->node);
+                if (!terminated)
+                    error(s.loc, "Ivy forbids implicit fallthrough: case must end with "
+                                 "break, return, or continue");
+            }
+            sw.cases.push_back(std::move(cc));
+        }
+        return out;
+    }
     out->node = hir::Stmt::Null{};
     return out;
 }

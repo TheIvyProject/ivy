@@ -241,6 +241,20 @@ void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth) {
                        dumpStmt(*v.body, os, depth + 1);
                    },
                    [&](const ivy::Stmt::Null&) { os << pad << "null\n"; },
+                   [&](const ivy::Stmt::Switch& v) {
+                       os << pad << "switch\n";
+                       if (v.cond) dumpExpr(*v.cond, os, depth + 1);
+                       for (const auto& c : v.cases) {
+                           if (c.value) {
+                               os << pad << "  case\n";
+                               dumpExpr(*c.value, os, depth + 2);
+                           } else {
+                               os << pad << "  default\n";
+                           }
+                           for (const auto& st : c.stmts)
+                               dumpStmt(*st, os, depth + 2);
+                       }
+                   },
                },
                s.node);
 }
@@ -431,6 +445,20 @@ void dumpHirStmt(const ivy::hir::Stmt& s, std::ostream& os, int depth) {
                        dumpHirStmt(*v.body, os, depth + 1);
                    },
                    [&](const ivy::hir::Stmt::Null&) { os << pad << "null\n"; },
+                   [&](const ivy::hir::Stmt::Switch& v) {
+                       os << pad << "switch\n";
+                       if (v.cond) dumpHirExpr(*v.cond, os, depth + 1);
+                       for (const auto& c : v.cases) {
+                           if (c.value) {
+                               os << pad << "  case\n";
+                               dumpHirExpr(*c.value, os, depth + 2);
+                           } else {
+                               os << pad << "  default\n";
+                           }
+                           for (const auto& st : c.stmts)
+                               dumpHirStmt(*st, os, depth + 2);
+                       }
+                   },
                },
                s.node);
 }
