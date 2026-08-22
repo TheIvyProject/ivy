@@ -109,6 +109,10 @@ struct Param {
     Type type;
     std::string_view name;      // empty if unnamed
     std::string_view lifetime;  // lowered [[ivy::lt(a)]]
+    // Default argument: raw pointer to the AST Expr (owned by the AST
+    // TranslationUnit).  At each call site that omits this argument,
+    // the HIR builder clones the AST expr and builds a fresh HIR expr.
+    const ivy::Expr* defaultValue = nullptr;
     SourceLoc loc;
 };
 

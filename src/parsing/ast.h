@@ -42,12 +42,15 @@ struct Type {
 
 // Forward declaration so that Expr::Lambda can reference Stmt::Compound.
 struct Stmt;
+// Forward declaration so that Param can hold a default-value Expr.
+struct Expr;
 
 // Defined early because Expr::Lambda uses std::vector<Param>.
 struct Param {
     Type type;
     std::string_view name;  // empty if unnamed
     std::vector<Attribute> attrs;
+    std::unique_ptr<Expr> defaultValue;  // `= expr` — filled at call site
     SourceLoc loc;
 };
 
@@ -155,7 +158,17 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
             // the captures/params/returnType and leave body null.
             Expr::Lambda lam;
             lam.captures = v.captures;
-            lam.params = v.params;
+            // Params are move-only (they hold default-value Exprs).
+            // Clone each param individually.
+            for (const auto& p : v.params) {
+                Param np;
+                np.type = p.type;
+                np.name = p.name;
+                np.attrs = p.attrs;
+                np.loc = p.loc;
+                if (p.defaultValue) np.defaultValue = cloneExpr(*p.defaultValue);
+                lam.params.push_back(std::move(np));
+            }
             lam.returnType = v.returnType;
             out->node.emplace<Expr::Lambda>(std::move(lam));
         } else {

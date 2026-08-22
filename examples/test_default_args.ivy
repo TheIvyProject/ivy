@@ -1,0 +1,53 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// Default arguments — eval at call site (C++ semantics).
+int greet(int a, int b = 10, int c = 20) {
+    return a + b + c;
+}
+
+// Single default arg.
+int32_t power(int32_t base, int32_t exp = 2) {
+    int32_t result = 1;
+    for (int32_t i = 0; i < exp; i = i + 1) result = result * base;
+    return result;
+}
+
+// Default with expression.
+int compute(int x, int y = 5, int z = 3) {
+    return x * y + z;
+}
+
+int main() {
+    // Call with all args
+    int r1 = greet(1, 2, 3);
+    printf("greet(1,2,3) = %d\n", r1);  // 6
+
+    // Call with 2 args — c defaults to 20
+    int r2 = greet(1, 2);
+    printf("greet(1,2) = %d\n", r2);  // 23
+
+    // Call with 1 arg — b=10, c=20
+    int r3 = greet(1);
+    printf("greet(1) = %d\n", r3);  // 31
+
+    // power with default exp=2
+    int32_t p1 = power(5);       // 5^2 = 25
+    int32_t p2 = power(2, 10);   // 2^10 = 1024
+    printf("power(5) = %d\n", p1);     // 25
+    printf("power(2,10) = %d\n", p2);  // 1024
+
+    // compute with defaults
+    int c1 = compute(4);         // 4*5+3 = 23
+    int c2 = compute(4, 6);      // 4*6+3 = 27
+    int c3 = compute(4, 6, 8);   // 4*6+8 = 32
+    printf("compute(4) = %d\n", c1);     // 23
+    printf("compute(4,6) = %d\n", c2);   // 27
+    printf("compute(4,6,8) = %d\n", c3); // 32
+
+    printf("all default-arg tests passed\n");
+    return 0;
+}

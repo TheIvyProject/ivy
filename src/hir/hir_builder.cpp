@@ -478,6 +478,7 @@ void HirBuilder::buildSignature(const Function& af) {
         p.name = ap.name;
         p.loc = ap.loc;
         p.lifetime = lowerParamAttribute(*fn, ap);
+        p.defaultValue = ap.defaultValue.get();
         fn->params.push_back(std::move(p));
     }
 
@@ -895,11 +896,27 @@ hir::Function* HirBuilder::resolveOverload(
         const std::size_t expected = fn->params.size();
         const std::size_t actual = args.size();
         // Variadic extern "C" functions: must have at least expected args.
-        if (expected > actual) return 0;
-        if (!fn->isExternC && expected != actual) return 0;
+        if (expected > actual) {
+            // Check if the missing params all have default values.
+            for (std::size_t i = actual; i < expected; ++i) {
+                if (!fn->params[i].defaultValue) return 0;
+            }
+            // OK — trailing args will be filled at call site.
+        } else if (!fn->isExternC && expected != actual) {
+            return 0;
+        }
         int score = 0;
         for (std::size_t i = 0; i < expected; ++i) {
             const hir::Type& pt = fn->params[i].type;
+            // Skip params that will be filled by default values —
+            // they don't need a user-provided argument.
+            if (i >= actual) {
+                // Default-arg params contribute a moderate score so
+                // that a candidate with fewer required args is preferred
+                // over one that needs more args (but both can match).
+                score += 80;  // default-arg match (less than exact)
+                continue;
+            }
             const hir::Type& at = args[i];
             // Strip reference-ness for comparison (reference params bind
             // to lvalues, but the type is the same).
@@ -975,15 +992,39 @@ void HirBuilder::checkCall(hir::Expr::Call& call, SourceLoc loc) {
 
     const std::size_t expected = fn->params.size();
     const std::size_t actual = call.args.size();
-    // Variadic extern "C" functions (e.g. printf) accept extra args.
     const bool variadic = fn->isExternC;
-    if (expected > actual || (!variadic && expected != actual)) {
+
+    // Fill missing arguments with default values.  In C++, default
+    // arguments are evaluated at the call site — so we clone the AST
+    // default-value expression and build a fresh HIR expr for each
+    // call site that omits trailing arguments.
+    if (actual < expected && !variadic) {
+        // Only trailing params can have defaults — and once a param
+        // has no default, all subsequent params must also be provided.
+        for (std::size_t i = actual; i < expected; ++i) {
+            const hir::Param& p = fn->params[i];
+            if (!p.defaultValue) {
+                error(loc, "call to '" + std::string(call.callee) +
+                               "' missing argument " + std::to_string(i + 1) +
+                               " (parameter '" + std::string(p.name) +
+                               "' has no default value)");
+                return;
+            }
+            // Clone the AST default-value expr and build it as a HIR expr.
+            auto clonedAst = ivy::cloneExpr(*p.defaultValue);
+            call.args.push_back(buildExpr(*clonedAst));
+        }
+    }
+
+    const std::size_t newActual = call.args.size();
+    // Variadic extern "C" functions (e.g. printf) accept extra args.
+    if (expected > newActual || (!variadic && expected != newActual)) {
         error(loc, "call to '" + std::string(call.callee) + "' expects " + std::to_string(expected) +
-                       " argument(s), got " + std::to_string(actual));
+                       " argument(s), got " + std::to_string(newActual));
         return;
     }
     // Check fixed params (extra variadic args are unchecked — C ABI).
-    for (std::size_t i = 0; i < expected && i < actual; ++i) {
+    for (std::size_t i = 0; i < expected && i < newActual; ++i) {
         if (call.args[i] && !isAssignable(fn->params[i].type, call.args[i]->type)) {
             error(call.args[i]->loc, "argument " + std::to_string(i + 1) + " of '" +
                                          std::string(call.callee) + "' expects '" +

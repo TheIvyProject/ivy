@@ -1062,6 +1062,11 @@ std::vector<Param> Parser::parseParams() {
         }
         p.attrs = parseAttributeList();
         validateAttributes(p.attrs, {"lt"});
+        // Default argument: `= expr` — fills in missing args at call site.
+        if (at(TokenKind::Assign)) {
+            next();  // consume '='
+            p.defaultValue = parseExpr();
+        }
         params.push_back(std::move(p));
         if (!at(TokenKind::RParen)) {
             expect(TokenKind::Comma, "expected ',' between parameters");
