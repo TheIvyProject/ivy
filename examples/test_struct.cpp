@@ -69,7 +69,7 @@ int main() {
     Node n;
     int nextVal = 42;
     n.value = 100;
-    n.next = &nextVal;
+    [[ivy::unsafe]] { n.next = &nextVal; }
     int deref = 0;
     [[ivy::unsafe]] { deref = *n.next; }
     printf("node: %d %d\n", n.value, deref);

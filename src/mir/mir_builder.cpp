@@ -16,6 +16,84 @@ mir::Lifetime mergeLifetime(const mir::Lifetime& a, const mir::Lifetime& b) {
     return mir::Lifetime{mir::Lifetime::Kind::Unknown, {}};
 }
 
+// Decode escape sequences in a string/char literal body (without quotes).
+// Copied from codegen.cpp — shared logic for literal decoding.
+bool decodeBody(std::string_view body, std::string& bytes) {
+    bytes.clear();
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        const char c = body[i];
+        if (c != '\\') {
+            bytes.push_back(c);
+            continue;
+        }
+        if (++i >= body.size()) return false;
+        switch (body[i]) {
+            case 'n': bytes.push_back('\n'); break;
+            case 't': bytes.push_back('\t'); break;
+            case 'r': bytes.push_back('\r'); break;
+            case 'a': bytes.push_back('\a'); break;
+            case 'b': bytes.push_back('\b'); break;
+            case 'f': bytes.push_back('\f'); break;
+            case 'v': bytes.push_back('\v'); break;
+            case '\\': bytes.push_back('\\'); break;
+            case '\'': bytes.push_back('\''); break;
+            case '"': bytes.push_back('"'); break;
+            case '?': bytes.push_back('?'); break;
+            case 'x': {
+                long long v = 0;
+                int count = 0;
+                while (++i < body.size() && count < 2) {
+                    char h = body[i];
+                    if (h >= '0' && h <= '9') v = v * 16 + (h - '0');
+                    else if (h >= 'a' && h <= 'f') v = v * 16 + (h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F') v = v * 16 + (h - 'A' + 10);
+                    else { --i; break; }
+                    ++count;
+                }
+                bytes.push_back(static_cast<char>(v));
+                break;
+            }
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7': {
+                long long v = body[i] - '0';
+                int count = 1;
+                while (++i < body.size() && count < 3) {
+                    char o = body[i];
+                    if (o >= '0' && o <= '7') { v = v * 8 + (o - '0'); ++count; }
+                    else { --i; break; }
+                }
+                bytes.push_back(static_cast<char>(v));
+                break;
+            }
+            default:
+                bytes.push_back(body[i]);
+                break;
+        }
+    }
+    return true;
+}
+
+bool decodeString(std::string_view raw, std::string& bytes) {
+    if (raw.size() >= 3 && raw[0] == 'R' && raw[1] == '"') {
+        std::size_t open = raw.find('(');
+        std::size_t close = raw.rfind(')');
+        if (open == std::string_view::npos || close == std::string_view::npos) return false;
+        bytes = std::string(raw.substr(open + 1, close - open - 1));
+        return true;
+    }
+    if (raw.size() < 2 || raw.front() != '"' || raw.back() != '"') return false;
+    return decodeBody(raw.substr(1, raw.size() - 2), bytes);
+}
+
+bool decodeChar(std::string_view raw, long long& value) {
+    if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') return false;
+    std::string bytes;
+    if (!decodeBody(raw.substr(1, raw.size() - 2), bytes)) return false;
+    if (bytes.empty()) return false;
+    value = static_cast<unsigned char>(bytes[0]);
+    return true;
+}
+
 }  // namespace
 
 MirBuilder::MirBuilder(const hir::TranslationUnit& hir) : hir_(hir) {}
@@ -90,6 +168,18 @@ void MirBuilder::checkReturn(const mir::Function& fn, const mir::Lifetime& lt, S
             error(loc, "returned pointer has no known lifetime; tie it to a parameter with "
                        "[[ivy::lt(...)]] or return nullptr");
             return;
+    }
+}
+
+// --- store lifetime checker: catch dangling pointer stores ---
+
+void MirBuilder::checkStore(const mir::Expr& target, const mir::Expr& value, SourceLoc loc) {
+    if (unsafeDepth_ > 0) return;  // [[ivy::unsafe]] opts out
+    // Only check pointer-typed stores.
+    if (target.type.pointerDepth == 0) return;
+    // Reject storing a Local (dangling) pointer into a named-lifetime slot.
+    if (value.lifetime.kind == mir::Lifetime::Kind::Local) {
+        error(loc, "storing a pointer to a local variable into a pointer slot (dangling)");
     }
 }
 
@@ -446,6 +536,29 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
             auto* inst = emit(mir::Inst::Kind::Store, s.loc);
             auto& st = inst->node.emplace<mir::Inst::Store>();
             auto& as = std::get<mir::Expr::Assign>(e->node);
+            // Expand compound assignment: `lhs op= rhs` → `lhs = lhs op rhs`.
+            // This avoids needing a separate op field on Store.
+            if (as.op != "=" && as.op.size() >= 2 && as.op.back() == '=') {
+                std::string_view plainOp = as.op.substr(0, as.op.size() - 1);
+                auto lhsCopy = cloneExpr(*as.lhs);
+                // Build a fresh Binary expr: lhs_copy <plainOp> rhs
+                auto binExpr = std::make_unique<mir::Expr>();
+                binExpr->loc = as.rhs ? as.rhs->loc : s.loc;
+                binExpr->type = as.rhs ? as.rhs->type : as.lhs->type;
+                auto& bin = binExpr->node.emplace<mir::Expr::Binary>();
+                bin.op = plainOp;
+                bin.lhs = std::move(lhsCopy);
+                bin.rhs = std::move(as.rhs);
+                // Recompute lifetime for the new binary expr.
+                if (bin.lhs && bin.rhs) {
+                    if (bin.lhs->type.pointerDepth > 0)
+                        binExpr->lifetime = bin.lhs->lifetime;
+                    else if (bin.rhs->type.pointerDepth > 0)
+                        binExpr->lifetime = bin.rhs->lifetime;
+                }
+                as.rhs = std::move(binExpr);
+                as.op = "=";
+            }
             st.target = std::move(as.lhs);
             st.value = std::move(as.rhs);
             // Track the variable's value lifetime for later reads.
@@ -460,6 +573,10 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
                         break;
                     }
                 }
+            }
+            // Safety check: reject dangling pointer stores (outside unsafe).
+            if (st.target && st.value) {
+                checkStore(*st.target, *st.value, s.loc);
             }
         } else {
             auto* inst = emit(mir::Inst::Kind::Eval, s.loc);
@@ -534,7 +651,153 @@ std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
         if (hf->body) buildFunction(*raw, *hf);
     }
     if (failed_) return nullptr;
+    // Post-pass: resolve call targets and decode string/char literals.
+    for (const auto& fn : mir_->functions) {
+        for (const auto& blk : fn->blocks) {
+            for (const auto& inst : blk->insts) {
+                if (auto* al = std::get_if<mir::Inst::Alloca>(&inst->node); al && al->init)
+                    walkExpr(*al->init);
+                if (auto* st = std::get_if<mir::Inst::Store>(&inst->node)) {
+                    if (st->target) walkExpr(*st->target);
+                    if (st->value) walkExpr(*st->value);
+                }
+                if (auto* ev = std::get_if<mir::Inst::Eval>(&inst->node); ev && ev->value)
+                    walkExpr(*ev->value);
+                if (auto* rt = std::get_if<mir::Inst::Ret>(&inst->node); rt && rt->value)
+                    walkExpr(*rt->value);
+                if (auto* cb = std::get_if<mir::Inst::CondBranch>(&inst->node); cb && cb->cond)
+                    walkExpr(*cb->cond);
+            }
+        }
+    }
     return std::move(mir_);
+}
+
+// --- post-pass visitor: resolve Call::target + decode string/char literals ---
+
+void MirBuilder::walkExpr(mir::Expr& e) {
+    using M = mir::Expr;
+    std::visit([&](auto& v) {
+        using V = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<V, M::StringLit>) {
+            decodeString(v.raw, v.decoded);
+        } else if constexpr (std::is_same_v<V, M::CharLit>) {
+            decodeChar(v.raw, v.decoded);
+        } else if constexpr (std::is_same_v<V, M::Call>) {
+            // Resolve target by matching name + namespacePrefix.
+            for (const auto& fn : mir_->functions) {
+                if (fn->name == v.callee) { v.target = fn.get(); break; }
+            }
+            for (auto& a : v.args) if (a) walkExpr(*a);
+        } else if constexpr (std::is_same_v<V, M::Unary>) {
+            if (v.operand) walkExpr(*v.operand);
+        } else if constexpr (std::is_same_v<V, M::Binary>) {
+            if (v.lhs) walkExpr(*v.lhs);
+            if (v.rhs) walkExpr(*v.rhs);
+        } else if constexpr (std::is_same_v<V, M::Ternary>) {
+            if (v.cond) walkExpr(*v.cond);
+            if (v.thenBranch) walkExpr(*v.thenBranch);
+            if (v.elseBranch) walkExpr(*v.elseBranch);
+        } else if constexpr (std::is_same_v<V, M::Index>) {
+            if (v.base) walkExpr(*v.base);
+            if (v.index) walkExpr(*v.index);
+        } else if constexpr (std::is_same_v<V, M::Member>) {
+            if (v.base) walkExpr(*v.base);
+        } else if constexpr (std::is_same_v<V, M::Assign>) {
+            if (v.lhs) walkExpr(*v.lhs);
+            if (v.rhs) walkExpr(*v.rhs);
+        } else if constexpr (std::is_same_v<V, M::New>) {
+            for (auto& a : v.args) if (a) walkExpr(*a);
+        } else if constexpr (std::is_same_v<V, M::Delete>) {
+            if (v.operand) walkExpr(*v.operand);
+        } else if constexpr (std::is_same_v<V, M::InitList>) {
+            for (auto& el : v.elements) if (el) walkExpr(*el);
+        } else if constexpr (std::is_same_v<V, M::Lambda>) {
+            for (auto& c : v.captureInits) if (c) walkExpr(*c);
+        }
+    }, e.node);
+}
+
+void MirBuilder::resolveCalls() { /* inlined into build() post-pass */ }
+void MirBuilder::decodeLiterals() { /* inlined into build() post-pass */ }
+
+// Deep-clone a MIR expression tree. Used when expanding compound assignments
+// (`lhs += rhs` → `lhs = lhs + rhs`): the lhs must appear twice (once as the
+// store target, once as the binary operand), so we need an independent copy.
+std::unique_ptr<mir::Expr> MirBuilder::cloneExpr(const mir::Expr& e) {
+    auto out = std::make_unique<mir::Expr>();
+    out->loc = e.loc;
+    out->type = e.type;
+    out->lifetime = e.lifetime;
+    std::visit([&](const auto& v) {
+        using V = std::decay_t<decltype(v)>;
+        using M = mir::Expr;
+        if constexpr (std::is_same_v<V, M::IntegerLit>) {
+            out->node = M::IntegerLit{v.value};
+        } else if constexpr (std::is_same_v<V, M::FloatLit>) {
+            out->node = M::FloatLit{v.value};
+        } else if constexpr (std::is_same_v<V, M::StringLit>) {
+            M::StringLit c; c.raw = v.raw; c.decoded = v.decoded;
+            out->node = std::move(c);
+        } else if constexpr (std::is_same_v<V, M::CharLit>) {
+            M::CharLit c; c.raw = v.raw; c.decoded = v.decoded;
+            out->node = std::move(c);
+        } else if constexpr (std::is_same_v<V, M::BoolLit>) {
+            out->node = M::BoolLit{v.value};
+        } else if constexpr (std::is_same_v<V, M::NullptrLit>) {
+            out->node = M::NullptrLit{};
+        } else if constexpr (std::is_same_v<V, M::IdentRef>) {
+            out->node = M::IdentRef{v.name};
+        } else if constexpr (std::is_same_v<V, M::Unary>) {
+            auto& c = out->node.emplace<M::Unary>();
+            c.op = v.op; c.isPrefix = v.isPrefix;
+            if (v.operand) c.operand = cloneExpr(*v.operand);
+        } else if constexpr (std::is_same_v<V, M::Binary>) {
+            auto& c = out->node.emplace<M::Binary>();
+            c.op = v.op;
+            if (v.lhs) c.lhs = cloneExpr(*v.lhs);
+            if (v.rhs) c.rhs = cloneExpr(*v.rhs);
+        } else if constexpr (std::is_same_v<V, M::Ternary>) {
+            auto& c = out->node.emplace<M::Ternary>();
+            if (v.cond) c.cond = cloneExpr(*v.cond);
+            if (v.thenBranch) c.thenBranch = cloneExpr(*v.thenBranch);
+            if (v.elseBranch) c.elseBranch = cloneExpr(*v.elseBranch);
+        } else if constexpr (std::is_same_v<V, M::Call>) {
+            auto& c = out->node.emplace<M::Call>();
+            c.callee = v.callee; c.target = v.target;
+            c.returnLifetime = v.returnLifetime;
+            for (const auto& a : v.args) c.args.push_back(a ? cloneExpr(*a) : nullptr);
+        } else if constexpr (std::is_same_v<V, M::Index>) {
+            auto& c = out->node.emplace<M::Index>();
+            if (v.base) c.base = cloneExpr(*v.base);
+            if (v.index) c.index = cloneExpr(*v.index);
+        } else if constexpr (std::is_same_v<V, M::Member>) {
+            auto& c = out->node.emplace<M::Member>();
+            c.name = v.name; c.isArrow = v.isArrow;
+            if (v.base) c.base = cloneExpr(*v.base);
+        } else if constexpr (std::is_same_v<V, M::Assign>) {
+            auto& c = out->node.emplace<M::Assign>();
+            c.op = v.op;
+            if (v.lhs) c.lhs = cloneExpr(*v.lhs);
+            if (v.rhs) c.rhs = cloneExpr(*v.rhs);
+        } else if constexpr (std::is_same_v<V, M::New>) {
+            auto& c = out->node.emplace<M::New>();
+            c.type = v.type;
+            for (const auto& a : v.args) c.args.push_back(a ? cloneExpr(*a) : nullptr);
+        } else if constexpr (std::is_same_v<V, M::Delete>) {
+            auto& c = out->node.emplace<M::Delete>();
+            c.isArray = v.isArray;
+            if (v.operand) c.operand = cloneExpr(*v.operand);
+        } else if constexpr (std::is_same_v<V, M::InitList>) {
+            auto& c = out->node.emplace<M::InitList>();
+            for (const auto& el : v.elements) c.elements.push_back(el ? cloneExpr(*el) : nullptr);
+        } else if constexpr (std::is_same_v<V, M::Lambda>) {
+            auto& c = out->node.emplace<M::Lambda>();
+            c.funcName = v.funcName; c.closureType = v.closureType;
+            for (const auto& ci : v.captureInits) c.captureInits.push_back(ci ? cloneExpr(*ci) : nullptr);
+        }
+    }, e.node);
+    return out;
 }
 
 }  // namespace ivy

@@ -36,8 +36,14 @@ struct Lifetime {
 struct Expr {
     struct IntegerLit { long long value; };
     struct FloatLit { double value; };
-    struct StringLit { std::string_view raw; };  // raw, including quotes
-    struct CharLit { std::string_view raw; };
+    struct StringLit {
+        std::string_view raw;     // raw, including quotes
+        std::string decoded;      // decoded bytes (filled by back-fill pass)
+    };
+    struct CharLit {
+        std::string_view raw;
+        long long decoded = 0;    // decoded char value (filled by back-fill pass)
+    };
     struct BoolLit { bool value; };
     struct NullptrLit {};
     struct IdentRef { std::string_view name; };
@@ -46,7 +52,8 @@ struct Expr {
     struct Ternary { std::unique_ptr<Expr> cond, thenBranch, elseBranch; };
     struct Call {
         std::string_view callee;
-        std::string_view returnLifetime;  // lowered [[ivy::lt_ret]] of the target ("" if none)
+        const Function* target = nullptr;  // resolved by back-fill pass
+        std::string_view returnLifetime;   // lowered [[ivy::lt_ret]] of the target ("" if none)
         std::vector<std::unique_ptr<Expr>> args;
     };
     struct Index { std::unique_ptr<Expr> base, index; };

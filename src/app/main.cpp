@@ -14,6 +14,7 @@
 #include "interpret/interpreter.h"
 #include "mir/mir.h"
 #include "mir/mir_builder.h"
+#include "mir/interpreter.h"
 #include "parsing/ast.h"
 #include "parsing/lexer.h"
 #include "parsing/parser.h"
@@ -31,7 +32,7 @@ void printUsage() {
                  "  --hir      print the analyzed HIR (debug)\n"
                  "  --mir      print the lowered MIR with lifetime annotations (debug)\n"
                  "  --llvm     emit LLVM IR to stdout\n"
-                 "  --run      interpret the program via IvyInterpret (no codegen)\n"
+                 "  --run      interpret the program via IvyInterpret v0.2 (MIR-based)\n"
                  "  --target <abi>  set the C++ ABI for name mangling:\n"
                  "               itanium (POSIX) or msvc (Windows)\n"
                  "               (default: auto-detect from host)\n"
@@ -725,21 +726,6 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
 
     if (showHir && hir) dumpHir(*hir, std::cout);
 
-    // --run mode: interpret the HIR directly via IvyInterpret.
-    // No MIR / codegen / native compiler needed.
-    if (doRun && hir) {
-        ivy::interp::Interpreter interp(*hir);
-        ivy::interp::Value result = interp.callMain();
-        for (const auto& d : interp.diagnostics()) {
-            std::cerr << path << ":" << d.line << ":" << d.col
-                      << ": error: " << d.message << "\n";
-        }
-        if (interp.failed()) return 1;
-        // If main returned a non-void exit code, forward it.
-        if (result.isInt()) return static_cast<int>(result.asInt());
-        return 0;
-    }
-
     ivy::MirBuilder mirBuilder(*hir);
     std::unique_ptr<ivy::mir::TranslationUnit> mir = mirBuilder.build();
     for (const ivy::Diagnostic& d : mirBuilder.diagnostics()) {
@@ -749,6 +735,21 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     if (failed) return 1;
 
     if (showMir && mir) dumpMir(*mir, std::cout);
+
+    // --run mode: interpret the MIR directly via IvyInterpret v0.2.
+    // No codegen / native compiler needed.
+    if (doRun && mir) {
+        ivy::mir::Interpreter interp(*mir);
+        ivy::mir::Value result = interp.callMain();
+        for (const auto& d : interp.diagnostics()) {
+            std::cerr << path << ":" << d.line << ":" << d.col
+                      << ": error: " << d.message << "\n";
+        }
+        if (interp.failed()) return 1;
+        // If main returned a non-void exit code, forward it.
+        if (result.isInt()) return static_cast<int>(result.asInt());
+        return 0;
+    }
 
     if (showLlvm && mir) {
         ivy::CodeGen cg(*mir);

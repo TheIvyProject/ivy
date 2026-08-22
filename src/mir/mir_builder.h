@@ -59,7 +59,16 @@ private:
     std::unique_ptr<mir::Expr> buildExpr(const hir::Expr& e);
     void buildStmt(const hir::Stmt& s);
     void checkReturn(const mir::Function& fn, const mir::Lifetime& lt, SourceLoc loc);
+    void checkStore(const mir::Expr& target, const mir::Expr& value, SourceLoc loc);
     void buildFunction(mir::Function& fn, const hir::Function& hf);
+
+    // Post-pass: resolve Call::target pointers and decode string/char literals.
+    void resolveCalls();
+    void decodeLiterals();
+    void walkExpr(mir::Expr& e);  // visitor for back-fill
+
+    // Deep-clone a MIR expression (used for compound-assignment expansion).
+    static std::unique_ptr<mir::Expr> cloneExpr(const mir::Expr& e);
 };
 
 }  // namespace ivy
