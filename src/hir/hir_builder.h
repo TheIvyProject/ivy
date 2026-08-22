@@ -39,6 +39,10 @@ private:
     bool failed_ = false;
 
     std::unordered_map<std::string_view, hir::Function*> functions_;
+    // Template registry: template name → AST Function* (the template definition).
+    // Templates are NOT registered in `functions_` — they are instantiated
+    // on demand when a template-id call is encountered.
+    std::unordered_map<std::string_view, const Function*> templates_;
     std::vector<std::unordered_map<std::string_view, hir::Type>> scopes_;
     int unsafeDepth_ = 0;
     hir::Function* current_ = nullptr;
@@ -169,6 +173,28 @@ private:
     // qualified name string. Returns false if the chain is not a
     // pure `::`-separated identifier path.
     bool flattenMemberChain(const Expr& e, std::string& out) const;
+
+    // --- template instantiation ---
+    // Lookup a template by name (with namespace fallback, like resolveFunction).
+    const Function* lookupTemplate(std::string_view name) const;
+    // Instantiates a template function with concrete type arguments.
+    // `tplFunc` is the AST template definition; `tplArgs` are the
+    // concrete types. Creates a new HIR function with the substituted
+    // signature, builds its body, and returns a pointer to the new
+    // HIR function (registered in `functions_`).
+    // `instantiatedName` is the mangled name (e.g. "add<int>").
+    hir::Function* instantiateTemplate(const Function& tplFunc,
+                                       std::string_view instantiatedName,
+                                       const std::vector<hir::Type>& tplArgs,
+                                       SourceLoc loc);
+    // Substitute a type: if `t.base` matches a template type param name,
+    // replace it with the corresponding concrete type from `mapping`.
+    // Returns the substituted type (or original if no substitution).
+    hir::Type substituteType(const hir::Type& t,
+                             const std::unordered_map<std::string_view, hir::Type>& mapping) const;
+    // Set of already-instantiated template specializations (by mangled
+    // name) to avoid duplicate instantiation.
+    std::unordered_map<std::string_view, hir::Function*> instantiated_;
 };
 
 }  // namespace ivy

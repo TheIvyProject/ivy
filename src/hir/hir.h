@@ -34,6 +34,7 @@ struct Expr {
         std::string_view callee;
         const Function* target = nullptr;  // resolved by the builder
         std::vector<std::unique_ptr<Expr>> args;
+        std::vector<Type> tplArgs;  // explicit template arguments (e.g. `add<int>`)
     };
     struct Index { std::unique_ptr<Expr> base, index; };
     struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; };
@@ -112,6 +113,8 @@ struct Function {
     bool isExternC = false;
     bool isConstexpr = false;
     bool isConsteval = false;
+    bool isTemplate = false;       // true => template function (not instantiated)
+    std::vector<Type> tplArgs;     // for instantiated templates: the concrete args
     SourceLoc loc;
 };
 

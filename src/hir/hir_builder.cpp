@@ -439,6 +439,12 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
 }
 
 void HirBuilder::buildSignature(const Function& af) {
+    // Template definitions are not registered in `functions_` — they are
+    // stored in `templates_` and instantiated on demand.
+    if (!af.tplParams.empty()) {
+        templates_[af.name] = &af;
+        return;
+    }
     auto fn = std::make_unique<hir::Function>();
     fn->name = af.name;
     fn->namespacePrefix = af.namespacePrefix;
@@ -1116,17 +1122,35 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         const A::Call& v = std::get<A::Call>(n);
         auto& call = out->node.emplace<hir::Expr::Call>();
         const Expr* callee = v.callee.get();
+        // Copy template args (AST Type → HIR Type, same struct).
+        for (const auto& ta : v.tplArgs) call.tplArgs.push_back(ta);
         // Bare name call: `func(args)` — resolve with namespace fallback.
         if (std::holds_alternative<A::IdentRef>(callee->node)) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
-            call.target = resolveFunction(bareName);
-            if (call.target) {
-                // Use the resolved function's qualified name so codegen
-                // emits the correct (mangled) symbol.
-                call.callee = call.target->name;
+            // Template-id call: `func<T>(args)` — instantiate template.
+            if (!call.tplArgs.empty()) {
+                const Function* tplFunc = lookupTemplate(bareName);
+                if (tplFunc) {
+                    call.target = instantiateTemplate(*tplFunc, bareName,
+                                                      call.tplArgs, e.loc);
+                    if (call.target) {
+                        call.callee = call.target->name;
+                    } else {
+                        call.callee = bareName;
+                        error(e.loc, "failed to instantiate template '" + std::string(bareName) + "'");
+                    }
+                } else {
+                    call.callee = bareName;
+                    error(e.loc, "'" + std::string(bareName) + "' is not a template");
+                }
             } else {
-                call.callee = bareName;
-                error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                call.target = resolveFunction(bareName);
+                if (call.target) {
+                    call.callee = call.target->name;
+                } else {
+                    call.callee = bareName;
+                    error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                }
             }
         } else if (std::holds_alternative<A::Member>(callee->node)) {
             // Qualified call: `ns::func(args)` — flatten the `::` chain.
@@ -1684,7 +1708,7 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     for (const StructDecl& sd : ast_.structs) buildStruct(sd);
     for (const Function& af : ast_.functions) buildSignature(af);
     for (const Function& af : ast_.functions) {
-        if (af.body) {
+        if (af.body && af.tplParams.empty()) {
             hir::Function* fn = functions_[af.name];
             if (fn) {
                 currentNsPrefix_ = af.namespacePrefix;
@@ -2032,6 +2056,126 @@ bool HirBuilder::tryEvalConstexprCall(hir::Expr& out, const hir::Expr::Call& cal
         out.node = hir::Expr::FloatLit{result.f};
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+//                      template instantiation
+// ---------------------------------------------------------------------------
+
+const Function* HirBuilder::lookupTemplate(std::string_view name) const {
+    auto it = templates_.find(name);
+    if (it != templates_.end()) return it->second;
+    // Try with namespace prefix.
+    if (!currentNsPrefix_.empty()) {
+        std::string qualified;
+        qualified.reserve(currentNsPrefix_.size() + name.size());
+        qualified += currentNsPrefix_;
+        qualified += name;
+        auto it2 = templates_.find(qualified);
+        if (it2 != templates_.end()) return it2->second;
+    }
+    return nullptr;
+}
+
+hir::Type HirBuilder::substituteType(const hir::Type& t,
+    const std::unordered_map<std::string_view, hir::Type>& mapping) const {
+    auto it = mapping.find(t.base);
+    if (it != mapping.end()) {
+        hir::Type sub = it->second;
+        // Preserve pointer/reference modifiers from the original type.
+        sub.pointerDepth = t.pointerDepth;
+        sub.isReference = t.isReference;
+        sub.isConst = t.isConst;
+        return sub;
+    }
+    return t;
+}
+
+hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
+                                               std::string_view instantiatedName,
+                                               const std::vector<hir::Type>& tplArgs,
+                                               SourceLoc loc) {
+    // Build the mangled specialization name: "add<int>" → store in stringStorage_.
+    // We'll use a simple mangling: name + "<" + arg1 + "," + arg2 + ">"
+    std::string mangled;
+    mangled += std::string(tplFunc.name);
+    mangled += "<";
+    for (std::size_t i = 0; i < tplArgs.size(); ++i) {
+        if (i > 0) mangled += ",";
+        // Use the base type name (simplified).
+        std::string arg;
+        arg += std::string(tplArgs[i].base);
+        if (tplArgs[i].isUnsigned) arg += " unsigned";
+        if (tplArgs[i].isConst) arg += " const";
+        for (std::uint32_t d = 0; d < tplArgs[i].pointerDepth; ++d) arg += "*";
+        mangled += arg;
+    }
+    mangled += ">";
+
+    // Check if already instantiated.
+    auto it = instantiated_.find(mangled);
+    if (it != instantiated_.end()) return it->second;
+
+    // Build type mapping: template param name → concrete type.
+    std::unordered_map<std::string_view, hir::Type> mapping;
+    for (std::size_t i = 0; i < tplFunc.tplParams.size() && i < tplArgs.size(); ++i) {
+        if (tplFunc.tplParams[i].isTypename) {
+            mapping[tplFunc.tplParams[i].name] = tplArgs[i];
+        }
+    }
+
+    // Create the HIR function with substituted signature.
+    auto fn = std::make_unique<hir::Function>();
+    fn->isTemplate = true;
+    fn->tplArgs = tplArgs;
+    fn->isExternC = tplFunc.isExternC;
+    fn->isConstexpr = tplFunc.isConstexpr;
+    fn->isConsteval = tplFunc.isConsteval;
+    fn->loc = loc;
+    fn->namespacePrefix = tplFunc.namespacePrefix;
+
+    // Substitute return type.
+    fn->returnType = substituteType(tplFunc.returnType, mapping);
+
+    // Store the mangled name in stable storage.
+    stringStorage_.push_back(std::move(mangled));
+    fn->name = stringStorage_.back();
+
+    // Substitute param types.
+    for (const Param& ap : tplFunc.params) {
+        hir::Param p;
+        p.type = substituteType(ap.type, mapping);
+        p.name = ap.name;
+        p.loc = ap.loc;
+        fn->params.push_back(std::move(p));
+    }
+
+    // Register the function before building the body (so recursive
+    // calls can resolve it).
+    hir::Function* raw = fn.get();
+    hir_->functions.push_back(std::move(fn));
+    functions_[raw->name] = raw;
+    instantiated_[raw->name] = raw;
+
+    // Build the body using the same mechanism as buildBody, but on the
+    // cloned AST body (so we own a mutable copy). The HIR builder will
+    // resolve names against the already-declared params and the
+    // substituted types in `raw->params`.
+    if (tplFunc.body) {
+        // Clone the AST body: tplFunc.body is a unique_ptr<Stmt::Compound>.
+        // We build a new Compound by cloning each statement individually.
+        Stmt::Compound clonedCompound;
+        for (const auto& st : tplFunc.body->stmts) {
+            clonedCompound.stmts.push_back(cloneStmt(*st));
+        }
+        // Save/restore namespace prefix so bare-name resolution works.
+        std::string_view savedNs = currentNsPrefix_;
+        currentNsPrefix_ = raw->namespacePrefix;
+        buildBody(*raw, clonedCompound);
+        currentNsPrefix_ = savedNs;
+    }
+
+    return raw;
 }
 
 }  // namespace ivy

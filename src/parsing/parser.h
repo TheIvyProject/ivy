@@ -73,6 +73,11 @@ private:
     // qualified names (e.g. `ns::Point`).
     std::vector<std::string_view> structNames_;
 
+    // Names of template type parameters in the current template declaration
+    // (e.g. `T`, `U`). Used by isTypeStart()/parseType() to accept them as
+    // types. Cleared after each template function is parsed.
+    std::vector<std::string_view> templateParamNames_;
+
     // --- token helpers ---
     const Token& peek(std::size_t n = 0) const {
         static const Token eof{TokenKind::EndOfFile, "", 0, 0};
@@ -115,9 +120,16 @@ private:
     void parseEnum(TranslationUnit& tu, SourceLoc loc);
     void parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass);
     void parseExternC(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs);
+    void parseTemplate(TranslationUnit& tu, SourceLoc loc);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
-                       bool isExternC, bool isConstexpr = false, bool isConsteval = false);
+                       bool isExternC, bool isConstexpr = false, bool isConsteval = false,
+                       std::vector<TemplateParam> tplParams = {});
     std::vector<Param> parseParams();
+    // Parse template parameter list: `<typename T, int N, ...>` (after `<`).
+    std::vector<TemplateParam> parseTemplateParams();
+    // Parse explicit template arguments: `<int, double, ...>` (after `<`).
+    // Returns parsed types; empty if none.
+    std::vector<Type> parseTemplateArgs();
 
     // Builds a qualified name from the current namespace stack + `name`.
     // If the stack is empty, returns `name` as-is (a view into the token

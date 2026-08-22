@@ -39,6 +39,16 @@ struct Param {
     SourceLoc loc;
 };
 
+// A template parameter: `typename T` (type) or `int N` / `long long N` (non-type).
+// For non-type parameters, `type` holds the integer type and `name` is the
+// parameter name. `isTypename` distinguishes the two kinds.
+struct TemplateParam {
+    bool isTypename = true;   // true => `typename T`, false => `int N` etc.
+    Type type;                // for non-type: the integer type
+    std::string_view name;    // parameter name (T, N, ...)
+    SourceLoc loc;
+};
+
 struct Expr {
     struct IntegerLit { long long value; };
     struct FloatLit { double value; };
@@ -50,7 +60,7 @@ struct Expr {
     struct Unary { std::string_view op; bool isPrefix; std::unique_ptr<Expr> operand; };
     struct Binary { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
     struct Ternary { std::unique_ptr<Expr> cond, thenBranch, elseBranch; };
-    struct Call { std::unique_ptr<Expr> callee; std::vector<std::unique_ptr<Expr>> args; };
+    struct Call { std::unique_ptr<Expr> callee; std::vector<std::unique_ptr<Expr>> args; std::vector<Type> tplArgs; };
     struct Index { std::unique_ptr<Expr> base, index; };
     struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; };
     struct Assign { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
@@ -99,7 +109,7 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 v.thenBranch ? cloneExpr(*v.thenBranch) : nullptr,
                 v.elseBranch ? cloneExpr(*v.elseBranch) : nullptr});
         } else if constexpr (std::is_same_v<V, Expr::Call>) {
-            Expr::Call c{v.callee ? cloneExpr(*v.callee) : nullptr, {}};
+            Expr::Call c{v.callee ? cloneExpr(*v.callee) : nullptr, {}, v.tplArgs};
             for (const auto& a : v.args) c.args.push_back(cloneExpr(*a));
             out->node.emplace<Expr::Call>(std::move(c));
         } else if constexpr (std::is_same_v<V, Expr::Index>) {
@@ -224,6 +234,7 @@ struct Function {
     std::string_view name;          // qualified name (e.g. "ns::func")
     std::string_view namespacePrefix;  // "ns1::ns2::" or "" for global scope
     std::vector<Param> params;
+    std::vector<TemplateParam> tplParams;  // non-empty => template function
     std::unique_ptr<Stmt::Compound> body;  // null => declaration only
     bool isExternC = false;
     bool isConstexpr = false;   // `constexpr` function / variable

@@ -78,7 +78,7 @@ constexpr struct {
     {"struct", ""},  // structs ARE supported (P4.4) — handled in parseTopLevel
     {"union", "unions are not supported in the Ivy subset"},
     {"enum", ""},  // enums ARE supported (P4.1) — handled in parseTopLevel
-    {"template", "templates are not supported in the Ivy subset"},
+    {"template", ""},  // templates ARE supported (P4.8) — handled in parseTopLevel
     {"namespace", ""},  // namespaces ARE supported (P4.2) — handled in parseTopLevel
     {"constexpr", ""},   // constexpr IS supported — handled in parseTopLevel
     {"consteval", ""},   // consteval IS supported — handled in parseTopLevel
@@ -246,6 +246,10 @@ bool Parser::isTypeStart() const {
         for (const auto& sn : structNames_) {
             if (sn == id) return true;
         }
+        // Template type parameters (e.g. `T`)
+        for (const auto& tn : templateParamNames_) {
+            if (tn == id) return true;
+        }
         // Qualified name: `ns::Struct` — peek ahead for `::`.
         if (peek(1).kind == TokenKind::ColonColon) {
             // Build the qualified name and check against struct/enum names.
@@ -356,6 +360,12 @@ Type Parser::parseType() {
         if (!isUserType) {
             for (const auto& sn : structNames_) {
                 if (sn == peek().lexeme) { isUserType = true; break; }
+            }
+        }
+        // Template type parameter (e.g. `T`)
+        if (!isUserType) {
+            for (const auto& tn : templateParamNames_) {
+                if (tn == peek().lexeme) { isUserType = true; break; }
             }
         }
         if (isUserType) {
@@ -540,6 +550,13 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
             continue;
         }
 
+        // `template` — parse template declaration: `template <typename T> ret name(...) { ... }`
+        if (atKeyword("template")) {
+            const SourceLoc loc = locOf(peek());
+            parseTemplate(tu, loc);
+            continue;
+        }
+
         // `constexpr` / `consteval` — consume and fall through to
         // parseFunction (with the flags).  This lets Ivy support
         // compile-time evaluation without a separate dispatch path.
@@ -674,6 +691,12 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
         if (atKeyword("namespace")) {
             const SourceLoc eloc = locOf(peek());
             parseNamespace(tu, eloc);
+            continue;
+        }
+        // `template` inside namespace
+        if (atKeyword("template")) {
+            const SourceLoc tloc = locOf(peek());
+            parseTemplate(tu, tloc);
             continue;
         }
         // `constexpr` / `consteval` inside namespace
@@ -871,8 +894,94 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
     tu.structs.push_back(std::move(sd));
 }
 
+// Parse a template parameter list: `typename T, int N, typename U, ...`.
+// The leading `<` has NOT been consumed yet.
+std::vector<TemplateParam> Parser::parseTemplateParams() {
+    std::vector<TemplateParam> params;
+    expect(TokenKind::Lt, "expected '<' to start template parameter list");
+    while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+        TemplateParam tp;
+        tp.loc = locOf(peek());
+        if (atKeyword("typename") || atKeyword("class")) {
+            next();  // consume `typename` / `class`
+            tp.isTypename = true;
+        } else if (isTypeStart()) {
+            // Non-type template parameter: `int N`, `long long N`, ...
+            tp.isTypename = false;
+            tp.type = parseType();
+        } else {
+            errorAt(peek(), "expected 'typename' or a type in template parameter list");
+            synchronize();
+            break;
+        }
+        // Parameter name
+        if (at(TokenKind::Identifier)) {
+            tp.name = next().lexeme;
+        } else {
+            errorAt(peek(), "expected template parameter name");
+            synchronize();
+            break;
+        }
+        params.push_back(std::move(tp));
+        if (at(TokenKind::Comma)) {
+            next();
+        } else {
+            break;
+        }
+    }
+    expect(TokenKind::Gt, "expected '>' to close template parameter list");
+    return params;
+}
+
+// Parse explicit template arguments: `int, double, ...` (after `<`).
+std::vector<Type> Parser::parseTemplateArgs() {
+    std::vector<Type> args;
+    while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+        if (!isTypeStart()) {
+            errorAt(peek(), "expected a type in template argument list");
+            synchronize();
+            break;
+        }
+        args.push_back(parseType());
+        if (at(TokenKind::Comma)) {
+            next();
+        } else {
+            break;
+        }
+    }
+    expect(TokenKind::Gt, "expected '>' to close template argument list");
+    return args;
+}
+
+// `template <typename T, ...> ret name(params) { body }`  or  `template <> ret name(params) { body }` (explicit specialization)
+void Parser::parseTemplate(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("template", "expected 'template'");
+    std::vector<TemplateParam> tplParams = parseTemplateParams();
+    // Register template type parameter names so parseType() accepts them
+    // in the function signature and body. We save/restore so nested
+    // templates (unlikely but possible) work correctly.
+    std::size_t savedCount = templateParamNames_.size();
+    for (const auto& tp : tplParams) {
+        if (tp.isTypename)
+            templateParamNames_.push_back(tp.name);
+    }
+    // Optional constexpr/consteval before the return type.
+    bool isConstexpr = false, isConsteval = false;
+    if (atKeyword("constexpr") || atKeyword("consteval")) {
+        ConstexprSpec spec = parseConstexprSpec();
+        isConstexpr = spec.isConstexpr;
+        isConsteval = spec.isConsteval;
+    }
+    std::vector<Attribute> attrs = parseAttributeList();
+    parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                  isConstexpr, isConsteval, std::move(tplParams));
+    // Restore: remove the names we added (keep any from outer templates).
+    templateParamNames_.resize(savedCount);
+}
+
 void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
-                           bool isExternC, bool isConstexpr, bool isConsteval) {
+                           bool isExternC, bool isConstexpr, bool isConsteval,
+                           std::vector<TemplateParam> tplParams) {
     Type returnType = parseType();
     if (returnType.base.empty()) {
         // parseType already reported the error; recover at statement-ish boundary.
@@ -903,6 +1012,7 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     fn.name = name;
     fn.namespacePrefix = currentNamespacePrefix();
     fn.params = std::move(params);
+    fn.tplParams = std::move(tplParams);
     fn.isExternC = isExternC;
     fn.isConstexpr = isConstexpr;
     fn.isConsteval = isConsteval;
@@ -1269,6 +1379,59 @@ std::unique_ptr<Expr> Parser::parsePostfix(std::unique_ptr<Expr> lhs) {
             }
             expect(TokenKind::RParen, "expected ')' to close call");
             lhs = makeExpr<Expr::Call>(loc, std::move(lhs), std::move(args));
+        } else if (at(TokenKind::Lt)) {
+            // Potential explicit template args: `func<int>(args)`.
+            // We try to parse `<type, ...> ` followed by `(`.
+            // If it doesn't match, backtrack and let `<` be comparison.
+            // Heuristic: only attempt if the token after `<` looks like a type.
+            // This avoids mis-parsing `a < b` as a template-id.
+            std::size_t savePos = pos_;
+            // Peek past `<`: is it a type-start?
+            // We need a temporary lookahead: skip `<`, check isTypeStart.
+            // But isTypeStart() checks peek(), so we temporarily advance.
+            ++pos_;  // consume `<` tentatively
+            if (isTypeStart()) {
+                std::vector<Type> tplArgs;
+                bool ok = true;
+                while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+                    if (!isTypeStart()) { ok = false; break; }
+                    tplArgs.push_back(parseType());
+                    if (at(TokenKind::Comma)) {
+                        next();
+                    } else {
+                        break;
+                    }
+                }
+                if (ok && at(TokenKind::Gt)) {
+                    next();  // consume `>`
+                    if (at(TokenKind::LParen)) {
+                        // This is a template-id call: `func<T>(args)`.
+                        // Attach tplArgs to the callee IdentRef by
+                        // wrapping in a Call with tplArgs set.
+                        // We need to build: Call{callee=lhs, args=..., tplArgs=...}
+                        // But we haven't parsed args yet — the `(` below handles it.
+                        // So we stash tplArgs and fall through to the LParen case.
+                        // To do this cleanly, we build the Call now:
+                        next();  // consume `(`
+                        std::vector<std::unique_ptr<Expr>> args;
+                        while (!at(TokenKind::RParen) && !at(TokenKind::EndOfFile)) {
+                            args.push_back(parseExpr());
+                            if (!at(TokenKind::RParen)) {
+                                expect(TokenKind::Comma, "expected ',' between call arguments");
+                                if (at(TokenKind::RParen)) break;
+                            }
+                        }
+                        expect(TokenKind::RParen, "expected ')' to close call");
+                        lhs = makeExpr<Expr::Call>(loc, std::move(lhs),
+                                                   std::move(args), std::move(tplArgs));
+                        continue;  // don't fall through
+                    }
+                }
+                // Not a template-id — backtrack.
+            }
+            // Backtrack: restore pos_ so `<` becomes comparison.
+            pos_ = savePos;
+            break;  // let parseBinary handle `<`
         } else if (at(TokenKind::LBracket)) {  // index
             next();
             std::unique_ptr<Expr> index = parseExpr();
