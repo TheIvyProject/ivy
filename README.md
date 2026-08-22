@@ -44,7 +44,7 @@ But Ivy does **not** compile by delegating to a C++ compiler. `ivyc` compiles C+
 ## Compilation Pipeline
 
 ```
-.cpp / .cxx / .cc
+.ivy / .cpp / .cxx / .cc
       │
       ▼
 ┌──────────┐
@@ -126,34 +126,28 @@ Raw memory management is invisible outside `[[ivy::unsafe]]` blocks. Any `malloc
 
 ## IvyInterpret
 
-**IvyInterpret** is a self-contained tree-walking interpreter that executes Ivy programs directly from HIR — no MIR, LLVM IR, or native code generation required. It is an independent module (`src/interpret/`) that depends only on the HIR data structures and the C++ standard library.
+**IvyInterpret** is ivyc's built-in interpreter for running programs without native code generation. It exists in two versions:
+
+- **v0.1** (`src/interpret/`) — the original HIR tree-walking interpreter. Kept as a fast-feedback path; no safety guarantees beyond HIR type checking.
+- **v0.2** (`src/mir/interpreter.*`) — MIR-based interpreter, the engine behind `--run`. It consumes fully type-checked *and* lifetime-checked MIR, so every compile-time safety guarantee carries over, and it adds runtime checks (null dereference, use-after-free) through a pluggable `Machine` hook. Built-ins available: `printf`, `puts`, `putchar`, `exit`, `abort`, `malloc`, `free`.
 
 ### Usage
 
 ```
-ivyc --run source.cpp
+ivyc --run source.ivy
 ```
 
-The `--run` flag tells `ivyc` to build HIR and then hand it to the interpreter instead of continuing down the MIR → LLVM IR pipeline. The interpreter calls `main()` and returns its exit code. Diagnostics (if any) are printed to `stderr`.
+The `--run` flag runs the full pipeline Lexer → Preprocessor → Parser → HIR → MIR, then hands the MIR translation unit to IvyInterpret v0.2 instead of emitting LLVM IR. The interpreter calls `main()` and returns its exit code. Runtime errors are printed to `stderr`.
 
 ### What it supports
 
-- **Functions**: user-defined functions, recursion, `extern "C"` built-ins (`printf`, `puts`, `putchar`, `exit`, `abort`).
-- **Types**: integers, floating-point, booleans, strings, pointers, structs (including nested structs and struct copy).
-- **Expressions**: integer/float/bool/string/char/nullptr literals, identifiers, unary (`+ - ! ~ & * ++ --`), binary (arithmetic, comparison, logical short-circuit, bitwise, shift), ternary, assignment (simple + compound), member access (`.` and `->`), aggregate init lists, function calls.
-- **Statements**: declarations, `if`/`else`, `while`, `do-while`, `for`, `return`, `break`, `continue`, expression statements, `[[ivy::unsafe]]` blocks.
-- **Structs**: aggregate initialization (`Point p = {1, 2}`), partial init (`Vec3 v = {100}` → `{100, 0, 0}`), empty init (`Vec3 v = {}`), default construction (`Point p;`), member assignment (`p.x = 10`), nested struct access (`line.start.x`), pointer-to-struct arrow (`pp->x`), struct copy assignment.
-- **Lambdas**: no-capture, by-value capture (`[x]`), by-reference capture (`[&x]`). Closures are represented as runtime struct values; capture fields are initialized from the closure struct definition in the HIR translation unit.
-
-### Runtime value model
-
-The interpreter uses a tagged-union `Value` type (`src/interpret/value.h`) with variants for `Void`, `Int`, `Float`, `Str`, `Struct`, and `Ptr`. A `Cell` (`shared_ptr<Value>`) provides heap allocation with shared ownership so that references and pointers alias the same storage. Control flow is managed via a `Signal` variant (`Return`/`Break`/`Continue`) returned from statement execution. Function call frames are `unordered_map<string, Cell>` stacks.
+Because it executes MIR, IvyInterpret v0.2 supports everything the language currently covers: functions and recursion, structs (nested access, aggregate init, copy assignment), enums, namespaces (qualified calls), lambdas with captures, control flow (`if`/`while`/`do-while`/`for`/`break`/`continue`), pointers/references, `extern "C"` built-ins, and constexpr-folded code paths.
 
 ### Design goals
 
-- **Independent**: `IvyInterpret` depends only on HIR — it does not touch parsing, MIR, or codegen. This makes it usable for REPL, testing, and `constexpr`/`consteval` evaluation in the future.
-- **Fast feedback**: `--run` lets you execute Ivy code immediately without a native compiler, useful for quick experiments and CI smoke tests.
-- **Foundation for `constexpr`**: per the roadmap, `constexpr`/`consteval` evaluation will be built on top of IvyInterpret.
+- **Independent**: depends only on `mir/` data structures — not on parsing or codegen internals.
+- **Safe by default**: inherits all MIR-level lifetime checks; runtime safety policy is injected via the `Machine` trait, keeping the core interpreter decoupled from safety logic.
+- **Foundation for tooling**: intended host for future REPL support and build tooling.
 
 ## Restrictions (The Subset)
 
@@ -164,7 +158,7 @@ The interpreter uses a tagged-union `Value` type (`src/interpret/value.h`) with 
 - `malloc`/`free`/`new`/`delete` outside `[[ivy::unsafe]]`,
 - returning a pointer whose lifetime is not tied to a parameter or to `[[ivy::lt_def]]` lifetimes,
 - uninitialized variables and implicit `void*` conversions,
-- language features outside the subset's grammar (templates, exceptions, and other features are either excluded or restricted — decided per feature).
+- language features outside the subset's grammar (exceptions are banned outright; other features such as `switch`, `goto`, operator overloading, inheritance, and C-style casts are excluded or restricted — decided per feature).
 
 ### Supported features
 
@@ -175,6 +169,9 @@ The interpreter uses a tagged-union `Value` type (`src/interpret/value.h`) with 
 - **Name mangling** (P4.3): C++ symbol names are mangled according to the target platform's ABI — Itanium ABI (`_Z` prefix, `N...E` nested names, type codes) for POSIX, MSVC ABI (`?` prefix, `@`-separated scopes, type codes, `@Z` terminator) for Windows. The ABI is auto-detected from the host platform or overridden via `--target itanium|msvc`. Scoped enums (`enum class`) are mangled as nested types; unscoped enums collapse to their underlying integer type.
 - **Structs / classes** (P4.4): `struct` and `class` aggregate types with field layout (sequential offsets, natural alignment, struct size rounded up to max alignment per C ABI). Member access via `.` (struct lvalue → GEP) and `->` (pointer-to-struct → load pointer then GEP). Nested struct member access (GEP chaining), namespace-qualified struct types (`ns::Struct`), struct copy assignment (LLVM aggregate load/store), zero-initialization for struct variables without explicit initializers. Named LLVM struct types (`%struct.Name = type { ... }`) emitted before function definitions. Access specifiers (`public:`/`private:`/`protected:`) are parsed and ignored (all members are public in Ivy). Variadic parameters (`...`) are accepted in `extern "C"` declarations (e.g. `printf`). `main` is never mangled to preserve the C ABI entry point. Aggregate initialization `{ }` (basic/partial/empty) and struct reassignment with init lists are supported. Default member initializers (`int x = 42;` in the struct body) are applied when a struct variable is declared without an explicit initializer and for trailing fields in partial aggregate init lists; fields without a default are zero-initialized.
 - **Lambdas** (P4.5): lambda expressions `[caps](params) -> ret { body }` in primary expressions. Capture modes: `[x]` (by value), `[&x]` (by reference), `[]` (no captures). Each lambda is lowered to a closure struct type (`__lambdaN_closure`) + a call-operator function (`__lambdaN(closure_ptr, params...)`). Captured variables are injected as local declarations at the top of the body (`T cap = __closure->cap` for by-value; `T& cap = *(__closure->cap)` for by-reference) under an implicit unsafe scope so the compiler-generated closure access is always safe while user code in the body is still checked normally. Calling a lambda (`lambda_expr(args)`) passes `&closure` as the implicit first argument. Return type deduction from the first `return` statement when `-> ret` is omitted.
+- **constexpr / consteval** (P4.7): `constexpr` and `consteval` function declarations are evaluated at compile time by the HIR builder — call sites with constant arguments fold to literal values during HIR construction. `consteval` functions are never emitted to LLVM IR (they exist only at compile time).
+- **Function templates** (P4.8): `template <typename T> T add(T a, T b)` declarations with explicit instantiation at the call site (`add<int>(3, 4)`). The template body AST is cloned and type-substituted (`T → int`) into a concrete HIR function registered under a mangled name (`add<int>`); duplicate instantiations are deduplicated. MIR and codegen need no special handling — instantiated functions are ordinary concrete functions.
+- **Exceptions are banned** (P4.9): `try`, `catch`, and `throw` are rejected outright as compile errors, per the safety philosophy. Error handling is via return codes today; `Result<T>`-style types are planned.
 - **Control flow**: `if`/`else`, `while`, `do-while`, `for`, `break`, `continue`, `return`, ternary `?:`.
 - **Operators**: arithmetic, comparison, logical, bitwise, assignment, compound assignment.
 - **Preprocessor**: `#define` (object-like, function-like, variadic), `#include`, `#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif` with constant-expression evaluation, `#undef`, `#pragma ivy cnumber`, predefined macros (`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__cplusplus`).
@@ -190,14 +187,22 @@ Each forbidden construct is either rejected outright or requires an explicit `[[
 - [x] HIR: type checking, attribute lowering
 - [x] MIR: CFG construction, lifetime checker, `[[ivy::unsafe]]` enforcement
 - [x] LLVM IR emission (LLVM infrastructure)
-- [x] IvyInterpret: tree-walking interpreter consuming HIR; `--run` flag for immediate execution
-- [ ] `constexpr`/`consteval` evaluation via IvyInterpret
-- [ ] IvyMake: C++-based build configuration system (replace CMake)
+- [x] IvyInterpret: `--run` immediate execution — v0.1 (HIR fast path) and v0.2 (MIR-based, safety guarantees)
+- [x] constexpr/consteval: compile-time call folding in the HIR builder; consteval functions skipped in codegen
+- [x] Function templates: explicit instantiation (`func<int>(args)`)
+- [x] `.ivy` source file extension (canonical) + legacy `.cpp/.cc/.cxx/.c` migration
+- [ ] Basic gaps: `switch`/`case`, `auto` deduction, array types `T[N]`, global variables
+- [ ] Class model: member functions, constructors/destructors (RAII)
+- [ ] Function overloading + default arguments
+- [ ] Template classes, template argument deduction
+- [ ] IvyMake: Ivy-based build configuration system (replace CMake)
 - [ ] Test suite: safe programs compile clean, unsafe programs are rejected
+
+The full multi-phase plan (phases 6–10, up to full independence from C++ and self-hosting) lives in [PLAN.md](PLAN.md).
 
 ## Status
 
-In active development. The core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the initial subset, and **IvyInterpret** provides immediate execution via `--run`. Work continues on `constexpr`/`consteval` evaluation and IvyMake.
+In active development. The core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the current subset, **IvyInterpret v0.2** provides safe immediate execution via `--run`, and constexpr/consteval plus function templates are working end-to-end. Work continues on closing the basic C++ gaps listed in the roadmap.
 
 # License
 [Apache License 2.0](LICENSE)

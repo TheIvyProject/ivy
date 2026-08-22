@@ -1,7 +1,7 @@
 # Kế hoạch phát triển Ivy
 
 - **Trạng thái**: Active — triển khai
-- **Ngày**: 2026-08-17
+- **Cập nhật**: 2026-08-22
 - **Người tạo**: User + AI
 
 ---
@@ -9,282 +9,212 @@
 ## Mục tiêu
 
 Xây dựng trình biên dịch `ivyc` — C++ subset an toàn (Ivy), pipeline:
+
 ```
-Lexer → Parser → HIR → MIR → LLVM IR
+Lexer → Preprocessor → Parser → HIR → MIR → LLVM IR
+                              ↘ IvyInterpret (MIR-based, --run)
+```
+
+Triết lý: Ivy là **subset an toàn** của C++ — giữ cú pháp quen thuộc, loại bỏ
+các tính năng nguy hiểm (exception, goto, union, asm, RTTI). An toàn được đảm
+bảo bằng lifetime checking ở tầng MIR và `[[ivy::unsafe]]` scope.
+
+Đích đến dài hạn: đi cùng con đường mà C++ từng đi từ C ("C with Classes" →
+ngôn ngữ độc lập) — Ivy bắt đầu là subset của C++, rồi dần tách ra thành
+**ngôn ngữ Ivy độc lập** (Giai đoạn 10).
+
+---
+
+## Hiện trạng tổng quan (2026-08-22)
+
+### Thành phần đã hoàn thành
+
+| # | Thành phần | Trạng thái | Ghi chú |
+|---|-----------|-----------|---------|
+| 1 | `parsing/lexer` | ✅ | Token stream; decimal/hex/octal/binary int, digit separator, raw string `R"(...)"`, char escape đầy đủ |
+| 2 | `parsing/preprocessor` | ✅ | `#include`, `#define` (object/function-like/variadic), `#ifdef/#ifndef/#else/#endif/#undef`, `#if/#elif`, predefined macros, `#pragma ivy cnumber` |
+| 3 | `parsing/parser` | ✅ | AST đầy đủ cho subset; template declaration + template-id call với backtracking |
+| 4 | `hir/hir_builder` | ✅ | Type check, name resolution (namespace), constexpr folding, template instantiation |
+| 5 | `mir/mir_builder` | ✅ | CFG lowering, lifetime annotation |
+| 6 | `mir/interpreter` | ✅ | IvyInterpret v0.2 — MIR-based, safety guarantee (`--run`) |
+| 7 | `codegen/codegen` | ✅ | LLVM IR emitter; Itanium/MSVC ABI mangling |
+| 8 | `app/main.cpp` | ✅ | CLI; nhận `.ivy` (canonical) + `.cpp/.cc/.cxx/.c` (legacy migration); warning extension lạ |
+
+### CLI
+
+```
+usage: ivyc [options] <file.ivy|file.cpp>
+
+Source files:
+  .ivy        Ivy source (the safe C++ subset)
+  .cpp/.cc/.cxx/.c  Legacy C/C++ source (migration)
+
+options:
+  --tokens/--ast/--hir/--mir   dump IR trung gian (debug)
+  --llvm     emit LLVM IR ra stdout
+  --run      thông dịch qua IvyInterpret v0.2
+  --target <itanium|msvc>      chọn ABI mangling
+  -o file    .ll -> LLVM IR, .i/.ii -> source sau tiền xử lý
+  -I dir     thêm đường dẫn #include <...>
 ```
 
 ---
 
-## Kế hoạch
+## Ma trận tính năng ngôn ngữ
 
-### Giai đoạn 1 — Hoàn thành (codegen + test)
+### ✅ Đã hỗ trợ
 
-| # | Task | Trạng thái | Ghi chú |
-|---|------|-----------|---------|
-| 1 | `lexer.h/cpp` | ✅ | Token stream |
-| 2 | `parser.h/cpp` | ✅ | AST |
-| 3 | `hir.h/cpp` | ✅ | Type-checked IR |
-| 4 | `hir_builder.h/cpp` | ✅ | Build HIR |
-| 5 | `mir.h/cpp` | ✅ | MIR (CFG) |
-| 6 | `mir_builder.h/cpp` | ✅ | Build MIR |
-| 7 | `codegen.h/cpp` | ✅ | LLVM IR emitter |
-| 8 | `main.cpp` | ✅ | CLI (--llvm -o); nhận `.ivy` (Ivy source) + `.cpp/.cc/.cxx/.c` (legacy migration) |
-| 9 | `CMakeLists.txt` | ✅ | C++23 |
-| 10 | `examples/demo.cpp` | ✅ | Test pass |
+| Nhóm | Tính năng |
+|------|-----------|
+| **Types** | Fixed-width `int8_t..int64_t`, `uint8_t..uint64_t`, `float16_t..float128_t`, `bfloat16_t`, `size_t`, `ptrdiff_t`, `nullptr_t`; `bool`, `void`; pointer đa cấp `T*`, reference `T&`/`const T&`; const qualifier |
+| **C-style types** | `int`, `long`, `float`, `double`, `char`, `unsigned`... — chỉ khi có `#pragma ivy cnumber` |
+| **Declarations** | function, biến local, struct/class (aggregate), enum/enum class (+ underlying type), namespace (lồng), `extern "C"`, template function, constexpr/consteval function |
+| **Statements** | if/else, while, do-while, for (C-style), break, continue, return, compound, `[[ivy::unsafe]] { }` |
+| **Expressions** | mọi literal (int dec/hex/oct/bin + suffix, float, string, char, bool, nullptr); binary đầy đủ precedence; unary prefix/postfix; ternary; assignment đầy đủ; call (+ template-id); member `.`/`->`; scope `::`; subscript `[]`; lambda `[x, &y](...)`; braced init `{ }`; new/delete (chỉ trong unsafe) |
+| **Struct** | member layout, GEP access, aggregate init `{}` (basic/partial/empty), default member initializer, copy assignment |
+| **Lambda** | capture by-value/by-ref/no-capture, closure struct + call-operator codegen |
+| **Enum** | unscoped/scoped, constant-expression values, `Enum::Value`, explicit underlying type |
+| **Namespace** | lồng nhau, qualified lookup, mangling `::` → `.` |
+| **Mangling** | Itanium ABI (`_Z...`) + MSVC ABI (`?...@Z`), auto-detect host, enum encoding |
+| **Preprocessor** | include expansion, macro object/function-like/variadic, conditional compilation, `#if EXPR` evaluator đầy đủ, `__LINE__/__FILE__/__DATE__/__TIME__/__cplusplus` |
+| **Constexpr** | `constexpr`/`consteval` function, compile-time call folding, consteval skip codegen |
+| **Template** | function template `template <typename T>`, explicit instantiation `func<int>(args)`, dedup instantiation, mangled name |
+| **Interpreter** | `--run` trên MIR, builtins: printf/puts/putchar/exit/abort/malloc/free |
 
-### Giai đoạn 2 — Spec viết xong
+### ⚠️ Hỗ trợ hạn chế
 
-| # | Task | Trạng thái | Ghi chú |
-|---|------|-----------|---------|
-| 1 | `spec/cast.md` | ✅ | C-style cast trong/ngoài unsafe |
-| 2 | `spec/types.md` | ✅ | Ivy builtin types |
-| 3 | `spec/ownership.md` | ✅ | Ownership + Borrow + Move |
-| 4 | `README.md` | ✅ | Pipeline + subset |
+| Tính năng | Giới hạn |
+|-----------|----------|
+| Lambda | KHÔNG `[=]`/`[&]` capture-all |
+| new/delete | CHỈ trong `[[ivy::unsafe]]`; malloc/free thuần, không ctor/dtor |
+| Template | chỉ function template; không deduction (`func(3,4)` phải viết `func<int>(3,4)`); không specialization; non-type param parse nhưng chưa dùng |
+| Variadic | chỉ `...` trong `extern "C"`; extra args không type-check |
+| Const | chỉ compile-time check; không global constexpr variable |
+| String | narrow `"..."` + raw; `L"/u8"/u"/U"` prefix bị tách token |
+| Suffix literal | strip u/U/l/L/f/F nhưng không validate thứ tự; không hex float `0x1.8p1` |
+| Prescan `#if` | simplified 1 cấp, giới hạn 64 lần chain |
 
-### Giai đoạn 3 — Triển khai ngay
+### 🚫 Bị loại bỏ có chủ đích (triết lý subset an toàn)
 
-| # | Task | Mức ưu tiên | Mô tả | File |
-|---|------|-----------|-------|------|
-| 1 | Thêm `int8_t..int64_t` vào parser | **✅ P0** | `int8_t`, `int16_t`, `int32_t`, `int64_t` | `src/parser.cpp` |
-| 2 | Thêm `uint8_t..uint64_t` vào parser | **✅ P0** | `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t` | `src/parser.cpp` |
-| 3 | Thêm `float16_t..float128_t`, `bfloat16_t` | **✅ P0** | `float16_t`, `float32_t`, `float64_t`, `float128_t`, `bfloat16_t` | `src/parser.cpp` |
-| 4 | Thêm `size_t`, `ptrdiff_t`, `nullptr_t`, `max_align_t` | **✅ P0** | Builtin | `src/parser.cpp` |
-| 5 | Thêm `const T&` / `T&` vào type | **✅ P0** | Type modifier (reference) | `src/ast.h` |
-| 6 | **Preprocessor: `#include`** | **✅ P1** | Include directive + `-o .i/.ii` + `-I` | `src/preprocessor.cpp` |
-| 7 | **Preprocessor: Object-like macro** | **✅ P1** | `#define PI 3.14` | `src/preprocessor.cpp` |
-| 8 | **Preprocessor: Function-like macro** | **✅ P1** | `#define SQUARE(x) ((x)*(x))` | `src/preprocessor.cpp` |
-| 9 | **Preprocessor: `#ifdef` / `#ifndef` / `#else` / `#endif` / `#undef`** | **✅ P1** | Conditional compilation | `src/preprocessor.cpp` |
-| 10 | **Preprocessor: `#if` / `#elif` constant expression** | **✅ P1** | `#if VERSION == 3`, `defined()`, arithmetic/bitwise/logical/ternary | `src/preprocessor.cpp` |
-| 11 | **Preprocessor: Variadic macro** | **✅ P1** | `#define PRINT(fmt, ...)` → `__VA_ARGS__` | `src/preprocessor.cpp` |
-| 12 | **Preprocessor: Predefined macros** | **✅ P1** | `__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__cplusplus` | `src/preprocessor.cpp` |
-
-### Giai đoạn 4 — Test + Regression
-
-| # | Task | Mức ưu tiên | Mô tả |
-|---|------|-----------|-------|
-| 1 | `test_promotion.cpp` | **✅** | Promotion + types mới |
-| 2 | `test_ref.cpp` | **✅** | `const T&` / `T&` param + local |
-| 3 | `test_mut_ref.cpp` | **✅** | Mutable reference (incr) |
-i| 4 | `test_cast.cpp` | **Pending P0** | C-style cast trong/ngoài unsafe |
-| 5 | `test_ownership.cpp` | **Tương lai** | Move + borrow |
-| 6 | `test_llvm.cpp` | **Tương lai** | LLVM IR + clang |
-| 7 | `test_errors.cpp` | **Pending P3** | Error messages |
-
-### Giai đoạn 5 — Mở rộng
-
-| # | Task | Mức ưu tiên | Mô tả |
-|---|------|-----------|-------|
-| 1 | `IvyInterpret` | **P5** | Bộ thông dịch MIR cho REPL (`ivyc --repl`) & Fast Test (`ivyc --run`) |
-| 2 | `constexpr` & `consteval` | **P5** | Thực thi compile-time evaluation dùng `IvyInterpret` trên tầng MIR. **Hoàn thành (P4.7)**: HIR-based tree-walking evaluator (v0.1, sẽ nâng cấp MIR-based sau) |
-| 3 | `IvyMake` | **P5** | Hệ thống build cấu hình bằng C++/Ivy (`build.ivy`), thực thi qua `IvyInterpret` |
-| 4 | `ivy::expected<T, E>` | **P5** | Template (sau) |
-| 5 | `std::optional` | **P5** | |
-| 6 | `T&&` (rvalue reference) | **P5** | |
-| 7 | `float16_t` → `half` LLVM | **P5** | `@llvm.fpext` |
-| 8 | `bfloat16_t` → LLVM `bfloat` | **P5** | |
-| 9 | `int8_t` + `float16_t` — arithmetic | **P5** | |
-| 10 | `unsigned int` — promotion | **P5** | |
+| Tính năng | Lý do |
+|-----------|-------|
+| Exception (`try`/`catch`/`throw`) | Cấm hoàn toàn (P4.9). Lỗi xử lý qua return code / `Result<T>` tương lai |
+| `goto` | Phá hủy phân tích control-flow của MIR |
+| `union` | Type-punning unsafe |
+| `asm` | Không thể verify an toàn |
+| RTTI (`dynamic_cast`, `typeid`) | Cần inheritance + runtime metadata |
+| Virtual dispatch / inheritance | Cần vtable — hoãn đến khi có class model đầy đủ |
 
 ---
 
-## Chi tiết
+## Lộ trình còn thiếu (để tiến tới C++ hoàn chỉnh)
 
-### ✅ P0 — Đã hoàn thành
+Kết quả khảo sát chi tiết 4 tầng (Lexer → Preprocessor → Parser → HIR/MIR/Codegen).
+Xếp theo giai đoạn tăng dần độ khó.
 
-1. **Parser** (`src/parser.cpp`):
-   - Thêm `int8_t`, `int16_t`, `int32_t`, `int64_t` → `type`
-   - Thêm `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t` → `type`
-   - Thêm `float16_t`, `float32_t`, `float64_t`, `float128_t`, `bfloat16_t` → `type`
-   - Thêm `size_t`, `ptrdiff_t`, `nullptr_t`, `max_align_t` → `type`
-   - Thêm `const T&` / `T&` → `type` (reference) — `&` sau type trong `parseType`
-   - Thêm Ivy types vào keyword set (lexer) + `isTypeStart()` (parser)
-2. **HIR** (`src/hir_builder.cpp`):
-   - `promoteTypes`: strip reference cho arithmetic
-   - `isAssignable`: viết lại — hỗ trợ reference binding (`T&` bind lvalue, `const T&` bind rvalue)
-3. **MIR** (`src/mir_builder.cpp`):
-   - `lowerType`: `const T&` → `[lt: a]` (tương tự C++) — **mặc kệ**, MIR chỉ là HIR copy
-   - `T&` → `[lt: a]` (mutable) — **không cần thay đổi**, MIR không phân biệt
-4. **Codegen** (`src/codegen.cpp`):
-   - `llvmType`: reference → `ptr`
-   - `valueType()` / `valueLlvmType()`: strip reference cho value semantics
-   - `IdentRef` reference: load addr từ slot, load value qua addr
-   - `lowerLValue` reference: load ptr từ slot
-   - **Alloca** reference: `alloca ptr`, store `lowerLValue(init)` vào slot
-   - **Call**: tra cứu callee param → nếu reference, truyền địa chỉ (`lowerLValue`)
-   - **Binary / Store / Ret / Alloca-init**: dùng `valueLlvmType` cho operand type
-5. **Test**:
-   - `test_types.cpp` — `int8_t x = 42;` → OK
-   - `test_ref.cpp` — `const T&` + `T&` → OK
-   - `test_mut_ref.cpp` — `T&` mutable → OK
-   - `demo.cpp` — regression → OK
+### Giai đoạn 6 — Đóng gaps cơ bản (ưu tiên cao nhất)
 
-### P1 — Preprocessor Macro
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| 6.1 | **`switch`/`case`/`default`** | ★★ | Parser: `Stmt::Switch` + case list. HIR/MIR: CFG switch block (`switch i32`). Codegen: LLVM `switch` instruction. Ràng buộc: cond là integral, case là constant expression, cấm fallthrough (an toàn) hoặc yêu cầu `break` |
+| 6.2 | **`auto` type deduction** | ★★ | Parser: accept `auto` làm type placeholder. HIR: infer từ initializer expression (`deduceType(expr)`), reject không init. Là nền cho range-for + structured bindings |
+| 6.3 | **Array type `T[N]`** | ★★ | `Type` struct: thêm `arraySize`. Parser: parse `T name[N]` trong declaration + param. HIR: layout (N × sizeof). Codegen: `alloca [N x T]`, `getelementptr [N x T]`. Bounds check ở MIR interpreter (an toàn hơn C) |
+| 6.4 | **Global variables** | ★★ | AST: `TranslationUnit.globalVars`. Parser: parse top-level declaration. Codegen: emit `@global = global T init`. Static init order: `@llvm.global_ctors` nếu cần |
+| 6.5 | **Function overloading** | ★★★ | `functions_`: đổi sang multimap name → overload set. Resolution: exact match → promotion → user conversion (không implicit lossy). Mangling đã sẵn sàng (ABI encode params) |
+| 6.6 | **Default arguments** | ★ | AST: `Param.defaultValue`. Parser: parse `= expr` trong param list. HIR: fill missing args tại call site. Lưu ý: default expr eval tại call site (theo C++) |
+| 6.7 | **Class methods** | ★★★ | Struct body: parse member functions. HIR: method = function với implicit `this` param (`ClassName::method`). Call: `obj.method(args)` → `method(&obj, args)`. Name mangling: nested-name theo ABI |
+| 6.8 | **Constructor/Destructor (RAII)** | ★★★★ | Parse `ClassName(...)` / `~ClassName()` trong struct body. HIR: ctor call sau alloca-init, dtor call tại scope exit (inject vào MIR terminator của block). Member initializer list `: x(42), y(3)`. RAII là nền cho smart pointer tương lai |
+| 6.9 | **`typedef` / `using` alias** | ★ | AST: type alias table. Parser: parse + đăng ký. HIR: expand khi resolve type. `using NS::name` + `using namespace NS` để mở lookup |
 
-1. **`#include`** ✅:
-   - File: `src/preprocessor.h/cpp`
-   - Pipeline: `Lexer → Preprocessor → Parser → ...` (chạy trước parser)
-   - Xử lý `#include "file"` (relative đến file hiện tại, rồi `-I`) và `#include <file>` (chỉ `-I`)
-   - Đệ quy với cycle guard (canonical path) + giới hạn depth 200
-   - Buffer của file include được lưu trong `Preprocessor` để `Token::lexeme` (string_view) còn hợp lệ
-   - CLI: `-I <dir>` (lặp lại được, cả dạng `-Idir`), `-o file.i` / `file.ii` → emit C++ đã tiền xử lý (như `g++ -E`)
-   - Các directive chưa hỗ trợ (`#define`, `#ifdef`, `#endif`, ...) được giữ lại dạng token thô để parser báo lỗi rõ ràng
-   - Test: `examples/test_include_simple.cpp` + `examples/ivy_simple.h` → sinh LLVM IR đúng; `examples/test_include.cpp` + `lib/ivy.h` (có guard) chỉ dùng được ở chế độ `-o .i` vì `#ifndef`/`#endif` chưa hỗ trợ
-2. **Object-like macro** (`#define NAME value`) ✅:
-   - Token: `TokenKind::Identifier` tra cứu trong bảng `macros_` → thay bằng body
-   - Lưu `{name, token_seq}` vào `std::unordered_map<std::string, Macro> macros_`
-   - Thay thế token stream trước parser (trong `emitToken`, đệ quy với cycle guard)
-   - Tự tham chiếu (`#define SELF SELF + 1`) → "painted blue" (không loop, để lại literal theo chuẩn C++)
-   - Chained expansion (`#define DOUBLE ANSWER + ANSWER` với `#define ANSWER 42` → `42 + 42`)
-   - Empty body (`#define EMPTY`) → không emit token gì
-   - Function-like macro (`#define F(x) ...`) → phát hiện (check `(` ngay sau NAME không khoảng trắng) + báo "not supported yet"
-   - Macro trong file include → available trong file chính (scope toàn TU)
-   - Test: `examples/test_define.cpp` → sinh LLVM IR đúng
-3. **Function-like macro** (`#define NAME(args) body`) ✅:
-   - `Macro` struct: thêm `isFunctionLike` + `params`
-   - `parseDefine`: phát hiện function-like (check `(` ngay sau NAME không khoảng trắng), parse param list, thu body
-   - `expandFunctionLike`: parse args (balanced parens, comma-separated), arity check, substitute params vào body
-   - `expandTokenVector`: chạy expansion trên một token vector (body đã substitute) — cho phép function-like macro trong body expand được (chained: `DBL_SQUARE(7)` → `SQUARE(7)` → `((7)*(7))`)
-   - Argument prescan: argument chứa macro → expand trước khi substitute (`SQUARE(TWO)` → `SQUARE(2)` → `((2)*(2))`)
-   - Bare function-like name (không có `(` sau) → emit verbatim (theo C++)
-   - Arity mismatch → diagnostic rõ ràng
-   - Cycle guard + depth guard như object-like
-   - Test: `examples/test_funclike.cpp` → sinh LLVM IR đúng
-4. **`#ifdef` / `#ifndef` / `#else` / `#endif` / `#undef`** ✅:
-   - `CondFrame {taken, seenElse, parentActive}` stack theo dõi trạng thái conditional
-   - `active()` kiểm tra toàn bộ frame `taken` — chỉ emit token khi active
-   - `parseConditional` xử lý `#ifdef`/`#ifndef` (check `isDefined`), `#else` (flip `taken` nếu parent active), `#endif` (pop frame), `#undef` (xóa macro khi active)
-   - Directive names: chấp nhận cả `TokenKind::Identifier` (`ifdef`/`ifndef`/`undef`) và `TokenKind::Keyword` (`if`/`else`/`elif`) vì lexer tag khác nhau
-   - Nested `#ifdef` inside `#ifdef` — `parentActive` propagated, inactive parent → frame luôn inactive
-   - Include-guard pattern (`#ifndef X / #define X / ... / #endif`) hoạt động đúng
-   - `#if` / `#elif` nhận diện nhưng báo "not supported yet" (P1.5) — vẫn push/skip frame để nesting không leak
-   - `#undef` trong block inactive bị bỏ qua (chỉ xóa macro khi active)
-   - Unterminated block → cảnh báo ở cuối `run()` + khi include không cân bằng
-   - Test: `examples/test_ifdef.cpp` → sinh `.i` đúng (conditional skip đúng nhánh) + `.ll` đúng (6 function + main)
-5. **`#if EXPR` / `#elif EXPR`** (constant expression) ✅:
-   - `evalConstExpr`: 3 bước theo chuẩn C++ [cpp.cond]:
-     1. Thay `defined NAME` / `defined(NAME)` bằng 1/0 (trước macro expansion)
-     2. Macro expansion object-like trên token còn lại; identifier không define → 0 (C++ rule); `true`→1, `false`→0
-     3. Recursive-descent parser (`ExprParser`) đánh giá integral constant expression
-   - Toán tử hỗ trợ (theo precedence tăng dần):
-     - Ternary `?:`
-     - Logical `||`, `&&`
-     - Bitwise `|`, `^`, `&`
-     - Comparison `==`, `!=`, `<`, `<=`, `>`, `>=`
-     - Shift `<<`, `>>`
-     - Arithmetic `+`, `-`, `*`, `/`, `%`
-     - Unary `!`, `-`, `+`, `~`
-     - Parenthesized `( expr )`
-   - Integer literal: decimal, hex `0x`, octal `0`, binary `0b`; suffix U/L bỏ qua
-   - `#elif` đúng chuẩn C++: chỉ eval nếu chưa branch nào taken (`anyTaken`); branch đã taken → skip
-   - `#elif after #else` → diagnostic lỗi
-   - Division/modulo by zero → diagnostic
-   - `CondFrame` thêm `anyTaken` để track
-   - Test: `examples/test_if.cpp` → 25 test case (literal, arithmetic, bitwise, logical, comparison, ternary, defined(), macro expansion, #elif chains, nested, undefined→0, true/false) → `.i` + `.ll` đúng
-6. **Variadic macro** (`...` / `__VA_ARGS__`) ✅:
-   - `Macro` struct thêm `bool isVariadic`
-   - `parseDefine`: nhận diện `...` ở cuối param list → set `isVariadic = true` (không thêm `...` vào `params`)
-   - Hỗ trợ cả `name...` (GNU extension) standalone
-   - `expandFunctionLike`: arity check cho phép `args.size() >= params.size()` (variadic); extra args join bằng comma token → `__VA_ARGS__`
-   - `__VA_ARGS__` thay thế trong body như param bình thường
-   - Empty `__VA_ARGS__` (0 extra args) — C++20 cho phép, expand thành empty
-   - `__VA_ARGS__` ở giữa body, không chỉ cuối
-   - Test: `examples/test_variadic.cpp` → 7 test case (zero named params, one named param, `__VA_ARGS__` mid-body, empty `__VA_ARGS__`, fallback) → `.i` + `.ll` đúng
-7. **Predefined macros** ✅:
-   - `__LINE__` → integer literal của dòng hiện tại (context-sensitive)
-   - `__FILE__` → string literal của đường dẫn file hiện tại (context-sensitive)
-   - `__DATE__` → string literal `"Mmm dd yyyy"` (cố định lúc bắt đầu preprocessing)
-   - `__TIME__` → string literal `"HH:MM:SS"` (cố định lúc bắt đầu preprocessing)
-   - `__cplusplus` → `202302L` (C++23)
-   - `initPredefinedMacros()`: khởi tạo `__cplusplus`/`__DATE__`/`__TIME__` vào `macros_` (object-like); `__LINE__`/`__FILE__` context-sensitive → `tryExpandPredefined()`
-   - `isPredefined()`: check 5 tên macro; `isDefined()` include predefined
-   - `tryExpandPredefined()`: expand `__LINE__`/`__FILE__` context-sensitively; `__DATE__`/`__TIME__`/`__cplusplus` qua object-like path
-   - Tích hợp vào `emitToken`, `expandTokenVector`, vòng lặp `run()` + `processFile()`
-   - Ngăn `#define`/`#undef` predefined macro → diagnostic lỗi
-   - `buffers_` đổi từ `std::vector` sang `std::deque` để string_view stable khi push_back thêm buffer
-   - `defined(__cplusplus)`, `#ifdef __cplusplus`, `#if __cplusplus == 202302` hoạt động
-   - Test: `examples/test_predefined.cpp` → 6 test case (`__cplusplus` defined/value, `__LINE__` defined/line 56/59) → `.i` + `.ll` đúng
+### Giai đoạn 7 — C++ hiện đại (C++17/20 core)
 
-### P2 — Tương lai
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| 7.1 | **Range-based for** | ★★ | `for (auto& x : container)` → desugar thành index loop hoặc iterator protocol. Với array: index loop. Với struct có `begin/end`: iterator protocol |
+| 7.2 | **`if constexpr`** | ★★ | Parser: flag trên `Stmt::If`. HIR: khi trong template instantiation — evaluate điều kiện, chỉ build nhánh true/false (discarded statement không instantiate) |
+| 7.3 | **Operator overloading** | ★★★ | Parse `operator+`/`==`/`[]`/`()`/`->` như method đặc biệt. HIR Binary handler: nếu operand là struct → lookup `operatorX` method. Ưu tiên member operator trước free function |
+| 7.4 | **Template class/struct** | ★★★ | Mở rộng registry `templates_` cho struct. Instantiate: clone field layout + methods với substituted types. `Box<int>` mangled name. Là nền cho `Result<T>`/container |
+| 7.5 | **Template type deduction** | ★★ | `func(3, 4)` → infer `T=int` từ arg types. Deduction rules: exact match, decay array→pointer, const/ref stripping. Kết hợp với overload resolution (6.5) |
+| 7.6 | **Variadic templates** | ★★★★ | `typename... Args`, pack expansion `args...`, `sizeof...(args)`. Instantiation sinh N phiên bản theo arity. Fold expression `(args + ...)`. Là nền cho `format()`-style API |
+| 7.7 | **Inheritance + virtual** | ★★★★ | `class A : public B` — base subobject layout, upcast. Vtable: bảng function pointer per polymorphic class, vptr là field ẩn đầu tiên. `virtual`/`override` check. Deviate từ C++: có thể yêu cầu `[[ivy::virtual]]` tường minh |
+| 7.8 | **Structured bindings** | ★★ | `auto [a, b] = pair;` — cần `auto` (6.2). Với struct: bind từng field theo tên. Với tuple: cần stdlib tuple trước |
 
-> Chuyển từ "Cần làm" — compiler chưa hoàn thiện, các mục này hoãn lại sau.
+### Giai đoạn 8 — Toolchain hoàn chỉnh
 
-1. **`std::move`**:
-   - Parser: `std::move(x)` → `Expr::Move`
-   - HIR: `Move(a)` → đánh dấu moved-out
-   - MIR: đọc sau move → lỗi
-2. **`Moved-out`**:
-   - MIR: `Move(a)` → `Uninitialized` (không thể đọc)
-3. **`nullptr`**:
-   - `nullptr` → chỉ trong `[[ivy::unsafe]]`
-   - `nullptr_t` → type (trong unsafe)
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| 8.1 | **Object file emission** | ★★ | Dùng LLVM library (thay vì emit text IR): `TargetMachine.emitToFile` → `.o`/`.obj`. Hoặc invoke `llc` external. Flag: `-c`, `-o out.o` |
+| 8.2 | **Linking** | ★★ | Invoke linker hệ thống (`link.exe`/`ld`/`clang`). Link libc mặc định (malloc/free/printf). Flag: `-o app.exe` tự động link |
+| 8.3 | **`sizeof` / `alignof`** | ★ | Compile-time: tra cứu layout đã compute ở HIR builder, fold thành integer literal |
+| 8.4 | **Cast operators** | ★★ | `static_cast` (numeric conversion + pointer upcast/downcast checked), `reinterpret_cast` (chỉ unsafe). Vẫn cấm `dynamic_cast` (RTTI) |
+| 8.5 | **Standard library tối thiểu** | ★★★ | Viết bằng chính Ivy (dogfooding): `ivy::string` (SSO), `ivy::vector<T>` (cần template class 7.4 + new/delete), `ivy::result<T,E>` thay exception, `ivy::print` thay printf |
+| 8.6 | **`#error` / `#warning` / `#line`** | ★ | Preprocessor: parse directive, báo diagnostic / set line mapping |
+| 8.7 | **Stringify `#` + paste `##`** | ★★ | Macro metaprogramming: stringify argument token sequence; paste hai token thành một (validate hợp lệ) |
+| 8.8 | **Wide/UTF string prefixes** | ★ | Lexer: gộp `L"/u8"/u"/U"` + string thành một token. Codegen: emit global với đúng type (`[N x i16]` cho wide...) |
 
-### P3 — Có thể
+### Giai đoạn 9 — C++20/23 nâng cao
 
-1. **`#pragma ivy cnumber`** ✅:
-   - `#pragma ivy cnumber` → enable C++ compat types
-   - `int`, `long`, `long long`, `float`, `double`, `signed short int`, `unsigned long long int`,... → OK
-   - Mặc định: Ivy chỉ chấp nhận fixed-width types (`int8_t`…`int64_t`, `uint8_t`…`uint64_t`, `float16_t`…`float128_t`, `bfloat16_t`, `size_t`, `ptrdiff_t`, `bool`, `void`)
-   - C-style types (`int`, `unsigned`, `long`, `short`, `char`, `float`, `double`, `long long`) bị cấm khi chưa có pragma
-   - Hex/octal/binary literal (`0xFF`, `017`, `0b1010`) luôn được phép (syntax, không phải type)
-   - `Preprocessor`: `parsePragma` nhận diện `#pragma ivy cnumber` → set `cnumberEnabled_`; unknown pragma → warning + drop
-   - `Preprocessor.cnumberEnabled()` → truyền cho `Parser` qua `main.cpp`
-   - `Parser`: `isTypeStart()` + `parseType()` gate C-style types theo `cnumberEnabled_`; diagnostic rõ ràng gợi ý fixed-width type
-   - Pragma trong inactive `#if` block không có hiệu lực (C++ rule)
-   - Test: `examples/test_cnumber.cpp` (có pragma → pass) + `examples/test_no_cnumber.cpp` (không pragma → fail đúng)
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| 9.1 | **Concepts** | ★★★ | `concept Addable = requires(T a, T b) { a + b; };` — constraint check tại template instantiation, error message rõ ràng thay vì lỗi substitution sâu |
+| 9.2 | **Modules** | ★★★★ | `export module`, `import` — binary module interface (.ivm) thay #include. Cần đổi preprocessor architecture. Có thể hoãn vô thời hạn (Ivy dùng #include vẫn ổn) |
+| 9.3 | **Designated initializers** | ★ | `{.field = 42}` — parse trong InitList, map field name → offset, validate thứ tự |
+| 9.4 | **User-defined literals** | ★★ | `operator""_km(long long)` — lexer gộp suffix, HIR lookup UDL operator |
+| 9.5 | **Coroutines** | ★★★★+ | `co_await`/`co_return`/`co_yield` — cần transform CFG phức tạp. Có thể KHÔNG làm (không thuộc triết lý subset) |
+| 9.6 | **`std::move` + rvalue ref `T&&`** | ★★★ | Move semantics cho ownership tracking: move-out state trong MIR, use-after-move error. Nền cho smart pointer `ivy::unique_ptr<T>` |
 
-### P4 — Mở rộng (độ khó tăng dần)
+### Giai đoạn 10 — Độc lập hoàn toàn khỏi C++ (Ivy 1.0)
 
-> Các tính năng C++ chưa có, xếp theo độ khó triển khai — từ dễ đến khó.
-> (Chèn giữa P3 và P4 cũ; P4 cũ đổi thành P5.)
+Giống như C++ thoát thai từ C ("C with Classes" 1979 → ngôn ngữ độc lập),
+Giai đoạn 10 tách Ivy ra khỏi gốc C++ để trở thành **ngôn ngữ độc lập**:
+không còn C-style types, không phụ thuộc libc/CRT, stdlib riêng, tự biên dịch
+chính nó (self-hosting). Từ đây Ivy không phải "C++ subset" nữa mà là
+"Ivy language".
 
-| # | Tính năng | Độ khó | Ghi chú |
-|---|-----------|--------|---------|
-| 1 | `enum` ✅ | ★ Dễ | Kiểu hằng số nguyên — parser + codegen như literal, không cần runtime. Đã hoàn thành (P4.1): unscoped/scoped enum (`enum`/`enum class`/`enum struct`), implicit/explicit values, constant expression values (arithmetic, bitwise), `EnumName::Value` cho scoped, explicit underlying type (`enum E : int64_t`), enum-typed variables, enum trong arithmetic/comparison/ternary/if |
-| 2 | `namespace` ✅ | ★ Dễ | Chỉ parser/lookup `ns::name` vào HIR symbol table; codegen không đổi. Đã hoàn thành (P4.2): nested namespace, bare call trong namespace, `ns::func(args)`, `ns::EnumName::Value`, `ns::enum_constant`, LLVM name mangling (`::` → `.`), `extern "C"` không mangle |
-| 3 | Name mangling ABI ✅ | ★ Trung bình | Đổi mangling sang ABI chuẩn. Đã hoàn thành (P4.3): Itanium ABI cho POSIX (`_Z` + `N...E` nested + type codes), MSVC ABI cho Windows (`?` + `@` scopes + type codes + `@Z`), `--target itanium|msvc` flag, auto-detect từ host platform, scoped enum mangling (nested type encoding), unscoped enum collapse to underlying type, `extern "C"` skip mangling |
-| 4 | `struct` / `class` ✅ | ★★ Trung bình | Aggregate type: member layout, codegen `member` access (GEP), init `{ }`. Đã hoàn thành (P4.4): struct/class declaration (fields, access specifiers parsed/ignored), member access `.` (struct lvalue) và `->` (pointer-to-struct), LLVM GEP codegen, nested struct member access (GEP chaining), namespace-qualified struct (`ns::Struct`), struct copy assignment (aggregate load/store), zero-init struct variables, named LLVM struct type (`%struct.Name = type { ... }`), variadic params (`...`) trong extern "C", `main` không bị mangle, aggregate init `{ }` (basic/partial/empty), struct reassign với init list, default member initializers (`int x = 42;` trong struct body — apply cho struct var không init + trailing fields trong partial init) |
-| 5 | `lambda` ✅ | ★★★ Trung bình–Khó | Closure: capture list, function type ẩn danh, codegen struct-of-captures + call convention. Đã hoàn thành (P4.5): lambda expression `[caps](params) -> ret { body }` trong `parsePrimary()`, capture modes `[x]` (by-value) + `[&x]` (by-reference) + `[]` (no captures), AST node `Expr::Lambda` + `Expr::Capture` + `cloneStmt()` helper, HIR builder lower lambda thành closure struct type (`__lambdaN_closure`) + call-operator function (`__lambdaN(closure_ptr, params...)`), inject capture locals (`T cap = __closure->cap` by-value / `T& cap = *(__closure->cap)` by-ref) vào đầu body dưới implicit unsafe scope, Lambda callee trong Call handler (thêm `&lambda` làm first arg), MIR builder propagate Lambda variant, codegen: `alloca` closure + GEP init captures + `llvmGlobalName()` quote ký tự đặc biệt, Unary `&` handle Lambda operand (return closure slot), test no-capture + by-value + by-ref captures |
-| 6 | `IvyInterpret` (MIR Interpreter & REPL) | ★★★ Khó | **v0.1** (hoàn thành): HIR-based interpreter — fast-path, không safety guarantee. **v0.2** (hoàn thành): MIR-based interpreter — safety check (lifetime + unsafe), dùng cho `--run`/consteval/IvyMake. Xem [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) |
-| 7 | `constexpr` & `consteval` ✅ | ★★★ Khó | Đánh giá hằng số compile-time. Đã hoàn thành (P4.7): Parser parse `constexpr`/`consteval` keyword (`parseConstexprSpec()`), AST flags (`Function.isConstexpr`/`isConsteval`, `Stmt::Decl.isConstexpr`), HIR/MIR propagate flags, HIR Builder constexpr call folding (`tryEvalConstexprCall` — tree-walking evaluator với parameter substitution, hỗ trợ Unary/Binary/Ternary/If/Return/Compound), codegen skip `consteval` functions (không emit LLVM IR — đã được fold tại compile-time), `constexpr` functions vẫn emit (fallback cho runtime calls). Test: `square(4)→16`, `cube(3)→27` |
-| 8 | `IvyMake` | ★★★ Khó | Hệ thống build cấu hình trực tiếp bằng C++/Ivy (file `build.ivy`), tự thông dịch qua `IvyInterpret` v0.2 thay thế cho CMake |
-| 9 | ~~`exception`~~ | ★★★ Khó | **Cấm hoàn toàn** — Ivy là subset an toàn, không hỗ trợ `try`/`catch`/`throw`/exception ABI. Lỗi được xử lý qua return code / `Result<T>` (sẽ thêm sau). Loại khỏi Ivy theo triết lý subset |
-| 10 | `template` ✅ | ★★★ Khó nhất | Generics chạm cả pipeline: parameterization, instantiation, type deduction. Đã hoàn thành (P4.8): Parser parse `template <typename T>` declaration (`parseTemplate`, `parseTemplateParams`), template-id call `func<int>(args)` với backtracking parser (phân biệt `<` comparison vs template-arg), `templateParamNames_` cho `parseType()` nhận type params. AST: `TemplateParam`, `Function.tplParams`, `Call.tplArgs`. HIR: template registry (`templates_` map), `instantiateTemplate` — clone AST body + substitute types (`substituteType` mapping `T→int`), tạo concrete HIR function với mangled name (`add<int>`), `buildBody` trên cloned body. MIR/Codegen: không cần sửa (instantiated functions là concrete). Test: `add<int>(3,4)→7`, `add<double>(1.5,2.5)→4.0`, `identity<int>(42)→42` |
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| 10.1 | **Loại bỏ C-style types** | ★★ | Xóa `#pragma ivy cnumber` và các type `int`/`long`/`short`/`unsigned`. Chỉ giữ fixed-width `i8..i64`, `u8..u64`, `f16/f32/f64/f128` (đổi tên gọn hơn). Code cũ migrate bằng script đổi type |
+| 10.2 | **Own runtime + entry point** | ★★★ | Bỏ CRT: entry `_start` → `ivy_main()`, không link libc. Own allocator (arena + free-list), own `print()`/`format()` thay printf. Codegen emit freestanding object |
+| 10.3 | **Module system thật** | ★★★★ | Quay lại 9.2 nhưng bắt buộc: `export module ivy.io`, binary `.ivm` interface, bỏ preprocessor cho code Ivy (giữ macro chỉ trong unsafe/FFI). Import graph + incremental compile |
+| 10.4 | **Stdlib hoàn chỉnh viết bằng Ivy** | ★★★★ | `ivy::string`, `ivy::vector<T>`, `ivy::result<T,E>`, `ivy::option<T>`, `ivy::unique_ptr<T>` (move semantics 9.6), `ivy::slice<T>` (thay array/pointer), collections (map/set), IO, time. Đủ để viết app thực dụng không cần libc |
+| 10.5 | **Self-hosting** | ★★★★★+ | Viết lại ivyc bằng chính Ivy: lexer → preprocessor-lite → parser → HIR → MIR → codegen. Mốc cuối cùng của sự độc lập — như khi GCC/Clang tự biên dịch chính mình. Có thể bắt đầu bằng port từng tầng, dùng IvyInterpret để chạy bootstrap |
+| 10.6 | **Bản sắc ngôn ngữ** | ★★ | Versioning chính thức (Ivy 1.0 spec), diagnostic style riêng (error messages có hint sửa lỗi), naming convention riêng, tooling: `ivyc fmt`, `ivyc doc`, LSP server. Đổi tagline từ "safe C++ subset" thành "the Ivy programming language" |
+
+Tiêu chí hoàn thành Giai đoạn 10:
+1. Một chương trình Ivy chạy được mà không link bất kỳ thư viện C nào.
+2. ivyc được viết 100% bằng Ivy và tự biên dịch chính nó (`ivyc build ivyc.ivy`).
+3. Spec ngôn ngữ độc lập tách khỏi tài liệu C++.
 
 ---
 
-### P4.6 — IvyInterpret (MIR Interpreter)
+## Các mốc đã hoàn thành (lịch sử rút gọn)
 
-> **Chi tiết đầy đủ**: [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md)
->
-> **Phiên bản**:
-> - **v0.1** (hoàn thành) — HIR-based, fast-path cho REPL, không safety guarantee
-> - **v0.2** (hoàn thành) — MIR-based, có safety guarantee (lifetime + unsafe enforcement)
->
-> **Triết lý**: IvyInterpret v0.2 **phải** thông dịch MIR, không phải HIR. Nếu chạy thẳng từ HIR, interpreter bỏ qua safety check ở MIR → mất ý nghĩa "Ivy an toàn". Tham khảo kiến trúc **Miri** của Rust (POPL 2026).
+| Giai đoạn | Nội dung | Trạng thái |
+|-----------|----------|-----------|
+| GĐ 1 | Skeleton pipeline: lexer → parser → HIR → MIR → LLVM IR emitter + demo | ✅ |
+| GĐ 2 | Spec: cast, types, ownership + README | ✅ |
+| GĐ 3 (P0) | Fixed-width types, reference `T&`/`const T&`, promotion | ✅ |
+| GĐ 3 (P1) | Preprocessor: include, macro (object/function/variadic), conditionals, `#if EXPR`, predefined macros | ✅ |
+| GĐ 3 (P3) | `#pragma ivy cnumber` gate cho C-style types | ✅ |
+| GĐ 4 (P4.1) | enum + enum class | ✅ |
+| GĐ 4 (P4.2) | namespace + qualified lookup | ✅ |
+| GĐ 4 (P4.3) | Name mangling Itanium/MSVC ABI + `--target` | ✅ |
+| GĐ 4 (P4.4) | struct/class aggregate + GEP + aggregate init | ✅ |
+| GĐ 4 (P4.5) | lambda + closure codegen | ✅ |
+| GĐ 4 (P4.6) | IvyInterpret v0.1 (HIR) + v0.2 (MIR, safety) — xem [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) | ✅ |
+| GĐ 4 (P4.7) | constexpr/consteval + compile-time folding | ✅ |
+| GĐ 4 (P4.8) | Function template + explicit instantiation | ✅ |
+| GĐ 4 (P4.9) | Cấm exception hoàn toàn | ✅ |
+| Driver | `.ivy` extension nhận diện + warning extension lạ | ✅ |
 
-**Tóm tắt 6 bước triển khai v0.2** (chi tiết trong MIR_PLAN.md):
-1. ✅ Hoàn thiện MIR data structures — thêm `Call::target`, decode string/char lit
-2. ✅ Back-fill pass trong MirBuilder — resolve call targets, decode literals
-3. ✅ Mở rộng lifetime checker — check store/arg (không chỉ return)
-4. ✅ Runtime Value + Memory model — `interp_value.h`, `interp_memory.h`, `Machine` trait
-5. ✅ MIR Interpreter engine — `mir/interpreter.h/.cpp` (port từ v0.1 + CFG traversal)
-6. ✅ Tích hợp `--run` vào main.cpp + regression test (14 examples pass)
-
-
-
-### P5 — Sau
-
-1. **LLVM**:
-   - `@llvm.fpext` / `@llvm.fptrunc` cho `float16_t`
+Chi tiết triển khai từng mốc nằm trong git history (`git log --oneline`).
 
 ---
 
 ## Liên kết
 
-- [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) — Kế hoạch hoàn thiện MIR (IvyMiri)
 - [README](file:///d:/project/Ivy/ivyc/README.md)
+- [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) — kế hoạch IvyInterpret v0.2
 - [spec/cast.md](file:///d:/project/Ivy/ivyc/spec/cast.md)
 - [spec/types.md](file:///d:/project/Ivy/ivyc/spec/types.md)
 - [spec/ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md)
-- [src/parser.cpp](file:///d:/project/Ivy/ivyc/src/parser.cpp)
-- [src/codegen.cpp](file:///d:/project/Ivy/ivyc/src/codegen.cpp)
