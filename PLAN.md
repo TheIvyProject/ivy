@@ -28,7 +28,7 @@ Lexer → Parser → HIR → MIR → LLVM IR
 | 5 | `mir.h/cpp` | ✅ | MIR (CFG) |
 | 6 | `mir_builder.h/cpp` | ✅ | Build MIR |
 | 7 | `codegen.h/cpp` | ✅ | LLVM IR emitter |
-| 8 | `main.cpp` | ✅ | CLI (--llvm -o) |
+| 8 | `main.cpp` | ✅ | CLI (--llvm -o); nhận `.ivy` (Ivy source) + `.cpp/.cc/.cxx/.c` (legacy migration) |
 | 9 | `CMakeLists.txt` | ✅ | C++23 |
 | 10 | `examples/demo.cpp` | ✅ | Test pass |
 

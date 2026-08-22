@@ -24,7 +24,11 @@
 namespace {
 
 void printUsage() {
-    std::cout << "usage: ivyc [options] <file.cpp>\n"
+    std::cout << "usage: ivyc [options] <file.ivy|file.cpp>\n"
+                 "\n"
+                 "Source files:\n"
+                 "  .ivy        Ivy source (the safe C++ subset)\n"
+                 "  .cpp/.cc/.cxx/.c  Legacy C/C++ source (migration)\n"
                  "\n"
                  "options:\n"
                  "  --tokens   print the token stream (debug)\n"
@@ -638,6 +642,24 @@ void dumpMir(const ivy::mir::TranslationUnit& tu, std::ostream& os) {
 
 // --- driver ---
 
+// Accepted source-file extensions. `.ivy` marks Ivy code (the new
+// safe subset); `.cpp`/`.cc`/`.cxx`/`.c` are accepted for compatibility
+// with legacy C/C++ files being migrated to Ivy.
+bool isKnownSourceExtension(std::string_view ext) {
+    return ext == "ivy" || ext == "cpp" || ext == "cc" ||
+           ext == "cxx" || ext == "c";
+}
+
+std::string_view getExtension(std::string_view path) {
+    const auto pos = path.find_last_of('.');
+    if (pos == std::string_view::npos) return {};
+    return path.substr(pos + 1);
+}
+
+bool isIvyFile(const std::filesystem::path& path) {
+    return getExtension(path.string()) == "ivy";
+}
+
 // Case-sensitive check of a path's extension (without the dot).
 bool hasExtension(const std::string& path, std::string_view ext) {
     const auto pos = path.find_last_of('.');
@@ -778,6 +800,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
 
 int main(int argc, char** argv) {
     std::filesystem::path file;
+    std::string fileArg;  // original argv string for extension checks
     bool showTokens = false;
     bool showAst = false;
     bool showHir = false;
@@ -841,6 +864,7 @@ int main(int argc, char** argv) {
             return 2;
         } else {
             file = arg;
+            fileArg = argv[i];
         }
     }
 
@@ -848,6 +872,17 @@ int main(int argc, char** argv) {
         printUsage();
         return 2;
     }
+
+    // Validate source extension — warn (not error) on unknown extensions.
+    // `.ivy` is the canonical Ivy extension; `.cpp`/`.cc`/`.cxx`/`.c` are
+    // accepted for legacy migration. Other extensions are warned about but
+    // still processed (the user may know what they are doing).
+    const std::string_view fileExt = getExtension(fileArg);
+    if (!fileExt.empty() && !isKnownSourceExtension(fileExt)) {
+        std::cerr << "ivyc: warning: unrecognized file extension '." << fileExt
+                  << "' — expected .ivy, .cpp, .cc, .cxx, or .c\n";
+    }
+
     return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun, outPath,
                includePaths, targetPlatform);
 }
