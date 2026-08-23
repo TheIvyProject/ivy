@@ -96,6 +96,12 @@ private:
             hir::Type type;
         };
         std::unordered_map<std::string_view, FieldInfo> fieldMap;
+        // Methods (member functions). Maps method name → overload set
+        // (HIR Function pointers registered in functions_).
+        std::unordered_map<std::string_view, std::vector<hir::Function*>> methods;
+        // The AST methods (for body-building in pass 2).  Keyed by
+        // method name (bare, unqualified).
+        std::vector<const Function*> astMethods;
     };
     std::unordered_map<std::string_view, StructDef> structs_;
 

@@ -270,6 +270,14 @@ Value Interpreter::evalExpr(const Expr& e) {
             return makeInt(v.decoded);
         } else if constexpr (std::is_same_v<V, E::NullptrLit>) {
             return makeNullPtr();
+        } else if constexpr (std::is_same_v<V, E::This>) {
+            // `this` — same as IdentRef{name="this"}.
+            Cell c = lookupCell("this");
+            if (!c) { error(e.loc, "'this' is only valid inside a method"); return makeVoid(); }
+            // `this` is a reference (StructType&) — load through.
+            if (e.type.isReference && c->isPtr() && !c->ptr.isNull)
+                return *c->ptr.cell;
+            return *c;
         } else if constexpr (std::is_same_v<V, E::IdentRef>) {
             Cell c = lookupCell(v.name);
             if (!c) { error(e.loc, "undefined variable '" + std::string(v.name) + "'"); return makeVoid(); }
@@ -553,6 +561,12 @@ Value Interpreter::evalAssign(const Expr::Assign& a, const Expr& e) {
 
 Cell Interpreter::lvalueCell(const Expr& e) {
     using E = Expr;
+    if (std::get_if<E::This>(&e.node)) {
+        Cell c = lookupCell("this");
+        // If cell IS itself a reference (Ptr), return the pointed-to cell.
+        if (c && c->isPtr() && !c->ptr.isNull) return c->ptr.cell;
+        return c;
+    }
     if (const auto* id = std::get_if<E::IdentRef>(&e.node)) {
         Cell c = lookupCell(id->name);
         // If cell IS itself a reference (Ptr), return the pointed-to cell.

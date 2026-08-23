@@ -47,6 +47,7 @@ struct Expr {
     struct BoolLit { bool value; };
     struct NullptrLit {};
     struct IdentRef { std::string_view name; };
+    struct This {};  // `this` — resolves to the implicit `this` param (6.7)
     struct Unary { std::string_view op; bool isPrefix; std::unique_ptr<Expr> operand; };
     struct Binary { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
     struct Ternary { std::unique_ptr<Expr> cond, thenBranch, elseBranch; };
@@ -57,7 +58,7 @@ struct Expr {
         std::vector<std::unique_ptr<Expr>> args;
     };
     struct Index { std::unique_ptr<Expr> base, index; };
-    struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; };
+    struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; bool isScope = false; };
     struct Assign { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
     struct New { Type type; std::vector<std::unique_ptr<Expr>> args; };
     struct Delete { std::unique_ptr<Expr> operand; bool isArray; };
@@ -76,7 +77,7 @@ struct Expr {
     Type type;
     Lifetime lifetime;  // result of the lifetime analysis
     SourceLoc loc;
-    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef,
+    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
                  Lambda>
         node;

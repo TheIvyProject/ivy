@@ -451,7 +451,69 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     }
     hir_->structs.push_back(std::move(resolved));
 
+    // Register member functions (methods).  Each method is registered
+    // in `functions_` under its qualified name ("StructName::method")
+    // with an implicit `this` parameter prepended.  The `this` param
+    // is a reference to the struct type, so the method can mutate
+    // the object.
+    for (const Function& mf : sd.methods) {
+        // Build the HIR function for this method.
+        auto fn = std::make_unique<hir::Function>();
+        fn->name = mf.name;  // "StructName::methodName"
+        fn->namespacePrefix = mf.namespacePrefix;
+        fn->isExternC = mf.isExternC;
+        fn->isConstexpr = mf.isConstexpr;
+        fn->isConsteval = mf.isConsteval;
+        fn->returnType = mf.returnType;
+        fn->loc = mf.loc;
+
+        // Implicit `this` parameter: `StructName& this` (or
+        // `const StructName& this` for const methods — Ivy doesn't
+        // have const methods yet, so always non-const).
+        hir::Param thisParam;
+        thisParam.type.base = sd.name;
+        thisParam.type.isReference = true;
+        thisParam.name = "this";
+        thisParam.loc = mf.loc;
+        fn->params.push_back(std::move(thisParam));
+
+        // User-declared parameters.
+        for (const Param& ap : mf.params) {
+            hir::Param p;
+            p.type = ap.type;
+            p.name = ap.name;
+            p.loc = ap.loc;
+            p.lifetime = lowerParamAttribute(*fn, ap);
+            p.defaultValue = ap.defaultValue.get();
+            fn->params.push_back(std::move(p));
+        }
+
+        // Register in functions_ under the qualified name.
+        functions_[fn->name].push_back(fn.get());
+        hir_->functions.push_back(std::move(fn));
+    }
+
+    // Now that def is fully built (fields + layout), move it into
+    // the registry.  Method registration into def.methods/astMethods
+    // happens after the move, via the reference in structs_.
     structs_[sd.name] = std::move(def);
+
+    // Register methods in the struct's method table (under bare names).
+    StructDef& defRef = structs_[sd.name];
+    for (const Function& mf : sd.methods) {
+        const std::string_view qualName = mf.name;
+        const std::size_t pos = qualName.rfind("::");
+        const std::string_view bareName =
+            (pos != std::string_view::npos)
+                ? qualName.substr(pos + 2)
+                : qualName;
+        // Find the HIR Function* we just registered.
+        auto it = functions_.find(qualName);
+        if (it != functions_.end() && !it->second.empty()) {
+            defRef.methods[bareName].push_back(it->second.back());
+        }
+        defRef.astMethods.push_back(&mf);
+    }
 }
 
 void HirBuilder::buildSignature(const Function& af) {
@@ -559,7 +621,10 @@ bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const 
     if (to.isReference) {
         if (to.pointerDepth == 0 && from.pointerDepth == 0) {
             // Reference to scalar — allow narrowing like C++.
-            return isNumeric(to) && isNumeric(from);
+            if (isNumeric(to) && isNumeric(from)) return true;
+            // Reference to struct — `T&` binds to `T` (lvalue).
+            if (structs_.contains(to.base) && to.base == from.base)
+                return true;
         }
         // Reference to pointer.
         if (to.pointerDepth == from.pointerDepth && to.base == from.base &&
@@ -971,10 +1036,14 @@ bool HirBuilder::flattenMemberChain(const Expr& e, std::string& out) const {
         out = std::get<Expr::IdentRef>(e.node).name;
         return true;
     }
-    // Recursive case: Member (from `A::B`).
+    // Recursive case: Member from `A::B` (scope resolution only).
+    // `.`/`->` member access must NOT be treated as scope resolution —
+    // otherwise `obj.method(args)` would be misclassified as a qualified
+    // call `obj::method(args)`.
     if (std::holds_alternative<Expr::Member>(e.node)) {
         const auto& m = std::get<Expr::Member>(e.node);
         if (m.isArrow) return false;  // `->` is not scope resolution
+        if (!m.isScope) return false;  // `.` is not scope resolution
         if (!m.base) return false;
         std::string base;
         if (!flattenMemberChain(*m.base, base)) return false;
@@ -1139,6 +1208,23 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
     if (std::holds_alternative<A::NullptrLit>(n)) {
         out->node = hir::Expr::NullptrLit{};
         out->type = nullptrType();
+        return out;
+    }
+    if (std::holds_alternative<A::This>(n)) {
+        // `this` — resolve to the implicit `this` parameter of the
+        // current method.  It's registered in the scope as "this"
+        // with type `StructType&` (reference).
+        out->node = hir::Expr::This{};
+        // Look up "this" in variable scopes.
+        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+            const auto hit = it->find("this");
+            if (hit != it->end()) {
+                out->type = hit->second;
+                return out;
+            }
+        }
+        error(e.loc, "'this' is only valid inside a method body");
+        out->type = dummyType();
         return out;
     }
     if (std::holds_alternative<A::IdentRef>(n)) {
@@ -1395,21 +1481,109 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 }
             }
         } else if (std::holds_alternative<A::Member>(callee->node)) {
-            // Qualified call: `ns::func(args)` — flatten the `::` chain.
+            const auto& mem = std::get<A::Member>(callee->node);
+            // Try qualified call first: `ns::func(args)` — flatten `::` chain.
             std::string qualified;
             if (flattenMemberChain(*callee, qualified)) {
                 stringStorage_.push_back(std::move(qualified));
                 call.callee = stringStorage_.back();
-                // Qualified calls use the first overload (qualified names
-                // are typically unique, e.g. `ns::func`).  If there are
-                // multiple overloads, overload resolution is done below
-                // after args are built.
                 call.target = resolveFunction(call.callee);
                 if (!call.target) {
                     error(callee->loc, "call to undeclared function '" + std::string(call.callee) + "'");
                 }
             } else {
-                error(callee->loc, "callee must be a function name");
+                // Method call: `obj.method(args)` or `obj->method(args)`.
+                // Build the base expression to determine its type.
+                auto baseExpr = buildExpr(*mem.base);
+                if (!baseExpr) {
+                    out->type = dummyType();
+                    return out;
+                }
+                hir::Type baseType = baseExpr->type;
+                if (mem.isArrow) {
+                    if (baseType.pointerDepth == 0) {
+                        error(e.loc, "'->' requires a pointer operand");
+                        out->type = dummyType();
+                        return out;
+                    }
+                    --baseType.pointerDepth;
+                } else {
+                    if (baseType.isReference) baseType.isReference = false;
+                }
+                // Look up the struct type.
+                auto sIt = structs_.find(baseType.base);
+                if (sIt == structs_.end()) {
+                    error(e.loc, "'" + typeToString(baseType) +
+                          "' is not a struct type — cannot call method '" +
+                          std::string(mem.name) + "'");
+                    out->type = dummyType();
+                    return out;
+                }
+                // Look up the method in the struct's method table.
+                auto mIt = sIt->second.methods.find(mem.name);
+                if (mIt == sIt->second.methods.end()) {
+                    error(e.loc, "struct '" + std::string(baseType.base) +
+                          "' has no method '" + std::string(mem.name) + "'");
+                    out->type = dummyType();
+                    return out;
+                }
+                // Inject `this` as the first argument.  The method's
+                // `this` param is a reference (`StructType&`), so we pass
+                // the object as an lvalue.  We wrap the base expression
+                // in a Member-like node so the codegen/interpreter can
+                // emit the address.  The simplest way: create an
+                // hir::Expr::Member with isArrow=false and a flag that
+                // marks it as "this" — but we don't have that flag.
+                // Instead, we just prepend the base expression directly.
+                // The method's first param is `StructType& this`, and
+                // the base expression has type `StructType` (by value or
+                // reference) — the codegen passes the address.
+                //
+                // For `.`: obj is an lvalue → pass &obj.
+                // For `->`: obj is a pointer → pass obj (already an address).
+                std::vector<hir::Type> argTypes;
+                argTypes.push_back(baseType);  // `this` arg type
+                for (const auto& a : call.args) {
+                    argTypes.push_back(a ? a->type : dummyType());
+                }
+                // Resolve overload among the method candidates.
+                call.target = resolveOverload(mIt->second, argTypes, e.loc);
+                if (call.target) {
+                    call.callee = call.target->name;
+                    // Inject `this` as the first argument.
+                    // If `->`, the base is already a pointer — we need
+                    // to load it and pass it (the method expects a ref).
+                    // For `.`, the base is an lvalue — pass it directly.
+                    // We create an IdentRef-like wrapper by reusing the
+                    // Member node: set the base expr as-is, and mark it
+                    // as a "this" expression.  The codegen/interpreter
+                    // treat Member as an lvalue already.
+                    //
+                    // The trick: we prepend the base expression as a
+                    // Member expr so lowerLValue can get its address.
+                    auto thisExpr = std::make_unique<hir::Expr>();
+                    if (mem.isArrow) {
+                        // `ptr->method(args)` — base is a pointer.
+                        // We need to pass the pointer value as `this`.
+                        // The method's `this` is `T&`, so passing a
+                        // pointer doesn't match.  Instead, we dereference:
+                        // create `*ptr` (a Member with isArrow=true).
+                        thisExpr->node = hir::Expr::Member{};
+                        auto& tm = std::get<hir::Expr::Member>(thisExpr->node);
+                        tm.base = std::move(baseExpr);
+                        tm.name = mem.name;  // not used for lvalue
+                        tm.isArrow = true;
+                        thisExpr->type = baseType;
+                    } else {
+                        // `obj.method(args)` — base is an lvalue.
+                        // Pass the object directly (by reference).
+                        thisExpr = std::move(baseExpr);
+                    }
+                    thisExpr->loc = e.loc;
+                    call.args.insert(call.args.begin(), std::move(thisExpr));
+                } else {
+                    call.callee = mem.name;
+                }
             }
         } else if (std::holds_alternative<A::Lambda>(callee->node)) {
             // Lambda callee: build the lambda expression, which yields a
@@ -1615,6 +1789,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             mem.base = std::move(base);
             mem.name = v.name;
             mem.isArrow = v.isArrow;
+            mem.isScope = v.isScope;
             out->type = fIt->second.type;
             return out;
         }
@@ -1625,6 +1800,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
     mem.base = buildExpr(*v.base);
     mem.name = v.name;
     mem.isArrow = v.isArrow;
+    mem.isScope = v.isScope;
     out->type = dummyType();
     return out;
     }
@@ -1986,6 +2162,36 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
             if (fn) {
                 currentNsPrefix_ = af.namespacePrefix;
                 buildBody(*fn, *af.body);
+                currentNsPrefix_ = {};
+            }
+        }
+    }
+    // Build method bodies (pass 2b).  Methods are registered in
+    // functions_ under "StructName::methodName" with an implicit
+    // `this` param prepended, so we match by the AST method's name
+    // (which is already "StructName::methodName").
+    for (const StructDecl& sd : ast_.structs) {
+        for (const Function& mf : sd.methods) {
+            if (!mf.body || !mf.tplParams.empty()) continue;
+            // Find the HIR function we registered in buildStruct.
+            hir::Function* fn = nullptr;
+            auto it = functions_.find(mf.name);
+            if (it != functions_.end()) {
+                for (hir::Function* cand : it->second) {
+                    // The HIR method has 1 extra param (implicit `this`).
+                    if (cand->params.size() != mf.params.size() + 1) continue;
+                    bool match = true;
+                    for (std::size_t i = 0; i < mf.params.size() && match; ++i) {
+                        hir::Type a = cand->params[i + 1].type; a.isReference = false;
+                        hir::Type b = mf.params[i].type;        b.isReference = false;
+                        if (!(a == b)) match = false;
+                    }
+                    if (match) { fn = cand; break; }
+                }
+            }
+            if (fn) {
+                currentNsPrefix_ = mf.namespacePrefix;
+                buildBody(*fn, *mf.body);
                 currentNsPrefix_ = {};
             }
         }

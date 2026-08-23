@@ -502,6 +502,17 @@ std::string CodeGen::valueName(std::string_view name) {
 std::string CodeGen::lowerLValue(const mir::Expr& e) {
     const auto& n = e.node;
     using M = mir::Expr;
+    if (std::holds_alternative<M::This>(n)) {
+        // `this` — same semantics as IdentRef{name="this"}.
+        const auto it = vars_.find("this");
+        if (it == vars_.end()) return "ptr null";
+        if (e.type.isReference) {
+            std::string t = newTemp();
+            emitLine(t + " = load ptr, ptr " + it->second);
+            return t;
+        }
+        return it->second;
+    }
     if (std::holds_alternative<M::IdentRef>(n)) {
         const std::string_view name = std::get<M::IdentRef>(n).name;
         const auto it = vars_.find(name);
@@ -605,6 +616,18 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::NullptrLit>(n)) {
         return "null";  // emitCast treats "null" as ptr
+    }
+    if (std::holds_alternative<M::This>(n)) {
+        // `this` as an lvalue — return the address of the object.
+        // For a reference `this` param, the slot holds the address.
+        const auto it = vars_.find("this");
+        if (it == vars_.end()) return "undef";
+        if (e.type.isReference) {
+            std::string addr = newTemp();
+            emitLine(addr + " = load ptr, ptr " + it->second);
+            return addr;
+        }
+        return it->second;
     }
     if (std::holds_alternative<M::IdentRef>(n)) {
         const auto it = vars_.find(std::get<M::IdentRef>(n).name);

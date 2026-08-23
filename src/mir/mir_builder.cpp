@@ -236,6 +236,11 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         out->node = mir::Expr::NullptrLit{};
         return out;
     }
+    if (std::holds_alternative<H::This>(n)) {
+        // `this` — lowered as an IdentRef to the "this" parameter.
+        out->node = mir::Expr::This{};
+        return out;
+    }
     if (std::holds_alternative<H::IdentRef>(n)) {
         const std::string_view name = std::get<H::IdentRef>(n).name;
         out->node = mir::Expr::IdentRef{name};
@@ -338,6 +343,7 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         mem.base = buildExpr(*v.base);
         mem.name = v.name;
         mem.isArrow = v.isArrow;
+        mem.isScope = v.isScope;
         // Member access inherits the lifetime of the base (if it's a
         // pointer field, it borrows the base's lifetime).
         if (mem.base) out->lifetime = mem.base->lifetime;
@@ -841,6 +847,8 @@ std::unique_ptr<mir::Expr> MirBuilder::cloneExpr(const mir::Expr& e) {
             out->node = M::BoolLit{v.value};
         } else if constexpr (std::is_same_v<V, M::NullptrLit>) {
             out->node = M::NullptrLit{};
+        } else if constexpr (std::is_same_v<V, M::This>) {
+            out->node = M::This{};
         } else if constexpr (std::is_same_v<V, M::IdentRef>) {
             out->node = M::IdentRef{v.name};
         } else if constexpr (std::is_same_v<V, M::Unary>) {
@@ -868,7 +876,7 @@ std::unique_ptr<mir::Expr> MirBuilder::cloneExpr(const mir::Expr& e) {
             if (v.index) c.index = cloneExpr(*v.index);
         } else if constexpr (std::is_same_v<V, M::Member>) {
             auto& c = out->node.emplace<M::Member>();
-            c.name = v.name; c.isArrow = v.isArrow;
+            c.name = v.name; c.isArrow = v.isArrow; c.isScope = v.isScope;
             if (v.base) c.base = cloneExpr(*v.base);
         } else if constexpr (std::is_same_v<V, M::Assign>) {
             auto& c = out->node.emplace<M::Assign>();

@@ -860,9 +860,16 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
     sd.isClass = isClass;
     sd.loc = loc;
 
-    // Parse fields: `Type name;` or `Type name = default;`
-    // Access specifiers (`public:`/`private:`) are accepted but
-    // ignored — Ivy treats all members as public (C-style aggregate).
+    // Register the struct name early so that method parameter lists
+    // can reference the struct itself (e.g. `void set(Point other)`).
+    // Fields cannot use the incomplete type (C++ rule: incomplete type
+    // at field declaration), but method bodies are parsed as method
+    // definitions with deferred resolution.
+    structNames_.push_back(name);
+
+    // Parse struct body: fields (`Type name;`) and methods
+    // (`Type name(params) { body }`).  Access specifiers are accepted
+    // but ignored — Ivy treats all members as public.
     while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile)) {
         // Accept and ignore access specifiers.
         if (atKeyword("public") || atKeyword("private") || atKeyword("protected")) {
@@ -871,19 +878,65 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
             continue;
         }
         if (!isTypeStart()) {
-            errorAt(peek(), "expected field declaration in struct body");
+            errorAt(peek(), "expected field or method declaration in struct body");
             synchronize();
             break;
         }
-        Field f;
-        f.type = parseType();
+        Type fieldType = parseType();
         if (!at(TokenKind::Identifier)) {
-            errorAt(peek(), "expected field name");
+            errorAt(peek(), "expected field or method name");
             synchronize();
             break;
         }
-        f.loc = locOf(peek());
-        f.name = next().lexeme;
+        const SourceLoc memberLoc = locOf(peek());
+        const std::string_view memberName = next().lexeme;
+
+        // If the next token is `(`, this is a method definition.
+        if (at(TokenKind::LParen)) {
+            // Method: `ReturnType name(params) { body }`
+            next();  // consume '('
+            std::vector<Param> params = parseParams();
+            expect(TokenKind::RParen, "expected ')' to close method parameter list");
+
+            Function method;
+            method.returnType = std::move(fieldType);
+            // The method's qualified name is `StructName::methodName`.
+            // At this point `name` is the fully-qualified struct name
+            // (e.g. "ns::Point"), so the full method name is
+            // `name + "::" + memberName`.  The string must be stored
+            // stably (Function::name is a string_view), so we keep it
+            // in nameStorage_.
+            {
+                std::string qual;
+                qual.reserve(std::string(name).size() + 2 + memberName.size());
+                qual += name;
+                qual += "::";
+                qual += memberName;
+                nameStorage_.push_back(std::move(qual));
+                method.name = nameStorage_.back();
+            }
+            method.namespacePrefix = currentNamespacePrefix();
+            method.params = std::move(params);
+            method.loc = memberLoc;
+
+            if (at(TokenKind::LBrace)) {
+                std::unique_ptr<Stmt> bodyStmt = parseCompound();
+                method.body =
+                    std::make_unique<Stmt::Compound>(
+                        std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else {
+                expect(TokenKind::Semi,
+                       "expected '{' for method body or ';' for a declaration");
+            }
+            sd.methods.push_back(std::move(method));
+            continue;
+        }
+
+        // Otherwise: field declaration.
+        Field f;
+        f.type = std::move(fieldType);
+        f.loc = memberLoc;
+        f.name = memberName;
 
         // Optional default initializer: `Type name = expr;`
         if (at(TokenKind::Assign)) {
@@ -898,8 +951,8 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
     expect(TokenKind::RBrace, "expected '}' to close struct body");
     expect(TokenKind::Semi, "expected ';' after struct definition");
 
-    // Register the struct name so isTypeStart()/parseType() accept it.
-    structNames_.push_back(name);
+    // The struct name was already registered early (above) so method
+    // parameter lists could reference the struct itself.
 
     tu.structs.push_back(std::move(sd));
 }
@@ -1428,7 +1481,7 @@ std::unique_ptr<Expr> Parser::parsePostfix(std::unique_ptr<Expr> lhs) {
                 return lhs;
             }
             next();
-            lhs = makeExpr<Expr::Member>(loc, std::move(lhs), nameTok.lexeme, /*isArrow=*/false);
+            lhs = makeExpr<Expr::Member>(loc, std::move(lhs), nameTok.lexeme, /*isArrow=*/false, /*isScope=*/true);
             continue;
         }
         if (at(TokenKind::LParen)) {  // call
@@ -1637,9 +1690,9 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
             }
         }
         if (t.lexeme == "this") {
-            errorAt(t, "'this' is only available in classes, which are not supported");
+            // `this` is valid inside method bodies (6.7).
             next();
-            return makeExpr<Expr::NullptrLit>(loc);
+            return makeExpr<Expr::This>(loc);
         }
     }
 

@@ -95,6 +95,7 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::Expr::BoolLit& v) { os << pad << "bool " << (v.value ? "true" : "false"); },
                    [&](const ivy::Expr::NullptrLit&) { os << pad << "nullptr"; },
                    [&](const ivy::Expr::IdentRef& v) { os << pad << "ident " << v.name; },
+                   [&](const ivy::Expr::This&) { os << pad << "this"; },
                    [&](const ivy::Expr::Unary& v) {
                        os << pad << (v.isPrefix ? "prefix " : "postfix ") << v.op << "\n";
                        dumpExpr(*v.operand, os, depth + 1);
@@ -320,6 +321,7 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::hir::Expr::BoolLit& v) { os << pad << "bool " << (v.value ? "true" : "false") << "\n"; },
                    [&](const ivy::hir::Expr::NullptrLit&) { os << pad << "nullptr\n"; },
                    [&](const ivy::hir::Expr::IdentRef& v) { os << pad << "ident " << v.name << "\n"; },
+                   [&](const ivy::hir::Expr::This&) { os << pad << "this\n"; },
                    [&](const ivy::hir::Expr::Unary& v) {
                        dumpHirExprHeader(e, os, depth,
                                          std::string(v.isPrefix ? "prefix '" : "postfix '") +
@@ -534,6 +536,7 @@ void dumpMirExpr(const ivy::mir::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::mir::Expr::BoolLit& v) { os << pad << "bool " << (v.value ? "true" : "false") << lts << "\n"; },
                    [&](const ivy::mir::Expr::NullptrLit&) { os << pad << "nullptr" << lts << "\n"; },
                    [&](const ivy::mir::Expr::IdentRef& v) { os << pad << "ident " << v.name << lts << "\n"; },
+                   [&](const ivy::mir::Expr::This&) { os << pad << "this" << lts << "\n"; },
                    [&](const ivy::mir::Expr::Unary& v) {
                        dumpMirExprHeader(e, os, depth,
                                          std::string(v.isPrefix ? "prefix '" : "postfix '") +

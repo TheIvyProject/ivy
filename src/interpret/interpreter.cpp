@@ -316,6 +316,12 @@ Value Interpreter::evalExpr(const hir::Expr& e) {
         } else if constexpr (std::is_same_v<V, E::NullptrLit>) {
             Value nv; nv.data = Value::Ptr{nullptr}; return nv;
 
+        } else if constexpr (std::is_same_v<V, E::This>) {
+            Cell c = lookupCell("this");
+            if (!c) { error(e.loc, "'this' is only valid inside a method"); return Value{}; }
+            if (e.type.isReference && c->isPtr() && c->asPtr()) return *c->asPtr();
+            return *c;
+
         } else if constexpr (std::is_same_v<V, E::IdentRef>) {
             Cell c = lookupCell(v.name);
             if (!c) { error(e.loc, "undefined variable '" + std::string(v.name) + "'"); return Value{}; }
@@ -597,6 +603,11 @@ Value Interpreter::defaultStructValue(std::string_view structName) {
 
 Cell Interpreter::lvalueCell(const hir::Expr& e) {
     using E = hir::Expr;
+    if (std::get_if<E::This>(&e.node)) {
+        Cell c = lookupCell("this");
+        if (c && c->isPtr() && c->asPtr()) return c->asPtr();
+        return c;
+    }
     if (const auto* id = std::get_if<E::IdentRef>(&e.node)) {
         Cell c = lookupCell(id->name);
         // If cell IS itself a reference (Ptr), return the pointed-to cell.

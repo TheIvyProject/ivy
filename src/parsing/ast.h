@@ -72,12 +72,16 @@ struct Expr {
     struct BoolLit { bool value; };
     struct NullptrLit {};
     struct IdentRef { std::string_view name; };
+    struct This {};  // `this` pointer in method bodies (6.7)
     struct Unary { std::string_view op; bool isPrefix; std::unique_ptr<Expr> operand; };
     struct Binary { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
     struct Ternary { std::unique_ptr<Expr> cond, thenBranch, elseBranch; };
     struct Call { std::unique_ptr<Expr> callee; std::vector<std::unique_ptr<Expr>> args; std::vector<Type> tplArgs; };
     struct Index { std::unique_ptr<Expr> base, index; };
-    struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; };
+    // `isScope` is true for `::` (scope resolution), false for `.`/`->`
+    // (member access).  Distinguishing the two is required for method
+    // calls (`obj.method(args)`) vs qualified calls (`ns::func(args)`).
+    struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; bool isScope = false; };
     struct Assign { std::string_view op; std::unique_ptr<Expr> lhs, rhs; };
     struct New { Type type; std::vector<std::unique_ptr<Expr>> args; };  // unsafe only
     struct Delete { std::unique_ptr<Expr> operand; bool isArray; };      // unsafe only
@@ -97,7 +101,7 @@ struct Expr {
     };
 
     SourceLoc loc;
-    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef,
+    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
                  Lambda>
         node;
@@ -123,6 +127,8 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 v.cond ? cloneExpr(*v.cond) : nullptr,
                 v.thenBranch ? cloneExpr(*v.thenBranch) : nullptr,
                 v.elseBranch ? cloneExpr(*v.elseBranch) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::This>) {
+            out->node.emplace<Expr::This>();
         } else if constexpr (std::is_same_v<V, Expr::Call>) {
             Expr::Call c{v.callee ? cloneExpr(*v.callee) : nullptr, {}, v.tplArgs};
             for (const auto& a : v.args) c.args.push_back(cloneExpr(*a));
@@ -133,7 +139,7 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 v.index ? cloneExpr(*v.index) : nullptr});
         } else if constexpr (std::is_same_v<V, Expr::Member>) {
             out->node.emplace<Expr::Member>(Expr::Member{
-                v.base ? cloneExpr(*v.base) : nullptr, v.name, v.isArrow});
+                v.base ? cloneExpr(*v.base) : nullptr, v.name, v.isArrow, v.isScope});
         } else if constexpr (std::is_same_v<V, Expr::Assign>) {
             out->node.emplace<Expr::Assign>(Expr::Assign{v.op,
                 v.lhs ? cloneExpr(*v.lhs) : nullptr,
@@ -325,12 +331,14 @@ struct EnumDecl {
 
 // A `struct` (or `class`) declaration. Ivy treats `struct` and
 // `class` identically — both are aggregates with public members.
-// No inheritance, no methods, no access specifiers — Ivy is a
-// subset and structs are plain C-style aggregates.
+// No inheritance — Ivy is a subset.  Methods (member functions) are
+// supported; they are stored here and registered as free functions
+// with an implicit `this` parameter during HIR building.
 struct StructDecl {
     std::string_view name;          // qualified (e.g. "ns::Point")
     std::string_view namespacePrefix;  // "ns::" or "" for global scope
     std::vector<Field> fields;
+    std::vector<Function> methods;  // member functions (6.7)
     bool isClass = false;  // `class` vs `struct` (cosmetic only)
     SourceLoc loc;
 };

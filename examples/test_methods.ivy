@@ -1,0 +1,44 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Point {
+    int32_t x;
+    int32_t y;
+
+    int32_t sum() {
+        return this.x + this.y;
+    }
+
+    void set(int32_t nx, int32_t ny) {
+        this.x = nx;
+        this.y = ny;
+    }
+
+    int32_t distance_squared(Point other) {
+        int32_t dx = this.x - other.x;
+        int32_t dy = this.y - other.y;
+        return dx * dx + dy * dy;
+    }
+};
+
+int main() {
+    Point p;
+    p.x = 3;
+    p.y = 4;
+    printf("p.sum() = %d\n", p.sum());  // 7
+
+    p.set(10, 20);
+    printf("p.x=%d p.y=%d\n", p.x, p.y);  // 10 20
+
+    Point q;
+    q.x = 0;
+    q.y = 0;
+    int32_t d = p.distance_squared(q);
+    printf("distance_squared = %d\n", d);  // 10*10 + 20*20 = 500
+
+    printf("all method tests passed\n");
+    return 0;
+}
