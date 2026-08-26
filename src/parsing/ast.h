@@ -196,6 +196,19 @@ struct Stmt {
         std::unique_ptr<Expr> incr;  // may be null
         std::unique_ptr<Stmt> body;
     };
+    // Range-based for: `for (T x : range) { body }` or `for (T& x : range)`.
+    // The loop variable `x` is bound to each element of `range` in turn.
+    // `isRef` is true when the declarator is `T& x` (reference to element).
+    // At the HIR stage this is desugared into an equivalent index loop
+    // (array) or begin/end iterator loop (struct), so downstream stages
+    // never see a RangeFor directly.
+    struct RangeFor {
+        Type type;
+        std::string_view name;
+        bool isRef = false;  // `T& x` — bind by reference
+        std::unique_ptr<Expr> range;
+        std::unique_ptr<Stmt> body;
+    };
     struct Return { std::unique_ptr<Expr> value; };  // may be null
     struct Break {};
     struct Continue {};
@@ -216,7 +229,7 @@ struct Stmt {
     };
 
     SourceLoc loc;
-    std::variant<Compound, Decl, If, While, DoWhile, For, Return, Break, Continue, ExprStmt,
+    std::variant<Compound, Decl, If, While, DoWhile, For, RangeFor, Return, Break, Continue, ExprStmt,
                  Unsafe, Null, Switch>
         node;
 };
@@ -253,6 +266,11 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
                 v.init ? cloneStmt(*v.init) : nullptr,
                 v.cond ? cloneExpr(*v.cond) : nullptr,
                 v.incr ? cloneExpr(*v.incr) : nullptr,
+                v.body ? cloneStmt(*v.body) : nullptr});
+        } else if constexpr (std::is_same_v<V, Stmt::RangeFor>) {
+            out->node.emplace<Stmt::RangeFor>(Stmt::RangeFor{
+                v.type, v.name, v.isRef,
+                v.range ? cloneExpr(*v.range) : nullptr,
                 v.body ? cloneStmt(*v.body) : nullptr});
         } else if constexpr (std::is_same_v<V, Stmt::Return>) {
             out->node.emplace<Stmt::Return>(Stmt::Return{

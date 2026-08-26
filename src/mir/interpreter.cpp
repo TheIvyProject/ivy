@@ -170,6 +170,22 @@ void Interpreter::execInst(FrameCtx& frame, const Inst& inst) {
                 declareCell(a.var, makeCell(std::move(arr)));
                 break;
             }
+            if (a.type.isReference) {
+                // Reference variable: alias the referenced object's cell.
+                // `a.init` is guaranteed by HIR to be an lvalue (Index,
+                // IdentRef, Deref, ...).  We must NOT call evalExpr here
+                // — that would copy the value and break the alias.
+                if (a.init) {
+                    Cell target = lvalueCell(*a.init);
+                    if (target) {
+                        declareCell(a.var, target);
+                        break;
+                    }
+                    error(inst.loc, "cannot bind reference to non-lvalue");
+                }
+                declareCell(a.var, makeCell(makeNullPtr()));
+                break;
+            }
             if (a.init) {
                 init = evalExpr(*a.init);
             } else {
@@ -184,7 +200,7 @@ void Interpreter::execInst(FrameCtx& frame, const Inst& inst) {
                     if (!isStruct) init = makeInt(0);
                 }
             }
-            if (a.type.isReference || a.type.pointerDepth > 0) {
+            if (a.type.pointerDepth > 0) {
                 if (init.isPtr() && !init.ptr.isNull)
                     declareCell(a.var, init.ptr.cell);
                 else

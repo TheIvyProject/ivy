@@ -152,6 +152,12 @@ private:
     void buildBody(hir::Function& fn, const Stmt::Compound& body);
     std::unique_ptr<hir::Stmt> buildStmt(const Stmt& s);
     std::unique_ptr<hir::Stmt> buildCompound(const Stmt::Compound& c, SourceLoc loc);
+    // Desugar a range-based for into an equivalent C-style for loop.
+    // For arrays: `for (T x : arr)` →
+    //   for (size_t __i = 0; __i < N; ++__i) { T x = arr[__i]; body }
+    // The loop variable `x` is const (by-value) unless `isRef` is true,
+    // in which case it's a reference to the element (mutable).
+    std::unique_ptr<hir::Stmt> buildRangeFor(const Stmt::RangeFor& rf, SourceLoc loc);
     std::unique_ptr<hir::Stmt> buildDeclaration(const Stmt::Decl& d, SourceLoc loc,
                                                 bool checkInit);
     std::unique_ptr<hir::Stmt> buildReturn(const Stmt::Return& r, SourceLoc loc);
@@ -171,6 +177,8 @@ private:
     std::unique_ptr<hir::Expr> buildLambda(const Expr::Lambda& lam, SourceLoc loc);
     // Counter for generating unique lambda names.
     int lambdaCounter_ = 0;
+    // Counter for generating unique range-for temporaries (__rfiN).
+    int rangeForCounter_ = 0;
 
     // helpers
     void declare(std::string_view name, hir::Type type, SourceLoc loc);

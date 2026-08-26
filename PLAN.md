@@ -130,7 +130,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| 7.1 | **Range-based for** | ★★ | `for (auto& x : container)` → desugar thành index loop hoặc iterator protocol. Với array: index loop. Với struct có `begin/end`: iterator protocol |
+| 7.1 | **Range-based for** ✅ | ★★ | `for (T x : arr)` / `for (T& x : arr)` — chỉ hỗ trợ fixed-size array `T[N]`. Desugar tại HIR thành C-style index loop với bound N captured compile-time từ `arraySize` → **an toàn: không bị iterator-invalidation** như `std::vector::push_back` trong C++. By-value `T x` copy; by-ref `T& x` alias element (mutable). Interpreter: reference Alloca dùng `lvalueCell` để alias cell thay vì `evalExpr` copy |
 | 7.2 | **`if constexpr`** | ★★ | Parser: flag trên `Stmt::If`. HIR: khi trong template instantiation — evaluate điều kiện, chỉ build nhánh true/false (discarded statement không instantiate) |
 | 7.3 | **Operator overloading** | ★★★ | Parse `operator+`/`==`/`[]`/`()`/`->` như method đặc biệt. HIR Binary handler: nếu operand là struct → lookup `operatorX` method. Ưu tiên member operator trước free function |
 | 7.4 | **Template class/struct** | ★★★ | Mở rộng registry `templates_` cho struct. Instantiate: clone field layout + methods với substituted types. `Box<int>` mangled name. Là nền cho `Result<T>`/container |

@@ -1,6 +1,7 @@
 #include "hir/hir_builder.h"
 
 #include <algorithm>
+#include <deque>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -972,6 +973,145 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     return out;
 }
 
+std::unique_ptr<hir::Stmt> HirBuilder::buildRangeFor(const Stmt::RangeFor& rf, SourceLoc loc) {
+    // Desugar `for (T x : range) { body }` into an equivalent
+    // index-based C-style for loop:
+    //   { for (size_t __rfiN = 0; __rfiN < N; ++__rfiN) {
+    //         T x = range[__rfiN];   // (or T& x = range[__rfiN])
+    //         body
+    //     } }
+    // We build the desugared AST and delegate to `buildStmt` so that
+    // all type checking, overload resolution, and RAII handling apply
+    // uniformly to the synthesized loop.
+    //
+    // Safety: the array bound N is the compile-time `arraySize`
+    // captured once from the range type — the loop body cannot mutate
+    // it, so iterator-invalidation (a la std::vector::push_back) is
+    // impossible for fixed-size Ivy arrays.  By-value loop variables
+    // (`T x`) are copies; reference loop variables (`T& x`) alias the
+    // element but the bound is still fixed.
+
+    // Build the range expression first to discover its type.
+    std::unique_ptr<hir::Expr> rangeExpr = buildExpr(*rf.range);
+    if (!rangeExpr) {
+        return [&] {
+            auto err = std::make_unique<hir::Stmt>();
+            err->loc = loc;
+            err->node = hir::Stmt::Null{};
+            return err;
+        }();
+    }
+
+    const hir::Type& rangeType = rangeExpr->type;
+    const bool isArray = (rangeType.arraySize > 0);
+    if (!isArray) {
+        error(loc, "range-based for currently supports only fixed-size arrays "
+                    "(T[N]); got non-array range expression");
+        auto err = std::make_unique<hir::Stmt>();
+        err->loc = loc;
+        err->node = hir::Stmt::Null{};
+        return err;
+    }
+
+    // Generate unique temp names.
+    const int id = rangeForCounter_++;
+    const std::string idxName = "__rfi" + std::to_string(id);
+
+    // --- Build the desugared AST: a Compound wrapping one For stmt ---
+    // init: size_t __rfiN = 0;
+    auto initStmt = std::make_unique<ivy::Stmt>();
+    initStmt->loc = loc;
+    {
+        auto& d = initStmt->node.emplace<ivy::Stmt::Decl>();
+        d.type.base = "size_t";
+        // We need a stable string for the name (string_view must outlive).
+        // Use a deque so that push_back never invalidates references to
+        // existing elements (a vector reallocates and would dangle the
+        // string_view for SSO-short strings like "__rfi0").
+        static thread_local std::deque<std::string> namePool;
+        namePool.push_back(idxName);
+        d.name = std::string_view(namePool.back());
+        auto zero = std::make_unique<ivy::Expr>();
+        zero->loc = loc;
+        zero->node = ivy::Expr::IntegerLit{0};
+        d.init = std::move(zero);
+    }
+
+    // cond: __rfiN < N
+    auto condExpr = std::make_unique<ivy::Expr>();
+    condExpr->loc = loc;
+    {
+        auto& bin = condExpr->node.emplace<ivy::Expr::Binary>();
+        bin.op = "<";
+        bin.lhs = std::make_unique<ivy::Expr>();
+        bin.lhs->loc = loc;
+        bin.lhs->node = ivy::Expr::IdentRef{
+            std::get<ivy::Stmt::Decl>(initStmt->node).name};
+        auto rhs = std::make_unique<ivy::Expr>();
+        rhs->loc = loc;
+        rhs->node = ivy::Expr::IntegerLit{
+            static_cast<long long>(rangeType.arraySize)};
+        bin.rhs = std::move(rhs);
+    }
+
+    // incr: ++__rfiN
+    auto incrExpr = std::make_unique<ivy::Expr>();
+    incrExpr->loc = loc;
+    {
+        auto& un = incrExpr->node.emplace<ivy::Expr::Unary>();
+        un.op = "++";
+        un.isPrefix = true;
+        un.operand = std::make_unique<ivy::Expr>();
+        un.operand->loc = loc;
+        un.operand->node = ivy::Expr::IdentRef{
+            std::get<ivy::Stmt::Decl>(initStmt->node).name};
+    }
+
+    // body: Compound { Decl(x, init=range[__rfiN]), <user body> }
+    auto bodyStmt = std::make_unique<ivy::Stmt>();
+    bodyStmt->loc = loc;
+    {
+        auto& comp = bodyStmt->node.emplace<ivy::Stmt::Compound>();
+        // Decl: T x = range[__rfiN];  (or T& x = range[__rfiN])
+        auto varDecl = std::make_unique<ivy::Stmt>();
+        varDecl->loc = loc;
+        auto& d = varDecl->node.emplace<ivy::Stmt::Decl>();
+        d.type = rf.type;
+        d.type.isReference = rf.isRef;
+        // name — must be stable; rf.name is already a string_view into
+        // the source, so it's safe to copy.
+        d.name = rf.name;
+        // init: range[__rfiN]
+        auto indexExpr = std::make_unique<ivy::Expr>();
+        indexExpr->loc = loc;
+        auto& idx = indexExpr->node.emplace<ivy::Expr::Index>();
+        // Clone the range AST (not the HIR) so buildExpr runs fresh
+        // inside the loop body scope where __rfiN is declared.
+        idx.base = cloneExpr(*rf.range);
+        idx.index = std::make_unique<ivy::Expr>();
+        idx.index->loc = loc;
+        idx.index->node = ivy::Expr::IdentRef{
+            std::get<ivy::Stmt::Decl>(initStmt->node).name};
+        d.init = std::move(indexExpr);
+        comp.stmts.push_back(std::move(varDecl));
+        // User body (already a unique_ptr Stmt — clone it so the
+        // synthesized compound takes ownership).
+        if (rf.body) comp.stmts.push_back(cloneStmt(*rf.body));
+    }
+
+    // Assemble the For stmt.
+    auto forStmt = std::make_unique<ivy::Stmt>();
+    forStmt->loc = loc;
+    auto& fr = forStmt->node.emplace<ivy::Stmt::For>();
+    fr.init = std::move(initStmt);
+    fr.cond = std::move(condExpr);
+    fr.incr = std::move(incrExpr);
+    fr.body = std::move(bodyStmt);
+
+    // Delegate to the normal C-style for builder.
+    return buildStmt(*forStmt);
+}
+
 std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, SourceLoc loc) {
     auto out = std::make_unique<hir::Stmt>();
     out->loc = loc;
@@ -1112,6 +1252,9 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         scopes_.pop_back();
         dtorStacks_.pop_back();
         return out;
+    }
+    if (std::holds_alternative<A::RangeFor>(n)) {
+        return buildRangeFor(std::get<A::RangeFor>(n), s.loc);
     }
     if (std::holds_alternative<A::Return>(n)) {
         return buildReturn(std::get<A::Return>(n), s.loc);

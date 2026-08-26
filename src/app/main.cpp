@@ -226,6 +226,13 @@ void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth) {
                        os << pad << "  body\n";
                        dumpStmt(*v.body, os, depth + 1);
                    },
+                   [&](const ivy::Stmt::RangeFor& v) {
+                       os << pad << "range-for";
+                       if (v.isRef) os << " ref";
+                       os << "\n";
+                       if (v.range) dumpExpr(*v.range, os, depth + 1);
+                       if (v.body) dumpStmt(*v.body, os, depth + 1);
+                   },
                    [&](const ivy::Stmt::Return& v) {
                        os << pad << "return";
                        if (v.value) {

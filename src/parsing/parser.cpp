@@ -1421,6 +1421,39 @@ std::unique_ptr<Stmt> Parser::parseFor() {
     next();  // for
     expect(TokenKind::LParen, "expected '(' after 'for'");
 
+    // Detect range-based for: `for (T x : range)` or `for (T& x : range)`.
+    // After `for (`, if the next token starts a type, we speculatively
+    // parse `T x` (or `T& x`) and then look for `:`.  If we see `:`,
+    // it's a range-for; otherwise we roll back the token position and
+    // fall through to the C-style for parsing below.
+    if (isTypeStart()) {
+        const std::size_t savePos = pos_;
+        Type type = parseType();
+        // `parseType` consumes a trailing `&` and sets `type.isReference`.
+        // We use that as the source of truth for `T& x` range-for bindings
+        // (so there's no separate `&` token to check here).
+        const bool isRef = type.isReference;
+        if (at(TokenKind::Identifier) && peek(1).kind == TokenKind::Colon) {
+            // Range-based for: `for (T x : range) { body }`
+            std::string_view name = next().lexeme;  // variable name
+            next();  // consume ':'
+            std::unique_ptr<Expr> range = parseExpr();
+            expect(TokenKind::RParen, "expected ')' after range-for range");
+            std::unique_ptr<Stmt> body = parseStatement();
+            auto s = makeStmt<Stmt::RangeFor>(loc);
+            auto& rf = std::get<Stmt::RangeFor>(s->node);
+            rf.type = std::move(type);
+            rf.name = name;
+            rf.isRef = isRef;
+            rf.range = std::move(range);
+            rf.body = std::move(body);
+            return s;
+        }
+        // Not a range-for — roll back to the saved position and fall
+        // through to the C-style for parsing below.
+        pos_ = savePos;
+    }
+
     // init
     std::unique_ptr<Stmt> init;
     if (at(TokenKind::Semi)) {
