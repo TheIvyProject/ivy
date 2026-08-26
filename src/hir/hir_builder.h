@@ -121,6 +121,12 @@ private:
     };
     std::unordered_map<std::string_view, StructDef> structs_;
 
+    // Type alias registry: maps alias name → aliased type.
+    // Populated from `ast_.usingDecls` during `build()` (pass 0).
+    // Used by `resolveTypeAlias()` to expand aliases when resolving
+    // types in declarations, parameters, and expressions.
+    std::unordered_map<std::string_view, hir::Type> typeAliases_;
+
     // Stable storage for synthesized qualified names (e.g. from
     // flattening `ns::func` Member chains in Call expressions).
     // `string_view` keys in `functions_` / `call.callee` must point
@@ -133,6 +139,12 @@ private:
     void buildSignature(const Function& af);
     void buildEnum(const EnumDecl& ed);
     void buildStruct(const StructDecl& sd);
+    void buildUsing(const UsingDecl& ud);
+    // Recursively expand a type alias.  If `type.base` is a registered
+    // alias, replace it with the aliased type (preserving const/ref/
+    // pointer qualifiers from the alias usage).  Recurse in case of
+    // alias→alias chains.
+    hir::Type resolveTypeAlias(const hir::Type& type) const;
     void lowerLifetimeAttributes(hir::Function& fn, const Function& af);
     std::string_view lowerParamAttribute(hir::Function& fn, const Param& ap);
 

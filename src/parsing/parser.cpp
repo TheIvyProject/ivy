@@ -83,8 +83,8 @@ constexpr struct {
     {"constexpr", ""},   // constexpr IS supported — handled in parseTopLevel
     {"consteval", ""},   // consteval IS supported — handled in parseTopLevel
     {"constinit", "constinit is not supported in the Ivy subset yet"},
-    {"using", "'using' declarations are not supported in the Ivy subset"},
-    {"typedef", "typedefs are not supported in the Ivy subset"},
+    {"using", ""},  // using IS supported — handled in parseTopLevel/parseNamespace
+    {"typedef", "use 'using' instead of 'typedef' in the Ivy subset"},
     {"static_assert", "static_assert is not supported in the Ivy subset"},
     {"try", "exceptions are not supported in the Ivy subset"},
     {"catch", "exceptions are not supported in the Ivy subset"},
@@ -246,6 +246,10 @@ bool Parser::isTypeStart() const {
         for (const auto& sn : structNames_) {
             if (sn == id) return true;
         }
+        // Type aliases (`using Name = Type;`)
+        for (const auto& tn : typeAliases_) {
+            if (tn == id) return true;
+        }
         // Template type parameters (e.g. `T`)
         for (const auto& tn : templateParamNames_) {
             if (tn == id) return true;
@@ -270,6 +274,9 @@ bool Parser::isTypeStart() const {
             }
             for (const auto& en : enumNames_) {
                 if (en == qual) return true;
+            }
+            for (const auto& tn : typeAliases_) {
+                if (tn == qual) return true;
             }
         }
     }
@@ -327,7 +334,7 @@ Type Parser::parseType() {
                 if (pos_ + lookahead >= tokens_.size() ||
                     tokens_[pos_ + lookahead].kind != TokenKind::ColonColon) break;
             }
-            // Check if `qual` matches a struct or enum name.
+            // Check if `qual` matches a struct, enum, or alias name.
             bool isUserType = false;
             for (const auto& sn : structNames_) {
                 if (sn == qual) { isUserType = true; break; }
@@ -335,6 +342,11 @@ Type Parser::parseType() {
             if (!isUserType) {
                 for (const auto& en : enumNames_) {
                     if (en == qual) { isUserType = true; break; }
+                }
+            }
+            if (!isUserType) {
+                for (const auto& tn : typeAliases_) {
+                    if (tn == qual) { isUserType = true; break; }
                 }
             }
             if (isUserType) {
@@ -370,6 +382,12 @@ Type Parser::parseType() {
         if (!isUserType) {
             for (const auto& sn : structNames_) {
                 if (sn == peek().lexeme) { isUserType = true; break; }
+            }
+        }
+        // Type alias (`using Name = Type;`)
+        if (!isUserType) {
+            for (const auto& tn : typeAliases_) {
+                if (tn == peek().lexeme) { isUserType = true; break; }
             }
         }
         // Template type parameter (e.g. `T`)
@@ -560,6 +578,13 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
             continue;
         }
 
+        // `using Name = Type;` — type alias declaration.
+        if (atKeyword("using")) {
+            const SourceLoc loc = locOf(peek());
+            parseUsing(tu, loc);
+            continue;
+        }
+
         // `template` — parse template declaration: `template <typename T> ret name(...) { ... }`
         if (atKeyword("template")) {
             const SourceLoc loc = locOf(peek());
@@ -703,6 +728,12 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
             parseNamespace(tu, eloc);
             continue;
         }
+        // `using Name = Type;` inside namespace
+        if (atKeyword("using")) {
+            const SourceLoc uloc = locOf(peek());
+            parseUsing(tu, uloc);
+            continue;
+        }
         // `template` inside namespace
         if (atKeyword("template")) {
             const SourceLoc tloc = locOf(peek());
@@ -746,6 +777,45 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
     expect(TokenKind::RBrace, "expected '}' to close namespace body");
     // Optional trailing ';' (C++ allows but does not require it).
     if (at(TokenKind::Semi)) next();
+}
+
+void Parser::parseUsing(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("using", "expected 'using'");
+    // Only `using Name = Type;` (type alias) is supported.
+    // `using namespace NS;` and `using NS::name;` are not supported yet.
+    if (!at(TokenKind::Identifier)) {
+        errorAt(peek(), "expected alias name after 'using'");
+        synchronize();
+        return;
+    }
+    const std::string_view aliasName = next().lexeme;
+    if (!at(TokenKind::Assign)) {
+        errorAt(peek(), "expected '=' after alias name; only 'using Name = Type;' is supported");
+        synchronize();
+        return;
+    }
+    next();  // consume '='
+    if (!isTypeStart()) {
+        errorAt(peek(), "expected a type after '=' in using-declaration");
+        synchronize();
+        return;
+    }
+    Type targetType = parseType();
+    expect(TokenKind::Semi, "expected ';' after using-declaration");
+
+    UsingDecl ud;
+    ud.loc = loc;
+    ud.name = qualifyName(aliasName);
+    ud.targetType = targetType;
+    ud.namespacePrefix = currentNamespacePrefix();
+    tu.usingDecls.push_back(std::move(ud));
+
+    // Register the alias name so isTypeStart()/parseType() accept it.
+    // The name is already stored in nameStorage_ via qualifyName.
+    // Store the bare (unqualified) name — matching how structNames_
+    // and enumNames_ work — so unqualified use inside the defining
+    // namespace resolves correctly.
+    typeAliases_.push_back(aliasName);
 }
 
 void Parser::parseEnum(TranslationUnit& tu, SourceLoc loc) {

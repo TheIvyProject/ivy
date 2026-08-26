@@ -354,10 +354,19 @@ struct StructDecl {
     SourceLoc loc;
 };
 
+// Type alias declared with `using Name = Type;`.
+struct UsingDecl {
+    std::string_view name;            // alias name (qualified, e.g. "ns::Int")
+    Type targetType;                  // the aliased type
+    std::string_view namespacePrefix; // namespace prefix (e.g. "ns::" or "")
+    SourceLoc loc;
+};
+
 struct TranslationUnit {
     std::vector<Function> functions;
     std::vector<EnumDecl> enums;
     std::vector<StructDecl> structs;
+    std::vector<UsingDecl> usingDecls;  // `using Name = Type;` aliases
 };
 
 }  // namespace ivy

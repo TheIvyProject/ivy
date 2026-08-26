@@ -392,6 +392,38 @@ static std::uint64_t typeSize(const hir::Type& t) {
     return 4;  // fallback (e.g. unresolved enum → int)
 }
 
+void HirBuilder::buildUsing(const UsingDecl& ud) {
+    // Register the alias: name → target type.  The AST Type and HIR
+    // Type are the same struct, so direct copy is fine.
+    // Store under both the qualified name (ud.name, e.g. "math::Float")
+    // and the bare name (last `::` segment, e.g. "Float") so that
+    // `resolveTypeAlias` finds it whether the source used the
+    // qualified or unqualified form.
+    typeAliases_[ud.name] = ud.targetType;
+    const std::string_view qual = ud.name;
+    const std::size_t pos = qual.rfind("::");
+    const std::string_view bare =
+        (pos != std::string_view::npos) ? qual.substr(pos + 2) : qual;
+    if (bare != qual) typeAliases_[bare] = ud.targetType;
+}
+
+hir::Type HirBuilder::resolveTypeAlias(const hir::Type& type) const {
+    // If type.base is a registered alias, replace it with the aliased
+    // type.  Preserve const/ref/pointer qualifiers from the *usage*
+    // (e.g. `const Int&` → `const int32_t&`).  Recurse for alias chains.
+    if (type.base.empty()) return type;
+    auto it = typeAliases_.find(type.base);
+    if (it == typeAliases_.end()) return type;
+    hir::Type expanded = it->second;
+    // Merge qualifiers: if the alias usage has const/ref/pointer,
+    // apply them on top of the expanded base type.
+    if (type.isConst) expanded.isConst = true;
+    if (type.isReference) expanded.isReference = true;
+    expanded.pointerDepth += type.pointerDepth;
+    // Recurse in case the target is also an alias.
+    return resolveTypeAlias(expanded);
+}
+
 static std::uint32_t typeAlign(const hir::Type& t) {
     // Alignment = size for all Ivy scalar types (no special alignment rules).
     return static_cast<std::uint32_t>(typeSize(t));
@@ -415,11 +447,12 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     std::uint32_t structAlign = 1;
     for (std::size_t i = 0; i < sd.fields.size(); ++i) {
         const Field& f = sd.fields[i];
-        const std::uint64_t sz = typeSize(f.type);
-        const std::uint32_t align = typeAlign(f.type);
+        const hir::Type fieldType = resolveTypeAlias(f.type);
+        const std::uint64_t sz = typeSize(fieldType);
+        const std::uint32_t align = typeAlign(fieldType);
         // Pad to alignment.
         offset = (offset + align - 1) & ~(std::uint64_t(align - 1));
-        def.fieldMap[f.name] = {i, offset, f.type};
+        def.fieldMap[f.name] = {i, offset, fieldType};
         offset += sz;
         if (align > structAlign) structAlign = align;
     }
@@ -427,7 +460,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     def.align = structAlign;
     // Copy field type/name (skip `init` — not needed past HIR).
     for (const Field& f : sd.fields) {
-        def.fields.push_back(Field{f.type, f.name, nullptr, f.loc});
+        def.fields.push_back(Field{resolveTypeAlias(f.type), f.name, nullptr, f.loc});
         def.defaultInits.push_back(f.init.get());
     }
 
@@ -444,7 +477,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     resolved.loc = sd.loc;
     for (const Field& f : sd.fields) {
         Field cf;
-        cf.type = f.type;
+        cf.type = resolveTypeAlias(f.type);  // expand `using` aliases
         cf.name = f.name;
         cf.loc = f.loc;
         resolved.fields.push_back(std::move(cf));
@@ -477,7 +510,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         fn->isConsteval = mf.isConsteval;
         fn->isCtor = mf.isCtor;
         fn->isDtor = mf.isDtor;
-        fn->returnType = mf.returnType;
+        fn->returnType = resolveTypeAlias(mf.returnType);
         fn->loc = mf.loc;
 
         // Implicit `this` parameter: `StructName& this` (or
@@ -493,7 +526,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         // User-declared parameters.
         for (const Param& ap : mf.params) {
             hir::Param p;
-            p.type = ap.type;
+            p.type = resolveTypeAlias(ap.type);
             p.name = ap.name;
             p.loc = ap.loc;
             p.lifetime = lowerParamAttribute(*fn, ap);
@@ -552,7 +585,7 @@ void HirBuilder::buildSignature(const Function& af) {
     auto fn = std::make_unique<hir::Function>();
     fn->name = af.name;
     fn->namespacePrefix = af.namespacePrefix;
-    fn->returnType = af.returnType;
+    fn->returnType = resolveTypeAlias(af.returnType);
     fn->isExternC = af.isExternC;
     fn->isConstexpr = af.isConstexpr;
     fn->isConsteval = af.isConsteval;
@@ -562,7 +595,7 @@ void HirBuilder::buildSignature(const Function& af) {
 
     for (const Param& ap : af.params) {
         hir::Param p;
-        p.type = ap.type;
+        p.type = resolveTypeAlias(ap.type);
         p.name = ap.name;
         p.loc = ap.loc;
         p.lifetime = lowerParamAttribute(*fn, ap);
@@ -573,7 +606,7 @@ void HirBuilder::buildSignature(const Function& af) {
     // Safety rule: a function definition that returns a pointer must declare
     // the returned pointer's lifetime. (Declarations — e.g. extern "C" C APIs
     // like malloc — are exempt.)
-    if (af.body && af.returnType.pointerDepth > 0 && fn->returnLifetime.empty()) {
+    if (af.body && fn->returnType.pointerDepth > 0 && fn->returnLifetime.empty()) {
         error(af.loc, "function '" + std::string(af.name) +
                           "' returns a pointer but has no [[ivy::lt_ret(...)]] attribute");
     }
@@ -633,6 +666,9 @@ void HirBuilder::declare(std::string_view name, hir::Type type, SourceLoc loc) {
         error(loc, "redefinition of variable '" + std::string(name) + "'");
         return;
     }
+    // Expand type aliases (e.g. `Int` → `int32_t`) so downstream
+    // type comparisons, recordDtorVar, and codegen see the real type.
+    type = resolveTypeAlias(type);
     scope.emplace(name, type);
 }
 
@@ -764,10 +800,13 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     auto out = std::make_unique<hir::Stmt>();
     out->loc = loc;
     auto& decl = out->node.emplace<hir::Stmt::Decl>();
-    decl.type = d.type;
+    // Expand type aliases (e.g. `Int` → `int32_t`) so all downstream
+    // comparisons (isAssignable, struct lookup, ctor injection, etc.)
+    // see the real underlying type.
+    decl.type = resolveTypeAlias(d.type);
     decl.name = d.name;
 
-    if (d.type.pointerDepth == 0 && d.type.base == "void") {
+    if (decl.type.pointerDepth == 0 && decl.type.base == "void") {
         error(loc, "variable '" + std::string(d.name) + "' cannot have type void");
     }
 
@@ -775,28 +814,28 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     // `auto x = expr;`  →  type = expr.type (with pointer/ref from the declared auto)
     // `auto* p = &x;`   →  type = expr.type (already a pointer)
     // `auto& r = x;`    →  type = expr.type with isReference = true
-    const bool isAuto = (d.type.base == "auto");
+    const bool isAuto = (decl.type.base == "auto");
     if (isAuto) {
         if (!d.init) {
             error(loc, "'auto' variable '" + std::string(d.name) +
                            "' must have an initializer");
-            declare(d.name, d.type, loc);
+            declare(d.name, decl.type, loc);
             return out;
         }
         decl.init = buildExpr(*d.init);
         if (!decl.init) {
-            declare(d.name, d.type, loc);
+            declare(d.name, decl.type, loc);
             return out;
         }
         // Infer the concrete type from the initializer.
         hir::Type inferred = decl.init->type;
         // Propagate pointer/ref qualifiers from the `auto` declaration:
         // e.g. `auto* p = expr` keeps inferred pointer depth but adds declared depth.
-        inferred.pointerDepth += d.type.pointerDepth;
-        if (d.type.isReference) inferred.isReference = true;
-        if (d.type.isConst) inferred.isConst = true;
+        inferred.pointerDepth += decl.type.pointerDepth;
+        if (decl.type.isReference) inferred.isReference = true;
+        if (decl.type.isConst) inferred.isConst = true;
         // Strip reference from plain `auto x = ref_expr` (copy semantics).
-        if (!d.type.isReference) inferred.isReference = false;
+        if (!decl.type.isReference) inferred.isReference = false;
         decl.type = inferred;
         declare(d.name, inferred, loc);
         return out;
@@ -807,21 +846,21 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
         // Resolve each element against the corresponding field type so
         // implicit conversions (e.g. int → int32_t) are applied.
         if (auto* il = std::get_if<ivy::Expr::InitList>(&d.init->node)) {
-            decl.init = buildStructInit(*il, d.type, d.name, loc);
+            decl.init = buildStructInit(*il, decl.type, d.name, loc);
         } else {
             decl.init = buildExpr(*d.init);
-            if (decl.init && !isAssignable(d.type, decl.init->type)) {
+            if (decl.init && !isAssignable(decl.type, decl.init->type)) {
                 error(loc, "cannot initialize variable '" + std::string(d.name) + "' of type '" +
-                               typeToString(d.type) + "' with a value of type '" +
+                               typeToString(decl.type) + "' with a value of type '" +
                                typeToString(decl.init->type) + "'");
             }
         }
     } else if (checkInit) {
         // Array variables (T[N]) are zero-initialized — no explicit
         // initializer required (like C arrays and Ivy struct variables).
-        if (d.type.arraySize > 0) {
+        if (decl.type.arraySize > 0) {
             // No error — codegen will emit zeroinitializer for the [N x T] alloca.
-        } else if (structs_.contains(d.type.base)) {
+        } else if (structs_.contains(decl.type.base)) {
             // Struct variables are zero-initialized (like C) — no explicit
             // initializer required.  All other types must be initialized.
             // Synthesize an aggregate initializer from default member
@@ -829,7 +868,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
             // zero-initialized by `lowerInitListInto` (which emits a
             // `store ... zeroinitializer` first). This preserves C
             // value-initialization semantics while honoring `= default`.
-            const StructDef& def = structs_[d.type.base];
+            const StructDef& def = structs_[decl.type.base];
             bool anyDefault = false;
             for (auto* p : def.defaultInits) if (p) { anyDefault = true; break; }
             if (anyDefault) {
@@ -842,14 +881,14 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                     if (p) il.elements.push_back(cloneExpr(*p));
                     else il.elements.push_back(nullptr);
                 }
-                decl.init = buildStructInit(il, d.type, d.name, loc);
+                decl.init = buildStructInit(il, decl.type, d.name, loc);
             }
         } else {
             error(loc, "variable '" + std::string(d.name) +
                            "' must be initialized (uninitialized variables are not allowed)");
         }
     }
-    declare(d.name, d.type, loc);
+    declare(d.name, decl.type, loc);
 
     // Constructor injection: if the declared type is a struct with a
     // user-declared constructor and the declaration has no aggregate
@@ -857,8 +896,8 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     // synthesize a ctor call `StructName::ctor(&p, args...)` right
     // after the declaration.  The object is zero-initialized first by
     // the codegen alloca, then the ctor runs (like C++).
-    if (d.type.pointerDepth == 0 && !d.type.isReference) {
-        auto sit = structs_.find(d.type.base);
+    if (decl.type.pointerDepth == 0 && !decl.type.isReference) {
+        auto sit = structs_.find(decl.type.base);
         if (sit != structs_.end() && !sit->second.ctors.empty()) {
             std::vector<std::unique_ptr<hir::Expr>> ctorArgExprs;
             bool isAggregateInit = false;  // InitList bypasses ctor
@@ -900,7 +939,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                     auto thisArg = std::make_unique<hir::Expr>();
                     thisArg->loc = loc;
                     thisArg->node = hir::Expr::IdentRef{d.name};
-                    thisArg->type = d.type;
+                    thisArg->type = decl.type;
                     thisArg->type.isReference = true;
                     ce.args.push_back(std::move(thisArg));
                     for (auto& a : ctorArgExprs) {
@@ -923,13 +962,13 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                     out = std::move(wrap);
                 } else if (!ctorArgExprs.empty()) {
                     error(loc, "no matching constructor for type '" +
-                               std::string(d.type.base) + "'");
+                               std::string(decl.type.base) + "'");
                 }
             }
         }
     }
 
-    recordDtorVar(d.name, d.type);
+    recordDtorVar(d.name, decl.type);
     return out;
 }
 
@@ -2459,6 +2498,9 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
 
 std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     hir_ = std::make_unique<hir::TranslationUnit>();
+    // Register type aliases (pass 0) so alias names are usable as types
+    // in function/struct member declarations (pass 1).
+    for (const UsingDecl& ud : ast_.usingDecls) buildUsing(ud);
     // Register enums first (pass 1a) so enum constants are resolvable
     // in function bodies (pass 2) and enum type names are usable as types.
     for (const EnumDecl& ed : ast_.enums) buildEnum(ed);
@@ -2478,7 +2520,11 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
                     bool match = true;
                     for (std::size_t i = 0; i < af.params.size() && match; ++i) {
                         hir::Type a = cand->params[i].type; a.isReference = false;
-                        hir::Type b = af.params[i].type;    b.isReference = false;
+                        // Expand `using` aliases on the AST side so the
+                        // comparison sees the real underlying type (the
+                        // HIR side was already resolved in buildSignature).
+                        hir::Type b = resolveTypeAlias(af.params[i].type);
+                        b.isReference = false;
                         if (!(a == b)) match = false;
                     }
                     if (match) { fn = cand; break; }
@@ -2508,7 +2554,11 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
                     bool match = true;
                     for (std::size_t i = 0; i < mf.params.size() && match; ++i) {
                         hir::Type a = cand->params[i + 1].type; a.isReference = false;
-                        hir::Type b = mf.params[i].type;        b.isReference = false;
+                        // Expand `using` aliases on the AST side so the
+                        // comparison sees the real underlying type (the
+                        // HIR side was already resolved in buildStruct).
+                        hir::Type b = resolveTypeAlias(mf.params[i].type);
+                        b.isReference = false;
                         if (!(a == b)) match = false;
                     }
                     if (match) { fn = cand; break; }

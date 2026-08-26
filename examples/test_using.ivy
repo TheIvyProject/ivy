@@ -1,0 +1,42 @@
+// Test 6.9: `using` alias (type alias).
+// Only `using Name = Type;` is supported (no `typedef`).
+
+// Basic alias to a primitive.
+using Int = int32_t;
+using Word = uint32_t;
+using SizeT = uint64_t;
+
+// Alias to a pointer.
+using IntPtr = int32_t*;
+
+// Alias chain: alias to another alias.
+using AnotherInt = Int;
+
+// Struct with aliased field types and constructor.
+struct Point {
+    Int x;
+    Int y;
+
+    // Constructor with aliased param types + member init list.
+    Point(Int x, Int y) : x(x), y(y) {}
+};
+
+int32_t main() {
+    // Basic: alias as variable type.
+    Int a = 42;
+    Word w = 100u;
+    SizeT sz = 1000ull;
+
+    // Pointer alias.
+    Int b = 7;
+    IntPtr p = &b;
+
+    // Struct field types are aliases — construct via ctor.
+    Point pt(1, 2);
+
+    // Alias chain: AnotherInt → Int → int32_t.
+    AnotherInt c = 99;
+
+    // Return sum to verify everything compiled/ran.
+    return a + w + b + c;  // 42 + 100 + 7 + 99 = 248
+}

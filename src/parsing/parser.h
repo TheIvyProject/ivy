@@ -73,6 +73,11 @@ private:
     // qualified names (e.g. `ns::Point`).
     std::vector<std::string_view> structNames_;
 
+    // Type aliases defined so far via `using Name = Type;` (populated
+    // by parseUsing). Used by isTypeStart()/parseType() to accept
+    // alias names as types. Stored as qualified names (e.g. `ns::Int`).
+    std::vector<std::string_view> typeAliases_;
+
     // Names of template type parameters in the current template declaration
     // (e.g. `T`, `U`). Used by isTypeStart()/parseType() to accept them as
     // types. Cleared after each template function is parsed.
@@ -120,6 +125,7 @@ private:
     void parseEnum(TranslationUnit& tu, SourceLoc loc);
     void parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass);
     void parseExternC(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs);
+    void parseUsing(TranslationUnit& tu, SourceLoc loc);
     void parseTemplate(TranslationUnit& tu, SourceLoc loc);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
