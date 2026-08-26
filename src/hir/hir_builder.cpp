@@ -455,7 +455,18 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     // in `functions_` under its qualified name ("StructName::method")
     // with an implicit `this` parameter prepended.  The `this` param
     // is a reference to the struct type, so the method can mutate
-    // the object.
+    // the object.  Constructors and destructors are registered here
+    // too (they live in `sd.methods` with `isCtor`/`isDtor` set), and
+    // are also collected into `StructDef.ctors`/`StructDef.dtor` for
+    // RAII injection at declaration sites and scope exits.
+    // Build the HIR function for each method in declaration order.
+    // Keep a parallel vector of raw pointers so the second loop (which
+    // populates the struct's method/ctor/dtor tables) can address each
+    // HIR function by index instead of by name lookup — which would be
+    // ambiguous for overloaded methods (e.g. multiple ctors share the
+    // same qualified name "Pair::Pair").
+    std::vector<hir::Function*> methodFns;
+    methodFns.reserve(sd.methods.size());
     for (const Function& mf : sd.methods) {
         // Build the HIR function for this method.
         auto fn = std::make_unique<hir::Function>();
@@ -464,6 +475,8 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         fn->isExternC = mf.isExternC;
         fn->isConstexpr = mf.isConstexpr;
         fn->isConsteval = mf.isConsteval;
+        fn->isCtor = mf.isCtor;
+        fn->isDtor = mf.isDtor;
         fn->returnType = mf.returnType;
         fn->loc = mf.loc;
 
@@ -490,6 +503,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
 
         // Register in functions_ under the qualified name.
         functions_[fn->name].push_back(fn.get());
+        methodFns.push_back(fn.get());
         hir_->functions.push_back(std::move(fn));
     }
 
@@ -499,19 +513,31 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     structs_[sd.name] = std::move(def);
 
     // Register methods in the struct's method table (under bare names).
+    // Constructors and destructors are NOT added to the method table —
+    // they are invoked implicitly at declaration sites and scope exits,
+    // not via member call syntax (`obj.ctor()` is illegal).
     StructDef& defRef = structs_[sd.name];
-    for (const Function& mf : sd.methods) {
+    for (std::size_t i = 0; i < sd.methods.size(); ++i) {
+        const Function& mf = sd.methods[i];
+        hir::Function* hirFn = i < methodFns.size() ? methodFns[i] : nullptr;
+        if (mf.isCtor) {
+            defRef.ctors.push_back(hirFn);
+            defRef.astCtors.push_back(&mf);
+            continue;
+        }
+        if (mf.isDtor) {
+            defRef.dtor = hirFn;
+            defRef.astDtor = &mf;
+            continue;
+        }
+        // Regular method — register under its bare name.
         const std::string_view qualName = mf.name;
         const std::size_t pos = qualName.rfind("::");
         const std::string_view bareName =
             (pos != std::string_view::npos)
                 ? qualName.substr(pos + 2)
                 : qualName;
-        // Find the HIR Function* we just registered.
-        auto it = functions_.find(qualName);
-        if (it != functions_.end() && !it->second.empty()) {
-            defRef.methods[bareName].push_back(it->second.back());
-        }
+        if (hirFn) defRef.methods[bareName].push_back(hirFn);
         defRef.astMethods.push_back(&mf);
     }
 }
@@ -583,11 +609,13 @@ void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
     current_ = &fn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
+    dtorStacks_.push_back({});
     for (const hir::Param& p : fn.params) {
         if (!p.name.empty()) declare(p.name, p.type, p.loc);
     }
     std::unique_ptr<hir::Stmt> c = buildCompound(body, fn.loc);
     scopes_.pop_back();
+    dtorStacks_.pop_back();
     if (c) {
         fn.body = std::make_unique<hir::Stmt::Compound>(
             std::move(std::get<hir::Stmt::Compound>(c->node)));
@@ -606,6 +634,54 @@ void HirBuilder::declare(std::string_view name, hir::Type type, SourceLoc loc) {
         return;
     }
     scope.emplace(name, type);
+}
+
+void HirBuilder::recordDtorVar(std::string_view name, const hir::Type& type) {
+    // Only struct types with a user-declared destructor need cleanup.
+    if (type.pointerDepth > 0) return;  // pointers don't own
+    auto it = structs_.find(type.base);
+    if (it == structs_.end() || !it->second.dtor) return;
+    if (dtorStacks_.empty()) return;
+    dtorStacks_.back().push_back(name);
+}
+
+void HirBuilder::emitDtorCalls(std::size_t uptoScope, SourceLoc loc,
+                                std::vector<std::unique_ptr<hir::Stmt>>& out) {
+    // Walk scopes from innermost (top of stack) down to `uptoScope`
+    // (exclusive), emitting dtor calls in reverse declaration order
+    // within each scope (C++ destroys locals in reverse order).
+    for (std::size_t i = dtorStacks_.size(); i-- > uptoScope;) {
+        const auto& names = dtorStacks_[i];
+        for (auto it = names.rbegin(); it != names.rend(); ++it) {
+            // Look up the variable's type to find its dtor.
+            hir::Type varType;
+            for (auto sc = scopes_.rbegin(); sc != scopes_.rend(); ++sc) {
+                auto f = sc->find(*it);
+                if (f != sc->end()) { varType = f->second; break; }
+            }
+            auto sit = structs_.find(varType.base);
+            if (sit == structs_.end() || !sit->second.dtor) continue;
+            // Build `dtor(&var)` as an ExprStmt.
+            auto stmt = std::make_unique<hir::Stmt>();
+            stmt->loc = loc;
+            auto& es = stmt->node.emplace<hir::Stmt::ExprStmt>();
+            auto call = std::make_unique<hir::Expr>();
+            call->loc = loc;
+            auto& ce = call->node.emplace<hir::Expr::Call>();
+            ce.callee = sit->second.dtor->name;
+            ce.target = sit->second.dtor;
+            // First arg: address-of the variable (IdentRef).
+            auto thisArg = std::make_unique<hir::Expr>();
+            thisArg->loc = loc;
+            thisArg->node = hir::Expr::IdentRef{*it};
+            thisArg->type = varType;
+            thisArg->type.isReference = true;
+            ce.args.push_back(std::move(thisArg));
+            call->type = sit->second.dtor->returnType;  // void
+            es.value = std::move(call);
+            out.push_back(std::move(stmt));
+        }
+    }
 }
 
 bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const {
@@ -672,8 +748,14 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildCompound(const Stmt::Compound& c, So
     out->loc = loc;
     auto& compound = out->node.emplace<hir::Stmt::Compound>();
     scopes_.push_back({});
+    dtorStacks_.push_back({});
     for (const auto& s : c.stmts) compound.stmts.push_back(buildStmt(*s));
+    // Before popping the scope, emit destructor calls for any local
+    // struct variables that have a dtor (RAII).  These run in reverse
+    // declaration order (handled by emitDtorCalls).
+    emitDtorCalls(dtorStacks_.size() - 1, loc, compound.stmts);
     scopes_.pop_back();
+    dtorStacks_.pop_back();
     return out;
 }
 
@@ -768,6 +850,86 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
         }
     }
     declare(d.name, d.type, loc);
+
+    // Constructor injection: if the declared type is a struct with a
+    // user-declared constructor and the declaration has no aggregate
+    // initializer (`T x = {a, b}` uses C value-init, bypassing ctors),
+    // synthesize a ctor call `StructName::ctor(&p, args...)` right
+    // after the declaration.  The object is zero-initialized first by
+    // the codegen alloca, then the ctor runs (like C++).
+    if (d.type.pointerDepth == 0 && !d.type.isReference) {
+        auto sit = structs_.find(d.type.base);
+        if (sit != structs_.end() && !sit->second.ctors.empty()) {
+            std::vector<std::unique_ptr<hir::Expr>> ctorArgExprs;
+            bool isAggregateInit = false;  // InitList bypasses ctor
+            bool isDirectCtorCall = false;  // `T x(args)` / `T x = T(args)`
+            if (decl.init) {
+                if (std::holds_alternative<hir::Expr::InitList>(decl.init->node)) {
+                    isAggregateInit = true;  // `T x = {a, b}` → aggregate, no ctor
+                } else if (auto* call = std::get_if<hir::Expr::Call>(&decl.init->node);
+                           call && call->target && call->target->isCtor) {
+                    // Direct ctor call `Type(args)`: extract the args
+                    // and pass them to the ctor injection (the ctor
+                    // call itself is not stored as `decl.init`).
+                    isDirectCtorCall = true;
+                    for (const auto& a : call->args) {
+                        ctorArgExprs.push_back(a ? hir::cloneHirExpr(*a) : nullptr);
+                    }
+                } else {
+                    // `T x = other` — pass `other` as the single ctor
+                    // arg (copy/move constructor).
+                    ctorArgExprs.push_back(hir::cloneHirExpr(*decl.init));
+                }
+            }
+            if (!isAggregateInit) {
+                // Build arg types for overload resolution.  Ctor
+                // params[0] is the implicit `this` (struct&); skip it
+                // when comparing against user-supplied args.
+                std::vector<hir::Type> argTypes;
+                for (const auto& a : ctorArgExprs) argTypes.push_back(a ? a->type : dummyType());
+                hir::Function* ctor = resolveCtorOverload(sit->second.ctors, argTypes, loc);
+                if (ctor) {
+                    auto ctorStmt = std::make_unique<hir::Stmt>();
+                    ctorStmt->loc = loc;
+                    auto& es = ctorStmt->node.emplace<hir::Stmt::ExprStmt>();
+                    auto call = std::make_unique<hir::Expr>();
+                    call->loc = loc;
+                    auto& ce = call->node.emplace<hir::Expr::Call>();
+                    ce.callee = ctor->name;
+                    ce.target = ctor;
+                    auto thisArg = std::make_unique<hir::Expr>();
+                    thisArg->loc = loc;
+                    thisArg->node = hir::Expr::IdentRef{d.name};
+                    thisArg->type = d.type;
+                    thisArg->type.isReference = true;
+                    ce.args.push_back(std::move(thisArg));
+                    for (auto& a : ctorArgExprs) {
+                        if (a) ce.args.push_back(std::move(a));
+                    }
+                    call->type = ctor->returnType;  // void
+                    es.value = std::move(call);
+                    auto wrap = std::make_unique<hir::Stmt>();
+                    wrap->loc = loc;
+                    auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+                    // If it was a direct ctor call, the Decl doesn't
+                    // need an initializer (the ctor handles it).
+                    if (isDirectCtorCall) {
+                        // Clear the init — the Decl becomes a plain
+                        // alloca with no stored initializer.
+                        std::get<hir::Stmt::Decl>(out->node).init.reset();
+                    }
+                    wc.stmts.push_back(std::move(out));       // the Decl
+                    wc.stmts.push_back(std::move(ctorStmt));  // the ctor call
+                    out = std::move(wrap);
+                } else if (!ctorArgExprs.empty()) {
+                    error(loc, "no matching constructor for type '" +
+                               std::string(d.type.base) + "'");
+                }
+            }
+        }
+    }
+
+    recordDtorVar(d.name, d.type);
     return out;
 }
 
@@ -790,6 +952,32 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
                        "' must return a value of type '" +
                        typeToString(current_->returnType) + "'");
     }
+    // RAII: before returning, run destructors for all live locals in
+    // every enclosing scope (innermost first).  This mirrors C++ where
+    // `return` destroys locals in reverse construction order before
+    // leaving the function.  We wrap the dtor calls + return in a
+    // Compound so they all execute before the return.
+    //
+    // Only wrap when there is at least one live local needing a dtor;
+    // otherwise the `return` stays a plain Return (so the switch
+    // no-fallthrough check, which inspects `cc.stmts.back()->node`,
+    // still sees `Return` rather than a wrapping Compound).
+    if (!dtorStacks_.empty()) {
+        std::vector<std::unique_ptr<hir::Stmt>> dtorStmts;
+        emitDtorCalls(0, loc, dtorStmts);  // probe: all scopes, innermost first
+        if (!dtorStmts.empty()) {
+            auto wrap = std::make_unique<hir::Stmt>();
+            wrap->loc = loc;
+            auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+            wc.stmts = std::move(dtorStmts);
+            // Clear the innermost scope's dtor list so buildCompound
+            // doesn't emit them again for the (unreachable) trailing
+            // statements after the return.
+            if (!dtorStacks_.empty()) dtorStacks_.back().clear();
+            wc.stmts.push_back(std::move(out));
+            return wrap;
+        }
+    }
     return out;
 }
 
@@ -810,10 +998,38 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         return out;
     }
     if (std::holds_alternative<A::Break>(n)) {
+        // RAII: run dtors for the innermost scope's locals before
+        // breaking out of the loop.  We only need the current scope
+        // (the loop body scope) — enclosing scopes are still alive.
+        if (!dtorStacks_.empty() && !dtorStacks_.back().empty()) {
+            auto wrap = std::make_unique<hir::Stmt>();
+            wrap->loc = s.loc;
+            auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+            emitDtorCalls(dtorStacks_.size() - 1, s.loc, wc.stmts);
+            dtorStacks_.back().clear();
+            auto brk = std::make_unique<hir::Stmt>();
+            brk->loc = s.loc;
+            brk->node = hir::Stmt::Break{};
+            wc.stmts.push_back(std::move(brk));
+            return wrap;
+        }
         out->node = hir::Stmt::Break{};
         return out;
     }
     if (std::holds_alternative<A::Continue>(n)) {
+        // RAII: same as Break — destroy innermost scope locals.
+        if (!dtorStacks_.empty() && !dtorStacks_.back().empty()) {
+            auto wrap = std::make_unique<hir::Stmt>();
+            wrap->loc = s.loc;
+            auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+            emitDtorCalls(dtorStacks_.size() - 1, s.loc, wc.stmts);
+            dtorStacks_.back().clear();
+            auto cont = std::make_unique<hir::Stmt>();
+            cont->loc = s.loc;
+            cont->node = hir::Stmt::Continue{};
+            wc.stmts.push_back(std::move(cont));
+            return wrap;
+        }
         out->node = hir::Stmt::Continue{};
         return out;
     }
@@ -846,6 +1062,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         const A::For& v = std::get<A::For>(n);
         auto& fr = out->node.emplace<hir::Stmt::For>();
         scopes_.push_back({});
+        dtorStacks_.push_back({});  // for-init scope (RAII)
         if (v.init) fr.init = buildStmt(*v.init);
         if (v.cond) {
             fr.cond = buildExpr(*v.cond);
@@ -854,6 +1071,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         if (v.incr) fr.incr = buildExpr(*v.incr);
         fr.body = buildStmt(*v.body);
         scopes_.pop_back();
+        dtorStacks_.pop_back();
         return out;
     }
     if (std::holds_alternative<A::Return>(n)) {
@@ -1026,6 +1244,87 @@ hir::Function* HirBuilder::resolveOverload(
     }
     if (!best) {
         error(loc, "no matching overload for argument types");
+    }
+    return best;
+}
+
+hir::Function* HirBuilder::resolveCtorOverload(
+        const std::vector<hir::Function*>& candidates,
+        const std::vector<hir::Type>& argTypes,
+        SourceLoc loc) {
+    if (candidates.empty()) return nullptr;
+    if (candidates.size() == 1) {
+        // Fast path: single candidate — verify the param count is
+        // compatible (params[0] is `this`, skipped).
+        const hir::Function* fn = candidates[0];
+        const std::size_t userParamBase = 1;
+        const std::size_t expected = (fn->params.size() >= userParamBase)
+            ? fn->params.size() - userParamBase : 0;
+        const std::size_t actual = argTypes.size();
+        if (expected > actual) {
+            for (std::size_t i = actual; i < expected; ++i) {
+                if (!fn->params[i + userParamBase].defaultValue) return nullptr;
+            }
+        } else if (expected != actual) {
+            return nullptr;
+        }
+        return candidates[0];
+    }
+    // Rank each ctor candidate.  Skip param[0] (the implicit `this`).
+    auto rank = [this](const hir::Function* fn,
+                   const std::vector<hir::Type>& args) -> int {
+        const std::size_t userParamBase = 1;  // skip `this`
+        const std::size_t expected = (fn->params.size() >= userParamBase)
+            ? fn->params.size() - userParamBase : 0;
+        const std::size_t actual = args.size();
+        if (expected > actual) {
+            for (std::size_t i = actual; i < expected; ++i) {
+                if (!fn->params[i + userParamBase].defaultValue) return 0;
+            }
+        } else if (expected != actual) {
+            return 0;
+        }
+        int score = 0;
+        // Default ctor (0 user params, 0 args) is an exact match.
+        if (expected == 0 && actual == 0) score += 100;
+        for (std::size_t i = 0; i < expected; ++i) {
+            if (i >= actual) {
+                score += 80;  // default-arg match
+                continue;
+            }
+            const hir::Type& pt = fn->params[i + userParamBase].type;
+            const hir::Type& at = args[i];
+            hir::Type p = pt; p.isReference = false;
+            hir::Type a = at; a.isReference = false;
+            if (p == a) {
+                score += 100;
+            } else if (isNumeric(p) && isNumeric(a)) {
+                int pw = typeWidth(p.base);
+                int aw = typeWidth(a.base);
+                int diff = (pw > aw) ? (pw - aw) : (aw - pw);
+                score += (pw > 0 && aw > 0) ? (90 - diff) : 50;
+            } else if (isAssignable(pt, at)) {
+                score += 1;
+            } else {
+                return 0;
+            }
+        }
+        return score;
+    };
+    int bestScore = 0;
+    hir::Function* best = nullptr;
+    bool ambiguous = false;
+    for (hir::Function* fn : candidates) {
+        int s = rank(fn, argTypes);
+        if (s > bestScore) { bestScore = s; best = fn; ambiguous = false; }
+        else if (s == bestScore && s > 0) { ambiguous = true; }
+    }
+    if (ambiguous) {
+        error(loc, "ambiguous constructor call");
+        return nullptr;
+    }
+    if (!best) {
+        error(loc, "no matching constructor for argument types");
     }
     return best;
 }
@@ -1462,21 +1761,43 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                     error(e.loc, "'" + std::string(bareName) + "' is not a template");
                 }
             } else {
-                auto overloads = resolveOverloads(bareName);
-                if (overloads.empty()) {
-                    call.callee = bareName;
-                    error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
-                } else {
+                // Constructor call: `Type(args)` where Type is a struct
+                // with user-declared constructors.  Resolve the ctor
+                // overload and build the call.
+                auto sit = structs_.find(bareName);
+                if (sit != structs_.end() && !sit->second.ctors.empty()) {
                     std::vector<hir::Type> argTypes;
                     argTypes.reserve(call.args.size());
                     for (const auto& a : call.args) {
                         argTypes.push_back(a ? a->type : dummyType());
                     }
-                    call.target = resolveOverload(overloads, argTypes, e.loc);
+                    call.target = resolveCtorOverload(sit->second.ctors, argTypes, e.loc);
                     if (call.target) {
                         call.callee = call.target->name;
-                    } else {
+                        // A ctor call produces a temporary of the struct
+                        // type (used in `T x = T(args)` initialization).
+                        out->type.base = bareName;
+                        return out;
+                    }
+                    call.callee = bareName;
+                    // resolveOverload already reported the error.
+                } else {
+                    auto overloads = resolveOverloads(bareName);
+                    if (overloads.empty()) {
                         call.callee = bareName;
+                        error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                    } else {
+                        std::vector<hir::Type> argTypes;
+                        argTypes.reserve(call.args.size());
+                        for (const auto& a : call.args) {
+                            argTypes.push_back(a ? a->type : dummyType());
+                        }
+                        call.target = resolveOverload(overloads, argTypes, e.loc);
+                        if (call.target) {
+                            call.callee = call.target->name;
+                        } else {
+                            call.callee = bareName;
+                        }
                     }
                 }
             }
@@ -2011,6 +2332,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
     current_ = rawFn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
+    dtorStacks_.push_back({});  // parameter scope (RAII)
     // Declare the closure pointer parameter.
     declare("__closure", hir::Type{closureTypeSv, false, false, false, 1}, loc);
     // Declare user parameters.
@@ -2083,6 +2405,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
         out->loc = loc;
         auto& compound = out->node.emplace<hir::Stmt::Compound>();
         scopes_.push_back({});
+        dtorStacks_.push_back({});  // lambda body scope (RAII)
 
         // Build injected capture declarations under an implicit unsafe
         // scope (compiler-generated closure access is always safe).
@@ -2101,12 +2424,14 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
             }
         }
         scopes_.pop_back();
+        dtorStacks_.pop_back();
 
         rawFn->body = std::make_unique<hir::Stmt::Compound>(
             std::move(compound));
     }
 
     scopes_.pop_back();
+    dtorStacks_.pop_back();
     // Check for missing return (unless void).
     if (!rawFn->returnType.isConst && rawFn->returnType.pointerDepth == 0 &&
         rawFn->returnType.base != "void" && !hasReturnInBody_) {
@@ -2191,7 +2516,42 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
             }
             if (fn) {
                 currentNsPrefix_ = mf.namespacePrefix;
-                buildBody(*fn, *mf.body);
+                // Constructor member initializer list: `: x(42), y(3)`.
+                // Synthesize `this->field = arg` assignments and prepend
+                // them to the body before building it.  Each assignment
+                // is `*this . field = arg` (member access on `this`).
+                if (mf.isCtor && !mf.memberInits.empty()) {
+                    Stmt::Compound synthBody;
+                    synthBody.stmts.reserve(mf.memberInits.size() + mf.body->stmts.size());
+                    for (const auto& mi : mf.memberInits) {
+                        auto stmt = std::make_unique<Stmt>();
+                        stmt->loc = mf.loc;
+                        auto& es = stmt->node.emplace<Stmt::ExprStmt>();
+                        auto assign = std::make_unique<Expr>();
+                        assign->loc = mf.loc;
+                        // lhs: this.field (Member, dot — `this` is a
+                        // reference, not a pointer)
+                        auto lhs = std::make_unique<Expr>();
+                        lhs->loc = mf.loc;
+                        auto base = std::make_unique<Expr>();
+                        base->loc = mf.loc;
+                        base->node = Expr::This{};
+                        lhs->node = Expr::Member{std::move(base), mi.name, /*isArrow*/false, /*isScope*/false};
+                        // rhs: clone the init expression
+                        auto rhs = mi.arg ? ivy::cloneExpr(*mi.arg) : nullptr;
+                        assign->node = Expr::Assign{"=", std::move(lhs), std::move(rhs)};
+                        es.value = std::move(assign);
+                        synthBody.stmts.push_back(std::move(stmt));
+                    }
+                    // Append the original body statements (clone so the
+                    // AST TranslationUnit still owns the originals).
+                    for (const auto& s : mf.body->stmts) {
+                        synthBody.stmts.push_back(ivy::cloneStmt(*s));
+                    }
+                    buildBody(*fn, synthBody);
+                } else {
+                    buildBody(*fn, *mf.body);
+                }
                 currentNsPrefix_ = {};
             }
         }

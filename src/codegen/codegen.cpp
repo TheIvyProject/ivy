@@ -1386,6 +1386,36 @@ std::string CodeGen::itaniumMangleEnumType(std::string_view name,
 
 std::string CodeGen::itaniumMangleFunction(std::string_view name,
                                             const mir::Function* fn) const {
+    // Constructors and destructors use special Itanium mangling:
+    //   ctor: _ZN <prefix> <C1|C2> E <bare-function-type>
+    //   dtor: _ZN <prefix> <D1|D2> E <bare-function-type>
+    // where <prefix> is the struct's qualified name (length-prefixed
+    // parts).  C1/D1 = complete-object ctor/dtor (the form Ivy uses).
+    if (fn && (fn->isCtor || fn->isDtor)) {
+        std::string out = "_ZN";
+        const std::string_view ns = fn->namespacePrefix;
+        const auto parts = splitQualifiedName(name, ns);
+        // parts: [..., "StructName", "StructName" (ctor)] or
+        // [..., "StructName", "~StructName" (dtor)]
+        // The struct name is the second-to-last part; we emit all
+        // parts up to and including the struct name, then C1/D1.
+        // (Drop the last part which is the ctor/dtor name itself.)
+        for (std::size_t i = 0; i + 1 < parts.size(); ++i) {
+            out += std::to_string(parts[i].size());
+            out += parts[i];
+        }
+        out += fn->isCtor ? "C1" : "D1";
+        out += "E";
+        // Bare function type: parameter type codes (incl. `this`).
+        if (fn && !fn->params.empty()) {
+            for (const auto& p : fn->params) {
+                out += itaniumMangleType(p.type);
+            }
+        } else {
+            out += "v";  // void parameter list
+        }
+        return out;
+    }
     std::string out = "_Z";
     const std::string_view ns = fn ? fn->namespacePrefix : std::string_view{};
     const auto parts = splitQualifiedName(name, ns);
@@ -1494,6 +1524,42 @@ std::string CodeGen::msvcMangleEnumType(std::string_view name,
 
 std::string CodeGen::msvcMangleFunction(std::string_view name,
                                          const mir::Function* fn) const {
+    // Constructors and destructors use special MSVC mangling:
+    //   ctor: ??0<StructName>@<scope>@*@ <type-encoding> @Z
+    //   dtor: ??1<StructName>@<scope>@*@ <type-encoding> @Z
+    // The struct name replaces the simple-name, and the return type
+    // is X (void) for both.  Args include the implicit `this`.
+    if (fn && (fn->isCtor || fn->isDtor)) {
+        std::string out = "?";
+        out += fn->isCtor ? "0" : "1";
+        const std::string_view ns = fn->namespacePrefix;
+        const auto parts = splitQualifiedName(name, ns);
+        // parts: [..., "StructName", "StructName" (ctor)] or
+        // [..., "StructName", "~StructName" (dtor)]
+        // The struct name is the second-to-last part.
+        std::string_view structName = parts.back();
+        if (parts.size() >= 2) structName = parts[parts.size() - 2];
+        out += std::string(structName) + "@";
+        // Scopes: innermost to outermost, each terminated by @.
+        for (auto it = parts.rbegin() + 2; it != parts.rend(); ++it) {
+            out += *it + "@";
+        }
+        out += "@";
+        // Calling convention: AE for __cdecl (instance method).
+        out += "AE";
+        // Return type: X for void (ctors/dtors return void).
+        out += "X";
+        // Argument types: the `this` param + user params.
+        if (fn && !fn->params.empty()) {
+            for (const auto& p : fn->params) {
+                out += msvcMangleType(p.type);
+            }
+        } else {
+            out += "X";  // void parameter list
+        }
+        out += "@Z";
+        return out;
+    }
     std::string out = "?";
     const std::string_view ns = fn ? fn->namespacePrefix : std::string_view{};
     const auto parts = splitQualifiedName(name, ns);

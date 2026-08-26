@@ -66,6 +66,73 @@ struct Expr {
         node;
 };
 
+// Deep-copy a HIR expression tree.  Used when the same HIR expr must
+// be referenced from two places (e.g. constructor injection clones the
+// already-built initializer expression so the ctor call gets a fresh
+// copy while the Decl keeps its own).
+inline std::unique_ptr<Expr> cloneHirExpr(const Expr& e) {
+    auto out = std::make_unique<Expr>();
+    out->type = e.type;
+    out->loc = e.loc;
+    std::visit([&]<typename V>(const V& v) {
+        if constexpr (std::is_same_v<V, Expr::Unary>) {
+            out->node.emplace<Expr::Unary>(Expr::Unary{v.op, v.isPrefix,
+                v.operand ? cloneHirExpr(*v.operand) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::Binary>) {
+            out->node.emplace<Expr::Binary>(Expr::Binary{v.op,
+                v.lhs ? cloneHirExpr(*v.lhs) : nullptr,
+                v.rhs ? cloneHirExpr(*v.rhs) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::Ternary>) {
+            out->node.emplace<Expr::Ternary>(Expr::Ternary{
+                v.cond ? cloneHirExpr(*v.cond) : nullptr,
+                v.thenBranch ? cloneHirExpr(*v.thenBranch) : nullptr,
+                v.elseBranch ? cloneHirExpr(*v.elseBranch) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::This>) {
+            out->node.emplace<Expr::This>();
+        } else if constexpr (std::is_same_v<V, Expr::Call>) {
+            Expr::Call c{v.callee, v.target, {}, v.tplArgs};
+            for (const auto& a : v.args) c.args.push_back(cloneHirExpr(*a));
+            out->node.emplace<Expr::Call>(std::move(c));
+        } else if constexpr (std::is_same_v<V, Expr::Index>) {
+            out->node.emplace<Expr::Index>(Expr::Index{
+                v.base ? cloneHirExpr(*v.base) : nullptr,
+                v.index ? cloneHirExpr(*v.index) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::Member>) {
+            out->node.emplace<Expr::Member>(Expr::Member{
+                v.base ? cloneHirExpr(*v.base) : nullptr, v.name, v.isArrow, v.isScope});
+        } else if constexpr (std::is_same_v<V, Expr::Assign>) {
+            out->node.emplace<Expr::Assign>(Expr::Assign{v.op,
+                v.lhs ? cloneHirExpr(*v.lhs) : nullptr,
+                v.rhs ? cloneHirExpr(*v.rhs) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::New>) {
+            Expr::New n{v.type, {}};
+            for (const auto& a : v.args) n.args.push_back(cloneHirExpr(*a));
+            out->node.emplace<Expr::New>(std::move(n));
+        } else if constexpr (std::is_same_v<V, Expr::Delete>) {
+            out->node.emplace<Expr::Delete>(Expr::Delete{
+                v.operand ? cloneHirExpr(*v.operand) : nullptr, v.isArray});
+        } else if constexpr (std::is_same_v<V, Expr::InitList>) {
+            Expr::InitList il;
+            for (const auto& el : v.elements) {
+                if (el) il.elements.push_back(cloneHirExpr(*el));
+                else il.elements.push_back(nullptr);
+            }
+            out->node.emplace<Expr::InitList>(std::move(il));
+        } else if constexpr (std::is_same_v<V, Expr::Lambda>) {
+            Expr::Lambda lam;
+            lam.funcName = v.funcName;
+            lam.closureType = v.closureType;
+            for (const auto& c : v.captureInits) {
+                lam.captureInits.push_back(c ? cloneHirExpr(*c) : nullptr);
+            }
+            out->node.emplace<Expr::Lambda>(std::move(lam));
+        } else {
+            out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
+        }
+    }, e.node);
+    return out;
+}
+
 struct Stmt {
     struct Compound { std::vector<std::unique_ptr<Stmt>> stmts; };
     struct Decl { Type type; std::string_view name; std::unique_ptr<Expr> init; };
@@ -131,6 +198,8 @@ struct Function {
     bool isConsteval = false;
     bool isTemplate = false;       // true => template function (not instantiated)
     std::vector<Type> tplArgs;     // for instantiated templates: the concrete args
+    bool isCtor = false;           // constructor
+    bool isDtor = false;           // destructor
     SourceLoc loc;
 };
 

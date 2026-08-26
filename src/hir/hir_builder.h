@@ -46,6 +46,11 @@ private:
     // on demand when a template-id call is encountered.
     std::unordered_map<std::string_view, const Function*> templates_;
     std::vector<std::unordered_map<std::string_view, hir::Type>> scopes_;
+    // Per-scope stack of local variables that need a destructor call
+    // when the scope exits (RAII).  Parallel to `scopes_` — pushed/
+    // popped together.  Each entry is the variable name; the dtor is
+    // looked up via `structs_[type.base].dtor`.
+    std::vector<std::vector<std::string_view>> dtorStacks_;
     int unsafeDepth_ = 0;
     hir::Function* current_ = nullptr;
     bool hasReturnInBody_ = false;
@@ -102,6 +107,17 @@ private:
         // The AST methods (for body-building in pass 2).  Keyed by
         // method name (bare, unqualified).
         std::vector<const Function*> astMethods;
+        // Constructors (overload set).  Empty if the struct has no
+        // user-declared constructors.  A struct with no ctors uses
+        // aggregate initialization (C value-initialization).
+        std::vector<hir::Function*> ctors;
+        // The AST ctor declarations (for body-building + member init list).
+        std::vector<const Function*> astCtors;
+        // Destructor (single — no overload).  Null if no user-declared
+        // dtor.  A struct with no dtor does not synthesize one (RAII is
+        // opt-in, not implicit like C++).
+        hir::Function* dtor = nullptr;
+        const Function* astDtor = nullptr;  // AST dtor (for body-building)
     };
     std::unordered_map<std::string_view, StructDef> structs_;
 
@@ -146,6 +162,14 @@ private:
 
     // helpers
     void declare(std::string_view name, hir::Type type, SourceLoc loc);
+    // Record a local that needs a destructor call at scope exit.
+    // Called from buildDeclaration when the variable's type has a dtor.
+    void recordDtorVar(std::string_view name, const hir::Type& type);
+    // Emit destructor calls for all live dtor-variables in scopes
+    // [0..uptoScope) (innermost first).  Used at return/break/
+    // continue points to run dtors for enclosing scopes.
+    void emitDtorCalls(std::size_t uptoScope, SourceLoc loc,
+                       std::vector<std::unique_ptr<hir::Stmt>>& out);
     bool isAssignable(const hir::Type& to, const hir::Type& from) const;
     bool checkCondition(const hir::Expr& e);
     void requireUnsafe(SourceLoc loc, std::string_view what);
@@ -185,6 +209,13 @@ private:
     hir::Function* resolveOverload(const std::vector<hir::Function*>& candidates,
                                    const std::vector<hir::Type>& argTypes,
                                    SourceLoc loc);
+    // Overload resolution for constructors.  Each candidate's param[0]
+    // is the implicit `this` (struct&); it is skipped when comparing
+    // against user-supplied arg types.  Used by both direct ctor calls
+    // (`Type(args)`) and declaration-site ctor injection.
+    hir::Function* resolveCtorOverload(const std::vector<hir::Function*>& candidates,
+                                       const std::vector<hir::Type>& argTypes,
+                                       SourceLoc loc);
     // Legacy single-function lookup: returns the first overload (or
     // nullptr if none).  Used by code paths that don't do overload
     // resolution (e.g. lambda call-operator, qualified calls where the

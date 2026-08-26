@@ -1,0 +1,66 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Logger {
+    int32_t id;
+
+    // Constructor with member initializer list.
+    Logger(int32_t id_) : id(id_) {
+        printf("Logger(%d) constructed\n", this.id);
+    }
+
+    // Destructor — runs at scope exit (RAII).
+    ~Logger() {
+        printf("Logger(%d) destroyed\n", this.id);
+    }
+};
+
+struct Pair {
+    int32_t a;
+    int32_t b;
+
+    // Default constructor (no args).
+    Pair() : a(0), b(0) {
+        printf("Pair() default constructed\n");
+    }
+
+    // Two-arg constructor with member init list.
+    Pair(int32_t x, int32_t y) : a(x), b(y) {
+        printf("Pair(%d, %d) constructed\n", this.a, this.b);
+    }
+
+    ~Pair() {
+        printf("Pair(%d, %d) destroyed\n", this.a, this.b);
+    }
+};
+
+int main() {
+    printf("=== test 1: ctor with member init list ===\n");
+    {
+        Logger log(42);
+        printf("log.id = %d\n", log.id);
+    }  // dtor runs here
+    printf("---\n");
+
+    printf("=== test 2: default ctor + parameterized ctor ===\n");
+    {
+        Pair p1;
+        printf("p1.a=%d p1.b=%d\n", p1.a, p1.b);  // 0 0
+
+        Pair p2(3, 4);
+        printf("p2.a=%d p2.b=%d\n", p2.a, p2.b);  // 3 4
+    }  // dtors run here in reverse order: p2, p1
+    printf("---\n");
+
+    printf("=== test 3: RAII with early return ===\n");
+    {
+        Logger early(1);
+        Logger early2(2);
+        printf("about to return early\n");
+        return 0;
+        // dtors should run here in reverse order: early2, early
+    }
+}

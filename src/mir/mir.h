@@ -132,6 +132,8 @@ struct Function {
     bool hasBody = false;  // false = declaration only (extern "C" prototype)
     bool isConstexpr = false;
     bool isConsteval = false;
+    bool isCtor = false;  // constructor
+    bool isDtor = false;  // destructor
     SourceLoc loc;
 };
 

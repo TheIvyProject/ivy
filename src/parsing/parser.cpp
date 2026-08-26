@@ -870,6 +870,16 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
     // Parse struct body: fields (`Type name;`) and methods
     // (`Type name(params) { body }`).  Access specifiers are accepted
     // but ignored — Ivy treats all members as public.
+    // The struct's bare (unqualified) name — used to detect
+    // constructors (`Name(...)`) and destructors (`~Name(...)`).
+    const std::string_view bareStructName = [&]() {
+        const auto pos = name.rfind("::");
+        return (pos != std::string_view::npos) ? name.substr(pos + 2) : name;
+    }();
+
+    // Parse struct body: fields (`Type name;`), methods
+    // (`Type name(params) { body }`), constructors (`Name(params) { ... }`),
+    // and destructors (`~Name() { ... }`).
     while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile)) {
         // Accept and ignore access specifiers.
         if (atKeyword("public") || atKeyword("private") || atKeyword("protected")) {
@@ -877,6 +887,114 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
             if (at(TokenKind::Colon)) next();
             continue;
         }
+
+        // Constructor: `StructName(params) [: x(42), y(3)] { body }`.
+        // The leading identifier equals the struct's bare name and is
+        // followed by `(`.  No return type is written.
+        if (at(TokenKind::Identifier) && peek().lexeme == bareStructName &&
+            peek(1).kind == TokenKind::LParen) {
+            const SourceLoc memberLoc = locOf(peek());
+            next();  // consume struct name
+            next();  // consume '('
+            std::vector<Param> params = parseParams();
+            expect(TokenKind::RParen, "expected ')' to close constructor parameter list");
+
+            Function ctor;
+            ctor.isCtor = true;
+            ctor.returnType.base = "void";  // ctors have no return type
+            {
+                std::string qual;
+                qual.reserve(std::string(name).size() + 2 + bareStructName.size());
+                qual += name;
+                qual += "::";
+                qual += bareStructName;
+                nameStorage_.push_back(std::move(qual));
+                ctor.name = nameStorage_.back();
+            }
+            ctor.namespacePrefix = currentNamespacePrefix();
+            ctor.params = std::move(params);
+            ctor.loc = memberLoc;
+
+            // Member initializer list: `: x(42), y(3)`.
+            if (at(TokenKind::Colon)) {
+                next();
+                while (!at(TokenKind::LBrace) && !at(TokenKind::Semi) &&
+                       !at(TokenKind::EndOfFile)) {
+                    if (!at(TokenKind::Identifier)) {
+                        errorAt(peek(), "expected member name in constructor initializer list");
+                        synchronize();
+                        break;
+                    }
+                    const std::string_view memberName = next().lexeme;
+                    expect(TokenKind::LParen, "expected '(' after member name in initializer list");
+                    auto arg = parseExpr();
+                    expect(TokenKind::RParen, "expected ')' to close member initializer");
+                    Function::MemberInit mi;
+                    mi.name = memberName;
+                    mi.arg = std::move(arg);
+                    ctor.memberInits.push_back(std::move(mi));
+                    if (at(TokenKind::Comma)) next();
+                    else break;
+                }
+            }
+
+            if (at(TokenKind::LBrace)) {
+                std::unique_ptr<Stmt> bodyStmt = parseCompound();
+                ctor.body =
+                    std::make_unique<Stmt::Compound>(
+                        std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else {
+                expect(TokenKind::Semi,
+                       "expected '{' for constructor body or ';' for a declaration");
+            }
+            sd.methods.push_back(std::move(ctor));
+            continue;
+        }
+
+        // Destructor: `~StructName() { body }`.  No parameters, no return type.
+        if (at(TokenKind::Tilde) && peek(1).kind == TokenKind::Identifier &&
+            peek(1).lexeme == bareStructName &&
+            peek(2).kind == TokenKind::LParen) {
+            const SourceLoc memberLoc = locOf(peek());
+            next();  // consume '~'
+            next();  // consume struct name
+            next();  // consume '('
+            std::vector<Param> params = parseParams();
+            expect(TokenKind::RParen, "expected ')' to close destructor parameter list");
+            if (!params.empty()) {
+                errorAt(peek(), "destructors must not take parameters");
+                params.clear();
+            }
+
+            Function dtor;
+            dtor.isDtor = true;
+            dtor.returnType.base = "void";
+            {
+                std::string qual;
+                qual.reserve(std::string(name).size() + 3 + bareStructName.size());
+                qual += name;
+                qual += "::~";
+                qual += bareStructName;
+                nameStorage_.push_back(std::move(qual));
+                dtor.name = nameStorage_.back();
+            }
+            dtor.namespacePrefix = currentNamespacePrefix();
+            dtor.params.clear();
+            dtor.loc = memberLoc;
+
+            if (at(TokenKind::LBrace)) {
+                std::unique_ptr<Stmt> bodyStmt = parseCompound();
+                dtor.body =
+                    std::make_unique<Stmt::Compound>(
+                        std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else {
+                expect(TokenKind::Semi,
+                       "expected '{' for destructor body or ';' for a declaration");
+            }
+            sd.methods.push_back(std::move(dtor));
+            continue;
+        }
+
         if (!isTypeStart()) {
             errorAt(peek(), "expected field or method declaration in struct body");
             synchronize();
@@ -1361,6 +1479,26 @@ std::unique_ptr<Stmt> Parser::parseDeclaration(bool expectSemi) {
         } else if (at(TokenKind::LBrace)) {
             // Constructor-style aggregate init: `Point p{1, 2};`
             d.init = parsePrimary();
+        } else if (at(TokenKind::LParen)) {
+            // Direct constructor call: `Point p(1, 2);`
+            // Synthesize a Call expression whose callee is an IdentRef
+            // to the type name; the HIR builder's ctor injection will
+            // resolve it to the struct's constructor.
+            next();  // consume '('
+            Expr::Call call;
+            auto callee = std::make_unique<Expr>();
+            callee->loc = locOf(peek());
+            callee->node = Expr::IdentRef{t.base};
+            call.callee = std::move(callee);
+            while (!at(TokenKind::RParen) && !at(TokenKind::EndOfFile)) {
+                call.args.push_back(parseExpr());
+                if (at(TokenKind::Comma)) next();
+                else break;
+            }
+            expect(TokenKind::RParen, "expected ')' after constructor arguments");
+            auto callExpr = std::make_unique<Expr>();
+            callExpr->node = std::move(call);
+            d.init = std::move(callExpr);
         }
         return d;
     };

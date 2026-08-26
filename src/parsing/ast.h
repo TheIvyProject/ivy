@@ -292,6 +292,17 @@ struct Function {
     bool isExternC = false;
     bool isConstexpr = false;   // `constexpr` function / variable
     bool isConsteval = false;   // `consteval` function (implies constexpr)
+    bool isCtor = false;        // constructor (name == struct name)
+    bool isDtor = false;        // destructor (name == "~StructName")
+    // Member initializer list for constructors: `: x(42), y(3)`.
+    // Each entry initializes a field by name with a single expression
+    // (Ivy doesn't support multi-arg member init `x(a, b)` — use a
+    // single InitList `x = {a, b}` instead).
+    struct MemberInit {
+        std::string_view name;          // field name
+        std::unique_ptr<Expr> arg;      // initializer expression
+    };
+    std::vector<MemberInit> memberInits;
     SourceLoc loc;
 };
 
