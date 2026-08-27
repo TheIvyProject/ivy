@@ -12,7 +12,7 @@ Xây dựng trình biên dịch `ivyc` — C++ subset an toàn (Ivy), pipeline:
 
 ```
 Lexer → Preprocessor → Parser → HIR → MIR → LLVM IR
-                              ↘ IvyInterpret (MIR-based, --run)
+                                    ↘ IvyInterpret v0.2 (MIR-based, --run)
 ```
 
 Triết lý: Ivy là **subset an toàn** của C++ — giữ cú pháp quen thuộc, loại bỏ
@@ -131,10 +131,10 @@ Xếp theo giai đoạn tăng dần độ khó.
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
 | 7.1 | **Range-based for** ✅ | ★★ | `for (T x : arr)` / `for (T& x : arr)` — chỉ hỗ trợ fixed-size array `T[N]`. Desugar tại HIR thành C-style index loop với bound N captured compile-time từ `arraySize` → **an toàn: không bị iterator-invalidation** như `std::vector::push_back` trong C++. By-value `T x` copy; by-ref `T& x` alias element (mutable). Interpreter: reference Alloca dùng `lvalueCell` để alias cell thay vì `evalExpr` copy |
-| 7.2 | **`if constexpr`** | ★★ | Parser: flag trên `Stmt::If`. HIR: khi trong template instantiation — evaluate điều kiện, chỉ build nhánh true/false (discarded statement không instantiate) |
-| 7.3 | **Operator overloading** | ★★★ | Parse `operator+`/`==`/`[]`/`()`/`->` như method đặc biệt. HIR Binary handler: nếu operand là struct → lookup `operatorX` method. Ưu tiên member operator trước free function |
-| 7.4 | **Template class/struct** | ★★★ | Mở rộng registry `templates_` cho struct. Instantiate: clone field layout + methods với substituted types. `Box<int>` mangled name. Là nền cho `Result<T>`/container |
-| 7.5 | **Template type deduction** | ★★ | `func(3, 4)` → infer `T=int` từ arg types. Deduction rules: exact match, decay array→pointer, const/ref stripping. Kết hợp với overload resolution (6.5) |
+| 7.2 | **Template class/struct** | ★★★ | Mở rộng registry `templates_` cho struct. Instantiate: clone field layout + methods với substituted types. `Box<int>` mangled name. Là nền cho `Result<T>`/container |
+| 7.3 | **Template type deduction** | ★★ | `func(3, 4)` → infer `T=int` từ arg types. Deduction rules: exact match, decay array→pointer, const/ref stripping. Kết hợp với overload resolution (6.5) |
+| 7.4 | **Operator overloading** | ★★★ | Parse `operator+`/`==`/`[]`/`()`/`->` như method đặc biệt. HIR Binary handler: nếu operand là struct → lookup `operatorX` method. Ưu tiên member operator trước free function |
+| 7.5 | **`if constexpr`** | ★★ | Parser: flag `isConstexpr` trên `Stmt::If`. HIR: trong template instantiation (7.2) — evaluate điều kiện constexpr, chỉ build nhánh true/false (discarded statement không instantiate). Ngoài template thì `if constexpr` == `if` thường |
 | 7.6 | **Variadic templates** | ★★★★ | `typename... Args`, pack expansion `args...`, `sizeof...(args)`. Instantiation sinh N phiên bản theo arity. Fold expression `(args + ...)`. Là nền cho `format()`-style API |
 | 7.7 | **Inheritance + virtual** | ★★★★ | `class A : public B` — base subobject layout, upcast. Vtable: bảng function pointer per polymorphic class, vptr là field ẩn đầu tiên. `virtual`/`override` check. Deviate từ C++: có thể yêu cầu `[[ivy::virtual]]` tường minh |
 | 7.8 | **Structured bindings** | ★★ | `auto [a, b] = pair;` — cần `auto` (6.2). Với struct: bind từng field theo tên. Với tuple: cần stdlib tuple trước |
@@ -201,7 +201,7 @@ Tiêu chí hoàn thành Giai đoạn 10:
 | GĐ 4 (P4.3) | Name mangling Itanium/MSVC ABI + `--target` | ✅ |
 | GĐ 4 (P4.4) | struct/class aggregate + GEP + aggregate init | ✅ |
 | GĐ 4 (P4.5) | lambda + closure codegen | ✅ |
-| GĐ 4 (P4.6) | IvyInterpret v0.1 (HIR) + v0.2 (MIR, safety) — xem [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) | ✅ |
+| GĐ 4 (P4.6) | IvyInterpret v0.2 (MIR-based, safety guarantee) — xem [MIR_PLAN.md](file:///d:/project/Ivy/ivyc/MIR_PLAN.md) | ✅ |
 | GĐ 4 (P4.7) | constexpr/consteval + compile-time folding | ✅ |
 | GĐ 4 (P4.8) | Function template + explicit instantiation | ✅ |
 | GĐ 4 (P4.9) | Cấm exception hoàn toàn | ✅ |

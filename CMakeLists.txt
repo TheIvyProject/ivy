@@ -13,7 +13,6 @@ add_executable(ivyc
     src/hir/hir_builder.cpp
     src/mir/mir_builder.cpp
     src/codegen/codegen.cpp
-    src/interpret/interpreter.cpp
     src/mir/interpreter.cpp
 )
 

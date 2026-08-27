@@ -126,10 +126,7 @@ Raw memory management is invisible outside `[[ivy::unsafe]]` blocks. Any `malloc
 
 ## IvyInterpret
 
-**IvyInterpret** is ivyc's built-in interpreter for running programs without native code generation. It exists in two versions:
-
-- **v0.1** (`src/interpret/`) — the original HIR tree-walking interpreter. Kept as a fast-feedback path; no safety guarantees beyond HIR type checking.
-- **v0.2** (`src/mir/interpreter.*`) — MIR-based interpreter, the engine behind `--run`. It consumes fully type-checked *and* lifetime-checked MIR, so every compile-time safety guarantee carries over, and it adds runtime checks (null dereference, use-after-free) through a pluggable `Machine` hook. Built-ins available: `printf`, `puts`, `putchar`, `exit`, `abort`, `malloc`, `free`.
+**IvyInterpret** is ivyc's built-in interpreter for running programs without native code generation. It is MIR-based (`src/mir/interpreter.*`) — the engine behind `--run`. It consumes fully type-checked *and* lifetime-checked MIR, so every compile-time safety guarantee carries over, and it adds runtime checks (null dereference, use-after-free) through a pluggable `Machine` hook. Built-ins available: `printf`, `puts`, `putchar`, `exit`, `abort`, `malloc`, `free`.
 
 ### Usage
 
@@ -187,7 +184,7 @@ Each forbidden construct is either rejected outright or requires an explicit `[[
 - [x] HIR: type checking, attribute lowering
 - [x] MIR: CFG construction, lifetime checker, `[[ivy::unsafe]]` enforcement
 - [x] LLVM IR emission (LLVM infrastructure)
-- [x] IvyInterpret: `--run` immediate execution — v0.1 (HIR fast path) and v0.2 (MIR-based, safety guarantees)
+- [x] IvyInterpret: `--run` immediate execution — MIR-based, with safety guarantees
 - [x] constexpr/consteval: compile-time call folding in the HIR builder; consteval functions skipped in codegen
 - [x] Function templates: explicit instantiation (`func<int>(args)`)
 - [x] `.ivy` source file extension (canonical) + legacy `.cpp/.cc/.cxx/.c` migration

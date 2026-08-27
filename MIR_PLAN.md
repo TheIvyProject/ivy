@@ -2,7 +2,7 @@
 
 - **Trạng thái**: ✅ Hoàn thành — 6/6 bước, 14 test pass
 - **Ngày**: 2026-08-22
-- **Phiên bản**: v0.2 (MIR-based) — kế thừa v0.1 (HIR-based)
+- **Phiên bản**: v0.2 (MIR-based, safety guarantee)
 - **Tài liệu liên quan**: [PLAN.md](file:///d:/project/Ivy/ivyc/PLAN.md) (P4.6)
 
 ---
@@ -12,29 +12,17 @@
 ### Pipeline Ivy hiện tại
 
 ```
-Lexer → Preprocessor → Parser → HIR → MIR → LLVM IR
+Lexer → Preprocessor → Parser → HIR → MIR ─┬─→ LLVM IR → native code
+                                           └─→ IvyInterpret v0.2 (--run)
 ```
 
-### Vấn đề cốt lõi
+### Tại sao thông dịch MIR?
 
-IvyInterpret v0.1 (hiện tại) thông dịch **HIR**, không phải MIR. Điều này có nghĩa:
+IvyInterpret v0.2 thông dịch **MIR** — tầng IR sau HIR, trước LLVM IR. Thông dịch MIR đảm bảo:
 
-- **Bỏ qua lifetime checker** (chỉ chạy ở MIR level)
-- **Bỏ qua unsafe enforcement** (HIR enforce + MIR mark `inUnsafe`)
-- Code unsafe chạy được mà không cần `[[ivy::unsafe]]` block
-- → **Mất ý nghĩa "Ivy an toàn"** → Ivy không khác gì C++ compiler khác
-
-### Giải pháp
-
-Nâng cấp IvyInterpret từ v0.1 (HIR) → **v0.2 (MIR)**. Giữ nguyên tên IvyInterpret.
-
-```
-HIR → MIR ─┬─→ LLVM IR → native code            (production path)
-           └─→ IvyInterpret v0.2 (interpret MIR)  (--run / --repl / consteval)
-```
-
-**v0.1 (HIR-based)**: Giữ lại làm fast-path cho REPL (feedback nhanh, không safety guarantee).
-**v0.2 (MIR-based)**: Dùng cho `--run`, consteval, IvyMake — có safety guarantee.
+- **Lifetime checker chạy** (chỉ chạy ở MIR level) — bắt dangling pointer, use-after-free
+- **Unsafe enforcement** — MIR mark `inUnsafe`, code unsafe phải trong `[[ivy::unsafe]]` block
+- → **Giữ ý nghĩa "Ivy an toàn"** khi chạy `--run` — không như C++ interpreter thường
 
 ---
 
@@ -361,9 +349,8 @@ Tạo 2 file mới trong `src/mir/`:
 
 | Thay đổi | File | Chi tiết | Trạng thái |
 |---|---|---|---|
-| `--run` flag | `src/app/main.cpp` | Đổi: HIR → MIR → IvyInterpret v0.2 | ✅ |
+| `--run` flag | `src/app/main.cpp` | `--run` dùng IvyInterpret v0.2 (MIR-based) | ✅ |
 | CMakeLists | `CMakeLists.txt` | Thêm `src/mir/interpreter.cpp` vào sources | ✅ |
-| HIR interpreter | `src/interpret/` | Giữ lại làm fast-path | ✅ |
 
 **Regression test — 14 examples pass**:
 - `test_mir_simple` — x+y=30
@@ -388,17 +375,15 @@ Tạo 2 file mới trong `src/mir/`:
 
 ## 6. Lưu ý quan trọng
 
-1. **Không xóa HIR interpreter ngay** — giữ `src/interpret/` (IvyInterpret v0.1) làm fast-path cho REPL (nếu cần feedback tối đa, chấp nhận không safety). Nhưng `--run` phải dùng IvyInterpret v0.2 (MIR-based).
+1. **Machine trait từ ngày đầu** — dù ban đầu chỉ `NoOpMachine`, có hook sẵn để thêm safety checks dần (bounds, init, provenance, aliasing). Đây là decision có leverage cao nhất.
 
-2. **Machine trait từ ngày đầu** — dù ban đầu chỉ `NoOpMachine`, có hook sẵn để thêm safety checks dần (bounds, init, provenance, aliasing). Đây là decision có leverage cao nhất.
+2. **Provenance tracking** — pointer không chỉ là số nguyên, mà mang origin (allocId, lifetime). Đây là điểm khác biệt cốt lõi với C++ interpreter thường.
 
-3. **Provenance tracking** — pointer không chỉ là số nguyên, mà mang origin (allocId, lifetime). Đây là điểm khác biệt cốt lõi với C++ interpreter thường.
+3. **initMask** — track per-byte initialization, catch read-before-init (UB detection).
 
-4. **initMask** — track per-byte initialization, catch read-before-init (UB detection).
+4. **Thread safety** — sau này nếu Ivy có thread, thêm vector clocks vào `Allocation` (giống Miri `AllocExtra`).
 
-5. **Thread safety** — sau này nếu Ivy có thread, thêm vector clocks vào `Allocation` (giống Miri `AllocExtra`).
-
-6. **Codegen callee scan bug** — `codegen.cpp:825-828` bỏ qua namespace prefix khi resolve callee. Fix trong back-fill pass (Bước 2) để cả codegen và interpreter đều受益.
+5. **Codegen callee scan bug** — `codegen.cpp:825-828` bỏ qua namespace prefix khi resolve callee. Fix trong back-fill pass (Bước 2) để cả codegen và interpreter đều受益.
 
 ---
 
@@ -408,7 +393,6 @@ Tạo 2 file mới trong `src/mir/`:
 - [README.md](file:///d:/project/Ivy/ivyc/README.md) — IvyInterpret section
 - [src/mir/mir.h](file:///d:/project/Ivy/ivyc/src/mir/mir.h) — MIR data structures hiện tại
 - [src/mir/mir_builder.cpp](file:///d:/project/Ivy/ivyc/src/mir/mir_builder.cpp) — MIR builder (lifetime check, CFG)
-- [src/interpret/interpreter.cpp](file:///d:/project/Ivy/ivyc/src/interpret/interpreter.cpp) — IvyInterpret v0.1 (HIR-based, port source)
 - [src/codegen/codegen.cpp](file:///d:/project/Ivy/ivyc/src/codegen/codegen.cpp) — codegen (decodeString/decodeChar source)
 
 ---

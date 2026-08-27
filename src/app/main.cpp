@@ -15,7 +15,6 @@
 #include "codegen/codegen.h"
 #include "hir/hir.h"
 #include "hir/hir_builder.h"
-#include "interpret/interpreter.h"
 #include "mir/mir.h"
 #include "mir/mir_builder.h"
 #include "mir/interpreter.h"
