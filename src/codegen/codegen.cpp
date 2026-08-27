@@ -93,11 +93,30 @@ std::string CodeGen::newTemp() { return "%tmp." + std::to_string(temp_++); }
 
 std::string CodeGen::newInlineBlock() { return "bb.i" + std::to_string(inlineBlock_++); }
 
+// Escape characters that are invalid in unquoted LLVM IR identifiers.
+// Template specialization names like `Box<int32_t>` contain `<` and `>`
+// which are not allowed in LLVM identifiers — replace with `_`.
+std::string CodeGen::escapeLlvmIdent(std::string_view name) const {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        if (c == '<' || c == '>' || c == ',' || c == ' ' || c == ':' ||
+            c == '&' || c == '*' || c == '(' || c == ')') {
+            out += '_';
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
 std::string CodeGen::llvmGlobalName(std::string_view name) const {
     // LLVM IR identifiers may contain [A-Za-z0-9_.$-] unquoted.
     // Mangled names (MSVC: "?foo@@...@Z", Itanium: "_Z3foov")
     // contain '@' and '?' which require quoting.
-    const std::string s(name);
+    // First escape template specialization characters (`<`, `>`, etc.)
+    // so names like `Box<int32_t>::set` become valid identifiers.
+    const std::string s = escapeLlvmIdent(name);
     bool needsQuote = false;
     for (char c : s) {
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -1656,16 +1675,10 @@ bool CodeGen::generate(std::ostream& out) {
     for (const auto& si : mir_.structs) {
         StructMeta meta;
         // Mangle the struct name into a valid LLVM identifier.
-        // Replace `::` with `.` (same scheme as the old mangleName).
+        // Replace `::` with `.` and escape `<`/`>`/`,` etc. from
+        // template specialization names (e.g. `Box<int32_t>` → `Box_int32_t_`).
         std::string llvmName = "%struct.";
-        for (std::size_t i = 0; i < si.name.size(); ++i) {
-            if (i + 1 < si.name.size() && si.name[i] == ':' && si.name[i + 1] == ':') {
-                llvmName += '.';
-                ++i;
-            } else {
-                llvmName += si.name[i];
-            }
-        }
+        llvmName += escapeLlvmIdent(si.name);
         meta.llvmType = llvmName;
         for (const auto& f : si.fields) {
             meta.fields.push_back({f.name, f.type});

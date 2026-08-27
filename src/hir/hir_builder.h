@@ -268,6 +268,36 @@ private:
     // Set of already-instantiated template specializations (by mangled
     // name) to avoid duplicate instantiation.
     std::unordered_map<std::string_view, hir::Function*> instantiated_;
+
+    // --- template struct instantiation ---
+    // Template struct registry: template name → AST StructDecl*.
+    // Populated in `buildStruct` when `sd.tplParams` is non-empty.
+    // The template definition is NOT registered in `structs_` — it is
+    // instantiated on demand when a template-id type (`Box<int>`) is
+    // encountered.
+    std::unordered_map<std::string_view, const StructDecl*> structTemplates_;
+    // Cache of already-instantiated struct specializations (by mangled
+    // name, e.g. "Box<int32_t>") to avoid duplicate instantiation.
+    std::unordered_map<std::string_view, std::string_view> instantiatedStructs_;
+    // Lookup a struct template by name (with namespace fallback).
+    const StructDecl* lookupStructTemplate(std::string_view name) const;
+    // Mangle a struct template specialization name: "Box<int32_t>".
+    std::string mangleStructSpec(std::string_view tplName,
+                                  const std::vector<hir::Type>& tplArgs) const;
+    // Instantiate a struct template with concrete type arguments.
+    // Clones the AST StructDecl, substitutes field/method types, and
+    // calls `buildStruct` on the clone with the mangled specialization
+    // name. Returns the mangled name (stored in stringStorage_).
+    std::string_view instantiateStructTemplate(const StructDecl& tplStruct,
+                                                std::string_view tplName,
+                                                const std::vector<hir::Type>& tplArgs,
+                                                SourceLoc loc);
+    // Resolve a type that may be a template-id (`Box<int>`).  If
+    // `type.tplArgs` is non-empty and `type.base` is a registered
+    // struct template, instantiate it and return the mangled
+    // specialization name as `type.base`.  Otherwise return `type`
+    // unchanged (with aliases resolved).
+    hir::Type resolveTemplateStructType(const hir::Type& type, SourceLoc loc);
 };
 
 }  // namespace ivy

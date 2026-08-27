@@ -431,6 +431,15 @@ static std::uint32_t typeAlign(const hir::Type& t) {
 }
 
 void HirBuilder::buildStruct(const StructDecl& sd) {
+    // Template struct definition: do not build — register the template
+    // and instantiate on demand when a template-id type (`Box<int>`) is
+    // encountered.  The template definition lives in `structTemplates_`
+    // and the AST is kept alive by `ast::TranslationUnit::structs`.
+    if (!sd.tplParams.empty()) {
+        structTemplates_[sd.name] = &sd;
+        return;
+    }
+
     // Reject duplicate struct name.
     if (structs_.contains(sd.name)) {
         error(sd.loc, "redefinition of struct '" + std::string(sd.name) + "'");
@@ -448,7 +457,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     std::uint32_t structAlign = 1;
     for (std::size_t i = 0; i < sd.fields.size(); ++i) {
         const Field& f = sd.fields[i];
-        const hir::Type fieldType = resolveTypeAlias(f.type);
+        const hir::Type fieldType = resolveTemplateStructType(resolveTypeAlias(f.type), f.loc);
         const std::uint64_t sz = typeSize(fieldType);
         const std::uint32_t align = typeAlign(fieldType);
         // Pad to alignment.
@@ -461,7 +470,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     def.align = structAlign;
     // Copy field type/name (skip `init` — not needed past HIR).
     for (const Field& f : sd.fields) {
-        def.fields.push_back(Field{resolveTypeAlias(f.type), f.name, nullptr, f.loc});
+        def.fields.push_back(Field{resolveTemplateStructType(resolveTypeAlias(f.type), f.loc), f.name, nullptr, f.loc});
         def.defaultInits.push_back(f.init.get());
     }
 
@@ -478,7 +487,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
     resolved.loc = sd.loc;
     for (const Field& f : sd.fields) {
         Field cf;
-        cf.type = resolveTypeAlias(f.type);  // expand `using` aliases
+        cf.type = resolveTemplateStructType(resolveTypeAlias(f.type), f.loc);  // expand `using` aliases + template-id
         cf.name = f.name;
         cf.loc = f.loc;
         resolved.fields.push_back(std::move(cf));
@@ -511,7 +520,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         fn->isConsteval = mf.isConsteval;
         fn->isCtor = mf.isCtor;
         fn->isDtor = mf.isDtor;
-        fn->returnType = resolveTypeAlias(mf.returnType);
+        fn->returnType = resolveTemplateStructType(resolveTypeAlias(mf.returnType), mf.loc);
         fn->loc = mf.loc;
 
         // Implicit `this` parameter: `StructName& this` (or
@@ -527,7 +536,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         // User-declared parameters.
         for (const Param& ap : mf.params) {
             hir::Param p;
-            p.type = resolveTypeAlias(ap.type);
+            p.type = resolveTemplateStructType(resolveTypeAlias(ap.type), ap.loc);
             p.name = ap.name;
             p.loc = ap.loc;
             p.lifetime = lowerParamAttribute(*fn, ap);
@@ -586,7 +595,7 @@ void HirBuilder::buildSignature(const Function& af) {
     auto fn = std::make_unique<hir::Function>();
     fn->name = af.name;
     fn->namespacePrefix = af.namespacePrefix;
-    fn->returnType = resolveTypeAlias(af.returnType);
+    fn->returnType = resolveTemplateStructType(resolveTypeAlias(af.returnType), af.loc);
     fn->isExternC = af.isExternC;
     fn->isConstexpr = af.isConstexpr;
     fn->isConsteval = af.isConsteval;
@@ -596,7 +605,7 @@ void HirBuilder::buildSignature(const Function& af) {
 
     for (const Param& ap : af.params) {
         hir::Param p;
-        p.type = resolveTypeAlias(ap.type);
+        p.type = resolveTemplateStructType(resolveTypeAlias(ap.type), ap.loc);
         p.name = ap.name;
         p.loc = ap.loc;
         p.lifetime = lowerParamAttribute(*fn, ap);
@@ -803,8 +812,10 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     auto& decl = out->node.emplace<hir::Stmt::Decl>();
     // Expand type aliases (e.g. `Int` → `int32_t`) so all downstream
     // comparisons (isAssignable, struct lookup, ctor injection, etc.)
-    // see the real underlying type.
-    decl.type = resolveTypeAlias(d.type);
+    // see the real underlying type.  Also resolve template-id types
+    // (e.g. `Box<int32_t>` → instantiate and rewrite base to the
+    // mangled specialization name).
+    decl.type = resolveTemplateStructType(resolveTypeAlias(d.type), loc);
     decl.name = d.name;
 
     if (decl.type.pointerDepth == 0 && decl.type.base == "void") {
@@ -3208,6 +3219,208 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     }
 
     return raw;
+}
+
+// --- template struct instantiation ---
+
+const StructDecl* HirBuilder::lookupStructTemplate(std::string_view name) const {
+    auto it = structTemplates_.find(name);
+    if (it != structTemplates_.end()) return it->second;
+    // Try with namespace prefix.
+    if (!currentNsPrefix_.empty()) {
+        std::string qualified;
+        qualified.reserve(currentNsPrefix_.size() + name.size());
+        qualified += currentNsPrefix_;
+        qualified += name;
+        auto it2 = structTemplates_.find(qualified);
+        if (it2 != structTemplates_.end()) return it2->second;
+    }
+    return nullptr;
+}
+
+std::string HirBuilder::mangleStructSpec(std::string_view tplName,
+                                          const std::vector<hir::Type>& tplArgs) const {
+    std::string mangled;
+    mangled += std::string(tplName);
+    mangled += "<";
+    for (std::size_t i = 0; i < tplArgs.size(); ++i) {
+        if (i > 0) mangled += ",";
+        std::string arg;
+        arg += std::string(tplArgs[i].base);
+        if (tplArgs[i].isUnsigned) arg += " unsigned";
+        if (tplArgs[i].isConst) arg += " const";
+        for (std::uint32_t d = 0; d < tplArgs[i].pointerDepth; ++d) arg += "*";
+        mangled += arg;
+    }
+    mangled += ">";
+    return mangled;
+}
+
+std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStruct,
+                                                        std::string_view tplName,
+                                                        const std::vector<hir::Type>& tplArgs,
+                                                        SourceLoc loc) {
+    std::string mangled = mangleStructSpec(tplName, tplArgs);
+
+    // Check cache.
+    auto it = instantiatedStructs_.find(mangled);
+    if (it != instantiatedStructs_.end()) return it->second;
+
+    // Build type mapping: template param name → concrete type.
+    std::unordered_map<std::string_view, hir::Type> mapping;
+    for (std::size_t i = 0; i < tplStruct.tplParams.size() && i < tplArgs.size(); ++i) {
+        if (tplStruct.tplParams[i].isTypename) {
+            mapping[tplStruct.tplParams[i].name] = tplArgs[i];
+        }
+    }
+
+    // Clone the AST StructDecl with substituted types.
+    StructDecl cloned;
+    cloned.namespacePrefix = tplStruct.namespacePrefix;
+    cloned.isClass = tplStruct.isClass;
+    cloned.loc = loc;
+    // Store the mangled name stably.
+    stringStorage_.push_back(std::move(mangled));
+    cloned.name = stringStorage_.back();
+
+    // Substitute field types.
+    for (const Field& f : tplStruct.fields) {
+        Field cf;
+        cf.type = substituteType(resolveTypeAlias(f.type), mapping);
+        cf.name = f.name;
+        cf.loc = f.loc;
+        if (f.init) cf.init = cloneExpr(*f.init);
+        cloned.fields.push_back(std::move(cf));
+    }
+
+    // Substitute method types (return type, params, member init args
+    // are AST-owned and re-built during `buildStruct`/`buildBody`).
+    for (const Function& mf : tplStruct.methods) {
+        Function cm = cloneFunctionAst(mf);
+        // Rewrite the qualified method name to use the specialization
+        // name instead of the template name.  The method name looks
+        // like "TplName::method" — replace the "TplName" prefix with
+        // the mangled specialization name.
+        const std::string_view bareMethod = [&]() {
+            const auto pos = mf.name.rfind("::");
+            return (pos != std::string_view::npos) ? mf.name.substr(pos + 2) : mf.name;
+        }();
+        std::string qualName;
+        qualName.reserve(cloned.name.size() + 2 + bareMethod.size());
+        qualName += std::string(cloned.name);
+        qualName += "::";
+        qualName += std::string(bareMethod);
+        stringStorage_.push_back(std::move(qualName));
+        cm.name = stringStorage_.back();
+        // Substitute return type.
+        cm.returnType = substituteType(resolveTypeAlias(mf.returnType), mapping);
+        // Substitute param types.
+        for (auto& p : cm.params) {
+            p.type = substituteType(resolveTypeAlias(p.type), mapping);
+        }
+        cloned.methods.push_back(std::move(cm));
+    }
+
+    // Register the specialization name in structNames_ so that the
+    // cloned methods' `this` parameter (which uses `cloned.name`)
+    // resolves correctly during `buildStruct`.
+    // (buildStruct itself also checks structs_ for duplicates, which
+    // is what we want.)
+
+    // Build the specialized struct.
+    // Save/restore namespace prefix so bare-name resolution works.
+    // Also save/restore `current_` and `hasReturnInBody_` because
+    // `buildBody` for cloned methods will overwrite them — we may be
+    // running in the middle of building the caller's body.
+    std::string_view savedNs = currentNsPrefix_;
+    hir::Function* savedCurrent = current_;
+    bool savedHasReturn = hasReturnInBody_;
+    currentNsPrefix_ = cloned.namespacePrefix;
+    buildStruct(cloned);
+
+    // Build method bodies for the cloned methods.  `buildStruct`
+    // registered them in `functions_` under "SpecName::method" but
+    // did not build their bodies (bodies are built in pass 2b, which
+    // only walks `ast_.structs` — cloned structs are not in the AST).
+    // We resolve each cloned method's HIR function by name and build
+    // its body now, while `currentNsPrefix_` is set correctly.
+    for (const Function& mf : cloned.methods) {
+        if (!mf.body) continue;
+        hir::Function* fn = nullptr;
+        auto it = functions_.find(mf.name);
+        if (it != functions_.end()) {
+            for (hir::Function* cand : it->second) {
+                if (cand->params.size() != mf.params.size() + 1) continue;
+                bool match = true;
+                for (std::size_t i = 0; i < mf.params.size() && match; ++i) {
+                    hir::Type a = cand->params[i + 1].type; a.isReference = false;
+                    hir::Type b = substituteType(resolveTypeAlias(mf.params[i].type), mapping);
+                    b.isReference = false;
+                    if (!(a == b)) match = false;
+                }
+                if (match) { fn = cand; break; }
+            }
+        }
+        if (fn) {
+            // Constructor member initializer list synthesis.
+            if (mf.isCtor && !mf.memberInits.empty()) {
+                Stmt::Compound synthBody;
+                synthBody.stmts.reserve(mf.memberInits.size() + mf.body->stmts.size());
+                for (const auto& mi : mf.memberInits) {
+                    auto stmt = std::make_unique<Stmt>();
+                    stmt->loc = mf.loc;
+                    auto& es = stmt->node.emplace<Stmt::ExprStmt>();
+                    auto assign = std::make_unique<Expr>();
+                    assign->loc = mf.loc;
+                    auto lhs = std::make_unique<Expr>();
+                    lhs->loc = mf.loc;
+                    auto base = std::make_unique<Expr>();
+                    base->loc = mf.loc;
+                    base->node = Expr::This{};
+                    lhs->node = Expr::Member{std::move(base), mi.name, false, false};
+                    auto rhs = mi.arg ? ivy::cloneExpr(*mi.arg) : nullptr;
+                    assign->node = Expr::Assign{"=", std::move(lhs), std::move(rhs)};
+                    es.value = std::move(assign);
+                    synthBody.stmts.push_back(std::move(stmt));
+                }
+                for (const auto& s : mf.body->stmts) {
+                    synthBody.stmts.push_back(ivy::cloneStmt(*s));
+                }
+                buildBody(*fn, synthBody);
+            } else {
+                buildBody(*fn, *mf.body);
+            }
+        }
+    }
+    currentNsPrefix_ = savedNs;
+    current_ = savedCurrent;
+    hasReturnInBody_ = savedHasReturn;
+
+    // Record in cache.
+    instantiatedStructs_[cloned.name] = cloned.name;
+    return cloned.name;
+}
+
+hir::Type HirBuilder::resolveTemplateStructType(const hir::Type& type, SourceLoc loc) {
+    // If no template args, nothing to do.
+    if (type.tplArgs.empty()) return type;
+
+    // Look up the struct template.
+    const StructDecl* tpl = lookupStructTemplate(type.base);
+    if (!tpl) {
+        // Not a struct template — maybe a type alias or a regular
+        // struct with stray template args.  Leave as-is.
+        return type;
+    }
+
+    // Instantiate (or fetch from cache).
+    std::string_view specName = instantiateStructTemplate(*tpl, type.base,
+                                                           type.tplArgs, loc);
+    // Build the resolved type: base = specialization name, no tplArgs.
+    hir::Type resolved = type;
+    resolved.base = specName;
+    resolved.tplArgs.clear();
+    return resolved;
 }
 
 }  // namespace ivy

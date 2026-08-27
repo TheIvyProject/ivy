@@ -123,7 +123,8 @@ private:
     void parseTopLevel(TranslationUnit& tu);
     void parseNamespace(TranslationUnit& tu, SourceLoc loc);
     void parseEnum(TranslationUnit& tu, SourceLoc loc);
-    void parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass);
+    void parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
+                     std::vector<TemplateParam> tplParams = {});
     void parseExternC(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs);
     void parseUsing(TranslationUnit& tu, SourceLoc loc);
     void parseTemplate(TranslationUnit& tu, SourceLoc loc);

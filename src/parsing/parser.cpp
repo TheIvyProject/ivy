@@ -360,6 +360,10 @@ Type Parser::parseType() {
                     next();  // `::`
                     next();  // Identifier
                 }
+                // Template-id: `Box<int32_t, ...>` — parse args.
+                if (at(TokenKind::Lt)) {
+                    t.tplArgs = parseTemplateArgs();
+                }
                 // pointer / reference modifiers
                 while (at(TokenKind::Star)) {
                     next();
@@ -398,6 +402,10 @@ Type Parser::parseType() {
         }
         if (isUserType) {
             t.base = next().lexeme;
+            // Template-id: `Box<int32_t, ...>` — parse args.
+            if (at(TokenKind::Lt)) {
+                t.tplArgs = parseTemplateArgs();
+            }
             // pointer / reference modifiers
             while (at(TokenKind::Star)) {
                 next();
@@ -897,7 +905,8 @@ void Parser::parseEnum(TranslationUnit& tu, SourceLoc loc) {
     tu.enums.push_back(std::move(ed));
 }
 
-void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
+void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
+                         std::vector<TemplateParam> tplParams) {
     // `struct Name { ... } ;`  /  `class Name { ... } ;`
     expectKeyword(isClass ? "class" : "struct",
                   isClass ? "expected 'class'" : "expected 'struct'");
@@ -928,6 +937,7 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass) {
     sd.name = name;
     sd.namespacePrefix = currentNamespacePrefix();
     sd.isClass = isClass;
+    sd.tplParams = std::move(tplParams);
     sd.loc = loc;
 
     // Register the struct name early so that method parameter lists
@@ -1185,7 +1195,9 @@ std::vector<TemplateParam> Parser::parseTemplateParams() {
 }
 
 // Parse explicit template arguments: `int, double, ...` (after `<`).
+// Precondition: the caller has confirmed `at(TokenKind::Lt)`.
 std::vector<Type> Parser::parseTemplateArgs() {
+    next();  // consume `<`
     std::vector<Type> args;
     while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
         if (!isTypeStart()) {
@@ -1216,6 +1228,15 @@ void Parser::parseTemplate(TranslationUnit& tu, SourceLoc loc) {
         if (tp.isTypename)
             templateParamNames_.push_back(tp.name);
     }
+
+    // Template struct/class: `template <typename T> struct Box { ... }`
+    if (atKeyword("struct") || atKeyword("class")) {
+        const bool isClass = atKeyword("class");
+        parseStruct(tu, loc, isClass, std::move(tplParams));
+        templateParamNames_.resize(savedCount);
+        return;
+    }
+
     // Optional constexpr/consteval before the return type.
     bool isConstexpr = false, isConsteval = false;
     if (atKeyword("constexpr") || atKeyword("consteval")) {

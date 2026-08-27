@@ -211,6 +211,11 @@ private:
     // like "?foo@@YA...@Z"). This helper wraps such names in quotes.
     std::string llvmGlobalName(std::string_view name) const;
 
+    // Escapes characters that are invalid in unquoted LLVM IR
+    // identifiers. Template specialization names like `Box<int32_t>`
+    // contain `<`, `>`, `,` which are not allowed — replace with `_`.
+    std::string escapeLlvmIdent(std::string_view name) const;
+
     // Lowers an expression to its value (an SSA name or literal).
     // For lvalue-only expressions (e.g. IdentRef of a variable), this
     // emits a `load` and returns the loaded value.

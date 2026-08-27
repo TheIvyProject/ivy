@@ -27,16 +27,21 @@ struct Type {
     bool isReference = false;  // T&
     std::uint32_t pointerDepth = 0;
     std::uint32_t arraySize = 0;  // 0 = not an array; >0 = T[N] with N elements
+    // Template arguments for a template-id type (e.g. `Box<int32_t>`).
+    // Empty for non-template types.  Stored by value so that cloned
+    // AST/HIR trees carry their own copy.
+    std::vector<Type> tplArgs;
 
     // Equality comparison for overload resolution and signature matching.
     // Compares all fields that affect type identity (base, unsigned,
-    // const, pointer depth, array size).  Reference-ness is intentionally
-    // NOT compared here — callers that need to ignore references should
-    // clear `isReference` on both operands before comparing.
+    // const, pointer depth, array size, template args).  Reference-ness
+    // is intentionally NOT compared here — callers that need to ignore
+    // references should clear `isReference` on both operands before
+    // comparing.
     bool operator==(const Type& o) const {
         return base == o.base && isUnsigned == o.isUnsigned &&
                isConst == o.isConst && pointerDepth == o.pointerDepth &&
-               arraySize == o.arraySize;
+               arraySize == o.arraySize && tplArgs == o.tplArgs;
     }
 };
 
@@ -368,6 +373,7 @@ struct StructDecl {
     std::string_view namespacePrefix;  // "ns::" or "" for global scope
     std::vector<Field> fields;
     std::vector<Function> methods;  // member functions (6.7)
+    std::vector<TemplateParam> tplParams;  // non-empty => template struct
     bool isClass = false;  // `class` vs `struct` (cosmetic only)
     SourceLoc loc;
 };
@@ -386,5 +392,52 @@ struct TranslationUnit {
     std::vector<StructDecl> structs;
     std::vector<UsingDecl> usingDecls;  // `using Name = Type;` aliases
 };
+
+// Deep-copy a Function AST node. Used by the HIR builder when
+// instantiating template structs: the template's methods are cloned
+// into a specialization with substituted types.  Only the fields
+// needed past HIR are copied (attrs, returnType, name, namespacePrefix,
+// params, body, ctor/dtor flags, memberInits, loc).  `tplParams` are
+// NOT copied (the specialization is not a template).
+inline Function cloneFunctionAst(const Function& f) {
+    Function c;
+    c.attrs = f.attrs;
+    c.returnType = f.returnType;
+    c.name = f.name;
+    c.namespacePrefix = f.namespacePrefix;
+    // Params hold default-value Exprs (unique_ptr) — clone each.
+    for (const auto& p : f.params) {
+        Param np;
+        np.type = p.type;
+        np.name = p.name;
+        np.attrs = p.attrs;
+        np.loc = p.loc;
+        if (p.defaultValue) np.defaultValue = cloneExpr(*p.defaultValue);
+        c.params.push_back(std::move(np));
+    }
+    // Body is a unique_ptr<Stmt::Compound> — deep-copy by cloning
+    // each statement individually (Compound holds unique_ptrs which
+    // are not copyable).
+    if (f.body) {
+        c.body = std::make_unique<Stmt::Compound>();
+        for (const auto& st : f.body->stmts) {
+            if (st) c.body->stmts.push_back(cloneStmt(*st));
+        }
+    }
+    c.isExternC = f.isExternC;
+    c.isConstexpr = f.isConstexpr;
+    c.isConsteval = f.isConsteval;
+    c.isCtor = f.isCtor;
+    c.isDtor = f.isDtor;
+    // Member initializers hold unique_ptr<Expr> — clone each.
+    for (const auto& mi : f.memberInits) {
+        Function::MemberInit nmi;
+        nmi.name = mi.name;
+        if (mi.arg) nmi.arg = cloneExpr(*mi.arg);
+        c.memberInits.push_back(std::move(nmi));
+    }
+    c.loc = f.loc;
+    return c;
+}
 
 }  // namespace ivy
