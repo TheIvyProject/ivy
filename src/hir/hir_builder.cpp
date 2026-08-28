@@ -1977,8 +1977,35 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 } else {
                     auto overloads = resolveOverloads(bareName);
                     if (overloads.empty()) {
-                        call.callee = bareName;
-                        error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                        // Implicit template instantiation: `func(3, 4)`
+                        // where `func` is a template — deduce `T` from
+                        // the argument types and instantiate.
+                        const Function* tplFunc = lookupTemplate(bareName);
+                        if (tplFunc) {
+                            std::vector<hir::Type> argTypes;
+                            argTypes.reserve(call.args.size());
+                            for (const auto& a : call.args) {
+                                argTypes.push_back(a ? a->type : dummyType());
+                            }
+                            std::vector<hir::Type> deduced;
+                            if (deduceTemplateArgs(*tplFunc, argTypes, deduced, e.loc)) {
+                                call.tplArgs = deduced;
+                                call.target = instantiateTemplate(*tplFunc, bareName,
+                                                                  deduced, e.loc);
+                                if (call.target) {
+                                    call.callee = call.target->name;
+                                } else {
+                                    call.callee = bareName;
+                                    error(e.loc, "failed to deduce template arguments for '" + std::string(bareName) + "'");
+                                }
+                            } else {
+                                call.callee = bareName;
+                                error(e.loc, "cannot deduce template arguments for '" + std::string(bareName) + "'");
+                            }
+                        } else {
+                            call.callee = bareName;
+                            error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                        }
                     } else {
                         std::vector<hir::Type> argTypes;
                         argTypes.reserve(call.args.size());
@@ -3219,6 +3246,126 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     }
 
     return raw;
+}
+
+bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
+                                    const std::vector<hir::Type>& argTypes,
+                                    std::vector<hir::Type>& deduced,
+                                    SourceLoc loc) const {
+    // Collect the template type parameter names (only `typename` params;
+    // non-type template params are not supported for deduction yet).
+    std::vector<std::string_view> typeParams;
+    for (const auto& tp : tplFunc.tplParams) {
+        if (tp.isTypename) typeParams.push_back(tp.name);
+    }
+    if (typeParams.empty()) return false;  // nothing to deduce
+
+    // Build a mapping: type-param-name → deduced type.
+    std::unordered_map<std::string_view, hir::Type> mapping;
+
+    // Match each call argument against the corresponding template param type.
+    // If the param type references a type parameter `T`, we deduce `T` from
+    // the argument's type.
+    const std::size_t numParams = tplFunc.params.size();
+    const std::size_t numArgs = argTypes.size();
+    if (numArgs < numParams) {
+        // Allow trailing params with default values.
+        for (std::size_t i = numArgs; i < numParams; ++i) {
+            if (!tplFunc.params[i].defaultValue) return false;
+        }
+    }
+
+    const std::size_t matchCount = (numArgs < numParams) ? numArgs : numParams;
+    for (std::size_t i = 0; i < matchCount; ++i) {
+        // Resolve the param type through type aliases (so `using`-aliases
+        // in the param type are expanded before deduction).
+        hir::Type paramType = resolveTypeAlias(tplFunc.params[i].type);
+        hir::Type argType = argTypes[i];
+
+        // Strip reference-ness for deduction (a `const T&` param can
+        // bind to an lvalue of type `T`).
+        paramType.isReference = false;
+        argType.isReference = false;
+
+        // Case 1: param type is exactly `T` (a bare type parameter).
+        // Check if `paramType.base` is one of the type params.
+        bool isTypeParam = false;
+        for (std::string_view tp : typeParams) {
+            if (paramType.base == tp) { isTypeParam = true; break; }
+        }
+        if (isTypeParam) {
+            // Deduce: T = argType (stripping const from the arg if the
+            // param is `const T&` — the const is on the param side).
+            hir::Type deduced = argType;
+            // If the param is `const T`, the deduced type should not
+            // inherit the arg's const (e.g. `const int&` → `T=int`).
+            if (paramType.isConst) deduced.isConst = false;
+            // If the param is `T*` (pointer to T), the arg should be a
+            // pointer and we deduce the pointee type.
+            if (paramType.pointerDepth > 0) {
+                if (argType.pointerDepth != paramType.pointerDepth) {
+                    // Can't deduce — pointer depth mismatch.
+                    return false;
+                }
+                // Strip pointer depth for the deduced type.
+                deduced.pointerDepth = 0;
+            }
+            auto it = mapping.find(paramType.base);
+            if (it != mapping.end()) {
+                // Already deduced — check consistency.
+                hir::Type existing = it->second;
+                existing.isConst = false;
+                deduced.isConst = false;
+                if (!(existing == deduced)) return false;  // conflicting deduction
+            } else {
+                mapping[paramType.base] = deduced;
+            }
+            continue;
+        }
+
+        // Case 2: param is `T[N]` (array of T) — deduce T from arg
+        // (which should be `T*` after array-to-pointer decay).
+        if (paramType.arraySize > 0 && paramType.pointerDepth == 0) {
+            // The param type base should be a type parameter.
+            bool baseIsTp = false;
+            for (std::string_view tp : typeParams) {
+                if (paramType.base == tp) { baseIsTp = true; break; }
+            }
+            if (baseIsTp && argType.pointerDepth == 1 &&
+                argType.base == paramType.base) {
+                // Deduce T = argType.base (already matches).
+                hir::Type deduced;
+                deduced.base = argType.base;
+                deduced.isUnsigned = argType.isUnsigned;
+                auto it = mapping.find(paramType.base);
+                if (it != mapping.end()) {
+                    if (!(it->second == deduced)) return false;
+                } else {
+                    mapping[paramType.base] = deduced;
+                }
+                continue;
+            }
+            // Can't deduce from array param — skip (not a type param).
+            continue;
+        }
+
+        // Case 3: param doesn't reference a type parameter at all
+        // (e.g. `int` param in a mixed template).  No deduction needed
+        // for this argument — skip it.
+    }
+
+    // Build the deduced args vector in the order of type params.
+    deduced.clear();
+    for (std::string_view tp : typeParams) {
+        auto it = mapping.find(tp);
+        if (it == mapping.end()) {
+            // This type parameter was not deduced — fail.
+            (void)loc;  // could report error here
+            return false;
+        }
+        deduced.push_back(it->second);
+    }
+    return true;
 }
 
 // --- template struct instantiation ---

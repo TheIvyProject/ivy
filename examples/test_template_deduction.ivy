@@ -1,0 +1,48 @@
+#pragma ivy cnumber
+extern "C" int printf(const char* fmt, ...);
+
+// Template function with single type parameter — deduce from one arg.
+template <typename T>
+T identity(T x) {
+    return x;
+}
+
+// Template function with two type parameters — deduce from two args.
+template <typename T>
+T add(T a, T b) {
+    return a + b;
+}
+
+// Template function with const ref param — deduce T, const/ref stripping.
+template <typename T>
+T increment(const T& x) {
+    return x + 1;
+}
+
+// Explicit template call + implicit deduction call mixed.
+int main() {
+    // Implicit deduction: identity(42) → T=int32_t
+    int32_t a = identity(42);
+    printf("identity(42) = %d\n", a);
+
+    // Implicit deduction: add(3, 4) → T=int32_t
+    int32_t b = add(3, 4);
+    printf("add(3, 4) = %d\n", b);
+
+    // Implicit deduction with const ref: increment(10) → T=int32_t
+    int32_t c = increment(10);
+    printf("increment(10) = %d\n", c);
+
+    // Explicit template args still work: identity<int32_t>(99)
+    int32_t d = identity<int32_t>(99);
+    printf("identity<int32_t>(99) = %d\n", d);
+
+    // Mixed: deduce with different types
+    int32_t e = add(100, 200);
+    printf("add(100, 200) = %d\n", e);
+
+    int32_t sum = a + b + c + d + e;
+    printf("sum = %d\n", sum);
+    printf("all template deduction tests passed\n");
+    return 0;
+}

@@ -265,6 +265,20 @@ private:
     // Returns the substituted type (or original if no substitution).
     hir::Type substituteType(const hir::Type& t,
                              const std::unordered_map<std::string_view, hir::Type>& mapping) const;
+    // Deduce template type arguments from the types of call arguments.
+    // For each template type parameter `T`, find its concrete type by
+    // matching `argType` against the corresponding `paramType` (the
+    // parameter as written in the template definition, before
+    // substitution).  Returns true if all type parameters could be
+    // deduced; false otherwise (and reports an error).
+    // Deduction rules (C++-like, simplified):
+    //   - exact match: `T` param → `int32_t` arg deduces `T=int32_t`
+    //   - array decay: `T[N]` param → `int32_t*` arg deduces `T=int32_t`
+    //   - const/ref stripping: `const T&` param → `int` arg deduces `T=int`
+    bool deduceTemplateArgs(const Function& tplFunc,
+                            const std::vector<hir::Type>& argTypes,
+                            std::vector<hir::Type>& deduced,
+                            SourceLoc loc) const;
     // Set of already-instantiated template specializations (by mangled
     // name) to avoid duplicate instantiation.
     std::unordered_map<std::string_view, hir::Function*> instantiated_;
