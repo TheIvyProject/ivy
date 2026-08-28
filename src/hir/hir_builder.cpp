@@ -649,6 +649,11 @@ void HirBuilder::buildSignature(const Function& af) {
 // --- bodies (pass 2) ---
 
 void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
+    // Save/restore current_ so that instantiating a template body
+    // (e.g. triggered by a call inside another function's body) does
+    // not clobber the caller's current_ context.
+    hir::Function* savedCurrent = current_;
+    bool savedHasReturn = hasReturnInBody_;
     current_ = &fn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
@@ -668,6 +673,8 @@ void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
         error(fn.loc, "function '" + std::string(fn.name) +
                           "' may reach the end without returning a value");
     }
+    current_ = savedCurrent;
+    hasReturnInBody_ = savedHasReturn;
 }
 
 void HirBuilder::declare(std::string_view name, hir::Type type, SourceLoc loc) {
@@ -2037,7 +2044,30 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         // Build arguments upfront so their types are available for
         // overload resolution.  (Lambda calls add a closure-pointer arg
         // as the first element; we handle that in the lambda branch.)
-        for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
+        // For pack-expansion arguments (`args...`), splice the expansion
+        // into N concrete IdentRef arguments (one per pack element).
+        for (const auto& a : v.args) {
+            auto built = buildExpr(*a);
+            if (built && std::holds_alternative<hir::Expr::PackExpansion>(built->node)) {
+                const auto& pe = std::get<hir::Expr::PackExpansion>(built->node);
+                auto it = currentPackMapping_.find(pe.packName);
+                if (it != currentPackMapping_.end()) {
+                    // Use the first element's type for all refs (homogeneous packs).
+                    const hir::Type& elemType = it->second.types.empty()
+                        ? dummyType() : it->second.types[0];
+                    for (const auto& name : it->second.paramNames) {
+                        auto ref = std::make_unique<hir::Expr>();
+                        ref->loc = built->loc;
+                        stringStorage_.push_back(name);
+                        ref->node.emplace<hir::Expr::IdentRef>(stringStorage_.back());
+                        ref->type = elemType;
+                        call.args.push_back(std::move(ref));
+                    }
+                }
+            } else {
+                call.args.push_back(std::move(built));
+            }
+        }
         // Operator overloading (7.4): `obj(args)` — if the callee is a
         // struct-typed expression with an `operator()` method, rewrite
         // as `obj.operator()(args)`.  We build the callee expression and
@@ -2595,6 +2625,241 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
     if (std::holds_alternative<A::Lambda>(n)) {
         const A::Lambda& v = std::get<A::Lambda>(n);
         return buildLambda(v, e.loc);
+    }
+    // --- variadic template pack expansion (7.6) ---
+    if (std::holds_alternative<A::SizeofPack>(n)) {
+        // sizeof...(pack) — fold to an integer literal at build time.
+        const A::SizeofPack& v = std::get<A::SizeofPack>(n);
+        std::size_t count = 0;
+        auto it = currentPackMapping_.find(v.packName);
+        if (it != currentPackMapping_.end()) count = it->second.types.size();
+        auto out = std::make_unique<hir::Expr>();
+        out->loc = e.loc;
+        out->node.emplace<hir::Expr::IntegerLit>(static_cast<long long>(count));
+        out->type.base = "int64_t";
+        return out;
+    }
+    if (std::holds_alternative<A::PackExpansion>(n)) {
+        // `expr...` — record the pattern + pack name + count. Callers
+        // (e.g. Call argument splicing) inspect this node to expand.
+        const A::PackExpansion& v = std::get<A::PackExpansion>(n);
+        auto out = std::make_unique<hir::Expr>();
+        out->loc = e.loc;
+        auto& pe = out->node.emplace<hir::Expr::PackExpansion>();
+        if (v.pattern) pe.pattern = buildExpr(*v.pattern);
+        if (v.pattern && std::holds_alternative<A::IdentRef>(v.pattern->node)) {
+            pe.packName = std::get<A::IdentRef>(v.pattern->node).name;
+            auto it = currentPackMapping_.find(pe.packName);
+            if (it != currentPackMapping_.end()) pe.count = it->second.types.size();
+        }
+        out->type = dummyType();
+        return out;
+    }
+    if (std::holds_alternative<A::FoldExpr>(n)) {
+        // Fold expression — expand into a Binary chain using the
+        // concrete pack element parameter names.
+        const A::FoldExpr& v = std::get<A::FoldExpr>(n);
+        // Helper: extract pack element names + type from an expression
+        // that is either a bare IdentRef to the pack or a PackExpansion
+        // of such a ref, or any expression containing a PackExpansion
+        // (e.g. a Call with a pack-expansion argument).
+        std::vector<std::string> elemNames;
+        hir::Type elemType = dummyType();
+        // Recursively search for a PackExpansion in an expression tree.
+        // Returns the pack name if found, or empty string_view if not.
+        std::function<std::string_view(const Expr&)> findPackExpansion =
+            [&](const Expr& ex) -> std::string_view {
+            if (std::holds_alternative<A::PackExpansion>(ex.node)) {
+                const auto& pex = std::get<A::PackExpansion>(ex.node);
+                if (pex.pattern && std::holds_alternative<A::IdentRef>(pex.pattern->node))
+                    return std::get<A::IdentRef>(pex.pattern->node).name;
+            }
+            if (std::holds_alternative<A::IdentRef>(ex.node)) {
+                return std::get<A::IdentRef>(ex.node).name;
+            }
+            // Recurse into Call args.
+            if (std::holds_alternative<A::Call>(ex.node)) {
+                const auto& c = std::get<A::Call>(ex.node);
+                for (const auto& a : c.args) {
+                    if (a) {
+                        auto pn = findPackExpansion(*a);
+                        if (!pn.empty()) return pn;
+                    }
+                }
+            }
+            return {};
+        };
+        auto extractPack = [&](const std::unique_ptr<Expr>& pe) -> bool {
+            if (!pe) return false;
+            std::string_view packName = findPackExpansion(*pe);
+            if (packName.empty()) return false;
+            auto it = currentPackMapping_.find(packName);
+            if (it == currentPackMapping_.end()) return false;
+            elemNames = it->second.paramNames;
+            if (!it->second.types.empty()) elemType = it->second.types[0];
+            return true;
+        };
+        // Determine which side is the pack and build the chain.
+        // Unary left fold `(... op pack)`: lhs=null, pack on rhs.
+        // Unary right fold `(pack op ...)`: rhs=null, pack on lhs.
+        // Binary fold `(lhs op ... op rhs)`: pack side determined by
+        //   which side actually references a pack.
+        bool ok = false;
+        std::unique_ptr<hir::Expr> init;  // fixed operand (binary fold)
+        // Track which AST expr is the pack pattern (for cloning).
+        const Expr* packPattern = nullptr;
+        if (!v.lhs && v.rhs) {
+            ok = extractPack(v.rhs);
+            if (ok) packPattern = v.rhs.get();
+        } else if (!v.rhs && v.lhs) {
+            ok = extractPack(v.lhs);
+            if (ok) packPattern = v.lhs.get();
+        } else if (v.lhs && v.rhs) {
+            ok = extractPack(v.lhs);
+            if (ok) {
+                packPattern = v.lhs.get();
+                init = buildExpr(*v.rhs);
+            } else {
+                ok = extractPack(v.rhs);
+                if (ok) {
+                    packPattern = v.rhs.get();
+                    init = buildExpr(*v.lhs);
+                }
+            }
+        }
+        if (!ok) {
+            auto out = std::make_unique<hir::Expr>();
+            out->loc = e.loc;
+            out->type = dummyType();
+            error(e.loc, "fold expression references unknown parameter pack");
+            return out;
+        }
+        // Empty pack: return the identity element for the operator.
+        // `&&`→true, `||`→false, `,`→void, else 0.
+        if (elemNames.empty()) {
+            auto out = std::make_unique<hir::Expr>();
+            out->loc = e.loc;
+            if (v.op == "&&") {
+                out->node.emplace<hir::Expr::BoolLit>(true);
+                out->type.base = "bool";
+            } else if (v.op == "||") {
+                out->node.emplace<hir::Expr::BoolLit>(false);
+                out->type.base = "bool";
+            } else if (v.op == ",") {
+                // Empty comma fold: no side effects, return a dummy value.
+                out->node.emplace<hir::Expr::IntegerLit>(0LL);
+                out->type.base = "int64_t";
+            } else {
+                out->node.emplace<hir::Expr::IntegerLit>(0LL);
+                out->type.base = "int64_t";
+            }
+            return out;
+        }
+        // Clone the pack pattern N times, replacing the PackExpansion
+        // with an IdentRef to the i-th element parameter.
+        // For bare `args` (no PackExpansion wrapper), substitute the
+        // IdentRef directly.
+        std::string_view packName = findPackExpansion(*packPattern);
+        std::vector<std::unique_ptr<hir::Expr>> builtElems;
+        for (const auto& name : elemNames) {
+            auto cloned = cloneExpr(*packPattern);
+            // Recursively substitute any PackExpansion{IdentRef(packName)}
+            // or bare IdentRef(packName) with IdentRef(name).
+            // Use stringStorage_ for pointer-stable string_view (same
+            // pattern as Call argument splicing above).
+            std::function<void(Expr&)> substitute = [&](Expr& ex) {
+                if (std::holds_alternative<A::PackExpansion>(ex.node)) {
+                    auto& pex = std::get<A::PackExpansion>(ex.node);
+                    if (pex.pattern) {
+                        if (std::holds_alternative<A::IdentRef>(pex.pattern->node) &&
+                            std::get<A::IdentRef>(pex.pattern->node).name == packName) {
+                            stringStorage_.push_back(name);
+                            ex.node.emplace<A::IdentRef>(stringStorage_.back());
+                            return;
+                        }
+                        substitute(*pex.pattern);
+                    }
+                    return;
+                }
+                if (std::holds_alternative<A::IdentRef>(ex.node)) {
+                    if (std::get<A::IdentRef>(ex.node).name == packName) {
+                        stringStorage_.push_back(name);
+                        ex.node.emplace<A::IdentRef>(stringStorage_.back());
+                    }
+                    return;
+                }
+                if (std::holds_alternative<A::Call>(ex.node)) {
+                    auto& c = std::get<A::Call>(ex.node);
+                    if (c.callee) substitute(*c.callee);
+                    for (auto& a : c.args) if (a) substitute(*a);
+                    return;
+                }
+                if (std::holds_alternative<A::Unary>(ex.node)) {
+                    auto& u = std::get<A::Unary>(ex.node);
+                    if (u.operand) substitute(*u.operand);
+                    return;
+                }
+                if (std::holds_alternative<A::Binary>(ex.node)) {
+                    auto& b = std::get<A::Binary>(ex.node);
+                    if (b.lhs) substitute(*b.lhs);
+                    if (b.rhs) substitute(*b.rhs);
+                    return;
+                }
+                if (std::holds_alternative<A::Member>(ex.node)) {
+                    auto& m = std::get<A::Member>(ex.node);
+                    if (m.base) substitute(*m.base);
+                    return;
+                }
+                if (std::holds_alternative<A::Index>(ex.node)) {
+                    auto& idx = std::get<A::Index>(ex.node);
+                    if (idx.base) substitute(*idx.base);
+                    if (idx.index) substitute(*idx.index);
+                    return;
+                }
+            };
+            substitute(*cloned);
+            builtElems.push_back(buildExpr(*cloned));
+        }
+
+        std::unique_ptr<hir::Expr> result;
+        if (init) {
+            // Binary fold: init op a0 op a1 ...
+            result = std::move(init);
+            for (auto& elem : builtElems) {
+                auto b = std::make_unique<hir::Expr>();
+                b->loc = e.loc;
+                b->node.emplace<hir::Expr::Binary>(v.op, std::move(result), std::move(elem));
+                b->type = elemType;
+                result = std::move(b);
+            }
+        } else {
+            // Unary fold: chain elements left-to-right.
+            result = std::move(builtElems[0]);
+            for (std::size_t i = 1; i < builtElems.size(); ++i) {
+                auto b = std::make_unique<hir::Expr>();
+                b->loc = e.loc;
+                b->node.emplace<hir::Expr::Binary>(v.op, std::move(result),
+                                                   std::move(builtElems[i]));
+                b->type = elemType;
+                result = std::move(b);
+            }
+        }
+        return result ? std::move(result) : [&] {
+            // Empty pack — identity element.
+            auto out = std::make_unique<hir::Expr>();
+            out->loc = e.loc;
+            if (v.op == "&&") {
+                out->node.emplace<hir::Expr::BoolLit>(true);
+                out->type.base = "bool";
+            } else if (v.op == "||") {
+                out->node.emplace<hir::Expr::BoolLit>(false);
+                out->type.base = "bool";
+            } else {
+                out->node.emplace<hir::Expr::IntegerLit>(0LL);
+                out->type.base = "int64_t";
+            }
+            return out;
+        }();
     }
 
     error(e.loc, "internal: unknown expression kind");
@@ -3373,11 +3638,67 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     if (it != instantiated_.end()) return it->second;
 
     // Build type mapping: template param name → concrete type.
+    // For variadic params (`typename... Args`), the pack absorbs all
+    // remaining type arguments.
     std::unordered_map<std::string_view, hir::Type> mapping;
-    for (std::size_t i = 0; i < tplFunc.tplParams.size() && i < tplArgs.size(); ++i) {
+    // Track whether this template has a variadic pack, and if so, its
+    // index in tplParams. We also build a PackInfo to populate
+    // currentPackMapping_ before building the body.
+    bool hasVariadic = false;
+    std::size_t variadicIdx = 0;
+    for (std::size_t i = 0; i < tplFunc.tplParams.size(); ++i) {
+        if (tplFunc.tplParams[i].isVariadic) {
+            hasVariadic = true;
+            variadicIdx = i;
+            break;
+        }
+    }
+    // Non-variadic params consume tplArgs one-to-one.
+    // The variadic pack (if any) consumes all remaining args.
+    std::size_t nonVariadicCount = tplFunc.tplParams.size();
+    if (hasVariadic) {
+        // The variadic param itself doesn't consume a slot in the
+        // one-to-one mapping; it takes all the remaining args.
+        nonVariadicCount = variadicIdx;
+    }
+    for (std::size_t i = 0; i < nonVariadicCount && i < tplArgs.size(); ++i) {
         if (tplFunc.tplParams[i].isTypename) {
             mapping[tplFunc.tplParams[i].name] = tplArgs[i];
         }
+    }
+    // Build the pack info for the variadic param.
+    PackInfo packInfo;
+    std::vector<hir::Type> packTypes;
+    // The function parameter name that corresponds to the pack (e.g.
+    // `args` in `Args... args`).  Fold expressions and sizeof...(pack)
+    // in the body reference the function parameter name, while the
+    // template parameter name (`Args`) is what we store as the key.
+    // We record both so that lookups by either name succeed.
+    std::string_view packFuncParamName;
+    if (hasVariadic) {
+        const std::string_view vName = tplFunc.tplParams[variadicIdx].name;
+        // Find the function parameter whose type or name matches the
+        // variadic template param name.
+        for (const Param& ap : tplFunc.params) {
+            if (ap.type.base == vName || ap.name == vName) {
+                if (!ap.name.empty()) packFuncParamName = ap.name;
+                break;
+            }
+        }
+        // All args from variadicIdx onward belong to the pack.
+        for (std::size_t i = variadicIdx; i < tplArgs.size(); ++i) {
+            packTypes.push_back(tplArgs[i]);
+        }
+        // Synthesize per-element parameter names: __args0, __args1, ...
+        // Use the function param name if available (e.g. `args`),
+        // otherwise fall back to the template param name.
+        const std::string baseName = packFuncParamName.empty()
+            ? std::string(vName) : std::string(packFuncParamName);
+        for (std::size_t i = 0; i < packTypes.size(); ++i) {
+            packInfo.paramNames.push_back(
+                "__" + baseName + std::to_string(i));
+        }
+        packInfo.types = packTypes;
     }
 
     // Create the HIR function with substituted signature.
@@ -3397,13 +3718,38 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     stringStorage_.push_back(std::move(mangled));
     fn->name = stringStorage_.back();
 
-    // Substitute param types.
+    // Substitute param types. For the variadic parameter, expand into
+    // N separate HIR params (one per pack element).
     for (const Param& ap : tplFunc.params) {
-        hir::Param p;
-        p.type = substituteType(ap.type, mapping);
-        p.name = ap.name;
-        p.loc = ap.loc;
-        fn->params.push_back(std::move(p));
+        // Check if this param is the variadic pack parameter. We match
+        // by name against the variadic template param.
+        bool isPackParam = false;
+        if (hasVariadic) {
+            const std::string_view vName = tplFunc.tplParams[variadicIdx].name;
+            // The param type base should be the pack type name, and the
+            // param name should be the pack parameter name (e.g. `Args... args`).
+            if (ap.type.base == vName || ap.name == vName) {
+                isPackParam = true;
+            }
+        }
+        if (isPackParam) {
+            // Expand the pack into N params, one per concrete type.
+            for (std::size_t i = 0; i < packInfo.types.size(); ++i) {
+                hir::Param p;
+                p.type = packInfo.types[i];
+                // Use the synthesized name. Store in stringStorage_ for stability.
+                stringStorage_.push_back(packInfo.paramNames[i]);
+                p.name = stringStorage_.back();
+                p.loc = ap.loc;
+                fn->params.push_back(std::move(p));
+            }
+        } else {
+            hir::Param p;
+            p.type = substituteType(ap.type, mapping);
+            p.name = ap.name;
+            p.loc = ap.loc;
+            fn->params.push_back(std::move(p));
+        }
     }
 
     // Register the function before building the body (so recursive
@@ -3427,7 +3773,27 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
         // Save/restore namespace prefix so bare-name resolution works.
         std::string_view savedNs = currentNsPrefix_;
         currentNsPrefix_ = raw->namespacePrefix;
+        // Set up the pack mapping so pack-expansion nodes (`args...`,
+        // `sizeof...(args)`, fold expressions) can resolve during body build.
+        // We register the pack under both the template parameter name
+        // (e.g. `Args`) and the function parameter name (e.g. `args`),
+        // because AST nodes may reference either.
+        decltype(currentPackMapping_) savedPack;
+        if (hasVariadic) {
+            savedPack = std::move(currentPackMapping_);
+            currentPackMapping_.clear();
+            const std::string_view tplName = tplFunc.tplParams[variadicIdx].name;
+            // Store under the template param name.
+            currentPackMapping_[tplName] = packInfo;  // copy
+            // Also store under the function param name if different.
+            if (!packFuncParamName.empty() && packFuncParamName != tplName) {
+                currentPackMapping_[packFuncParamName] = std::move(packInfo);
+            }
+        }
         buildBody(*raw, clonedCompound);
+        if (hasVariadic) {
+            currentPackMapping_ = std::move(savedPack);
+        }
         currentNsPrefix_ = savedNs;
     }
 
@@ -3446,23 +3812,65 @@ bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
     }
     if (typeParams.empty()) return false;  // nothing to deduce
 
+    // Detect a variadic parameter pack (7.6). If present, the pack
+    // absorbs all "extra" call arguments beyond the non-variadic params.
+    bool hasVariadic = false;
+    std::size_t variadicIdx = 0;
+    std::string_view variadicName;
+    for (std::size_t i = 0; i < tplFunc.tplParams.size(); ++i) {
+        if (tplFunc.tplParams[i].isVariadic && tplFunc.tplParams[i].isTypename) {
+            hasVariadic = true;
+            variadicIdx = i;
+            variadicName = tplFunc.tplParams[i].name;
+            break;
+        }
+    }
+
     // Build a mapping: type-param-name → deduced type.
+    // For the variadic pack, we accumulate multiple deduced types.
     std::unordered_map<std::string_view, hir::Type> mapping;
+    std::vector<hir::Type> variadicPack;  // deduced types for the pack
 
     // Match each call argument against the corresponding template param type.
     // If the param type references a type parameter `T`, we deduce `T` from
     // the argument's type.
     const std::size_t numParams = tplFunc.params.size();
     const std::size_t numArgs = argTypes.size();
-    if (numArgs < numParams) {
-        // Allow trailing params with default values.
-        for (std::size_t i = numArgs; i < numParams; ++i) {
-            if (!tplFunc.params[i].defaultValue) return false;
+
+    // Determine the number of non-variadic (fixed) function params. The
+    // variadic function param (if any) maps to the variadic template
+    // param and expands to absorb all extra args.
+    // The variadic function param is the one whose type or name matches
+    // the variadic template param name.
+    std::size_t fixedParamCount = numParams;
+    std::size_t variadicParamIdx = numParams;  // index of variadic fn param
+    if (hasVariadic) {
+        for (std::size_t i = 0; i < numParams; ++i) {
+            if (tplFunc.params[i].type.base == variadicName ||
+                tplFunc.params[i].name == variadicName) {
+                variadicParamIdx = i;
+                fixedParamCount = i;  // params before the variadic are fixed
+                break;
+            }
         }
     }
 
-    const std::size_t matchCount = (numArgs < numParams) ? numArgs : numParams;
-    for (std::size_t i = 0; i < matchCount; ++i) {
+    if (!hasVariadic) {
+        if (numArgs < numParams) {
+            // Allow trailing params with default values.
+            for (std::size_t i = numArgs; i < numParams; ++i) {
+                if (!tplFunc.params[i].defaultValue) return false;
+            }
+        }
+    } else {
+        // With a variadic pack, we need at least `fixedParamCount` args.
+        if (numArgs < fixedParamCount) return false;
+    }
+
+    // Match fixed (non-variadic) params against the first N args.
+    const std::size_t fixedMatchCount =
+        (numArgs < fixedParamCount) ? numArgs : fixedParamCount;
+    for (std::size_t i = 0; i < fixedMatchCount; ++i) {
         // Resolve the param type through type aliases (so `using`-aliases
         // in the param type are expanded before deduction).
         hir::Type paramType = resolveTypeAlias(tplFunc.params[i].type);
@@ -3482,10 +3890,10 @@ bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
         if (isTypeParam) {
             // Deduce: T = argType (stripping const from the arg if the
             // param is `const T&` — the const is on the param side).
-            hir::Type deduced = argType;
+            hir::Type d = argType;
             // If the param is `const T`, the deduced type should not
             // inherit the arg's const (e.g. `const int&` → `T=int`).
-            if (paramType.isConst) deduced.isConst = false;
+            if (paramType.isConst) d.isConst = false;
             // If the param is `T*` (pointer to T), the arg should be a
             // pointer and we deduce the pointee type.
             if (paramType.pointerDepth > 0) {
@@ -3494,17 +3902,17 @@ bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
                     return false;
                 }
                 // Strip pointer depth for the deduced type.
-                deduced.pointerDepth = 0;
+                d.pointerDepth = 0;
             }
             auto it = mapping.find(paramType.base);
             if (it != mapping.end()) {
                 // Already deduced — check consistency.
                 hir::Type existing = it->second;
                 existing.isConst = false;
-                deduced.isConst = false;
-                if (!(existing == deduced)) return false;  // conflicting deduction
+                d.isConst = false;
+                if (!(existing == d)) return false;  // conflicting deduction
             } else {
-                mapping[paramType.base] = deduced;
+                mapping[paramType.base] = d;
             }
             continue;
         }
@@ -3520,14 +3928,14 @@ bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
             if (baseIsTp && argType.pointerDepth == 1 &&
                 argType.base == paramType.base) {
                 // Deduce T = argType.base (already matches).
-                hir::Type deduced;
-                deduced.base = argType.base;
-                deduced.isUnsigned = argType.isUnsigned;
+                hir::Type d;
+                d.base = argType.base;
+                d.isUnsigned = argType.isUnsigned;
                 auto it = mapping.find(paramType.base);
                 if (it != mapping.end()) {
-                    if (!(it->second == deduced)) return false;
+                    if (!(it->second == d)) return false;
                 } else {
-                    mapping[paramType.base] = deduced;
+                    mapping[paramType.base] = d;
                 }
                 continue;
             }
@@ -3540,16 +3948,40 @@ bool HirBuilder::deduceTemplateArgs(const Function& tplFunc,
         // for this argument — skip it.
     }
 
-    // Build the deduced args vector in the order of type params.
-    deduced.clear();
-    for (std::string_view tp : typeParams) {
-        auto it = mapping.find(tp);
-        if (it == mapping.end()) {
-            // This type parameter was not deduced — fail.
-            (void)loc;  // could report error here
-            return false;
+    // Deduce the variadic pack: each extra arg (from fixedParamCount
+    // onward) contributes its type as a pack element.
+    if (hasVariadic) {
+        for (std::size_t i = fixedParamCount; i < numArgs; ++i) {
+            hir::Type argType = argTypes[i];
+            argType.isReference = false;
+            // Each pack element type is deduced from the arg type.
+            // If the variadic param type is `T` (bare pack), each arg
+            // deduces T for that slot.
+            variadicPack.push_back(argType);
         }
-        deduced.push_back(it->second);
+    }
+
+    // Build the deduced args vector in the order of type params.
+    // For the variadic pack, its elements are appended at the pack's
+    // position in the type-params list.
+    deduced.clear();
+    for (std::size_t i = 0; i < tplFunc.tplParams.size(); ++i) {
+        const auto& tp = tplFunc.tplParams[i];
+        if (!tp.isTypename) continue;
+        if (tp.isVariadic) {
+            // Append all pack element types.
+            for (const auto& pt : variadicPack) {
+                deduced.push_back(pt);
+            }
+        } else {
+            auto it = mapping.find(tp.name);
+            if (it == mapping.end()) {
+                // This type parameter was not deduced — fail.
+                (void)loc;  // could report error here
+                return false;
+            }
+            deduced.push_back(it->second);
+        }
     }
     return true;
 }

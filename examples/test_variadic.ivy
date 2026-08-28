@@ -1,0 +1,111 @@
+// Test: Variadic templates (7.6)
+// Covers: `typename... Args`, pack expansion `args...`,
+//         `sizeof...(pack)`, fold expressions.
+// Build: ivyc --run examples/test_variadic.ivy
+//        ivyc --llvm examples/test_variadic.ivy
+
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// --- Basic variadic template with sizeof... ---
+template <typename... Args>
+int count_args(Args... args) {
+    return sizeof...(args);
+}
+
+// --- Variadic + fixed: single fixed + pack ---
+template <typename T, typename... Args>
+int count_after(T first, Args... rest) {
+    return sizeof...(rest);
+}
+
+// --- Fold expression: unary right fold `(pack + ...)` ---
+template <typename... Args>
+int sum(Args... args) {
+    return (args + ...);
+}
+
+// --- Fold expression: unary left fold `(... + pack)` ---
+template <typename... Args>
+int sum_left(Args... args) {
+    return (... + args);
+}
+
+// --- Fold expression: binary fold `(init + ... + pack)` ---
+template <typename... Args>
+int sum_from(int init, Args... args) {
+    return (init + ... + args);
+}
+
+// --- Fold expression with `&&` (all true) ---
+template <typename... Args>
+bool all_true(Args... args) {
+    return (args && ...);
+}
+
+// --- Fold expression with `||` (any true) ---
+template <typename... Args>
+bool any_true(Args... args) {
+    return (args || ...);
+}
+
+// --- Pack expansion in a call (comma fold) ---
+void print_int(int x) { printf("%d\n", x); }
+
+template <typename... Args>
+void print_all(Args... args) {
+    (print_int(args), ...);
+}
+
+int main() {
+    // sizeof... basic
+    int n0 = count_args();
+    int n1 = count_args(1);
+    int n3 = count_args(1, 2, 3);
+    printf("count_args()=%d\n", n0);   // 0
+    printf("count_args(1)=%d\n", n1); // 1
+    printf("count_args(1,2,3)=%d\n", n3); // 3
+
+    // sizeof... after fixed
+    int c1 = count_after(10, 20);
+    int c3 = count_after(10, 20, 30, 40);
+    printf("count_after(10,20)=%d\n", c1);       // 1
+    printf("count_after(10,20,30,40)=%d\n", c3); // 3
+
+    // Fold: sum
+    int s0 = sum();
+    int s1 = sum(42);
+    int s3 = sum(1, 2, 3);
+    printf("sum()=%d\n", s0);       // 0 (empty pack identity)
+    printf("sum(42)=%d\n", s1);     // 42
+    printf("sum(1,2,3)=%d\n", s3);  // 6
+
+    // Fold: sum_left
+    int sl = sum_left(10, 20, 30);
+    printf("sum_left(10,20,30)=%d\n", sl); // 60
+
+    // Fold: binary
+    int bf = sum_from(100, 1, 2, 3);
+    printf("sum_from(100,1,2,3)=%d\n", bf); // 106
+
+    // Fold: all_true
+    bool at = all_true(true, true, true);
+    bool af = all_true(true, false, true);
+    printf("all_true(t,t,t)=%d\n", at ? 1 : 0); // 1
+    printf("all_true(t,f,t)=%d\n", af ? 1 : 0); // 0
+
+    // Fold: any_true
+    bool any1 = any_true(false, false, true);
+    bool any0 = any_true(false, false, false);
+    printf("any_true(f,f,t)=%d\n", any1 ? 1 : 0); // 1
+    printf("any_true(f,f,f)=%d\n", any0 ? 1 : 0); // 0
+
+    // Pack expansion in call
+    print_all(11, 22, 33); // prints 11, 22, 33
+
+    printf("all variadic tests passed\n");
+    return 0;
+}

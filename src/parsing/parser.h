@@ -136,6 +136,9 @@ private:
     // operator symbol string (e.g. "+", "==", "[]", "()", "++", "->").
     // Consumes the operator tokens.  Returns "" on error.
     std::string parseOperatorName();
+    // Returns the fold-operator string for a token kind, or "" if the
+    // token is not a valid fold operator (e.g. "+", "*", "&&", "<<").
+    static std::string_view foldOperator(TokenKind k);
     // Parse template parameter list: `<typename T, int N, ...>` (after `<`).
     std::vector<TemplateParam> parseTemplateParams();
     // Parse explicit template arguments: `<int, double, ...>` (after `<`).

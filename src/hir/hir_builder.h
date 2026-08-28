@@ -61,6 +61,19 @@ private:
     // `ns::func` before reporting an error.
     std::string_view currentNsPrefix_;
 
+    // --- variadic template pack expansion (7.6) ---
+    // Active pack mapping for the template instantiation whose body is
+    // currently being built. Empty when building a non-variadic function.
+    // Maps the parameter-pack name (e.g. "Args") to the concrete types
+    // and to the synthesized per-element parameter names (e.g.
+    // ["__args0","__args1",...]). Used to expand `args...`, `sizeof...(args)`,
+    // and fold expressions during HIR building.
+    struct PackInfo {
+        std::vector<hir::Type> types;
+        std::vector<std::string> paramNames;  // per-element param names
+    };
+    std::unordered_map<std::string_view, PackInfo> currentPackMapping_;
+
     // Enum registry. Maps enum type name → EnumDef (underlying type +
     // constant value map). For unscoped enums, constants are also
     // registered directly in `enumConstants_` (so `Red` resolves without

@@ -398,6 +398,12 @@ Value Interpreter::evalBinary(const Expr::Binary& b, const Expr& e) {
         return makeInt((rv.isInt() ? rv.asInt() != 0 : rv.asFloat() != 0.0) ? 1 : 0);
     }
 
+    // Comma operator: evaluate lhs for side effects, return rhs.
+    if (op == ",") {
+        evalExpr(*b.lhs);
+        return evalExpr(*b.rhs);
+    }
+
     Value lv = evalExpr(*b.lhs);
     Value rv = evalExpr(*b.rhs);
 

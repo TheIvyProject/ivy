@@ -766,6 +766,12 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             return p;
         }
 
+        // Comma operator: evaluate lhs for side effects, return rhs.
+        if (v.op == ",") {
+            lowerExpr(*v.lhs);
+            return lowerExpr(*v.rhs);
+        }
+
         const std::string lhsV = lowerExpr(*v.lhs);
         const std::string rhsV = lowerExpr(*v.rhs);
         // For comparison ops the result type is i1, but operands compared at

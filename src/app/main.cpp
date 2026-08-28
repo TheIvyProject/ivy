@@ -167,6 +167,21 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                        os << "\n";
                        if (v.body) dumpStmt(*v.body, os, depth + 1);
                    },
+                   [&](const ivy::Expr::PackExpansion& v) {
+                       os << pad << "pack-expansion\n";
+                       if (v.pattern) dumpExpr(*v.pattern, os, depth + 1);
+                   },
+                   [&](const ivy::Expr::FoldExpr& v) {
+                       os << pad << "fold op='" << v.op << "' isLeftPack="
+                          << (v.isLeftPack ? "true" : "false") << "\n";
+                       if (v.lhs) dumpExpr(*v.lhs, os, depth + 1);
+                       else os << pad << "  <null lhs>\n";
+                       if (v.rhs) dumpExpr(*v.rhs, os, depth + 1);
+                       else os << pad << "  <null rhs>\n";
+                   },
+                   [&](const ivy::Expr::SizeofPack& v) {
+                       os << pad << "sizeof...(" << v.packName << ")\n";
+                   },
                },
                e.node);
 }
@@ -386,6 +401,23 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                           << " (" << v.captureInits.size() << " captures)\n";
                        for (const auto& ci : v.captureInits)
                            if (ci) dumpHirExpr(*ci, os, depth + 1);
+                   },
+                   [&](const ivy::hir::Expr::PackExpansion& v) {
+                       os << pad << "pack-expansion pack=" << v.packName
+                          << " count=" << v.count << "\n";
+                       if (v.pattern) dumpHirExpr(*v.pattern, os, depth + 1);
+                   },
+                   [&](const ivy::hir::Expr::FoldExpr& v) {
+                       os << pad << "fold op='" << v.op << "' isLeftPack="
+                          << (v.isLeftPack ? "true" : "false") << "\n";
+                       if (v.lhs) dumpHirExpr(*v.lhs, os, depth + 1);
+                       else os << pad << "  <null lhs>\n";
+                       if (v.rhs) dumpHirExpr(*v.rhs, os, depth + 1);
+                       else os << pad << "  <null rhs>\n";
+                   },
+                   [&](const ivy::hir::Expr::SizeofPack& v) {
+                       os << pad << "sizeof...(" << v.packName << ") = "
+                          << v.count << "\n";
                    },
                },
                e.node);

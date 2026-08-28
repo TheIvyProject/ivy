@@ -57,12 +57,34 @@ struct Expr {
         std::string_view closureType;    // e.g. "__lambda0_closure"
         std::vector<std::unique_ptr<Expr>> captureInits;  // values for each capture field
     };
+    // Pack expansion: `expr...` — after template instantiation this is
+    // expanded into `count` copies of `pattern` (with each pack element
+    // substituted).  At HIR level, if `count` > 0 the builder expands
+    // it into concrete exprs; if `count` == 0 (empty pack), this node
+    // remains and typechecks to `void`.
+    struct PackExpansion {
+        std::unique_ptr<Expr> pattern;
+        std::string_view packName;  // for IdentRef patterns
+        std::size_t count = 0;
+    };
+    // Fold expression — after template instantiation, the builder
+    // expands this into a chain of Binary nodes.  If the pack is empty,
+    // the result is the identity element for the operator (or a
+    // compile-time error for operators without identity).
+    struct FoldExpr {
+        std::string_view op;
+        std::unique_ptr<Expr> lhs;  // null for unary left fold
+        std::unique_ptr<Expr> rhs;  // null for unary right fold
+        bool isLeftPack = true;
+    };
+    // sizeof...(pack) — already folded to an integer by the HIR builder.
+    struct SizeofPack { std::string_view packName; std::size_t count = 0; };
 
     Type type;  // resolved type
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack>
         node;
 };
 
@@ -126,6 +148,17 @@ inline std::unique_ptr<Expr> cloneHirExpr(const Expr& e) {
                 lam.captureInits.push_back(c ? cloneHirExpr(*c) : nullptr);
             }
             out->node.emplace<Expr::Lambda>(std::move(lam));
+        } else if constexpr (std::is_same_v<V, Expr::PackExpansion>) {
+            out->node.emplace<Expr::PackExpansion>(Expr::PackExpansion{
+                v.pattern ? cloneHirExpr(*v.pattern) : nullptr,
+                v.packName, v.count});
+        } else if constexpr (std::is_same_v<V, Expr::FoldExpr>) {
+            out->node.emplace<Expr::FoldExpr>(Expr::FoldExpr{v.op,
+                v.lhs ? cloneHirExpr(*v.lhs) : nullptr,
+                v.rhs ? cloneHirExpr(*v.rhs) : nullptr,
+                v.isLeftPack});
+        } else if constexpr (std::is_same_v<V, Expr::SizeofPack>) {
+            out->node.emplace<Expr::SizeofPack>(v);
         } else {
             out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
         }

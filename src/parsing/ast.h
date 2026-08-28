@@ -56,6 +56,7 @@ struct Param {
     std::string_view name;  // empty if unnamed
     std::vector<Attribute> attrs;
     std::unique_ptr<Expr> defaultValue;  // `= expr` — filled at call site
+    bool isPack = false;  // true => `Args... args` (function parameter pack)
     SourceLoc loc;
 };
 
@@ -64,8 +65,9 @@ struct Param {
 // parameter name. `isTypename` distinguishes the two kinds.
 struct TemplateParam {
     bool isTypename = true;   // true => `typename T`, false => `int N` etc.
+    bool isVariadic = false;  // true => `typename... Args` (parameter pack)
     Type type;                // for non-type: the integer type
-    std::string_view name;    // parameter name (T, N, ...)
+    std::string_view name;    // parameter name (T, N, Args, ...)
     SourceLoc loc;
 };
 
@@ -104,11 +106,27 @@ struct Expr {
         Type returnType;  // base.empty() => deduced
         std::unique_ptr<Stmt> body;  // actually a Stmt::Compound
     };
+    // Pack expansion: `expr...` — expands the pack inside `expr`.
+    // For a bare pack `args...`, `pattern` is an IdentRef to the pack
+    // name.  More complex patterns (`f(args)...`) are also possible.
+    struct PackExpansion { std::unique_ptr<Expr> pattern; };
+    // Fold expression: `(op ... pack)`, `(pack ... op)`, or
+    // `(lhs op ... op rhs)`.  `op` is the fold operator (e.g. "+").
+    // `lhs`/`rhs` are null for unary folds (left or right only).
+    struct FoldExpr {
+        std::string_view op;
+        std::unique_ptr<Expr> lhs;  // null for `(op ... pack)`
+        std::unique_ptr<Expr> rhs;  // null for `(pack ... op)`
+        bool isLeftPack = true;     // true: lhs is `...`, false: rhs is `...`
+    };
+    // sizeof...(pack) — returns the number of elements in a parameter
+    // pack at compile time.  `packName` is the identifier of the pack.
+    struct SizeofPack { std::string_view packName; };
 
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack>
         node;
 };
 
@@ -182,6 +200,16 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
             }
             lam.returnType = v.returnType;
             out->node.emplace<Expr::Lambda>(std::move(lam));
+        } else if constexpr (std::is_same_v<V, Expr::PackExpansion>) {
+            out->node.emplace<Expr::PackExpansion>(Expr::PackExpansion{
+                v.pattern ? cloneExpr(*v.pattern) : nullptr});
+        } else if constexpr (std::is_same_v<V, Expr::FoldExpr>) {
+            out->node.emplace<Expr::FoldExpr>(Expr::FoldExpr{v.op,
+                v.lhs ? cloneExpr(*v.lhs) : nullptr,
+                v.rhs ? cloneExpr(*v.rhs) : nullptr,
+                v.isLeftPack});
+        } else if constexpr (std::is_same_v<V, Expr::SizeofPack>) {
+            out->node.emplace<Expr::SizeofPack>(v);
         } else {
             out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
         }

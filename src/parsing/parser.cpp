@@ -105,6 +105,7 @@ constexpr struct {
     {"virtual", "virtual dispatch is not supported in the Ivy subset"},
     {"friend", "friends are not supported in the Ivy subset"},
     {"extern", "only 'extern \"C\"' is supported"},
+    {"sizeof", ""},  // sizeof IS supported (7.6): `sizeof...(pack)` — handled in parsePrimary
 };
 
 }  // namespace
@@ -1196,6 +1197,34 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
     tu.structs.push_back(std::move(sd));
 }
 
+// Returns the fold-operator string for a token kind, or "" if the
+// token is not a valid fold operator.  Fold operators are a subset
+// of binary operators: + - * / % ^ & | << >> && || == != < > <= >= ,
+std::string_view Parser::foldOperator(TokenKind k) {
+    switch (k) {
+        case TokenKind::Plus:    return "+";
+        case TokenKind::Minus:   return "-";
+        case TokenKind::Star:    return "*";
+        case TokenKind::Slash:   return "/";
+        case TokenKind::Percent: return "%";
+        case TokenKind::Caret:   return "^";
+        case TokenKind::Amp:     return "&";
+        case TokenKind::Pipe:    return "|";
+        case TokenKind::Shl:     return "<<";
+        case TokenKind::Shr:     return ">>";
+        case TokenKind::AndAnd:  return "&&";
+        case TokenKind::OrOr:    return "||";
+        case TokenKind::Eq:      return "==";
+        case TokenKind::Ne:      return "!=";
+        case TokenKind::Lt:      return "<";
+        case TokenKind::Gt:      return ">";
+        case TokenKind::Le:      return "<=";
+        case TokenKind::Ge:      return ">=";
+        case TokenKind::Comma:   return ",";
+        default: return "";
+    }
+}
+
 // Parse a template parameter list: `typename T, int N, typename U, ...`.
 // The leading `<` has NOT been consumed yet.
 std::vector<TemplateParam> Parser::parseTemplateParams() {
@@ -1216,6 +1245,12 @@ std::vector<TemplateParam> Parser::parseTemplateParams() {
             synchronize();
             break;
         }
+        // Variadic: `typename... Args` — the `...` may appear between
+        // the `typename` keyword and the parameter name.
+        if (at(TokenKind::Ellipsis)) {
+            next();  // consume `...`
+            tp.isVariadic = true;
+        }
         // Parameter name
         if (at(TokenKind::Identifier)) {
             tp.name = next().lexeme;
@@ -1223,6 +1258,11 @@ std::vector<TemplateParam> Parser::parseTemplateParams() {
             errorAt(peek(), "expected template parameter name");
             synchronize();
             break;
+        }
+        // Also allow `typename Args...` (postfix `...` after name).
+        if (at(TokenKind::Ellipsis)) {
+            next();
+            tp.isVariadic = true;
         }
         params.push_back(std::move(tp));
         if (at(TokenKind::Comma)) {
@@ -1414,6 +1454,13 @@ std::vector<Param> Parser::parseParams() {
         Param p;
         p.loc = locOf(peek());
         p.type = parseType();
+        // Function parameter pack: `Args... args` — the `...` appears
+        // between the type (a template pack name) and the parameter
+        // name.  This is only valid inside a variadic template.
+        if (at(TokenKind::Ellipsis)) {
+            next();  // consume `...`
+            p.isPack = true;
+        }
         if (at(TokenKind::Identifier)) {
             p.name = next().lexeme;
         } else if (at(TokenKind::LBracket) && peek(1).kind == TokenKind::LBracket) {
@@ -1937,6 +1984,12 @@ std::unique_ptr<Expr> Parser::parsePostfix(std::unique_ptr<Expr> lhs) {
         } else if (at(TokenKind::PlusPlus) || at(TokenKind::MinusMinus)) {  // postfix ++/--
             const Token& op = next();
             lhs = makeExpr<Expr::Unary>(loc, op.lexeme, /*isPrefix=*/false, std::move(lhs));
+        } else if (at(TokenKind::Ellipsis)) {
+            // Pack expansion: `expr...` — expands the parameter pack
+            // inside `expr`.  For a bare pack `args...`, `lhs` is an
+            // IdentRef to the pack name.
+            next();  // consume `...`
+            lhs = makeExpr<Expr::PackExpansion>(loc, std::move(lhs));
         } else {
             break;
         }
@@ -1967,6 +2020,21 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
     if (atKeyword("true") || atKeyword("false")) {
         next();
         return makeExpr<Expr::BoolLit>(loc, t.lexeme == "true");
+    }
+    // sizeof...(pack) — returns the number of elements in a parameter
+    // pack at compile time.  Syntax: `sizeof` `...` `(` `identifier` `)`.
+    if (atKeyword("sizeof") && peek(1).kind == TokenKind::Ellipsis) {
+        next();  // consume `sizeof`
+        next();  // consume `...`
+        expect(TokenKind::LParen, "expected '(' after 'sizeof...'");
+        if (!at(TokenKind::Identifier)) {
+            errorAt(peek(), "expected parameter pack name after 'sizeof...('");
+            synchronize();
+            return makeExpr<Expr::IntegerLit>(loc, 0);
+        }
+        std::string_view packName = next().lexeme;
+        expect(TokenKind::RParen, "expected ')' after sizeof... pack name");
+        return makeExpr<Expr::SizeofPack>(loc, packName);
     }
     if (atKeyword("nullptr")) {
         next();
@@ -2045,7 +2113,59 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
     }
     if (at(TokenKind::LParen)) {
         next();
-        std::unique_ptr<Expr> inner = parseExpr();
+        // Fold expression detection:
+        //   ( ... op expr )   — unary left fold
+        //   ( expr op ... )   — unary right fold
+        //   ( expr op ... op expr ) — binary fold
+        // The `...` is the marker; `op` is a binary operator token.
+        if (at(TokenKind::Ellipsis)) {
+            // `(... op expr)` — unary left fold.
+            next();  // consume `...`
+            // Expect a binary operator.
+            std::string_view foldOp;
+            if (auto sv = foldOperator(peek().kind); !sv.empty()) {
+                foldOp = sv;
+                next();
+            } else {
+                errorAt(peek(), "expected binary operator after '...' in fold expression");
+            }
+            std::unique_ptr<Expr> rhs = parseUnary();
+            expect(TokenKind::RParen, "expected ')' to close fold expression");
+            auto out = makeExpr<Expr::FoldExpr>(loc, foldOp, nullptr, std::move(rhs), /*isLeftPack=*/true);
+            return out;
+        }
+        // Parse the first operand. Use `parseUnary` (not `parseExpr`)
+        // so that a following binary operator is recognized as part of
+        // the fold syntax, not consumed by `parseBinary`.
+        std::unique_ptr<Expr> inner = parseUnary();
+        // Check for fold pattern: `expr op ...` (unary right fold) or
+        // `expr op ... op expr` (binary fold).
+        if (auto sv = foldOperator(peek().kind); !sv.empty()) {
+            std::string_view foldOp = sv;
+            next();  // consume operator
+            if (at(TokenKind::Ellipsis)) {
+                next();  // consume `...`
+                // Check for binary fold: `expr op ... op expr`
+                std::unique_ptr<Expr> rhs;
+                if (auto sv2 = foldOperator(peek().kind); !sv2.empty()) {
+                    next();  // consume second operator
+                    rhs = parseUnary();
+                }
+                expect(TokenKind::RParen, "expected ')' to close fold expression");
+                auto out = makeExpr<Expr::FoldExpr>(loc, foldOp, std::move(inner),
+                                                     std::move(rhs), /*isLeftPack=*/false);
+                return out;
+            }
+            // Not a fold — backtrack the operator.
+            // We already consumed it; reconstruct by wrapping in Binary.
+            // But we don't have the rhs yet, so just continue parsing
+            // as a normal expression (the operator will be handled by
+            // the binary parser if we hadn't consumed it).  Since we
+            // consumed it, we need to build a Binary node manually.
+            std::unique_ptr<Expr> rhs = parseExpr();
+            expect(TokenKind::RParen, "expected ')' to close parenthesized expression");
+            return makeExpr<Expr::Binary>(loc, foldOp, std::move(inner), std::move(rhs));
+        }
         expect(TokenKind::RParen, "expected ')' to close parenthesized expression");
         return inner;
     }
