@@ -1595,6 +1595,52 @@ void HirBuilder::checkCall(hir::Expr::Call& call, SourceLoc loc) {
     }
 }
 
+// --- Operator overloading (7.4) -------------------------------------------
+// Attempt to rewrite `base op rhs` (or `op base` for unary) as a call to
+// the struct's `operator<op>` member method.  `base` must be (or
+// degenerate to) a struct type.  On success, returns a Call expression
+// with `this` (base) injected as the first argument.  On failure
+// (base is not a struct, or no matching operator method), returns
+// nullptr and leaves the caller to emit a built-in error.
+std::unique_ptr<hir::Expr> HirBuilder::tryOperatorOverload(
+        std::unique_ptr<hir::Expr> base, std::string_view op,
+        std::unique_ptr<hir::Expr> rhs, SourceLoc loc) {
+    if (!base) return nullptr;
+    hir::Type baseType = base->type;
+    if (baseType.isReference) baseType.isReference = false;
+    auto sIt = structs_.find(baseType.base);
+    if (sIt == structs_.end()) return nullptr;
+    // Build the method key: "operator" + symbol (e.g. "operator+").
+    // The method table is keyed by bare name, and operator methods are
+    // registered under "operator+" / "operator==" / "operator[]" etc.
+    std::string opKey;
+    opKey.reserve(8 + op.size());
+    opKey += "operator";
+    opKey += op;
+    auto mIt = sIt->second.methods.find(opKey);
+    if (mIt == sIt->second.methods.end() || mIt->second.empty()) {
+        return nullptr;
+    }
+    // Build arg type vector: [this-type, rhs-type?].
+    std::vector<hir::Type> argTypes;
+    argTypes.push_back(baseType);  // `this` is `Struct&`
+    if (rhs) argTypes.push_back(rhs->type);
+    // Resolve the overload among the candidate operator methods.
+    hir::Function* target = resolveOverload(mIt->second, argTypes, loc);
+    if (!target) return nullptr;
+    // Construct the Call node, injecting `this` (base) as the first arg.
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    auto& call = out->node.emplace<hir::Expr::Call>();
+    call.target = target;
+    call.callee = target->name;
+    if (rhs) call.args.push_back(std::move(rhs));
+    call.args.insert(call.args.begin(), std::move(base));
+    out->type = target->returnType;
+    checkCall(call, loc);
+    return out;
+}
+
 std::unique_ptr<hir::Expr> HirBuilder::buildStructInit(const Expr::InitList& il,
                                                        const hir::Type& structType,
                                                        [[maybe_unused]] std::string_view varName,
@@ -1767,6 +1813,19 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         if (!un.operand) return out;
         const hir::Type& ot = un.operand->type;
 
+        // Operator overloading (7.4): if the operand is a struct type,
+        // try to rewrite `op a` / `a op` as `a.operator op()`.
+        if (structs_.contains(ot.base)) {
+            auto call = tryOperatorOverload(std::move(un.operand), v.op,
+                                            nullptr, e.loc);
+            if (call) return call;
+            // No matching operator method — report and bail.
+            out->type = dummyType();
+            error(e.loc, "struct '" + std::string(ot.base) +
+                  "' has no matching operator '" + std::string(v.op) + "'");
+            return out;
+        }
+
         if (v.op == "!" ) {
             if (!isNumeric(ot) && ot.pointerDepth == 0) {
                 error(e.loc, "'!' expects a numeric or pointer operand");
@@ -1831,6 +1890,23 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         const bool lNum = isNumeric(lt), rNum = isNumeric(rt);
         const bool lPtr = lt.pointerDepth > 0, rPtr = rt.pointerDepth > 0;
         const bool lNull = lt.base == "nullptr", rNull = rt.base == "nullptr";
+
+        // Operator overloading (7.4): if the LHS is a struct type,
+        // try to rewrite `a op b` as `a.operator op(b)`.  Member
+        // operators take priority over built-in handling — if a
+        // matching operator method exists, we use it; otherwise we
+        // fall through to the built-in type checks below.
+        if (structs_.contains(lt.base)) {
+            auto call = tryOperatorOverload(std::move(bin.lhs), v.op,
+                                            std::move(bin.rhs), e.loc);
+            if (call) return call;
+            // No matching operator method — report and bail.  Note:
+            // bin.lhs/bin.rhs may have been moved-out, so don't touch them.
+            out->type = dummyType();
+            error(e.loc, "struct '" + std::string(lt.base) +
+                  "' has no matching operator '" + std::string(v.op) + "'");
+            return out;
+        }
 
         if (v.op == "==" || v.op == "!=") {
             const bool ok = (lNum && rNum) || (lPtr && rPtr) || (lNull && rPtr) || (rNull && lPtr);
@@ -1934,6 +2010,76 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         // overload resolution.  (Lambda calls add a closure-pointer arg
         // as the first element; we handle that in the lambda branch.)
         for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
+        // Operator overloading (7.4): `obj(args)` — if the callee is a
+        // struct-typed expression with an `operator()` method, rewrite
+        // as `obj.operator()(args)`.  We build the callee expression and
+        // check its type; if it's a struct, try the call operator.
+        // Skip this for plain function names (resolved below) and
+        // lambdas (handled in a dedicated branch).
+        if (std::holds_alternative<A::IdentRef>(callee->node)) {
+            const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
+            // Only attempt if `bareName` is NOT a known function/template
+            // (otherwise `a()` for a function `a` would be misread).
+            bool isFunc = !resolveOverloads(bareName).empty() ||
+                          lookupTemplate(bareName) != nullptr;
+            if (!isFunc) {
+                // Build the callee as an expression to discover its type.
+                auto calleeExpr = buildExpr(*callee);
+                if (calleeExpr && structs_.contains(calleeExpr->type.base)) {
+                    // Collect args (already built above) into a fresh
+                    // vector — tryOperatorOverload takes ownership.
+                    std::vector<std::unique_ptr<hir::Expr>> opArgs;
+                    for (auto& a : call.args) opArgs.push_back(std::move(a));
+                    call.args.clear();
+                    // tryOperatorOverload expects a single rhs for binary
+                    // ops; for `operator()` with N args we need a variant.
+                    // Since our helper supports at most one rhs, we
+                    // handle the common case (0 or 1 arg) here and fall
+                    // back to error otherwise.
+                    if (opArgs.size() <= 1) {
+                        auto rhs = opArgs.empty() ? nullptr : std::move(opArgs[0]);
+                        auto rewritten = tryOperatorOverload(
+                            std::move(calleeExpr), "()", std::move(rhs), e.loc);
+                        if (rewritten) return rewritten;
+                    } else {
+                        // Multi-arg operator(): build a Call directly.
+                        hir::Type baseType = calleeExpr->type;
+                        if (baseType.isReference) baseType.isReference = false;
+                        auto sIt = structs_.find(baseType.base);
+                        if (sIt != structs_.end()) {
+                            auto mIt = sIt->second.methods.find("operator()");
+                            if (mIt != sIt->second.methods.end() && !mIt->second.empty()) {
+                                std::vector<hir::Type> argTypes;
+                                argTypes.push_back(baseType);
+                                for (const auto& a : opArgs) {
+                                    argTypes.push_back(a ? a->type : dummyType());
+                                }
+                                hir::Function* target = resolveOverload(mIt->second, argTypes, e.loc);
+                                if (target) {
+                                    auto out2 = std::make_unique<hir::Expr>();
+                                    out2->loc = e.loc;
+                                    auto& call2 = out2->node.emplace<hir::Expr::Call>();
+                                    call2.target = target;
+                                    call2.callee = target->name;
+                                    for (auto& a : opArgs) call2.args.push_back(std::move(a));
+                                    call2.args.insert(call2.args.begin(), std::move(calleeExpr));
+                                    out2->type = target->returnType;
+                                    checkCall(call2, e.loc);
+                                    return out2;
+                                }
+                            }
+                        }
+                    }
+                    // If we reach here, no operator() matched.
+                    out->type = dummyType();
+                    error(e.loc, "struct '" + std::string(calleeExpr->type.base) +
+                          "' has no matching operator '()'");
+                    return out;
+                }
+                // Not a struct variable — fall through to normal call
+                // resolution (which will likely report "undeclared").
+            }
+        }
         // Bare name call: `func(args)` — resolve with namespace fallback.
         if (std::holds_alternative<A::IdentRef>(callee->node)) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
@@ -2205,6 +2351,18 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         idx.index = buildExpr(*v.index);
         if (idx.base) {
             const hir::Type& bt = idx.base->type;
+            // Operator overloading (7.4): if the base is a struct type
+            // (not array, not pointer), try `operator[]`.
+            if (bt.arraySize == 0 && bt.pointerDepth == 0 &&
+                structs_.contains(bt.base)) {
+                auto call = tryOperatorOverload(std::move(idx.base), "[]",
+                                                std::move(idx.index), e.loc);
+                if (call) return call;
+                out->type = dummyType();
+                error(e.loc, "struct '" + std::string(bt.base) +
+                      "' has no matching operator '[]'");
+                return out;
+            }
             if (bt.arraySize > 0) {
                 // Array indexing: safe (bounds check injected by codegen unless unsafe).
                 // Result type = element type (array without the size).

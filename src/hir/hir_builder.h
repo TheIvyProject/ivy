@@ -195,6 +195,18 @@ private:
     void requireUnsafe(SourceLoc loc, std::string_view what);
     void checkCall(hir::Expr::Call& call, SourceLoc loc);
 
+    // --- operator overloading (7.4) ---
+    // Try to rewrite an operator expression (`a + b`, `!a`, `a[i]`)
+    // as a method call (`a.operator+(b)`, `a.operator!()`,
+    // `a.operator[](i)`).  `base` is the LHS/operand; `op` is the
+    // canonical operator symbol (e.g. "+", "==", "[]", "!"); `rhs`
+    // is the RHS for binary operators (empty for unary).  Returns a
+    // Call expression on success, or nullptr if `base` is not a struct
+    // or the struct has no matching `operator<op>` method.
+    std::unique_ptr<hir::Expr> tryOperatorOverload(
+        std::unique_ptr<hir::Expr> base, std::string_view op,
+        std::unique_ptr<hir::Expr> rhs, SourceLoc loc);
+
     // --- constexpr evaluation ---
     // Attempts to evaluate a constexpr/consteval function call at
     // compile time.  If all arguments are compile-time constants and

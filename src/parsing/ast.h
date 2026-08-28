@@ -317,6 +317,8 @@ struct Function {
     bool isConsteval = false;   // `consteval` function (implies constexpr)
     bool isCtor = false;        // constructor (name == struct name)
     bool isDtor = false;        // destructor (name == "~StructName")
+    bool isOperator = false;    // operator-overload method (7.4)
+    std::string operatorSymbol; // operator symbol: "+", "==", "[]", "()", etc.
     // Member initializer list for constructors: `: x(42), y(3)`.
     // Each entry initializes a field by name with a single expression
     // (Ivy doesn't support multi-arg member init `x(a, b)` — use a

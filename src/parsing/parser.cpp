@@ -96,7 +96,7 @@ constexpr struct {
     {"lambda", ""},  // lambdas have no keyword; handled via '[' in parsePrimary
     {"auto", ""},  // auto type deduction IS supported — handled in isTypeStart/parseType
     {"decltype", "'decltype' is not supported in the Ivy subset"},
-    {"operator", "operator overloading is not supported in the Ivy subset"},
+    {"operator", ""},  // operator overloading IS supported (7.4) — handled in parseStruct/parseFunction
     {"asm", "'asm' is not supported in the Ivy subset"},
     {"const_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
     {"static_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
@@ -1081,6 +1081,47 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
             break;
         }
         Type fieldType = parseType();
+
+        // Operator method: `ReturnType operator+(params) { body }`.
+        // After the return type, the next token is the `operator` keyword.
+        if (atKeyword("operator")) {
+            const SourceLoc memberLoc = locOf(peek());
+            std::string opName = parseOperatorName();
+            if (opName.empty()) { synchronize(); break; }
+            expect(TokenKind::LParen, "expected '(' after operator name");
+            std::vector<Param> params = parseParams();
+            expect(TokenKind::RParen, "expected ')' to close operator parameter list");
+
+            Function method;
+            method.returnType = std::move(fieldType);
+            method.isOperator = true;
+            method.operatorSymbol = opName;
+            {
+                std::string qual;
+                qual.reserve(std::string(name).size() + 11 + opName.size());
+                qual += name;
+                qual += "::operator";
+                qual += opName;
+                nameStorage_.push_back(std::move(qual));
+                method.name = nameStorage_.back();
+            }
+            method.namespacePrefix = currentNamespacePrefix();
+            method.params = std::move(params);
+            method.loc = memberLoc;
+
+            if (at(TokenKind::LBrace)) {
+                std::unique_ptr<Stmt> bodyStmt = parseCompound();
+                method.body =
+                    std::make_unique<Stmt::Compound>(
+                        std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else {
+                expect(TokenKind::Semi,
+                       "expected '{' for operator body or ';' for a declaration");
+            }
+            sd.methods.push_back(std::move(method));
+            continue;
+        }
+
         if (!at(TokenKind::Identifier)) {
             errorAt(peek(), "expected field or method name");
             synchronize();
@@ -1299,6 +1340,64 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     }
 
     tu.functions.push_back(std::move(fn));
+}
+
+std::string Parser::parseOperatorName() {
+    // Consume the `operator` keyword.
+    next();
+
+    // Map a single-token operator to its canonical symbol string.
+    // Returns the symbol, or "" if the token is not a valid operator.
+    auto singleTokenOp = [](TokenKind k) -> std::string_view {
+        switch (k) {
+            case TokenKind::Plus:    return "+";
+            case TokenKind::Minus:   return "-";
+            case TokenKind::Star:    return "*";
+            case TokenKind::Slash:   return "/";
+            case TokenKind::Percent: return "%";
+            case TokenKind::Amp:     return "&";
+            case TokenKind::Pipe:    return "|";
+            case TokenKind::Caret:   return "^";
+            case TokenKind::Tilde:   return "~";
+            case TokenKind::Bang:    return "!";
+            case TokenKind::Eq:      return "==";
+            case TokenKind::Ne:      return "!=";
+            case TokenKind::Lt:      return "<";
+            case TokenKind::Gt:      return ">";
+            case TokenKind::Le:      return "<=";
+            case TokenKind::Ge:      return ">=";
+            case TokenKind::Shl:     return "<<";
+            case TokenKind::Shr:     return ">>";
+            case TokenKind::AndAnd:  return "&&";
+            case TokenKind::OrOr:    return "||";
+            case TokenKind::PlusPlus:   return "++";
+            case TokenKind::MinusMinus: return "--";
+            case TokenKind::Arrow:      return "->";
+            default: return "";
+        }
+    };
+
+    // operator() and operator[] — two-token operators.
+    if (at(TokenKind::LParen) && peek(1).kind == TokenKind::RParen) {
+        next();  // (
+        next();  // )
+        return "()";
+    }
+    if (at(TokenKind::LBracket) && peek(1).kind == TokenKind::RBracket) {
+        next();  // [
+        next();  // ]
+        return "[]";
+    }
+
+    // Single-token operator.
+    std::string_view sym = singleTokenOp(peek().kind);
+    if (sym.empty()) {
+        errorAt(peek(), "expected an operator symbol after 'operator'");
+        next();  // consume anyway
+        return "";
+    }
+    next();
+    return std::string(sym);
 }
 
 std::vector<Param> Parser::parseParams() {

@@ -132,6 +132,10 @@ private:
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
                        std::vector<TemplateParam> tplParams = {});
     std::vector<Param> parseParams();
+    // Parse an operator name (after `operator` keyword): returns the
+    // operator symbol string (e.g. "+", "==", "[]", "()", "++", "->").
+    // Consumes the operator tokens.  Returns "" on error.
+    std::string parseOperatorName();
     // Parse template parameter list: `<typename T, int N, ...>` (after `<`).
     std::vector<TemplateParam> parseTemplateParams();
     // Parse explicit template arguments: `<int, double, ...>` (after `<`).

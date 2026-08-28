@@ -1,0 +1,77 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Vec3 {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+
+    // Binary operator+: Vec3 + Vec3 -> Vec3
+    Vec3 operator+(Vec3 other) {
+        Vec3 r;
+        r.x = this.x + other.x;
+        r.y = this.y + other.y;
+        r.z = this.z + other.z;
+        return r;
+    }
+
+    // Binary operator==: Vec3 == Vec3 -> bool
+    bool operator==(Vec3 other) {
+        return this.x == other.x && this.y == other.y && this.z == other.z;
+    }
+
+    // Unary operator-: -Vec3 -> Vec3 (negation)
+    Vec3 operator-() {
+        Vec3 r;
+        r.x = -this.x;
+        r.y = -this.y;
+        r.z = -this.z;
+        return r;
+    }
+
+    // Index operator[]: int index -> int32_t (component access)
+    int32_t operator[](int32_t i) {
+        if (i == 0) { return this.x; }
+        if (i == 1) { return this.y; }
+        return this.z;
+    }
+
+    // Call operator(): () -> int32_t (magnitude squared)
+    int32_t operator()() {
+        return this.x * this.x + this.y * this.y + this.z * this.z;
+    }
+};
+
+int main() {
+    Vec3 a;
+    a.x = 1; a.y = 2; a.z = 3;
+    Vec3 b;
+    b.x = 4; b.y = 5; b.z = 6;
+
+    // operator+
+    Vec3 c = a + b;
+    printf("a+b = (%d, %d, %d)\n", c.x, c.y, c.z);  // (5, 7, 9)
+
+    // operator==
+    bool eq = (a == b);
+    printf("a == b? %d\n", eq);  // 0 (false)
+    bool eq2 = (a == a);
+    printf("a == a? %d\n", eq2);  // 1 (true)
+
+    // unary operator-
+    Vec3 n = -a;
+    printf("-a = (%d, %d, %d)\n", n.x, n.y, n.z);  // (-1, -2, -3)
+
+    // operator[]
+    printf("a[0]=%d a[1]=%d a[2]=%d\n", a[0], a[1], a[2]);  // 1 2 3
+
+    // operator()
+    int32_t mag = a();
+    printf("|a|^2 = %d\n", mag);  // 1+4+9 = 14
+
+    printf("all operator overloading tests passed\n");
+    return 0;
+}
