@@ -1,0 +1,68 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// Compile-time enum used in `if constexpr` conditions.
+enum Color { Red, Green, Blue };
+
+int main() {
+    // --- 1. `if constexpr (true)` — then branch taken, else discarded.
+    if constexpr (true) {
+        printf("branch 1: true taken\n");
+    } else {
+        printf("branch 1: else taken (should NOT print)\n");
+    }
+
+    // --- 2. `if constexpr (false)` — else branch taken, then discarded.
+    if constexpr (false) {
+        printf("branch 2: then taken (should NOT print)\n");
+    } else {
+        printf("branch 2: else taken\n");
+    }
+
+    // --- 3. `if constexpr (false)` with no else — no-op.
+    if constexpr (false) {
+        printf("branch 3: then taken (should NOT print)\n");
+    }
+    printf("branch 3: skipped (no else)\n");
+
+    // --- 4. Constant expression with arithmetic: 2 + 3 == 5 → true.
+    if constexpr (2 + 3 == 5) {
+        printf("branch 4: 2+3==5 true\n");
+    } else {
+        printf("branch 4: 2+3==5 false (should NOT print)\n");
+    }
+
+    // --- 5. Enum constant condition: Green == 1 → true.
+    if constexpr (Green == 1) {
+        printf("branch 5: Green==1 true\n");
+    } else {
+        printf("branch 5: Green==1 false (should NOT print)\n");
+    }
+
+    // --- 6. Enum constant condition: Red == 0 → true (else path test).
+    if constexpr (Red == 1) {
+        printf("branch 6: Red==1 true (should NOT print)\n");
+    } else {
+        printf("branch 6: Red==1 false, else taken\n");
+    }
+
+    // --- 7. Logical AND of constant conditions: true && true → true.
+    if constexpr (1 == 1 && 2 == 2) {
+        printf("branch 7: 1==1 && 2==2 true\n");
+    } else {
+        printf("branch 7: false (should NOT print)\n");
+    }
+
+    // --- 8. Logical OR short-circuit: false || true → true.
+    if constexpr (false || true) {
+        printf("branch 8: false||true taken\n");
+    } else {
+        printf("branch 8: false (should NOT print)\n");
+    }
+
+    printf("all if constexpr tests passed\n");
+    return 0;
+}

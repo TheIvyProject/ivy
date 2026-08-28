@@ -430,7 +430,15 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
     if (std::holds_alternative<H::If>(n)) {
         const H::If& v = std::get<H::If>(n);
         mir::Block* cont = newBlock();
-        mir::Block* thenB = newBlock();
+        // For `if constexpr` that folded to a constant, one branch may
+        // be null.  If both are null (e.g. `if constexpr (false)` with
+        // no else), the If is a no-op — just fall through to cont.
+        if (!v.thenBranch && !v.elseBranch) {
+            jumpTo(cont);
+            cur_ = cont;
+            return;
+        }
+        mir::Block* thenB = v.thenBranch ? newBlock() : cont;
         mir::Block* elseB = v.elseBranch ? newBlock() : cont;
 
         auto* inst = emit(mir::Inst::Kind::CondBranch, s.loc);
@@ -439,9 +447,11 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         cb.thenBlock = thenB;
         cb.elseBlock = elseB;
 
-        cur_ = thenB;
-        buildStmt(*v.thenBranch);
-        jumpTo(cont);
+        if (v.thenBranch) {
+            cur_ = thenB;
+            buildStmt(*v.thenBranch);
+            jumpTo(cont);
+        }
         if (v.elseBranch) {
             cur_ = elseB;
             buildStmt(*v.elseBranch);

@@ -1226,8 +1226,36 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
     if (std::holds_alternative<A::If>(n)) {
         const A::If& v = std::get<A::If>(n);
         auto& ifs = out->node.emplace<hir::Stmt::If>();
+        ifs.isConstexpr = v.isConstexpr;
         ifs.cond = buildExpr(*v.cond);
         if (ifs.cond) checkCondition(*ifs.cond);
+        // `if constexpr` — attempt to evaluate the condition at
+        // compile time and only build the taken branch.  If the
+        // condition folds to a constant, the discarded branch is
+        // not built (its names are not resolved, its code is not
+        // generated) — this is the key semantics of `if constexpr`.
+        // If the condition cannot be folded (e.g. it references a
+        // runtime value), we fall back to building both branches
+        // like a regular `if`.
+        if (v.isConstexpr && ifs.cond && current_) {
+            ConstValue cv;
+            if (evalConstExpr(*ifs.cond, *current_, cv)) {
+                const bool taken = (cv.isInt ? cv.i != 0
+                                             : cv.f != 0.0);
+                if (taken) {
+                    ifs.thenBranch = buildStmt(*v.thenBranch);
+                    // No elseBranch — leave null.
+                } else if (v.elseBranch) {
+                    ifs.elseBranch = buildStmt(*v.elseBranch);
+                    // No thenBranch — leave null.
+                }
+                // For `if constexpr (false)` with no else, both
+                // branches stay null — the HIR If is effectively a
+                // no-op; codegen should emit nothing.
+                return out;
+            }
+            // Could not fold — fall through to build both branches.
+        }
         ifs.thenBranch = buildStmt(*v.thenBranch);
         if (v.elseBranch) ifs.elseBranch = buildStmt(*v.elseBranch);
         return out;

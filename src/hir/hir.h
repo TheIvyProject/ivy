@@ -136,7 +136,7 @@ inline std::unique_ptr<Expr> cloneHirExpr(const Expr& e) {
 struct Stmt {
     struct Compound { std::vector<std::unique_ptr<Stmt>> stmts; };
     struct Decl { Type type; std::string_view name; std::unique_ptr<Expr> init; };
-    struct If { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> thenBranch, elseBranch; };
+    struct If { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> thenBranch, elseBranch; bool isConstexpr = false; };
     struct While { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> body; };
     struct DoWhile { std::unique_ptr<Stmt> body; std::unique_ptr<Expr> cond; };
     struct For {

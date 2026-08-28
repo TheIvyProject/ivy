@@ -192,7 +192,7 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
 struct Stmt {
     struct Compound { std::vector<std::unique_ptr<Stmt>> stmts; };
     struct Decl { Type type; std::string_view name; std::unique_ptr<Expr> init; bool isConstexpr = false; };
-    struct If { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> thenBranch, elseBranch; };
+    struct If { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> thenBranch, elseBranch; bool isConstexpr = false; };
     struct While { std::unique_ptr<Expr> cond; std::unique_ptr<Stmt> body; };
     struct DoWhile { std::unique_ptr<Stmt> body; std::unique_ptr<Expr> cond; };
     struct For {
@@ -257,7 +257,8 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
             out->node.emplace<Stmt::If>(Stmt::If{
                 v.cond ? cloneExpr(*v.cond) : nullptr,
                 v.thenBranch ? cloneStmt(*v.thenBranch) : nullptr,
-                v.elseBranch ? cloneStmt(*v.elseBranch) : nullptr});
+                v.elseBranch ? cloneStmt(*v.elseBranch) : nullptr,
+                v.isConstexpr});
         } else if constexpr (std::is_same_v<V, Stmt::While>) {
             out->node.emplace<Stmt::While>(Stmt::While{
                 v.cond ? cloneExpr(*v.cond) : nullptr,

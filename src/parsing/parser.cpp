@@ -1502,6 +1502,13 @@ std::unique_ptr<Stmt> Parser::parseCompound() {
 std::unique_ptr<Stmt> Parser::parseIf() {
     const SourceLoc loc = locOf(peek());
     next();  // if
+    // Detect `if constexpr (...)` — the `constexpr` keyword must
+    // appear immediately after `if` and before the opening paren.
+    bool isConstexpr = false;
+    if (atKeyword("constexpr")) {
+        isConstexpr = true;
+        next();  // consume `constexpr`
+    }
     expect(TokenKind::LParen, "expected '(' after 'if'");
     std::unique_ptr<Expr> cond = parseExpr();
     expect(TokenKind::RParen, "expected ')' after if condition");
@@ -1511,7 +1518,9 @@ std::unique_ptr<Stmt> Parser::parseIf() {
         next();
         elseBranch = parseStatement();
     }
-    return makeStmt<Stmt::If>(loc, std::move(cond), std::move(thenBranch), std::move(elseBranch));
+    auto s = makeStmt<Stmt::If>(loc, std::move(cond), std::move(thenBranch), std::move(elseBranch));
+    std::get<Stmt::If>(s->node).isConstexpr = isConstexpr;
+    return s;
 }
 
 std::unique_ptr<Stmt> Parser::parseWhile() {

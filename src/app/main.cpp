@@ -198,7 +198,7 @@ void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth) {
                        os << pad << "if\n";
                        dumpExpr(*v.cond, os, depth + 1);
                        os << pad << "  then\n";
-                       dumpStmt(*v.thenBranch, os, depth + 1);
+                       if (v.thenBranch) dumpStmt(*v.thenBranch, os, depth + 1);
                        if (v.elseBranch) {
                            os << pad << "  else\n";
                            dumpStmt(*v.elseBranch, os, depth + 1);
@@ -417,7 +417,7 @@ void dumpHirStmt(const ivy::hir::Stmt& s, std::ostream& os, int depth) {
                    [&](const ivy::hir::Stmt::If& v) {
                        os << pad << "if\n";
                        dumpHirExpr(*v.cond, os, depth + 1);
-                       dumpHirStmt(*v.thenBranch, os, depth + 1);
+                       if (v.thenBranch) dumpHirStmt(*v.thenBranch, os, depth + 1);
                        if (v.elseBranch) dumpHirStmt(*v.elseBranch, os, depth + 1);
                    },
                    [&](const ivy::hir::Stmt::While& v) {
