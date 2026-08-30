@@ -248,6 +248,12 @@ struct Stmt {
     struct ExprStmt { std::unique_ptr<ivy::Expr> value; };
     struct Unsafe { std::unique_ptr<Stmt> body; };
     struct Null {};
+    // 7.8: Structured bindings — `auto [a, b] = expr;`
+    // Desugared in the HIR builder into per-field declarations.
+    struct StructuredBinding {
+        std::vector<std::string_view> names;
+        std::unique_ptr<Expr> init;
+    };
     // switch/case: cond is integral; each CaseClause has a constant value
     // (null => default). Ivy forbids implicit fallthrough: every case must
     // end with break/return/continue or be provably unreachable — this is
@@ -263,7 +269,7 @@ struct Stmt {
 
     SourceLoc loc;
     std::variant<Compound, Decl, If, While, DoWhile, For, RangeFor, Return, Break, Continue, ExprStmt,
-                 Unsafe, Null, Switch>
+                 Unsafe, Null, Switch, StructuredBinding>
         node;
 };
 
@@ -325,6 +331,11 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
                 sw.cases.push_back(std::move(cc));
             }
             out->node.emplace<Stmt::Switch>(std::move(sw));
+        } else if constexpr (std::is_same_v<V, Stmt::StructuredBinding>) {
+            Stmt::StructuredBinding sb;
+            sb.names = v.names;
+            sb.init = v.init ? cloneExpr(*v.init) : nullptr;
+            out->node.emplace<Stmt::StructuredBinding>(std::move(sb));
         } else {
             out->node = v;  // Break, Continue, Null
         }

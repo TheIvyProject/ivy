@@ -1317,6 +1317,81 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
     if (std::holds_alternative<A::Decl>(n)) {
         return buildDeclaration(std::get<A::Decl>(n), s.loc, /*checkInit=*/true);
     }
+    // 7.8: Structured bindings — `auto [a, b] = expr;`
+    // Desugar into a compound: { auto __sb = expr; auto a = __sb.f0; auto b = __sb.f1; }
+    if (std::holds_alternative<A::StructuredBinding>(n)) {
+        const auto& sb = std::get<A::StructuredBinding>(n);
+        if (!sb.init) {
+            error(s.loc, "structured binding requires an initializer");
+            return out;
+        }
+        // Build the initializer to learn its type.
+        auto initExpr = buildExpr(*sb.init);
+        if (!initExpr) { out->node = hir::Stmt::Null{}; return out; }
+        hir::Type initType = initExpr->type;
+        // Strip reference — we copy the value.
+        initType.isReference = false;
+        // Look up the struct to get ordered field list.
+        auto sIt = structs_.find(initType.base);
+        if (sIt == structs_.end()) {
+            error(s.loc, "structured binding requires a struct type, got '" +
+                         std::string(initType.base) + "'");
+            out->node = hir::Stmt::Null{};
+            return out;
+        }
+        const auto& def = sIt->second;
+        if (sb.names.size() != def.fields.size()) {
+            error(s.loc, "structured binding expects " +
+                         std::to_string(def.fields.size()) + " names, got " +
+                         std::to_string(sb.names.size()));
+            out->node = hir::Stmt::Null{};
+            return out;
+        }
+        // Synthesize a compound block with N+1 declarations.
+        auto& comp = out->node.emplace<hir::Stmt::Compound>();
+        // 1) Temporary: `auto __sb_N = expr;`
+        static int sbCounter = 0;
+        std::string tmpName = "__sb_" + std::to_string(sbCounter++);
+        stringStorage_.push_back(tmpName);
+        std::string_view tmpNameView = stringStorage_.back();
+        {
+            auto tmpStmt = std::make_unique<hir::Stmt>();
+            tmpStmt->loc = s.loc;
+            auto& tmpDecl = tmpStmt->node.emplace<hir::Stmt::Decl>();
+            tmpDecl.type = initType;
+            tmpDecl.name = tmpNameView;
+            tmpDecl.init = std::move(initExpr);
+            declare(tmpNameView, initType, s.loc);
+            comp.stmts.push_back(std::move(tmpStmt));
+        }
+        // 2) Per-field: `auto a = __sb.field;`
+        for (std::size_t i = 0; i < sb.names.size(); ++i) {
+            const auto& field = def.fields[i];
+            hir::Type fieldType = def.fieldMap.find(field.name)->second.type;
+            // Build member access: __sb.field
+            auto baseRef = std::make_unique<hir::Expr>();
+            baseRef->loc = s.loc;
+            baseRef->type = initType;
+            baseRef->node = hir::Expr::IdentRef{tmpNameView};
+            auto memberExpr = std::make_unique<hir::Expr>();
+            memberExpr->loc = s.loc;
+            memberExpr->type = fieldType;
+            auto& mem = memberExpr->node.emplace<hir::Expr::Member>();
+            mem.base = std::move(baseRef);
+            mem.name = field.name;
+            mem.isArrow = false;
+            // Build field declaration
+            auto fieldStmt = std::make_unique<hir::Stmt>();
+            fieldStmt->loc = s.loc;
+            auto& fieldDecl = fieldStmt->node.emplace<hir::Stmt::Decl>();
+            fieldDecl.type = fieldType;
+            fieldDecl.name = sb.names[i];
+            fieldDecl.init = std::move(memberExpr);
+            declare(sb.names[i], fieldType, s.loc);
+            comp.stmts.push_back(std::move(fieldStmt));
+        }
+        return out;
+    }
     if (std::holds_alternative<A::Null>(n)) {
         out->node = hir::Stmt::Null{};
         return out;

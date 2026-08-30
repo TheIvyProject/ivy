@@ -1839,6 +1839,30 @@ std::unique_ptr<Stmt> Parser::parseDeclaration(bool expectSemi) {
         return makeStmt<Stmt::Null>(loc);
     }
 
+    // 7.8: Structured bindings — `auto [a, b, c] = expr;`
+    if (type.base == "auto" && at(TokenKind::LBracket)) {
+        next();  // consume '['
+        Stmt::StructuredBinding sb;
+        if (!at(TokenKind::RBracket)) {
+            do {
+                if (!at(TokenKind::Identifier)) {
+                    errorAt(peek(), "expected identifier in structured binding");
+                    synchronize();
+                    return makeStmt<Stmt::Null>(loc);
+                }
+                sb.names.push_back(next().lexeme);
+            } while (at(TokenKind::Comma) && (next(), true));
+        }
+        expect(TokenKind::RBracket, "expected ']' after structured binding names");
+        expect(TokenKind::Assign, "structured binding requires '= expr'");
+        sb.init = parseExpr();
+        if (expectSemi) expect(TokenKind::Semi, "expected ';' after structured binding");
+        auto out = std::make_unique<Stmt>();
+        out->loc = loc;
+        out->node = std::move(sb);
+        return out;
+    }
+
     auto parseDeclarator = [this](Type t) {
         Stmt::Decl d;
         d.type = std::move(t);

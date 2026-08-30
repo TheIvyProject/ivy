@@ -137,7 +137,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 | 7.5 | **`if constexpr`** ✅ | ★★ | Parser: flag `isConstexpr` trên `Stmt::If`. HIR: trong template instantiation (7.2) — evaluate điều kiện constexpr, chỉ build nhánh true/false (discarded statement không instantiate). Ngoài template thì `if constexpr` == `if` thường |
 | 7.6 | **Variadic templates** ✅ | ★★★★ | `typename... Args`, pack expansion `args...`, `sizeof...(args)`. Instantiation sinh N phiên bản theo arity. Fold expression `(args + ...)`. Là nền cho `format()`-style API |
 | 7.7 | **Inheritance + virtual** ✅ | ★★★★ | `class A : public B` — base subobject layout, upcast. Vtable: bảng function pointer per polymorphic class, vptr là field ẩn đầu tiên. `virtual`/`override` check. Virtual dispatch qua reference/pointer. Destructor override tự động trong polymorphic class |
-| 7.8 | **Structured bindings** | ★★ | `auto [a, b] = pair;` — cần `auto` (6.2). Với struct: bind từng field theo tên. Với tuple: cần stdlib tuple trước |
+| 7.8 | **Structured bindings** ✅ | ★★ | `auto [a, b] = pair;` — cần `auto` (6.2). Với struct: bind từng field theo tên. Với tuple: cần stdlib tuple trước |
 
 ### Giai đoạn 8 — Toolchain hoàn chỉnh
 

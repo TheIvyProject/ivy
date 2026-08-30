@@ -281,6 +281,15 @@ void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth) {
                                dumpStmt(*st, os, depth + 2);
                        }
                    },
+                   [&](const ivy::Stmt::StructuredBinding& v) {
+                       os << pad << "structured-binding [";
+                       for (std::size_t i = 0; i < v.names.size(); ++i) {
+                           if (i) os << ", ";
+                           os << v.names[i];
+                       }
+                       os << "]\n";
+                       if (v.init) dumpExpr(*v.init, os, depth + 1);
+                   },
                },
                s.node);
 }

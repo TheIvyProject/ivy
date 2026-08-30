@@ -1,0 +1,28 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+struct RGB {
+    int32_t r;
+    int32_t g;
+    int32_t b;
+};
+
+int main() {
+    Point p = {10, 20};
+    auto [x, y] = p;
+    printf("x = %d, y = %d\n", x, y);
+
+    RGB color = {255, 128, 0};
+    auto [r, g, b] = color;
+    printf("r = %d, g = %d, b = %d\n", r, g, b);
+
+    return 0;
+}
