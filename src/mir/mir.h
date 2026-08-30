@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -56,6 +57,9 @@ struct Expr {
         const Function* target = nullptr;  // resolved by back-fill pass
         std::string_view returnLifetime;   // lowered [[ivy::lt_ret]] of the target ("" if none)
         std::vector<std::unique_ptr<Expr>> args;
+        bool isVirtual = false;        // virtual dispatch (7.7)
+        std::size_t vtableSlot = 0;    // vtable slot index (7.7)
+        std::string_view methodName;   // for virtual call diagnostics (7.7)
     };
     struct Index { std::unique_ptr<Expr> base, index; };
     struct Member { std::unique_ptr<Expr> base; std::string_view name; bool isArrow; bool isScope = false; };
@@ -73,6 +77,9 @@ struct Expr {
         std::string_view closureType;
         std::vector<std::unique_ptr<Expr>> captureInits;
     };
+    // Virtual method dispatch (7.7) — emitted as a `Call` with `isVirtual`
+    // set.  At runtime, the vtable is loaded from the object's vptr (at
+    // offset 0), then `vtable[slot]` is called indirectly.
 
     Type type;
     Lifetime lifetime;  // result of the lifetime analysis
@@ -134,6 +141,9 @@ struct Function {
     bool isConsteval = false;
     bool isCtor = false;  // constructor
     bool isDtor = false;  // destructor
+    bool isVirtual = false;        // virtual method (7.7)
+    bool isPureVirtual = false;    // pure virtual (`= 0`)
+    std::string_view vtableOf;     // struct name for vtable entries
     SourceLoc loc;
 };
 
@@ -160,6 +170,21 @@ struct StructInfo {
     std::string_view name;
     std::string_view namespacePrefix;  // "ns1::ns2::" or "" for global scope
     std::vector<StructField> fields;  // ordered — index in vector = GEP field index
+    // Base class info (7.7). Base subobjects are laid out at the
+    // beginning of the derived struct (before derived fields).
+    // The vptr (if polymorphic) is at index 0.
+    struct BaseInfo {
+        std::string_view name;
+    };
+    std::vector<BaseInfo> bases;
+    bool isPolymorphic = false;  // has vptr (virtual methods)
+    // Vtable entries: ordered list of (method name, function pointer).
+    // For codegen, each entry is a function symbol. Pure virtual = null.
+    struct VtableEntry {
+        std::string methodName;
+        std::string_view funcName;  // mangled function name (empty if pure virtual)
+    };
+    std::vector<VtableEntry> vtable;
 };
 
 struct TranslationUnit {

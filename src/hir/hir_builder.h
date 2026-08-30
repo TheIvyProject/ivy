@@ -107,6 +107,29 @@ private:
         std::uint64_t size = 0;
         std::uint32_t align = 1;
         std::string nsPrefix;  // namespace prefix (e.g. "geom::" or "")
+        // Base class info (7.7). A struct can have multiple bases.
+        // Base subobjects are laid out at the beginning of the derived
+        // struct (before any derived fields). The vptr (if any) is
+        // always at offset 0, followed by base subobjects, then fields.
+        struct BaseInfo {
+            std::string_view name;      // base class type name
+            std::uint64_t offset = 0;  // byte offset within derived struct
+        };
+        std::vector<BaseInfo> bases;
+        // True if the struct or any of its bases has virtual methods
+        // (i.e. requires a vptr). The vptr is at offset 0.
+        bool isPolymorphic = false;
+        // Virtual method table (7.7). Maps method bare name → slot index
+        // in the vtable. The vtable is an array of function pointers.
+        // `virtualMethods` is the ordered list of (name, HIR function*)
+        // for the vtable of this class. Derived classes override entries
+        // in their own vtable.
+        struct VtableEntry {
+            std::string_view name;     // bare method name
+            hir::Function* fn = nullptr;  // resolved function (or null for pure virtual)
+            bool isPureVirtual = false;
+        };
+        std::vector<VtableEntry> vtable;
         // Field name → {index, offset, type} for Member resolution.
         struct FieldInfo {
             std::size_t index;

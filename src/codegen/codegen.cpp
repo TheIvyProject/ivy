@@ -891,6 +891,48 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::Call>(n)) {
         const M::Call& v = std::get<M::Call>(n);
+        // 7.7: Virtual dispatch — load vptr, then fn ptr from vtable[slot].
+        if (v.isVirtual) {
+            if (v.args.empty() || !v.args[0]) {
+                error(e.loc, "internal: virtual call with no `this`");
+                return "null";
+            }
+            std::string objAddr = lowerLValue(*v.args[0]);
+            std::string vptr = newTemp();
+            emitLine(vptr + " = load ptr, ptr " + objAddr);
+            std::string fnPtrAddr = newTemp();
+            emitLine(fnPtrAddr + " = getelementptr ptr, ptr " + vptr +
+                     ", i32 " + std::to_string(v.vtableSlot));
+            std::string fnPtr = newTemp();
+            emitLine(fnPtr + " = load ptr, ptr " + fnPtrAddr);
+            // Build args using the static callee's parameter types.
+            const mir::Function* sig = nullptr;
+            for (const auto& f : mir_.functions)
+                if (f->name == v.callee) { sig = f.get(); break; }
+            std::string args;
+            for (std::size_t i = 0; i < v.args.size(); ++i) {
+                const auto& a = v.args[i];
+                if (!a) continue;
+                std::string val, ty;
+                if (sig && i < sig->params.size() &&
+                    sig->params[i].type.isReference) {
+                    val = lowerLValue(*a);
+                    ty = "ptr";
+                } else {
+                    val = lowerExpr(*a);
+                    ty = valueLlvmType(a->type);
+                }
+                args += (args.empty() ? "" : ", ") + ty + " " + val;
+            }
+            const std::string rt = llvmType(e.type);
+            if (rt == "void") {
+                emitLine("call void " + fnPtr + "(" + args + ")");
+                return "";
+            }
+            std::string t = newTemp();
+            emitLine(t + " = call " + rt + " " + fnPtr + "(" + args + ")");
+            return t;
+        }
         // Look up the callee's parameter types (to handle reference params
         // and overload resolution — match by name + param signature).
         const mir::Function* callee = nullptr;
@@ -1126,6 +1168,24 @@ void CodeGen::lowerInitListInto(const mir::Expr::InitList& il,
     }
 }
 
+void CodeGen::initVptr(const std::string& slot, std::string_view structName,
+                       SourceLoc loc) {
+    (void)loc;
+    // Find the struct info to check if it's polymorphic.
+    for (const auto& si : mir_.structs) {
+        if (si.name != structName) continue;
+        if (!si.isPolymorphic) return;
+        // Emit: store ptr @_ZTV<name>, ptr <slot>
+        // (vptr is at offset 0 — the first field).
+        std::string vtableGlobal = "@_ZTV" + escapeLlvmIdent(si.name);
+        std::string gep = newTemp();
+        emitLine(gep + " = getelementptr " + structTypes_[si.name].llvmType +
+                 ", ptr " + slot + ", i32 0, i32 0");
+        emitLine("store ptr " + vtableGlobal + ", ptr " + gep);
+        return;
+    }
+}
+
 // --- instructions ---
 
 // Emits bounds-check IR for array index. Pattern (Rust-style panic):
@@ -1229,6 +1289,8 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
         } else if (structTypes_.contains(a.type.base)) {
             // Uninitialized struct variable — zero-initialize (C semantics).
             emitLine("store " + slotTy + " zeroinitializer, ptr " + slot);
+            // 7.7: If polymorphic, init vptr to point to the vtable.
+            initVptr(slot, a.type.base, inst.loc);
         } else if (a.type.arraySize > 0) {
             // Array variable — zero-initialize all elements (C semantics).
             emitLine("store " + slotTy + " zeroinitializer, ptr " + slot);
@@ -1689,6 +1751,13 @@ bool CodeGen::generate(std::ostream& out) {
         for (const auto& f : si.fields) {
             meta.fields.push_back({f.name, f.type});
         }
+        // 7.7: polymorphic structs have a vptr at field index 0.
+        if (si.isPolymorphic) {
+            mir::StructField vptrField;
+            vptrField.name = "__vptr";
+            vptrField.type = mir::Type{"void", 0, true, 1, false};  // ptr
+            meta.fields.insert(meta.fields.begin(), std::move(vptrField));
+        }
         structTypes_[si.name] = std::move(meta);
     }
     // pre-pass over all functions
@@ -1696,17 +1765,57 @@ bool CodeGen::generate(std::ostream& out) {
 
     emitHeader();
     // Emit struct type definitions (before any function that uses them).
+    // 7.7: polymorphic structs have a `ptr` (vptr) as the first field.
     for (const auto& si : mir_.structs) {
         const auto& meta = structTypes_[si.name];
         std::string body = "{ ";
-        for (std::size_t i = 0; i < si.fields.size(); ++i) {
+        for (std::size_t i = 0; i < meta.fields.size(); ++i) {
             if (i > 0) body += ", ";
-            body += llvmType(si.fields[i].type);
+            body += llvmType(meta.fields[i].type);
         }
         body += " }";
         emitLine(meta.llvmType + " = type " + body);
     }
     if (!mir_.structs.empty()) emitLine("");
+
+    // 7.7: Emit vtable globals for polymorphic structs.
+    // Each vtable is a constant array of function pointers.
+    for (const auto& si : mir_.structs) {
+        if (!si.isPolymorphic) continue;
+        std::string vtableGlobal = "@_ZTV" + escapeLlvmIdent(si.name);
+        // Emit type: [N x ptr] where N = vtable size.
+        std::string vtableType = "[ " + std::to_string(si.vtable.size()) + " x ptr ]";
+        emitLine(vtableGlobal + " = internal constant " + vtableType + " [");
+        for (std::size_t i = 0; i < si.vtable.size(); ++i) {
+            if (i > 0) emitLine(", ");
+            if (si.vtable[i].funcName.empty()) {
+                // Pure virtual — null pointer.
+                emitLine("  ptr null");
+            } else {
+                // Find the function to get its mangled name.
+                const mir::Function* vfn = nullptr;
+                for (const auto& fn : mir_.functions) {
+                    if (fn->name == si.vtable[i].funcName) { vfn = fn.get(); break; }
+                }
+                std::string sym;
+                if (vfn) {
+                    sym = "@" + (vfn->isExternC ? llvmGlobalName(vfn->name)
+                                                : llvmGlobalName(mangleFunction(vfn->name, vfn)));
+                } else {
+                    sym = "@null";
+                }
+                emitLine("  ptr " + sym);
+            }
+        }
+        emitLine("]");
+    }
+    if (!mir_.structs.empty()) {
+        bool any = false;
+        for (const auto& si : mir_.structs) {
+            if (si.isPolymorphic) { any = true; break; }
+        }
+        if (any) emitLine("");
+    }
     // collect names of extern "C" prototypes so @malloc/@free fallbacks are
     // not declared twice
     for (const auto& fn : mir_.functions) {

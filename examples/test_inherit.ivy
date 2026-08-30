@@ -1,0 +1,25 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Animal {
+    int legs;
+    virtual void speak() { printf("generic animal\n"); }
+    virtual ~Animal() {}
+};
+
+struct Dog : public Animal {
+    int tail;
+    void speak() override { printf("woof!\n"); }
+    ~Dog() {}
+};
+
+int main() {
+    Dog d;
+    d.legs = 4;
+    d.tail = 1;
+    d.speak();
+    return 0;
+}

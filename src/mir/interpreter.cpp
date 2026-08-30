@@ -723,6 +723,15 @@ Value Interpreter::defaultStructValue(std::string_view structName) {
 
     Value::StructVal sv;
     sv.typeName = std::string(structName);
+    // 7.7: inherit base fields first (base subobject fields), so member
+    // access on a derived struct can find base-class fields.
+    for (const auto& b : si->bases) {
+        Value bv = defaultStructValue(b.name);
+        if (bv.isStruct()) {
+            for (auto& [fname, fcell] : bv.strct.fields)
+                sv.fields[fname] = fcell;
+        }
+    }
     for (const auto& f : si->fields) {
         Value fv;
         if (f.type.pointerDepth == 0) {
@@ -749,9 +758,59 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
     (void)e;
     std::vector<Value> args;
     args.reserve(c.args.size());
-    for (const auto& a : c.args) args.push_back(evalExpr(*a));
+    for (const auto& a : c.args) {
+        args.push_back(a ? evalExpr(*a) : Value{});
+    }
 
     if (isBuiltin(c.callee)) return callBuiltin(c.callee, args);
+
+    // 7.7: Virtual dispatch.  Read the object's dynamic type name and
+    // walk the derived-to-base chain to find the most-derived override
+    // with a body.  If none is found, fall back to the static target.
+    if (c.isVirtual && !args.empty()) {
+        std::string dynType;
+        const Value& thisVal = args[0];
+        if (thisVal.isPtr() && !thisVal.ptr.isNull && thisVal.ptr.cell &&
+            thisVal.ptr.cell->isStruct()) {
+            dynType = thisVal.ptr.cell->strct.typeName;
+        } else if (thisVal.isStruct()) {
+            dynType = thisVal.strct.typeName;
+        }
+
+        auto tryDispatch = [&](std::string_view typeName) -> const Function* {
+            if (typeName.empty()) return nullptr;
+            std::string qual = std::string(typeName) + "::" +
+                               std::string(c.methodName);
+            for (const auto& f : tu_.functions)
+                if (f->name == qual && f->hasBody) return f.get();
+            return nullptr;
+        };
+
+        const Function* target = tryDispatch(std::string_view(dynType));
+        if (!target) {
+            const StructInfo* si = nullptr;
+            for (const auto& s : tu_.structs)
+                if (s.name == dynType) { si = &s; break; }
+            if (si) {
+                for (const auto& b : si->bases) {
+                    target = tryDispatch(b.name);
+                    if (target) break;
+                    const StructInfo* bi = nullptr;
+                    for (const auto& s : tu_.structs)
+                        if (s.name == b.name) { bi = &s; break; }
+                    if (bi) {
+                        for (const auto& bb : bi->bases) {
+                            target = tryDispatch(bb.name);
+                            if (target) break;
+                        }
+                        if (target) break;
+                    }
+                }
+            }
+        }
+        if (!target && c.target && c.target->hasBody) target = c.target;
+        if (target) return execFunction(*target, std::move(args));
+    }
 
     if (c.target && c.target->hasBody)
         return execFunction(*c.target, std::move(args));

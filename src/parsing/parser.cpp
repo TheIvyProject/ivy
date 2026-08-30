@@ -102,7 +102,9 @@ constexpr struct {
     {"static_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
     {"reinterpret_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
     {"dynamic_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
-    {"virtual", "virtual dispatch is not supported in the Ivy subset"},
+    {"virtual", ""},  // virtual methods ARE supported (7.7) — handled in parseStruct
+    {"override", ""},  // override marker IS supported (7.7) — handled in parseStruct
+    {"final", ""},     // final marker IS handled in parseStruct (rejected with msg)
     {"friend", "friends are not supported in the Ivy subset"},
     {"extern", "only 'extern \"C\"' is supported"},
     {"sizeof", ""},  // sizeof IS supported (7.6): `sizeof...(pack)` — handled in parsePrimary
@@ -921,15 +923,42 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
     }
     const std::string_view name = qualifyName(next().lexeme);
 
-    // Ivy does not support inheritance — reject `final` or `: Base`.
+    // `final` is not supported.
     if (atKeyword("final")) {
         errorAt(peek(), "'final' is not supported in the Ivy subset");
         next();
     }
+
+    // Base class list: `: public Base, public Other` (7.7).
+    // Ivy only supports public inheritance; access specifiers are
+    // accepted but ignored (all base members are public).
+    std::vector<BaseClass> bases;
     if (at(TokenKind::Colon)) {
-        errorAt(peek(), "struct/class inheritance is not supported in the Ivy subset");
-        synchronize();
-        return;
+        next();  // consume ':'
+        while (true) {
+            // Optional access specifier: `public`/`private`/`protected`
+            bool isPublicBase = true;
+            if (atKeyword("public")) { next(); isPublicBase = true; }
+            else if (atKeyword("private")) { next(); isPublicBase = false; }
+            else if (atKeyword("protected")) { next(); isPublicBase = false; }
+            // Optional `virtual` inheritance — accepted but ignored
+            // (Ivy always uses non-virtual inheritance).
+            if (atKeyword("virtual")) { next(); }
+            if (!isTypeStart()) {
+                errorAt(peek(), "expected base class name after ':'");
+                synchronize();
+                break;
+            }
+            const SourceLoc baseLoc = locOf(peek());
+            Type baseType = parseType();
+            BaseClass bc;
+            bc.type = baseType;
+            bc.isPublic = isPublicBase;
+            bc.loc = baseLoc;
+            bases.push_back(std::move(bc));
+            if (at(TokenKind::Comma)) { next(); continue; }
+            break;
+        }
     }
 
     expect(TokenKind::LBrace, "expected '{' to start struct body");
@@ -939,6 +968,7 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
     sd.namespacePrefix = currentNamespacePrefix();
     sd.isClass = isClass;
     sd.tplParams = std::move(tplParams);
+    sd.bases = std::move(bases);
     sd.loc = loc;
 
     // Register the struct name early so that method parameter lists
@@ -968,6 +998,69 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
             if (at(TokenKind::Colon)) next();
             continue;
         }
+
+        // `virtual` prefix for methods/destructors (7.7).
+        bool isVirtualMethod = false;
+        if (atKeyword("virtual")) {
+            isVirtualMethod = true;
+            next();
+            // `virtual` can appear before `~Name()` (virtual dtor) or
+            // before a return type — we consume it and set the flag.
+        }
+
+        // Virtual destructor: `virtual ~StructName() { body }`.
+        if (isVirtualMethod && at(TokenKind::Tilde) &&
+            peek(1).kind == TokenKind::Identifier &&
+            peek(1).lexeme == bareStructName &&
+            peek(2).kind == TokenKind::LParen) {
+            const SourceLoc memberLoc = locOf(peek());
+            next();  // consume '~'
+            next();  // consume struct name
+            next();  // consume '('
+            std::vector<Param> params = parseParams();
+            expect(TokenKind::RParen, "expected ')' to close destructor parameter list");
+            if (!params.empty()) {
+                errorAt(peek(), "destructors must not take parameters");
+                params.clear();
+            }
+
+            Function dtor;
+            dtor.isDtor = true;
+            dtor.isVirtual = isVirtualMethod;
+            dtor.returnType.base = "void";
+            {
+                std::string qual;
+                qual.reserve(std::string(name).size() + 3 + bareStructName.size());
+                qual += name;
+                qual += "::~";
+                qual += bareStructName;
+                nameStorage_.push_back(std::move(qual));
+                dtor.name = nameStorage_.back();
+            }
+            dtor.namespacePrefix = currentNamespacePrefix();
+            dtor.params.clear();
+            dtor.loc = memberLoc;
+
+            if (at(TokenKind::LBrace)) {
+                std::unique_ptr<Stmt> bodyStmt = parseCompound();
+                dtor.body =
+                    std::make_unique<Stmt::Compound>(
+                        std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else if (at(TokenKind::Assign)) {
+                next();
+                expect(TokenKind::Integer, "expected '0' for pure virtual destructor");
+                dtor.isPureVirtual = true;
+                expect(TokenKind::Semi, "expected ';' after pure virtual destructor");
+            } else {
+                expect(TokenKind::Semi,
+                       "expected '{' for destructor body or ';' for a declaration");
+            }
+            sd.methods.push_back(std::move(dtor));
+            continue;
+        }
+
+        // If `virtual` was consumed but next isn't `~`, fall through to
+        // normal method parsing — `isVirtualMethod` is carried below.
 
         // Constructor: `StructName(params) [: x(42), y(3)] { body }`.
         // The leading identifier equals the struct's bare name and is
@@ -1096,6 +1189,7 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
             Function method;
             method.returnType = std::move(fieldType);
             method.isOperator = true;
+            method.isVirtual = isVirtualMethod;
             method.operatorSymbol = opName;
             {
                 std::string qual;
@@ -1115,6 +1209,11 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
                 method.body =
                     std::make_unique<Stmt::Compound>(
                         std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else if (at(TokenKind::Assign)) {
+                next();
+                expect(TokenKind::Integer, "expected '0' for pure virtual method");
+                method.isPureVirtual = true;
+                expect(TokenKind::Semi, "expected ';' after pure virtual method");
             } else {
                 expect(TokenKind::Semi,
                        "expected '{' for operator body or ';' for a declaration");
@@ -1140,6 +1239,7 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
 
             Function method;
             method.returnType = std::move(fieldType);
+            method.isVirtual = isVirtualMethod;
             // The method's qualified name is `StructName::methodName`.
             // At this point `name` is the fully-qualified struct name
             // (e.g. "ns::Point"), so the full method name is
@@ -1159,11 +1259,22 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
             method.params = std::move(params);
             method.loc = memberLoc;
 
+            // Optional `override` marker (7.7).
+            if (atKeyword("override")) {
+                next();
+                method.isOverride = true;
+            }
+
             if (at(TokenKind::LBrace)) {
                 std::unique_ptr<Stmt> bodyStmt = parseCompound();
                 method.body =
                     std::make_unique<Stmt::Compound>(
                         std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+            } else if (at(TokenKind::Assign)) {
+                next();
+                expect(TokenKind::Integer, "expected '0' for pure virtual method");
+                method.isPureVirtual = true;
+                expect(TokenKind::Semi, "expected ';' after pure virtual method");
             } else {
                 expect(TokenKind::Semi,
                        "expected '{' for method body or ';' for a declaration");

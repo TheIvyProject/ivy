@@ -446,15 +446,63 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         return;
     }
 
+    // --- 7.7: Inheritance + virtual ---
+    // Resolve base classes. They must already be built (declared earlier).
+    // Determine if this struct is polymorphic (has virtual methods or
+    // inherits from a polymorphic base).
+    bool hasVirtualMethod = false;
+    for (const Function& mf : sd.methods) {
+        if (mf.isVirtual || mf.isPureVirtual) { hasVirtualMethod = true; break; }
+    }
+    bool basesPolymorphic = false;
+    for (const BaseClass& bc : sd.bases) {
+        auto it = structs_.find(bc.type.base);
+        if (it != structs_.end() && it->second.isPolymorphic) {
+            basesPolymorphic = true; break;
+        }
+    }
+    bool isPolymorphic = hasVirtualMethod || basesPolymorphic;
+
     StructDef def;
     def.nsPrefix = std::string(sd.namespacePrefix);
+    def.isPolymorphic = isPolymorphic;
 
-    // Compute field layout: sequential offsets, each field aligned to
-    // its natural alignment. The struct's overall alignment is the
-    // max of all field alignments. The struct's size is rounded up
-    // to the overall alignment (C ABI rule).
+    // Compute field layout: vptr (if polymorphic) at offset 0, then
+    // base subobjects, then derived fields. Each is aligned to its
+    // natural alignment. The struct's overall alignment is the max
+    // of all component alignments. Size is rounded up to alignment.
     std::uint64_t offset = 0;
     std::uint32_t structAlign = 1;
+
+    // vptr at offset 0 (8 bytes, pointer-aligned).
+    if (isPolymorphic) {
+        def.fieldMap["__vptr"] = {0, 0, hir::Type{"void", 0, true, 1, false}};
+        offset = 8;
+        structAlign = 8;
+    }
+
+    // Base subobjects.
+    for (const BaseClass& bc : sd.bases) {
+        auto it = structs_.find(bc.type.base);
+        if (it == structs_.end()) {
+            error(bc.loc, "base class '" + std::string(bc.type.base) + "' is not defined");
+            continue;
+        }
+        const StructDef& baseDef = it->second;
+        const std::uint64_t baseSize = baseDef.size;
+        const std::uint32_t baseAlign = baseDef.align;
+        offset = (offset + baseAlign - 1) & ~(std::uint64_t(baseAlign - 1));
+        def.bases.push_back({bc.type.base, offset});
+        // Merge base fields into derived field map with adjusted offsets.
+        for (const auto& [fname, finfo] : baseDef.fieldMap) {
+            if (fname == "__vptr") continue;  // skip base vptr — derived has its own
+            def.fieldMap[fname] = {finfo.index, finfo.offset + offset, finfo.type};
+        }
+        offset += baseSize;
+        if (baseAlign > structAlign) structAlign = baseAlign;
+    }
+
+    // Derived fields.
     for (std::size_t i = 0; i < sd.fields.size(); ++i) {
         const Field& f = sd.fields[i];
         const hir::Type fieldType = resolveTemplateStructType(resolveTypeAlias(f.type), f.loc);
@@ -462,7 +510,7 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         const std::uint32_t align = typeAlign(fieldType);
         // Pad to alignment.
         offset = (offset + align - 1) & ~(std::uint64_t(align - 1));
-        def.fieldMap[f.name] = {i, offset, fieldType};
+        def.fieldMap[f.name] = {def.fields.size(), offset, fieldType};
         offset += sz;
         if (align > structAlign) structAlign = align;
     }
@@ -474,58 +522,44 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
         def.defaultInits.push_back(f.init.get());
     }
 
-    // Copy the struct declaration into the HIR TU.  Field has
-    // unique_ptr (move-only), so StructDecl is move-only.  However,
-    // the original lives in ast::TranslationUnit and must remain
-    // valid for later passes — we copy only the metadata needed
-    // (name, namespacePrefix, isClass, loc) and rebuild the fields
-    // vector by cloning each Field's type/name (skipping `init`).
+    // Copy the struct declaration into the HIR TU.
     StructDecl resolved;
     resolved.name = sd.name;
     resolved.namespacePrefix = sd.namespacePrefix;
     resolved.isClass = sd.isClass;
     resolved.loc = sd.loc;
+    resolved.bases = sd.bases;  // copy base class list (7.7)
     for (const Field& f : sd.fields) {
         Field cf;
-        cf.type = resolveTemplateStructType(resolveTypeAlias(f.type), f.loc);  // expand `using` aliases + template-id
+        cf.type = resolveTemplateStructType(resolveTypeAlias(f.type), f.loc);
         cf.name = f.name;
         cf.loc = f.loc;
         resolved.fields.push_back(std::move(cf));
     }
     hir_->structs.push_back(std::move(resolved));
 
-    // Register member functions (methods).  Each method is registered
-    // in `functions_` under its qualified name ("StructName::method")
-    // with an implicit `this` parameter prepended.  The `this` param
-    // is a reference to the struct type, so the method can mutate
-    // the object.  Constructors and destructors are registered here
-    // too (they live in `sd.methods` with `isCtor`/`isDtor` set), and
-    // are also collected into `StructDef.ctors`/`StructDef.dtor` for
-    // RAII injection at declaration sites and scope exits.
-    // Build the HIR function for each method in declaration order.
-    // Keep a parallel vector of raw pointers so the second loop (which
-    // populates the struct's method/ctor/dtor tables) can address each
-    // HIR function by index instead of by name lookup — which would be
-    // ambiguous for overloaded methods (e.g. multiple ctors share the
-    // same qualified name "Pair::Pair").
+    // Build HIR functions for each method with implicit `this` param.
     std::vector<hir::Function*> methodFns;
     methodFns.reserve(sd.methods.size());
     for (const Function& mf : sd.methods) {
-        // Build the HIR function for this method.
         auto fn = std::make_unique<hir::Function>();
-        fn->name = mf.name;  // "StructName::methodName"
+        fn->name = mf.name;
         fn->namespacePrefix = mf.namespacePrefix;
         fn->isExternC = mf.isExternC;
         fn->isConstexpr = mf.isConstexpr;
         fn->isConsteval = mf.isConsteval;
         fn->isCtor = mf.isCtor;
         fn->isDtor = mf.isDtor;
+        fn->isVirtual = mf.isVirtual || mf.isPureVirtual || mf.isOverride ||
+                        (mf.isDtor && isPolymorphic);  // 7.7: polymorphic dtor
+        fn->isPureVirtual = mf.isPureVirtual;
+        fn->isOverride = mf.isOverride;
+        // Set vtableOf so MIR builder can reconstruct vtable layout.
+        if (fn->isVirtual) fn->vtableOf = sd.name;
         fn->returnType = resolveTemplateStructType(resolveTypeAlias(mf.returnType), mf.loc);
         fn->loc = mf.loc;
 
-        // Implicit `this` parameter: `StructName& this` (or
-        // `const StructName& this` for const methods — Ivy doesn't
-        // have const methods yet, so always non-const).
+        // Implicit `this` parameter: `StructName& this`.
         hir::Param thisParam;
         thisParam.type.base = sd.name;
         thisParam.type.isReference = true;
@@ -544,22 +578,34 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
             fn->params.push_back(std::move(p));
         }
 
-        // Register in functions_ under the qualified name.
         functions_[fn->name].push_back(fn.get());
         methodFns.push_back(fn.get());
         hir_->functions.push_back(std::move(fn));
     }
 
-    // Now that def is fully built (fields + layout), move it into
-    // the registry.  Method registration into def.methods/astMethods
-    // happens after the move, via the reference in structs_.
     structs_[sd.name] = std::move(def);
 
     // Register methods in the struct's method table (under bare names).
-    // Constructors and destructors are NOT added to the method table —
-    // they are invoked implicitly at declaration sites and scope exits,
-    // not via member call syntax (`obj.ctor()` is illegal).
     StructDef& defRef = structs_[sd.name];
+
+    // Inherit methods from bases (7.7): copy base method pointers into
+    // the derived method table so `derived.baseMethod()` resolves.
+    for (const BaseClass& bc : sd.bases) {
+        auto it = structs_.find(bc.type.base);
+        if (it == structs_.end()) continue;
+        for (const auto& [bareName, overloads] : it->second.methods) {
+            for (hir::Function* f : overloads) {
+                // Don't copy if derived overrides (same bare name already present).
+                auto& derivedOverloads = defRef.methods[bareName];
+                bool already = false;
+                for (hir::Function* d : derivedOverloads) {
+                    if (d == f) { already = true; break; }
+                }
+                if (!already) derivedOverloads.push_back(f);
+            }
+        }
+    }
+
     for (std::size_t i = 0; i < sd.methods.size(); ++i) {
         const Function& mf = sd.methods[i];
         hir::Function* hirFn = i < methodFns.size() ? methodFns[i] : nullptr;
@@ -580,8 +626,81 @@ void HirBuilder::buildStruct(const StructDecl& sd) {
             (pos != std::string_view::npos)
                 ? qualName.substr(pos + 2)
                 : qualName;
-        if (hirFn) defRef.methods[bareName].push_back(hirFn);
+        if (hirFn) {
+            // If overriding a base virtual method, replace the base entry.
+            auto& overloads = defRef.methods[bareName];
+            bool replaced = false;
+            for (hir::Function*& d : overloads) {
+                // If the base method is virtual and this is an override,
+                // replace the slot.
+                if (d && d->isVirtual && hirFn->isOverride) {
+                    d = hirFn;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) overloads.push_back(hirFn);
+        }
         defRef.astMethods.push_back(&mf);
+    }
+
+    // Build vtable (7.7): collect virtual methods from bases (in order),
+    // then derived. Override matching names.
+    if (isPolymorphic) {
+        // First, collect from bases.
+        for (const BaseClass& bc : sd.bases) {
+            auto it = structs_.find(bc.type.base);
+            if (it == structs_.end()) continue;
+            for (const auto& vte : it->second.vtable) {
+                defRef.vtable.push_back(vte);
+            }
+        }
+        // Then, add/override from derived.
+        for (std::size_t i = 0; i < sd.methods.size(); ++i) {
+            const Function& mf = sd.methods[i];
+            // 7.7: a method participates in the vtable if it is virtual,
+            // pure-virtual, an override (override inherits virtuality
+            // from the base — e.g. `~Dog() override` overrides a virtual
+            // `~Animal()` even without repeating `virtual`), OR a
+            // destructor of a polymorphic class (dtors are virtual when
+            // the class is polymorphic).
+            const bool isVirtualMethod = mf.isVirtual || mf.isPureVirtual ||
+                                         mf.isOverride ||
+                                         (mf.isDtor && isPolymorphic);
+            if (!isVirtualMethod) continue;
+            if (mf.isCtor) continue;  // ctors aren't virtual
+            const std::string_view qualName = mf.name;
+            const std::size_t pos = qualName.rfind("::");
+            const std::string_view rawBare =
+                (pos != std::string_view::npos)
+                    ? qualName.substr(pos + 2)
+                    : qualName;
+            // 7.7: destructors share a single vtable slot. Normalize
+            // `~ClassName` → `~dtor` so derived `~Dog` overrides base
+            // `~Animal` (which was stored as `~dtor`).
+            const bool isDtorEntry = mf.isDtor;
+            std::string bareStorage;
+            std::string_view bareName = rawBare;
+            if (isDtorEntry) {
+                bareStorage = "~dtor";
+                stringStorage_.push_back(std::move(bareStorage));
+                bareName = stringStorage_.back();
+            }
+            hir::Function* hirFn = i < methodFns.size() ? methodFns[i] : nullptr;
+            // Check if this overrides an existing vtable entry.
+            bool overridden = false;
+            for (auto& vte : defRef.vtable) {
+                if (vte.name == bareName) {
+                    vte.fn = hirFn;
+                    vte.isPureVirtual = mf.isPureVirtual;
+                    overridden = true;
+                    break;
+                }
+            }
+            if (!overridden) {
+                defRef.vtable.push_back({bareName, hirFn, mf.isPureVirtual});
+            }
+        }
     }
 }
 
@@ -754,6 +873,14 @@ bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const 
             // Reference to struct — `T&` binds to `T` (lvalue).
             if (structs_.contains(to.base) && to.base == from.base)
                 return true;
+            // 7.7: derived-to-base reference binding (upcast).
+            // `Base& ref = derived;` — allowed if `to` is a base of `from`.
+            // Use `find()` (not `operator[]`) because `isAssignable` is const.
+            auto fromIt = structs_.find(from.base);
+            if (fromIt != structs_.end()) {
+                for (const auto& b : fromIt->second.bases)
+                    if (b.name == to.base) return true;
+            }
         }
         // Reference to pointer.
         if (to.pointerDepth == from.pointerDepth && to.base == from.base &&
@@ -2245,6 +2372,12 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                     return out;
                 }
                 hir::Type baseType = baseExpr->type;
+                // 7.7: remember whether the object was accessed through
+                // a reference/pointer — virtual dispatch is needed even
+                // when static type == method's class, because the dynamic
+                // type may differ (e.g. `Animal& a = dog; a.speak();`).
+                const bool wasRefOrPtr =
+                    baseType.isReference || baseType.pointerDepth > 0;
                 if (mem.isArrow) {
                     if (baseType.pointerDepth == 0) {
                         error(e.loc, "'->' requires a pointer operand");
@@ -2295,36 +2428,60 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 call.target = resolveOverload(mIt->second, argTypes, e.loc);
                 if (call.target) {
                     call.callee = call.target->name;
+                    // 7.7: Virtual dispatch. A virtual method is
+                    // dispatched statically ONLY when the object is a
+                    // value (not a reference/pointer) — then dynamic
+                    // type == static type. Through a reference or
+                    // pointer, always virtual-dispatch (the dynamic type
+                    // may be a derived class).
+                    bool isVirtualDispatch = call.target->isVirtual;
+                    if (isVirtualDispatch && !wasRefOrPtr) {
+                        // Value object — static type == dynamic type.
+                        isVirtualDispatch = false;
+                    }
+
                     // Inject `this` as the first argument.
-                    // If `->`, the base is already a pointer — we need
-                    // to load it and pass it (the method expects a ref).
-                    // For `.`, the base is an lvalue — pass it directly.
-                    // We create an IdentRef-like wrapper by reusing the
-                    // Member node: set the base expr as-is, and mark it
-                    // as a "this" expression.  The codegen/interpreter
-                    // treat Member as an lvalue already.
-                    //
-                    // The trick: we prepend the base expression as a
-                    // Member expr so lowerLValue can get its address.
                     auto thisExpr = std::make_unique<hir::Expr>();
                     if (mem.isArrow) {
-                        // `ptr->method(args)` — base is a pointer.
-                        // We need to pass the pointer value as `this`.
-                        // The method's `this` is `T&`, so passing a
-                        // pointer doesn't match.  Instead, we dereference:
-                        // create `*ptr` (a Member with isArrow=true).
                         thisExpr->node = hir::Expr::Member{};
                         auto& tm = std::get<hir::Expr::Member>(thisExpr->node);
                         tm.base = std::move(baseExpr);
-                        tm.name = mem.name;  // not used for lvalue
+                        tm.name = mem.name;
                         tm.isArrow = true;
                         thisExpr->type = baseType;
                     } else {
-                        // `obj.method(args)` — base is an lvalue.
-                        // Pass the object directly (by reference).
                         thisExpr = std::move(baseExpr);
                     }
                     thisExpr->loc = e.loc;
+
+                    if (isVirtualDispatch) {
+                        // Find vtable slot for this method.
+                        std::size_t slot = 0;
+                        bool foundSlot = false;
+                        for (std::size_t s = 0; s < sIt->second.vtable.size(); ++s) {
+                            if (sIt->second.vtable[s].name == mem.name) {
+                                slot = s;
+                                foundSlot = true;
+                                break;
+                            }
+                        }
+                        if (foundSlot) {
+                            // Emit a virtual-dispatch Call (7.7).
+                            // NOTE: `call` is a reference to the Call already
+                            // emplaced in `out->node` (line ~2147).  We must
+                            // NOT `emplace` again — that would destroy-then-
+                            // move-from-self, leaving `args` empty (UB).
+                            call.isVirtual = true;
+                            call.vtableSlot = slot;
+                            call.methodName = mem.name;
+                            call.args.insert(call.args.begin(), std::move(thisExpr));
+                            out->type = call.target->returnType;
+                            out->loc = e.loc;
+                            return out;
+                        }
+                        // Fallback: static dispatch if slot not found.
+                    }
+
                     call.args.insert(call.args.begin(), std::move(thisExpr));
                 } else {
                     call.callee = mem.name;

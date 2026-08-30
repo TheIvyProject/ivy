@@ -36,6 +36,9 @@ struct Expr {
         const Function* target = nullptr;  // resolved by the builder
         std::vector<std::unique_ptr<Expr>> args;
         std::vector<Type> tplArgs;  // explicit template arguments (e.g. `add<int>`)
+        bool isVirtual = false;        // virtual dispatch (7.7)
+        std::size_t vtableSlot = 0;    // vtable slot index (7.7)
+        std::string_view methodName;   // for virtual call diagnostics (7.7)
     };
     struct Index { std::unique_ptr<Expr> base, index; };
     // `isScope` is true for `::` (scope resolution), false for `.`/`->`.
@@ -79,6 +82,9 @@ struct Expr {
     };
     // sizeof...(pack) — already folded to an integer by the HIR builder.
     struct SizeofPack { std::string_view packName; std::size_t count = 0; };
+    // Virtual method dispatch (7.7): emitted as a `Call` with `isVirtual`
+    // set.  `vtableSlot` is the index into the vtable array.  `this` is
+    // passed as arg 0 (already injected by the builder).
 
     Type type;  // resolved type
     SourceLoc loc;
@@ -233,6 +239,10 @@ struct Function {
     std::vector<Type> tplArgs;     // for instantiated templates: the concrete args
     bool isCtor = false;           // constructor
     bool isDtor = false;           // destructor
+    bool isVirtual = false;        // virtual method (7.7) — dispatched via vtable
+    bool isPureVirtual = false;    // pure virtual (`= 0`) — no body
+    bool isOverride = false;       // `override` marker (7.7)
+    std::string_view vtableOf;     // struct name this function is a vtable entry for
     SourceLoc loc;
 };
 

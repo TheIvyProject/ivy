@@ -348,6 +348,9 @@ struct Function {
     bool isDtor = false;        // destructor (name == "~StructName")
     bool isOperator = false;    // operator-overload method (7.4)
     std::string operatorSymbol; // operator symbol: "+", "==", "[]", "()", etc.
+    bool isVirtual = false;     // `virtual` method (7.7) — uses vtable dispatch
+    bool isOverride = false;    // `override` marker (7.7) — checked at HIR build
+    bool isPureVirtual = false; // `= 0` (7.7) — abstract method, no body
     // Member initializer list for constructors: `: x(42), y(3)`.
     // Each entry initializes a field by name with a single expression
     // (Ivy doesn't support multi-arg member init `x(a, b)` — use a
@@ -394,17 +397,27 @@ struct EnumDecl {
     SourceLoc loc;
 };
 
+// A base class specifier: `public Base`, `protected Base`, `private Base`,
+// or just `Base` (defaults to public for struct, private for class).
+// Ivy only supports public inheritance (like Java/Go) — access specifiers
+// are accepted but ignored (all base members are public).
+struct BaseClass {
+    Type type;          // the base class type
+    bool isPublic = true;  // access specifier (accepted, ignored)
+    SourceLoc loc;
+};
+
 // A `struct` (or `class`) declaration. Ivy treats `struct` and
 // `class` identically — both are aggregates with public members.
-// No inheritance — Ivy is a subset.  Methods (member functions) are
-// supported; they are stored here and registered as free functions
-// with an implicit `this` parameter during HIR building.
+// Inheritance (7.7): single/multiple public base classes are supported.
+// Virtual dispatch: `virtual` methods use a vtable + vptr.
 struct StructDecl {
     std::string_view name;          // qualified (e.g. "ns::Point")
     std::string_view namespacePrefix;  // "ns::" or "" for global scope
     std::vector<Field> fields;
     std::vector<Function> methods;  // member functions (6.7)
     std::vector<TemplateParam> tplParams;  // non-empty => template struct
+    std::vector<BaseClass> bases;   // base classes (7.7)
     bool isClass = false;  // `class` vs `struct` (cosmetic only)
     SourceLoc loc;
 };

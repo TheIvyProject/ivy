@@ -19,7 +19,7 @@ add_executable(ivyc
 target_include_directories(ivyc PRIVATE src)
 
 if(MSVC)
-    target_compile_options(ivyc PRIVATE /W4 /permissive-)
+    target_compile_options(ivyc PRIVATE /W4 /permissive- /FS)
 else()
     target_compile_options(ivyc PRIVATE -Wall -Wextra -Wpedantic)
 endif()

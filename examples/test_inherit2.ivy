@@ -1,0 +1,43 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Animal {
+    int legs;
+    virtual void speak() { printf("generic animal\n"); }
+    virtual ~Animal() {}
+};
+
+struct Dog : public Animal {
+    int tail;
+    void speak() override { printf("woof!\n"); }
+    ~Dog() {}
+};
+
+struct Cat : public Animal {
+    void speak() override { printf("meow!\n"); }
+    ~Cat() {}
+};
+
+int main() {
+    Dog d;
+    d.legs = 4;
+    d.tail = 1;
+    d.speak();
+
+    Cat c;
+    c.legs = 4;
+    c.speak();
+
+    // Upcast + virtual dispatch through base reference.
+    Animal& a = d;
+    a.speak();
+
+    Animal& b = c;
+    b.speak();
+
+    printf("legs: %d\n", a.legs);
+    return 0;
+}

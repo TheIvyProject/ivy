@@ -50,6 +50,9 @@ const std::unordered_set<std::string_view>& keywords() {
         "typeid",      "typename",     "union",        "unsigned",
         "using",       "virtual",      "void",         "volatile",
         "wchar_t",     "while",        "xor",          "xor_eq",
+        // Ivy additions (contextual keywords, always tokenized as Keyword
+        // so the parser can match them with atKeyword()).
+        "final",        "override",
         // Ivy builtin types
         "int8_t",      "int16_t",      "int32_t",      "int64_t",
         "uint8_t",     "uint16_t",     "uint32_t",     "uint64_t",

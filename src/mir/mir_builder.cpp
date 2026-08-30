@@ -317,8 +317,14 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         const H::Call& v = std::get<H::Call>(n);
         auto& call = out->node.emplace<mir::Expr::Call>();
         call.callee = v.callee;
+        call.isVirtual = v.isVirtual;        // 7.7
+        call.vtableSlot = v.vtableSlot;      // 7.7
+        call.methodName = v.methodName;      // 7.7
         call.returnLifetime = v.target ? v.target->returnLifetime : std::string_view{};
-        for (const auto& a : v.args) call.args.push_back(buildExpr(*a));
+        for (const auto& a : v.args) {
+            if (a) call.args.push_back(buildExpr(*a));
+            else call.args.push_back(nullptr);
+        }
         if (e.type.pointerDepth > 0) {
             if (!call.returnLifetime.empty()) {
                 out->lifetime.kind = mir::Lifetime::Kind::Named;
@@ -327,6 +333,7 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
                 out->lifetime.kind = mir::Lifetime::Kind::Unknown;  // opaque, e.g. malloc
             }
         }
+        out->lifetime.kind = mir::Lifetime::Kind::Unknown;  // virtual: unknown
         return out;
     }
     if (std::holds_alternative<H::Index>(n)) {
@@ -710,11 +717,117 @@ std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
                                std::string(ed.underlyingType.base)});
     }
     // Populate struct info for codegen type + layout resolution.
+    // 7.7: include base class info, polymorphic flag, and vtable entries.
     for (const auto& sd : hir_.structs) {
-        std::vector<mir::StructField> fields;
-        fields.reserve(sd.fields.size());
-        for (const auto& f : sd.fields) fields.push_back({f.name, f.type});
-        mir_->structs.push_back({sd.name, sd.namespacePrefix, std::move(fields)});
+        mir::StructInfo si;
+        si.name = sd.name;
+        si.namespacePrefix = sd.namespacePrefix;
+        // 7.7: base subobject fields come first (after vptr), so that
+        // GEP field indices line up with the LLVM struct layout.
+        for (const auto& bc : sd.bases) {
+            for (const auto& bs : hir_.structs) {
+                if (bs.name != bc.type.base) continue;
+                for (const auto& bf : bs.fields)
+                    si.fields.push_back({bf.name, bf.type});
+                break;
+            }
+        }
+        for (const auto& f : sd.fields) si.fields.push_back({f.name, f.type});
+        // Base classes.
+        for (const auto& bc : sd.bases) {
+            si.bases.push_back({bc.type.base});
+        }
+        // Polymorphic: check if any function has vtableOf == this struct.
+        for (const auto& hf : hir_.functions) {
+            if (hf->vtableOf == sd.name) {
+                si.isPolymorphic = true;
+                break;
+            }
+            // Also check if any base is polymorphic.
+            if (!si.isPolymorphic) {
+                for (const auto& bc : sd.bases) {
+                    for (const auto& bs : hir_.structs) {
+                        if (bs.name == bc.type.base) {
+                            // Check if base has virtual methods.
+                            // We'll just check functions list.
+                        }
+                    }
+                }
+            }
+        }
+        // Also polymorphic if any base is polymorphic (check recursively).
+        // Simple approach: polymorphic if has bases that are polymorphic
+        // or has virtual methods. We check functions list for any
+        // isVirtual function with name starting with this struct name.
+        if (!si.isPolymorphic) {
+            for (const auto& hf : hir_.functions) {
+                if (hf->isVirtual) {
+                    // Check if function belongs to this struct or a base.
+                    std::string fnName(hf->name);
+                    std::string prefix(sd.name);
+                    prefix += "::";
+                    if (fnName.substr(0, prefix.size()) == prefix) {
+                        si.isPolymorphic = true;
+                        break;
+                    }
+                }
+            }
+            // Check bases recursively (simple: any base is polymorphic).
+            if (!si.isPolymorphic) {
+                for (const auto& bc : sd.bases) {
+                    for (const auto& bs : mir_->structs) {
+                        if (bs.name == bc.type.base && bs.isPolymorphic) {
+                            si.isPolymorphic = true;
+                            break;
+                        }
+                    }
+                    if (si.isPolymorphic) break;
+                }
+            }
+        }
+        // Vtable entries: collect virtual methods in order.
+        // For now, populate from function list: functions with
+        // isVirtual and name starting with structName::.
+        // Override entries from derived take priority.
+        if (si.isPolymorphic) {
+            // First, collect from bases (in order).
+            for (const auto& bc : sd.bases) {
+                for (const auto& bs : mir_->structs) {
+                    if (bs.name == bc.type.base) {
+                        for (const auto& vte : bs.vtable) {
+                            si.vtable.push_back(vte);
+                        }
+                        break;
+                    }
+                }
+            }
+            // Then, add/override from this struct's methods.
+            for (const auto& hf : hir_.functions) {
+                if (!hf->isVirtual) continue;
+                std::string fnName(hf->name);
+                std::string prefix(sd.name);
+                prefix += "::";
+                if (fnName.substr(0, prefix.size()) != prefix) continue;
+                std::string bareName = fnName.substr(prefix.size());
+                // 7.7: destructors share a single vtable slot. Normalize
+                // `~ClassName` → `~dtor` so derived `~Dog` overrides base
+                // `~Animal` (matches HIR builder normalization).
+                if (hf->isDtor) bareName = "~dtor";
+                // Check if overrides an existing entry.
+                bool overridden = false;
+                for (auto& vte : si.vtable) {
+                    if (vte.methodName == bareName) {
+                        vte.funcName = hf->name;
+                        overridden = true;
+                        break;
+                    }
+                }
+                if (!overridden) {
+                    si.vtable.push_back({bareName, hf->name});
+                }
+            }
+        }
+        mir_->structs.push_back(std::move(si));
     }
     for (const auto& hf : hir_.functions) {
         auto fn = std::make_unique<mir::Function>();
@@ -730,6 +843,9 @@ std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
         fn->isConsteval = hf->isConsteval;
         fn->isCtor = hf->isCtor;
         fn->isDtor = hf->isDtor;
+        fn->isVirtual = hf->isVirtual;
+        fn->isPureVirtual = hf->isPureVirtual;
+        fn->vtableOf = hf->vtableOf;
         fn->loc = hf->loc;
         mir::Function* raw = fn.get();
         mir_->functions.push_back(std::move(fn));

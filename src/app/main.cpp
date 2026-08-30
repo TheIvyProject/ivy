@@ -361,7 +361,11 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                        dumpHirExpr(*v.elseBranch, os, depth + 1);
                    },
                    [&](const ivy::hir::Expr::Call& v) {
-                       dumpHirExprHeader(e, os, depth, "call");
+                       dumpHirExprHeader(e, os, depth,
+                                         v.isVirtual ? std::string("virtual_call '") +
+                                                       std::string(v.methodName) +
+                                                       "' slot=" + std::to_string(v.vtableSlot)
+                                                     : std::string("call"));
                        for (const auto& a : v.args) dumpHirExpr(*a, os, depth + 1);
                    },
                    [&](const ivy::hir::Expr::Index& v) {
@@ -593,8 +597,13 @@ void dumpMirExpr(const ivy::mir::Expr& e, std::ostream& os, int depth) {
                        dumpMirExpr(*v.elseBranch, os, depth + 1);
                    },
                    [&](const ivy::mir::Expr::Call& v) {
-                       dumpMirExprHeader(e, os, depth, "call");
-                       for (const auto& a : v.args) dumpMirExpr(*a, os, depth + 1);
+                       dumpMirExprHeader(e, os, depth,
+                                         v.isVirtual ? std::string("virtual_call '") +
+                                                       std::string(v.methodName) +
+                                                       "' slot=" + std::to_string(v.vtableSlot)
+                                                     : std::string("call"));
+                       for (const auto& a : v.args)
+                           if (a) dumpMirExpr(*a, os, depth + 1);
                    },
                    [&](const ivy::mir::Expr::Index& v) {
                        dumpMirExprHeader(e, os, depth, "index");

@@ -229,6 +229,10 @@ private:
     void lowerInitListInto(const mir::Expr::InitList& il,
                            const std::string& slot,
                            const mir::Type& structType, SourceLoc loc);
+    // 7.7: Initialize the vptr of a polymorphic struct instance to
+    // point to the struct's vtable global. Called after zero-init.
+    void initVptr(const std::string& slot, std::string_view structName,
+                 SourceLoc loc);
     // Lowers a single MIR instruction.
     void lowerInst(const mir::Inst& inst);
     // Emits array bounds-check LLVM IR for index `idxVal` into array of
