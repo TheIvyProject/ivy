@@ -122,11 +122,20 @@ struct Expr {
     // sizeof...(pack) — returns the number of elements in a parameter
     // pack at compile time.  `packName` is the identifier of the pack.
     struct SizeofPack { std::string_view packName; };
+    // 8.3: sizeof(type) / sizeof(expr) — the operand type is resolved
+    // to its byte size at compile time and folded to an integer.
+    // `operandType` is the type whose size is queried.  For the
+    // `sizeof expr` form, the parser resolves the expression's type
+    // before building this node.
+    struct SizeOf { Type operandType; };
+    // 8.3: alignof(type) — the operand type's alignment is folded to
+    // an integer at compile time.
+    struct AlignOf { Type operandType; };
 
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda, PackExpansion, FoldExpr, SizeofPack>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf>
         node;
 };
 

@@ -2156,6 +2156,39 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         next();
         return makeExpr<Expr::BoolLit>(loc, t.lexeme == "true");
     }
+    // 8.3: sizeof(type) / alignof(type).
+    // Parsed BEFORE sizeof...(pack) so the ellipsis form only matches
+    // when `...` immediately follows `sizeof`.
+    //   sizeof ( type-id )   → SizeOf{type}
+    //   alignof ( type-id )   → AlignOf{type}
+    // sizeof(expr) / sizeof unary-expr are not supported (Ivy parser
+    // does not resolve expression types; use sizeof(type) instead).
+    if (atKeyword("sizeof") && peek(1).kind != TokenKind::Ellipsis) {
+        SourceLoc loc = locOf(peek());
+        next();  // consume `sizeof`
+        expect(TokenKind::LParen, "expected '(' after 'sizeof'");
+        if (!isTypeStart()) {
+            errorAt(peek(), "expected type after 'sizeof(' (sizeof(expression) is not supported)");
+            synchronize();
+            return makeExpr<Expr::SizeOf>(loc, Type{});
+        }
+        Type ty = parseType();
+        expect(TokenKind::RParen, "expected ')' after sizeof type");
+        return makeExpr<Expr::SizeOf>(loc, ty);
+    }
+    if (atKeyword("alignof")) {
+        SourceLoc loc = locOf(peek());
+        next();  // consume `alignof`
+        expect(TokenKind::LParen, "expected '(' after 'alignof'");
+        if (!isTypeStart()) {
+            errorAt(peek(), "expected type after 'alignof('");
+            synchronize();
+            return makeExpr<Expr::AlignOf>(loc, Type{});
+        }
+        Type ty = parseType();
+        expect(TokenKind::RParen, "expected ')' after alignof type");
+        return makeExpr<Expr::AlignOf>(loc, ty);
+    }
     // sizeof...(pack) — returns the number of elements in a parameter
     // pack at compile time.  Syntax: `sizeof` `...` `(` `identifier` `)`.
     if (atKeyword("sizeof") && peek(1).kind == TokenKind::Ellipsis) {

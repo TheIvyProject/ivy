@@ -181,6 +181,11 @@ private:
     // pointer qualifiers from the alias usage).  Recurse in case of
     // alias→alias chains.
     hir::Type resolveTypeAlias(const hir::Type& type) const;
+    // 8.3: Compute size/alignment of a type for sizeof/alignof and
+    // struct layout. Member functions (not static) so they can look
+    // up struct sizes/alignments from structs_.
+    std::uint64_t typeSize(const hir::Type& t) const;
+    std::uint32_t typeAlign(const hir::Type& t) const;
     void lowerLifetimeAttributes(hir::Function& fn, const Function& af);
     std::string_view lowerParamAttribute(hir::Function& fn, const Param& ap);
 

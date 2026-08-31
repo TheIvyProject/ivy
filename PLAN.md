@@ -145,7 +145,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 |---|------|--------|---------------------|
 | 8.1 | **Object file emission** ✅ | ★★★★ | Dùng LLVM library: `parseIR` → `TargetMachine` → COFF `.obj`. Phải patch `LLVMExports.cmake` (diaguids.lib corrupt VS2019), đổi `InitializeAllTargets` → `InitializeNative*`, xử lý LLVM 21 API |
 | 8.2 | **Linking** ✅ | ★★★★ | Invoke linker hệ thống (`clang++` on Windows/POSIX, via `CreateProcessA`/`std::system`). Link libc mặc định (malloc/free/printf). Flag: `-o app.exe` tự động link. `__ivy_panic` runtime defined inline (puts+abort). Xử lý ordering bug: string constants + declare phải emit sau lowerFunction. 15/19 examples link+run successfully |
-| 8.3 | **`sizeof` / `alignof`** | ★ | Compile-time: tra cứu layout đã compute ở HIR builder, fold thành integer literal |
+| 8.3 | **`sizeof` / `alignof`** ✅ | ★ | Compile-time: tra cứu layout đã compute ở HIR builder, fold thành integer literal. Hỗ trợ `sizeof(type)`, `alignof(type)` cho scalar/pointer/struct/array. Fold tại HIR → không cần MIR/codegen/interpreter changes |
 | 8.4 | **Cast operators** | ★★ | `static_cast` (numeric conversion + pointer upcast/downcast checked), `reinterpret_cast` (chỉ unsafe). Vẫn cấm `dynamic_cast` (RTTI) |
 | 8.5 | **Standard library tối thiểu** | ★★★ | Viết bằng chính Ivy (dogfooding): `ivy::string` (SSO), `ivy::vector<T>` (cần template class 7.4 + new/delete), `ivy::result<T,E>` thay exception, `ivy::print` thay printf |
 | 8.6 | **`#error` / `#warning` / `#line`** | ★ | Preprocessor: parse directive, báo diagnostic / set line mapping |

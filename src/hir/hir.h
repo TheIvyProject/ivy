@@ -82,6 +82,11 @@ struct Expr {
     };
     // sizeof...(pack) — already folded to an integer by the HIR builder.
     struct SizeofPack { std::string_view packName; std::size_t count = 0; };
+    // 8.3: sizeof(type) / alignof(type) — already folded to an integer
+    // by the HIR builder. These HIR nodes are only used transiently;
+    // by the time MIR is built they are IntegerLit.
+    struct SizeOf { std::uint64_t bytes = 0; };
+    struct AlignOf { std::uint32_t bytes = 0; };
     // Virtual method dispatch (7.7): emitted as a `Call` with `isVirtual`
     // set.  `vtableSlot` is the index into the vtable array.  `this` is
     // passed as arg 0 (already injected by the builder).
@@ -90,7 +95,7 @@ struct Expr {
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda, PackExpansion, FoldExpr, SizeofPack>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf>
         node;
 };
 

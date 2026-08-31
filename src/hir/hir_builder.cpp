@@ -378,10 +378,10 @@ void HirBuilder::buildEnum(const EnumDecl& ed) {
     enums_[ed.name] = std::move(def);
 }
 
-// Computes the size and alignment of a type for struct layout.
-// Uses the same rank table as codegen's sizeofType() — Ivy fixed-width
-// types and C-style types share a scale so layout matches codegen.
-static std::uint64_t typeSize(const hir::Type& t) {
+// 8.3: Computes the size of a type for sizeof/alignof and struct layout.
+// Member function (not static) so it can look up struct sizes from structs_.
+// Uses the same rank table as codegen's sizeofType() so layout matches.
+std::uint64_t HirBuilder::typeSize(const hir::Type& t) const {
     if (t.pointerDepth > 0 || t.isReference) return 8;  // 64-bit pointers
     const std::string_view b = t.base;
     if (b == "bool" || b == "char" || b == "int8_t" || b == "uint8_t") return 1;
@@ -390,6 +390,15 @@ static std::uint64_t typeSize(const hir::Type& t) {
         b == "float" || b == "float32_t" || b == "size_t" || b == "ptrdiff_t") return 4;
     if (b == "long" || b == "long long" || b == "int64_t" || b == "uint64_t" ||
         b == "double" || b == "long double" || b == "float64_t" || b == "float128_t") return 8;
+    // 8.3: Struct type — look up the pre-computed size from buildStruct.
+    auto it = structs_.find(b);
+    if (it != structs_.end()) return it->second.size;
+    // 8.3: Array type: element size * count.
+    if (t.arraySize > 0) {
+        hir::Type elem = t;
+        elem.arraySize = 0;
+        return typeSize(elem) * t.arraySize;
+    }
     return 4;  // fallback (e.g. unresolved enum → int)
 }
 
@@ -425,8 +434,20 @@ hir::Type HirBuilder::resolveTypeAlias(const hir::Type& type) const {
     return resolveTypeAlias(expanded);
 }
 
-static std::uint32_t typeAlign(const hir::Type& t) {
-    // Alignment = size for all Ivy scalar types (no special alignment rules).
+// 8.3: Computes the alignment of a type for alignof and struct layout.
+std::uint32_t HirBuilder::typeAlign(const hir::Type& t) const {
+    if (t.pointerDepth > 0 || t.isReference) return 8;  // 64-bit pointers
+    const std::string_view b = t.base;
+    // 8.3: Struct type — look up pre-computed alignment from buildStruct.
+    auto it = structs_.find(b);
+    if (it != structs_.end()) return it->second.align;
+    // 8.3: Array type: alignment = element alignment.
+    if (t.arraySize > 0) {
+        hir::Type elem = t;
+        elem.arraySize = 0;
+        return typeAlign(elem);
+    }
+    // Scalar types: alignment = size.
     return static_cast<std::uint32_t>(typeSize(t));
 }
 
@@ -2868,6 +2889,28 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         auto out = std::make_unique<hir::Expr>();
         out->loc = e.loc;
         out->node.emplace<hir::Expr::IntegerLit>(static_cast<long long>(count));
+        out->type.base = "int64_t";
+        return out;
+    }
+    // 8.3: sizeof(type) — fold to an integer literal at build time.
+    if (std::holds_alternative<A::SizeOf>(n)) {
+        const A::SizeOf& v = std::get<A::SizeOf>(n);
+        hir::Type resolved = resolveTypeAlias(v.operandType);
+        std::uint64_t sz = typeSize(resolved);
+        auto out = std::make_unique<hir::Expr>();
+        out->loc = e.loc;
+        out->node.emplace<hir::Expr::IntegerLit>(static_cast<long long>(sz));
+        out->type.base = "int64_t";
+        return out;
+    }
+    // 8.3: alignof(type) — fold to an integer literal at build time.
+    if (std::holds_alternative<A::AlignOf>(n)) {
+        const A::AlignOf& v = std::get<A::AlignOf>(n);
+        hir::Type resolved = resolveTypeAlias(v.operandType);
+        std::uint32_t al = typeAlign(resolved);
+        auto out = std::make_unique<hir::Expr>();
+        out->loc = e.loc;
+        out->node.emplace<hir::Expr::IntegerLit>(static_cast<long long>(al));
         out->type.base = "int64_t";
         return out;
     }

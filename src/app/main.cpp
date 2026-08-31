@@ -187,6 +187,12 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::Expr::SizeofPack& v) {
                        os << pad << "sizeof...(" << v.packName << ")\n";
                    },
+                   [&](const ivy::Expr::SizeOf& v) {
+                       os << pad << "sizeof(" << v.operandType.base << ")\n";
+                   },
+                   [&](const ivy::Expr::AlignOf& v) {
+                       os << pad << "alignof(" << v.operandType.base << ")\n";
+                   },
                },
                e.node);
 }
@@ -436,6 +442,12 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::hir::Expr::SizeofPack& v) {
                        os << pad << "sizeof...(" << v.packName << ") = "
                           << v.count << "\n";
+                   },
+                   [&](const ivy::hir::Expr::SizeOf& v) {
+                       os << pad << "sizeof = " << v.bytes << "\n";
+                   },
+                   [&](const ivy::hir::Expr::AlignOf& v) {
+                       os << pad << "alignof = " << v.bytes << "\n";
                    },
                },
                e.node);
