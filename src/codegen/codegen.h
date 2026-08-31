@@ -31,6 +31,12 @@ public:
     // reported; check diagnostics() then.
     bool generate(std::ostream& out);
 
+    // 8.1: Emits a native object file (.o / .obj) to `outPath`.
+    // Internally generates the textual LLVM IR, parses it into an
+    // LLVM Module, then uses LLVM TargetMachine to emit the object file.
+    // Returns false on failure; check diagnostics().
+    bool emitObject(const std::string& outPath);
+
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
     // Overrides the ABI platform (default is auto-detected from the

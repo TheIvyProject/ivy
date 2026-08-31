@@ -40,6 +40,7 @@ void printUsage() {
                  "  --mir      print the lowered MIR with lifetime annotations (debug)\n"
                  "  --llvm     emit LLVM IR to stdout\n"
                  "  --run      interpret the program via IvyInterpret v0.2 (MIR-based)\n"
+                 "  -c         compile to native object file (.o / .obj), no linking\n"
                  "  --target <abi>  set the C++ ABI for name mangling:\n"
                  "               itanium (POSIX) or msvc (Windows)\n"
                  "               (default: auto-detect from host)\n"
@@ -760,7 +761,8 @@ bool hasExtension(const std::string& path, std::string_view ext) {
 }
 
 int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool showHir,
-        bool showMir, bool showLlvm, bool doRun, const std::string& outPath,
+        bool showMir, bool showLlvm, bool doRun, bool compileOnly,
+        const std::string& outPath,
         const std::vector<std::filesystem::path>& includePaths,
         std::optional<ivy::CodeGen::Platform> targetPlatform) {
     std::ifstream in(path, std::ios::binary);
@@ -864,6 +866,31 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         return 0;
     }
 
+    if (compileOnly && mir) {
+        // 8.1: Compile to native object file.
+        std::string objPath = outPath;
+        if (objPath.empty()) {
+            // Default: replace source extension with .o (Unix) or .obj (Windows)
+            std::string stem = path.stem().string();
+#ifdef _WIN32
+            objPath = (path.parent_path() / (stem + ".obj")).string();
+#else
+            objPath = (path.parent_path() / (stem + ".o")).string();
+#endif
+        }
+        ivy::CodeGen cg(*mir);
+        if (targetPlatform) cg.setPlatform(*targetPlatform);
+        bool ok = cg.emitObject(objPath);
+        for (const ivy::Diagnostic& d : cg.diagnostics()) {
+            std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message
+                      << "\n";
+        }
+        if (ok) {
+            std::cerr << "ivyc: '" << objPath << "' generated\n";
+        }
+        return ok ? 0 : 1;
+    }
+
     if (showLlvm && mir) {
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
@@ -907,6 +934,7 @@ int main(int argc, char** argv) {
     bool showMir = false;
     bool showLlvm = false;
     bool doRun = false;
+    bool compileOnly = false;
     std::string outPath;
     std::vector<std::filesystem::path> includePaths;
     std::optional<ivy::CodeGen::Platform> targetPlatform;
@@ -925,6 +953,8 @@ int main(int argc, char** argv) {
             showLlvm = true;
         } else if (arg == "--run") {
             doRun = true;
+        } else if (arg == "-c") {
+            compileOnly = true;
         } else if (arg == "--target") {
             if (i + 1 >= argc) {
                 std::cerr << "ivyc: error: option '--target' requires an ABI name\n";
@@ -983,6 +1013,6 @@ int main(int argc, char** argv) {
                   << "' — expected .ivy, .cpp, .cc, .cxx, or .c\n";
     }
 
-    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun, outPath,
-               includePaths, targetPlatform);
+    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun, compileOnly,
+               outPath, includePaths, targetPlatform);
 }

@@ -143,7 +143,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| 8.1 | **Object file emission** | ★★ | Dùng LLVM library (thay vì emit text IR): `TargetMachine.emitToFile` → `.o`/`.obj`. Hoặc invoke `llc` external. Flag: `-c`, `-o out.o` |
+| 8.1 | **Object file emission** ✅ | ★★ | Dùng LLVM library (thay vì emit text IR): `TargetMachine.emitToFile` → `.o`/`.obj`. Hoặc invoke `llc` external. Flag: `-c`, `-o out.o` |
 | 8.2 | **Linking** | ★★ | Invoke linker hệ thống (`link.exe`/`ld`/`clang`). Link libc mặc định (malloc/free/printf). Flag: `-o app.exe` tự động link |
 | 8.3 | **`sizeof` / `alignof`** | ★ | Compile-time: tra cứu layout đã compute ở HIR builder, fold thành integer literal |
 | 8.4 | **Cast operators** | ★★ | `static_cast` (numeric conversion + pointer upcast/downcast checked), `reinterpret_cast` (chỉ unsafe). Vẫn cấm `dynamic_cast` (RTTI) |

@@ -2,9 +2,26 @@
 
 #include <cctype>
 #include <cstdint>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+// 8.1: LLVM headers for native object file emission.
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IRReader/IRReader.h>
+#include <llvm/Support/SourceMgr.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/CodeGen.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/TargetParser/Host.h>
+#include <llvm/TargetParser/Triple.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/MC/TargetRegistry.h>
+#include <llvm/IR/LegacyPassManager.h>
 
 namespace ivy {
 namespace {
@@ -1846,6 +1863,86 @@ bool CodeGen::generate(std::ostream& out) {
         if (fn->hasBody) lowerFunction(*fn);
     }
     return !failed_;
+}
+
+// 8.1: Emit a native object file (.o / .obj) by parsing the textual
+// LLVM IR (produced by generate()) into an LLVM Module, then using
+// LLVM's TargetMachine to emit the object code.
+bool CodeGen::emitObject(const std::string& outPath) {
+    // 1) Generate the textual LLVM IR into a string.
+    std::ostringstream oss;
+    if (!generate(oss)) return false;
+    std::string ir = oss.str();
+
+    // 2) Initialize LLVM native target (once per process). We only
+    // emit object files for the host triple (x86 on Windows), so the
+    // native subset suffices and avoids linking every LLVM target.
+    static bool initialized = false;
+    if (!initialized) {
+        llvm::InitializeNativeTarget();
+        llvm::InitializeNativeTargetAsmPrinter();
+        llvm::InitializeNativeTargetAsmParser();
+        initialized = true;
+    }
+
+    // 3) Parse the IR text into an LLVM Module.
+    llvm::LLVMContext ctx;
+    llvm::SMDiagnostic diag;
+    std::unique_ptr<llvm::Module> module =
+        llvm::parseIR(llvm::MemoryBufferRef(ir, "ivy-module"), diag, ctx);
+    if (!module) {
+        std::string msg;
+        llvm::raw_string_ostream rso(msg);
+        diag.print("ivyc", rso);
+        rso.flush();
+        error({}, "LLVM IR parse error: " + msg);
+        return false;
+    }
+
+    // 4) Determine the target triple (host native).
+    llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
+    module->setTargetTriple(triple);
+    module->setDataLayout("");
+
+    // 5) Look up the target and create a TargetMachine.
+    std::string err;
+    const llvm::Target* target =
+        llvm::TargetRegistry::lookupTarget(triple.str(), err);
+    if (!target) {
+        error({}, "LLVM target lookup failed: " + err);
+        return false;
+    }
+
+    // 6) Create a relocation model + codegen-opt-level config.
+    const llvm::TargetOptions targetOptions;
+    const std::optional<llvm::Reloc::Model> relocModel;  // default (PIC/static)
+    const llvm::CodeGenOptLevel optLevel = llvm::CodeGenOptLevel::Default;
+    std::unique_ptr<llvm::TargetMachine> tm(
+        target->createTargetMachine(triple, "", "", targetOptions,
+                                    relocModel, std::nullopt, optLevel));
+    if (!tm) {
+        error({}, "LLVM TargetMachine creation failed");
+        return false;
+    }
+    module->setDataLayout(tm->createDataLayout());
+
+    // 7) Emit the object file to disk.
+    std::error_code ec;
+    llvm::sys::fs::file_status fstatus;
+    auto out = std::make_unique<llvm::raw_fd_ostream>(outPath, ec);
+    if (ec) {
+        error({}, "cannot open output file '" + outPath + "': " + ec.message());
+        return false;
+    }
+    llvm::legacy::PassManager pm;
+    const llvm::CodeGenFileType fileType = llvm::CodeGenFileType::ObjectFile;
+    if (tm->addPassesToEmitFile(pm, *out, nullptr, fileType)) {
+        error({}, "LLVM TargetMachine cannot emit object file for this target");
+        return false;
+    }
+    pm.run(*module);
+    out->flush();
+    return true;
 }
 
 }  // namespace ivy

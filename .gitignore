@@ -27,3 +27,6 @@ out/
 
 # Intermediate preprocessed files
 *.i
+
+# Build logs
+build_log*.txt
