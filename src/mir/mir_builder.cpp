@@ -402,6 +402,19 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         // enclosing function (it's a local aggregate). No pointer lifetime.
         return out;
     }
+    // 8.4: Cast — pass through to codegen/interpreter. Lifetime is
+    // inherited from the operand (casting doesn't change ownership).
+    if (std::holds_alternative<H::Cast>(n)) {
+        const H::Cast& v = std::get<H::Cast>(n);
+        auto& cast = out->node.emplace<mir::Expr::Cast>();
+        cast.kind = v.kind;
+        if (v.operand) {
+            cast.operand = buildExpr(*v.operand);
+            if (cast.operand) out->lifetime = cast.operand->lifetime;
+        }
+        out->type = e.type;  // 8.4: propagate target type for codegen/interpreter
+        return out;
+    }
 
     out->lifetime.kind = mir::Lifetime::Kind::Unknown;
     return out;

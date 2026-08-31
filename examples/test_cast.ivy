@@ -1,0 +1,82 @@
+// 8.4 test: cast operators — static_cast, reinterpret_cast, const_cast, C-style cast
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+enum Color { Red = 10, Green = 20, Blue = 30 };
+
+int main() {
+    // --- static_cast: numeric conversions ---
+    int i = 42;
+    double d = static_cast<double>(i);
+    printf("static_cast<double>(42) = %f\n", d);
+
+    double pi = 3.14;
+    int truncated = static_cast<int>(pi);
+    printf("static_cast<int>(3.14) = %d\n", truncated);
+
+    long long big = 1000000000LL;
+    int narrowed = static_cast<int>(big);
+    printf("static_cast<int>(1000000000) = %d\n", narrowed);
+
+    char c = static_cast<char>(65);
+    printf("static_cast<char>(65) = %c\n", c);
+
+    // --- static_cast: enum <-> int ---
+    Color col = Green;
+    int enumVal = static_cast<int>(col);
+    printf("static_cast<int>(Green) = %d\n", enumVal);
+
+    Color fromInt = static_cast<Color>(30);
+    printf("static_cast<Color>(30) = %d\n", static_cast<int>(fromInt));
+
+    // --- static_cast: pointer upcast (void*) ---
+    int x = 99;
+    int* ip = &x;
+    void* vp = static_cast<void*>(ip);
+    printf("static_cast<void*>(&x) ok\n");
+
+    // --- static_cast: pointer downcast from void* (unsafe: deref) ---
+    [[ivy::unsafe]] {
+        int* recovered = static_cast<int*>(vp);
+        printf("static_cast<int*>(void*) = %d\n", *recovered);
+    }
+
+    // --- static_cast: nullptr -> pointer ---
+    static_cast<int*>(nullptr);
+    printf("static_cast<int*>(nullptr) is null\n");
+
+    // --- reinterpret_cast (unsafe) ---
+    [[ivy::unsafe]] {
+        long addr = reinterpret_cast<long>(&x);
+        printf("reinterpret_cast<long>(&x) = %ld\n", addr);
+
+        int* fromLong = reinterpret_cast<int*>(addr);
+        printf("reinterpret_cast<int*>(addr) = %d\n", *fromLong);
+
+        // pointer-to-pointer reinterpret
+        char* cp = reinterpret_cast<char*>(ip);
+        printf("reinterpret_cast<char*>(int*) ok\n");
+    }
+
+    // --- const_cast (unsafe) ---
+    const int ci = 777;
+    [[ivy::unsafe]] {
+        int* mut = const_cast<int*>(&ci);
+        printf("const_cast<int*>(&ci) ok, val = %d\n", *mut);
+    }
+
+    // --- C-style cast (unsafe) ---
+    [[ivy::unsafe]] {
+        double e = 2.71828;
+        int cint = (int)e;
+        printf("(int)2.71828 = %d\n", cint);
+
+        long ptrval = (long)&x;
+        printf("(long)&x = %ld\n", ptrval);
+    }
+
+    return 0;
+}

@@ -131,11 +131,17 @@ struct Expr {
     // 8.3: alignof(type) — the operand type's alignment is folded to
     // an integer at compile time.
     struct AlignOf { Type operandType; };
+    // 8.4: Explicit cast — static_cast<T>(expr), reinterpret_cast<T>(expr),
+    // const_cast<T>(expr), or C-style (T)expr (inside [[ivy::unsafe]] only).
+    // `kind` distinguishes the cast semantics. `targetType` is the
+    // destination type. `operand` is the expression being cast.
+    enum class CastKind { Static, Reinterpret, Const, CStyle };
+    struct Cast { CastKind kind; Type targetType; std::unique_ptr<Expr> operand; };
 
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf, Cast>
         node;
 };
 
@@ -219,6 +225,9 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 v.isLeftPack});
         } else if constexpr (std::is_same_v<V, Expr::SizeofPack>) {
             out->node.emplace<Expr::SizeofPack>(v);
+        } else if constexpr (std::is_same_v<V, Expr::Cast>) {
+            out->node.emplace<Expr::Cast>(Expr::Cast{v.kind, v.targetType,
+                v.operand ? cloneExpr(*v.operand) : nullptr});
         } else {
             out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
         }

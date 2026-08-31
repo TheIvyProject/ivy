@@ -496,6 +496,9 @@ void CodeGen::collectExpr(const mir::Expr& e) {
         const M::Lambda& v = std::get<M::Lambda>(n);
         for (const auto& ci : v.captureInits)
             if (ci) collectExpr(*ci);
+    } else if (std::holds_alternative<M::Cast>(n)) {
+        const M::Cast& v = std::get<M::Cast>(n);
+        if (v.operand) collectExpr(*v.operand);
     }
 }
 
@@ -1167,6 +1170,24 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         // (since the Lambda node is not an IdentRef). We handle the
         // `&Lambda` case in lowerExpr's Unary handler below.
         return slot;
+    }
+    // 8.4: Cast — lower the operand and emit the appropriate LLVM
+    // conversion instruction. This reuses emitCast() for numeric
+    // conversions and adds bitcast for pointer↔pointer and
+    // ptrtoint/inttoptr for pointer↔integer.
+    if (std::holds_alternative<M::Cast>(n)) {
+        const M::Cast& v = std::get<M::Cast>(n);
+        const std::string operandV = lowerExpr(*v.operand);
+        const std::string fromTy = valueLlvmType(v.operand->type);
+        const std::string toTy = valueLlvmType(e.type);
+        // For const_cast: same type, just return the value.
+        if (v.kind == M::CastKind::Const) return operandV;
+        // For pointer↔pointer (bitcast or same type): if both are ptr,
+        // LLVM's ptr type is opaque — no bitcast needed, just return.
+        if (fromTy == "ptr" && toTy == "ptr") return operandV;
+        // For all other conversions, reuse emitCast which handles
+        // zext/trunc/fptosi/sitofp/fpext/fptrunc/ptrtoint/inttoptr.
+        return emitCast(operandV, fromTy, toTy, e.loc);
     }
     error(e.loc, "unsupported expression");
     return "undef";

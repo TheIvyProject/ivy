@@ -11,6 +11,20 @@
 namespace ivy {
 namespace mir {
 
+// 8.4: Local type predicate helpers (mirrors of hir_builder.cpp statics).
+static bool isFloatBase(std::string_view b) {
+    return b == "float" || b == "double" || b == "long double" ||
+           b == "float16_t" || b == "float32_t" || b == "float64_t" ||
+           b == "float128_t" || b == "bfloat16_t";
+}
+static bool isIntegerBase(std::string_view b) {
+    return b == "bool" || b == "char" || b == "short" || b == "int" ||
+           b == "long" || b == "long long" ||
+           b == "int8_t" || b == "int16_t" || b == "int32_t" || b == "int64_t" ||
+           b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
+           b == "size_t" || b == "ptrdiff_t";
+}
+
 // ============================================================
 // Construction
 // ============================================================
@@ -369,6 +383,37 @@ Value Interpreter::evalExpr(const Expr& e) {
         } else if constexpr (std::is_same_v<V, E::Delete>) {
             error(e.loc, "IvyInterpret v0.2: 'delete' not yet supported");
             return makeVoid();
+        } else if constexpr (std::is_same_v<V, E::Cast>) {
+            // 8.4: Cast — evaluate the operand and convert.
+            Value operand = evalExpr(*v.operand);
+            const auto& tt = e.type;
+            if (operand.isInt()) {
+                if (isFloatBase(tt.base))
+                    return makeFloat(static_cast<double>(operand.asInt()));
+                // int→int or int→pointer: keep as int (pointer is
+                // represented as Ptr in the interpreter, but for
+                // reinterpret_cast results we keep the integer value).
+                return makeInt(operand.asInt());
+            }
+            if (operand.isFloat()) {
+                if (isFloatBase(tt.base))
+                    return makeFloat(operand.asFloat());
+                if (isIntegerBase(tt.base))
+                    return makeInt(static_cast<long long>(operand.asFloat()));
+                return makeFloat(operand.asFloat());
+            }
+            if (operand.isPtr()) {
+                // ptr→ptr (including void*→int*): pass through.
+                if (tt.pointerDepth > 0)
+                    return operand;
+                // ptr→integer: interpreter pointers are cell-based,
+                // so we can only return a non-zero sentinel (1) for
+                // non-null and 0 for null.
+                if (isIntegerBase(tt.base))
+                    return makeInt(operand.ptr.isNull ? 0 : 1);
+                return operand;
+            }
+            return operand;  // const_cast or same-type: pass through
         } else {
             error(e.loc, "IvyInterpret v0.2: unsupported expression");
             return makeVoid();

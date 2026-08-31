@@ -77,6 +77,10 @@ struct Expr {
         std::string_view closureType;
         std::vector<std::unique_ptr<Expr>> captureInits;
     };
+    // 8.4: Explicit cast — mirrors hir::Expr::Cast. The kind and
+    // operand type→target conversion is handled by codegen/interpreter.
+    using CastKind = ivy::Expr::CastKind;
+    struct Cast { CastKind kind; std::unique_ptr<Expr> operand; };
     // Virtual method dispatch (7.7) — emitted as a `Call` with `isVirtual`
     // set.  At runtime, the vtable is loaded from the object's vptr (at
     // offset 0), then `vtable[slot]` is called indirectly.
@@ -86,7 +90,7 @@ struct Expr {
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda>
+                 Lambda, Cast>
         node;
 };
 

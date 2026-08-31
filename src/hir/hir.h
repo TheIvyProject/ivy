@@ -87,6 +87,12 @@ struct Expr {
     // by the time MIR is built they are IntegerLit.
     struct SizeOf { std::uint64_t bytes = 0; };
     struct AlignOf { std::uint32_t bytes = 0; };
+    // 8.4: Explicit cast — static_cast<T>(expr), reinterpret_cast<T>(expr),
+    // const_cast<T>(expr), or C-style (T)expr. The HIR builder validates
+    // type compatibility and sets the result type. reinterpret_cast and
+    // C-style casts require [[ivy::unsafe]] context.
+    using CastKind = ivy::Expr::CastKind;
+    struct Cast { CastKind kind; std::unique_ptr<Expr> operand; };
     // Virtual method dispatch (7.7): emitted as a `Call` with `isVirtual`
     // set.  `vtableSlot` is the index into the vtable array.  `this` is
     // passed as arg 0 (already injected by the builder).
@@ -95,7 +101,7 @@ struct Expr {
     SourceLoc loc;
     std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
-                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf>
+                 Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf, Cast>
         node;
 };
 
@@ -170,6 +176,9 @@ inline std::unique_ptr<Expr> cloneHirExpr(const Expr& e) {
                 v.isLeftPack});
         } else if constexpr (std::is_same_v<V, Expr::SizeofPack>) {
             out->node.emplace<Expr::SizeofPack>(v);
+        } else if constexpr (std::is_same_v<V, Expr::Cast>) {
+            out->node.emplace<Expr::Cast>(Expr::Cast{v.kind,
+                v.operand ? cloneHirExpr(*v.operand) : nullptr});
         } else {
             out->node = v;  // POD variants: IntegerLit, FloatLit, etc.
         }

@@ -193,6 +193,16 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::Expr::AlignOf& v) {
                        os << pad << "alignof(" << v.operandType.base << ")\n";
                    },
+                   [&](const ivy::Expr::Cast& v) {
+                       const char* kw = "static_cast";
+                       if (v.kind == ivy::Expr::CastKind::Reinterpret) kw = "reinterpret_cast";
+                       else if (v.kind == ivy::Expr::CastKind::Const) kw = "const_cast";
+                       else if (v.kind == ivy::Expr::CastKind::CStyle) kw = "C-cast";
+                       os << pad << kw << "<" << v.targetType.base << ">(\n";
+                       if (v.operand) dumpExpr(*v.operand, os, depth + 1);
+                       else os << pad << "  <null>\n";
+                       os << pad << ")\n";
+                   },
                },
                e.node);
 }
@@ -449,6 +459,15 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::hir::Expr::AlignOf& v) {
                        os << pad << "alignof = " << v.bytes << "\n";
                    },
+                   [&](const ivy::hir::Expr::Cast& v) {
+                       const char* kw = "static_cast";
+                       if (v.kind == ivy::Expr::CastKind::Reinterpret) kw = "reinterpret_cast";
+                       else if (v.kind == ivy::Expr::CastKind::Const) kw = "const_cast";
+                       else if (v.kind == ivy::Expr::CastKind::CStyle) kw = "C-cast";
+                       os << pad << kw << "\n";
+                       if (v.operand) dumpHirExpr(*v.operand, os, depth + 1);
+                       else os << pad << "  <null>\n";
+                   },
                },
                e.node);
 }
@@ -670,6 +689,14 @@ void dumpMirExpr(const ivy::mir::Expr& e, std::ostream& os, int depth) {
                           << " (" << v.captureInits.size() << " captures)\n";
                        for (const auto& ci : v.captureInits)
                            if (ci) dumpMirExpr(*ci, os, depth + 1);
+                   },
+                   [&](const ivy::mir::Expr::Cast& v) {
+                       const char* kw = "static_cast";
+                       if (v.kind == ivy::Expr::CastKind::Reinterpret) kw = "reinterpret_cast";
+                       else if (v.kind == ivy::Expr::CastKind::Const) kw = "const_cast";
+                       else if (v.kind == ivy::Expr::CastKind::CStyle) kw = "C-cast";
+                       dumpMirExprHeader(e, os, depth, kw);
+                       if (v.operand) dumpMirExpr(*v.operand, os, depth + 1);
                    },
                },
                e.node);

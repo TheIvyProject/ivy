@@ -98,10 +98,10 @@ constexpr struct {
     {"decltype", "'decltype' is not supported in the Ivy subset"},
     {"operator", ""},  // operator overloading IS supported (7.4) — handled in parseStruct/parseFunction
     {"asm", "'asm' is not supported in the Ivy subset"},
-    {"const_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
-    {"static_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
-    {"reinterpret_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
-    {"dynamic_cast", "casts are not supported; use [[ivy::unsafe]] blocks"},
+    {"const_cast", ""},  // 8.4: const_cast IS supported — handled in parsePrimary
+    {"static_cast", ""},  // 8.4: static_cast IS supported — handled in parsePrimary
+    {"reinterpret_cast", ""},  // 8.4: reinterpret_cast IS supported (unsafe only) — handled in parsePrimary
+    {"dynamic_cast", "'dynamic_cast' is not supported (no RTTI in the Ivy subset)"},
     {"virtual", ""},  // virtual methods ARE supported (7.7) — handled in parseStruct
     {"override", ""},  // override marker IS supported (7.7) — handled in parseStruct
     {"final", ""},     // final marker IS handled in parseStruct (rejected with msg)
@@ -2204,6 +2204,31 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         expect(TokenKind::RParen, "expected ')' after sizeof... pack name");
         return makeExpr<Expr::SizeofPack>(loc, packName);
     }
+    // 8.4: static_cast<T>(expr), reinterpret_cast<T>(expr),
+    // const_cast<T>(expr).
+    // Syntax: `keyword` `<` type `>` `(` expr `)`.
+    // reinterpret_cast and const_cast require [[ivy::unsafe]] context
+    // (checked at HIR build time).
+    if (atKeyword("static_cast") || atKeyword("reinterpret_cast") ||
+        atKeyword("const_cast")) {
+        std::string_view kw = peek().lexeme;
+        next();  // consume keyword
+        expect(TokenKind::Lt, "expected '<' after cast keyword");
+        if (!isTypeStart()) {
+            errorAt(peek(), "expected type after '" + std::string(kw) + "<'");
+            synchronize();
+            return makeExpr<Expr::IntegerLit>(loc, 0);
+        }
+        Type targetType = parseType();
+        expect(TokenKind::Gt, "expected '>' after cast target type");
+        expect(TokenKind::LParen, "expected '(' in cast expression");
+        auto operand = parseExpr();
+        expect(TokenKind::RParen, "expected ')' after cast expression");
+        Expr::CastKind kind = Expr::CastKind::Static;
+        if (kw == "reinterpret_cast") kind = Expr::CastKind::Reinterpret;
+        else if (kw == "const_cast") kind = Expr::CastKind::Const;
+        return makeExpr<Expr::Cast>(loc, kind, targetType, std::move(operand));
+    }
     if (atKeyword("nullptr")) {
         next();
         return makeExpr<Expr::NullptrLit>(loc);
@@ -2280,6 +2305,26 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         return out;
     }
     if (at(TokenKind::LParen)) {
+        // 8.4: C-style cast `(type)expr` — only valid inside
+        // [[ivy::unsafe]] blocks (checked at HIR build time).
+        // Detect: `(` followed by a type keyword (built-in types only;
+        // user-defined struct/enum casts use static_cast instead).
+        // We must check this BEFORE fold-expression detection so that
+        // `(int)x` is parsed as a cast, not a parenthesized expression.
+        if (peek(1).kind == TokenKind::Keyword &&
+            (isCStyleTypeKeyword(peek(1).lexeme) ||
+             peek(1).lexeme == "bool" || peek(1).lexeme == "void" ||
+             peek(1).lexeme.rfind("int", 0) == 0 ||
+             peek(1).lexeme.rfind("uint", 0) == 0 ||
+             peek(1).lexeme.rfind("float", 0) == 0 ||
+             peek(1).lexeme == "size_t" || peek(1).lexeme == "ptrdiff_t")) {
+            next();  // consume '('
+            Type targetType = parseType();
+            expect(TokenKind::RParen, "expected ')' after C-style cast type");
+            auto operand = parseUnary();  // cast binds tighter than binary
+            return makeExpr<Expr::Cast>(loc, Expr::CastKind::CStyle,
+                                        targetType, std::move(operand));
+        }
         next();
         // Fold expression detection:
         //   ( ... op expr )   — unary left fold

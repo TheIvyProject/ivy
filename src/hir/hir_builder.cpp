@@ -2914,6 +2914,83 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         out->type.base = "int64_t";
         return out;
     }
+    // 8.4: static_cast / reinterpret_cast / const_cast / C-style cast.
+    if (std::holds_alternative<A::Cast>(n)) {
+        const A::Cast& v = std::get<A::Cast>(n);
+        hir::Type targetType = resolveTypeAlias(v.targetType);
+        // Strip reference from target — casts produce values, not references.
+        targetType.isReference = false;
+        auto operand = buildExpr(*v.operand);
+        if (!operand) return operand;
+        hir::Type fromType = operand->type;
+        fromType.isReference = false;
+
+        if (v.kind == A::CastKind::Static) {
+            // static_cast: numeric↔numeric, pointer↔pointer (same type),
+            // pointer↔void*, nullptr→pointer, enum→int, int→enum.
+            bool ok = false;
+            if (isNumeric(targetType) && isNumeric(fromType)) {
+                ok = true;
+            } else if (targetType.pointerDepth > 0 && fromType.pointerDepth > 0) {
+                // Pointer-to-pointer: same base type or void*.
+                ok = targetType.base == fromType.base ||
+                     targetType.base == "void" || fromType.base == "void";
+            } else if (targetType.pointerDepth > 0 &&
+                       (fromType.base == "nullptr" || fromType.base == "nullptr_t")) {
+                ok = true;  // nullptr → pointer
+            } else if (targetType.pointerDepth > 0 && isIntegerBase(fromType.base)) {
+                ok = true;  // int → pointer (static_cast allows this)
+            } else if (isIntegerBase(targetType.base) && fromType.pointerDepth > 0) {
+                ok = true;  // pointer → int (static_cast allows this)
+            } else if (isIntegerBase(targetType.base) && enums_.contains(fromType.base)) {
+                ok = true;  // enum → int
+            } else if (enums_.contains(targetType.base) && isIntegerBase(fromType.base)) {
+                ok = true;  // int → enum
+            }
+            if (!ok) {
+                error(e.loc, "static_cast: cannot convert from '" +
+                      std::string(fromType.base) + "' to '" +
+                      std::string(targetType.base) + "'");
+            }
+        } else if (v.kind == A::CastKind::Reinterpret ||
+                   v.kind == A::CastKind::CStyle) {
+            // reinterpret_cast / C-style cast: requires [[ivy::unsafe]].
+            requireUnsafe(e.loc, (v.kind == A::CastKind::Reinterpret
+                                  ? "reinterpret_cast"
+                                  : "C-style cast"));
+            // Must be pointer↔pointer or pointer↔integer.
+            bool ok = false;
+            if (targetType.pointerDepth > 0 && fromType.pointerDepth > 0) {
+                ok = true;  // pointer → pointer (any type)
+            } else if (targetType.pointerDepth > 0 && isIntegerBase(fromType.base)) {
+                ok = true;  // int → pointer
+            } else if (isIntegerBase(targetType.base) && fromType.pointerDepth > 0) {
+                ok = true;  // pointer → int
+            } else if (isNumeric(targetType) && isNumeric(fromType)) {
+                ok = true;  // numeric ↔ numeric (C-style allows this)
+            }
+            if (!ok) {
+                error(e.loc, "reinterpret_cast: cannot convert from '" +
+                      std::string(fromType.base) + "' to '" +
+                      std::string(targetType.base) + "'");
+            }
+        } else if (v.kind == A::CastKind::Const) {
+            // const_cast: add/remove const on pointer/reference types.
+            // Only valid between same-base types differing only in const.
+            requireUnsafe(e.loc, "const_cast");
+            if (targetType.base != fromType.base ||
+                targetType.pointerDepth != fromType.pointerDepth) {
+                error(e.loc, "const_cast: target type must match source "
+                      "type except for const qualifier");
+            }
+        }
+
+        auto out = std::make_unique<hir::Expr>();
+        out->loc = e.loc;
+        out->type = targetType;
+        out->node.emplace<hir::Expr::Cast>(v.kind, std::move(operand));
+        return out;
+    }
     if (std::holds_alternative<A::PackExpansion>(n)) {
         // `expr...` — record the pattern + pack name + count. Callers
         // (e.g. Call argument splicing) inspect this node to expand.
