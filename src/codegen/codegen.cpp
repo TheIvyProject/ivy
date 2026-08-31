@@ -2,11 +2,22 @@
 
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 // 8.1: LLVM headers for native object file emission.
 #include <llvm/IR/LLVMContext.h>
@@ -519,13 +530,20 @@ void CodeGen::collectFunction(const mir::Function& fn) {
 void CodeGen::emitHeader() { emitLine("; LLVM IR emitted by ivyc"); }
 
 void CodeGen::emitGlobals() {
+    if (usesMalloc_ && !declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
+    if (usesFree_ && !declaredC_.contains("free")) emitLine("declare void @free(ptr)");
+    // Note: string constants and the __ivy_panic declaration are emitted
+    // at the end of generate(), AFTER function lowering, because
+    // emitBoundsCheck() adds new strings / sets declaredIvyPanic_ during
+    // lowerFunction().
+}
+
+void CodeGen::emitStringConstants() {
     for (const auto& [name, bytes] : stringList_) {
         const std::size_t len = bytes.size() + 1;  // + NUL terminator
         emitLine(name + " = private unnamed_addr constant [" + std::to_string(len) +
                  " x i8] c\"" + llvmEscape(bytes) + "\\00\"");
     }
-    if (usesMalloc_ && !declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
-    if (usesFree_ && !declaredC_.contains("free")) emitLine("declare void @free(ptr)");
 }
 
 // --- expressions ---
@@ -1219,11 +1237,10 @@ void CodeGen::emitBoundsCheck(const std::string& idxVal, const std::string& idxT
                                std::uint32_t arrayN, SourceLoc loc) {
     if (inUnsafe_) return;
 
-    // Ensure __ivy_panic is declared once per module.
-    if (!declaredIvyPanic_) {
-        emitLine("declare void @__ivy_panic(ptr, i32)");
-        declaredIvyPanic_ = true;
-    }
+    // Mark that __ivy_panic is needed; the declaration is emitted at
+    // module level by emitGlobals(). We must NOT emit a `declare` here
+    // because it would land inside a function body, which is invalid IR.
+    declaredIvyPanic_ = true;
 
     // Cast idx to i64 for comparison (handles signed negative → becomes huge uint).
     const std::string idx64 = newTemp();
@@ -1862,6 +1879,32 @@ bool CodeGen::generate(std::ostream& out) {
         if (fn->isConsteval) continue;
         if (fn->hasBody) lowerFunction(*fn);
     }
+    // 8.2: Emit string constants and the __ivy_panic declaration AFTER
+    // function lowering. emitBoundsCheck() (called from lowerFunction())
+    // adds new panic-message strings to stringList_ and sets
+    // declaredIvyPanic_ during lowering, so these must be emitted
+    // afterwards to ensure they exist at module level.
+    emitStringConstants();
+    if (declaredIvyPanic_) {
+        // 8.2: Emit a definition for __ivy_panic at module level. It
+        // prints the message and aborts. We define it here (rather
+        // than `declare`) so the linker doesn't need an external Ivy
+        // runtime library.
+        // We use `puts` (stdout) rather than `fputs(..., stderr)` to
+        // avoid the portability headache of resolving the `stderr`
+        // FILE* across C runtimes (MSVC's stderr is a macro, not a
+        // global symbol). The message already includes the source
+        // line number (see emitBoundsCheck).
+        if (!declaredC_.contains("puts")) emitLine("declare i32 @puts(ptr)");
+        if (!declaredC_.contains("abort")) emitLine("declare void @abort()");
+        emitLine("");
+        emitLine("define void @__ivy_panic(ptr %msg, i32 %line) {");
+        emitLine("entry:");
+        emitLine("  call i32 @puts(ptr %msg)");
+        emitLine("  call void @abort()");
+        emitLine("  unreachable");
+        emitLine("}");
+    }
     return !failed_;
 }
 
@@ -1942,6 +1985,113 @@ bool CodeGen::emitObject(const std::string& outPath) {
     }
     pm.run(*module);
     out->flush();
+    return true;
+}
+
+// 8.2: Emit a native executable by first generating a temporary object
+// file (via emitObject), then invoking the system linker (clang++ on
+// POSIX, clang++ or lld on Windows) to link it with the default C/C++
+// runtime. The temporary object file is deleted on success.
+bool CodeGen::linkExecutable(const std::string& exePath) {
+    namespace fs = std::filesystem;
+
+    // 1) Determine a temporary object file path next to the target exe.
+    fs::path exeP(exePath);
+    std::string objExt =
+#ifdef _WIN32
+        ".obj";
+#else
+        ".o";
+#endif
+    std::string objPath =
+        (exeP.parent_path() / (exeP.stem().string() + "__tmp" + objExt)).string();
+
+    // 2) Emit the object file.
+    if (!emitObject(objPath)) return false;
+
+    // 3) Locate the linker. We prefer clang++ because it automatically
+    // finds the MSVC CRT / Windows SDK on Windows and the system libc
+    // on POSIX, without requiring a developer command prompt.
+    std::string linkerPath;
+    const char* envLinker = std::getenv("IVY_LINKER");
+    if (envLinker && *envLinker) {
+        linkerPath = envLinker;
+    } else {
+        // Search PATH for clang++ via _popen("where clang++") (Windows)
+        // or popen("command -v clang++") (POSIX).
+#ifdef _WIN32
+        const char* cmd = "where clang++";
+#else
+        const char* cmd = "command -v clang++";
+#endif
+        FILE* pipe =
+#ifdef _WIN32
+            _popen(cmd, "r");
+#else
+            popen(cmd, "r");
+#endif
+        if (pipe) {
+            char buf[1024];
+            if (fgets(buf, sizeof(buf), pipe)) {
+                // Strip trailing newline / CR.
+                std::size_t n = std::strlen(buf);
+                while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+                    buf[--n] = '\0';
+                linkerPath = buf;
+            }
+#ifdef _WIN32
+            _pclose(pipe);
+#else
+            pclose(pipe);
+#endif
+        }
+    }
+
+    if (linkerPath.empty()) {
+        std::error_code ec;
+        fs::remove(objPath, ec);
+        error({}, "cannot locate a linker (clang++); set IVY_LINKER or add clang++ to PATH");
+        return false;
+    }
+
+    // 4) Build the linker command line and invoke it.
+    std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\" -o \"" + exePath + "\"";
+
+    // 5) Run the linker and capture exit code.
+#ifdef _WIN32
+    // Use CreateProcessA to avoid cmd.exe's quirky quoting rules.
+    std::string cmdline = "\"" + linkerPath + "\" \"" + objPath + "\" -o \"" + exePath + "\"";
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::vector<char> buf(cmdline.begin(), cmdline.end());
+    buf.push_back('\0');
+    BOOL ok = CreateProcessA(nullptr, buf.data(), nullptr, nullptr, FALSE,
+                              0, nullptr, nullptr, &si, &pi);
+    int rc = 1;
+    if (ok) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        rc = static_cast<int>(exitCode);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    } else {
+        DWORD err = GetLastError();
+        std::cerr << "ivyc: CreateProcessA failed (error " << err << ")\n";
+    }
+#else
+    int rc = std::system(cmd.c_str());
+#endif
+    if (rc != 0) {
+        // Link failed — keep the temp obj for debugging.
+        error({}, "linker failed (exit code " + std::to_string(rc) + "): " + cmd);
+        return false;
+    }
+
+    // 6) Clean up the temporary object file.
+    std::error_code ec;
+    fs::remove(objPath, ec);
     return true;
 }
 

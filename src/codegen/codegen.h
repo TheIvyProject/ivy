@@ -37,6 +37,12 @@ public:
     // Returns false on failure; check diagnostics().
     bool emitObject(const std::string& outPath);
 
+    // 8.2: Emits a native object file to a temporary path, then invokes
+    // the system linker (clang++ / clang / ld) to produce the final
+    // executable at `exePath`. The temporary .obj/.o is deleted on
+    // success. Returns false on failure; check diagnostics().
+    bool linkExecutable(const std::string& exePath);
+
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
     // Overrides the ABI platform (default is auto-detected from the
@@ -199,8 +205,13 @@ private:
 
     // Emits the module header (comment only).
     void emitHeader();
-    // Emits string constants and malloc/free declarations.
+    // Emits malloc/free declarations. String constants are emitted
+    // later by emitStringConstants() after function lowering, because
+    // emitBoundsCheck() may add new strings during lowering.
     void emitGlobals();
+    // Emits all accumulated string constants at module level. Called
+    // after function lowering in generate().
+    void emitStringConstants();
 
     // Returns the alloca slot name for a variable (unique per function).
     std::string valueName(std::string_view name);

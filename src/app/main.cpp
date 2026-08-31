@@ -1,3 +1,4 @@
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -41,12 +42,15 @@ void printUsage() {
                  "  --llvm     emit LLVM IR to stdout\n"
                  "  --run      interpret the program via IvyInterpret v0.2 (MIR-based)\n"
                  "  -c         compile to native object file (.o / .obj), no linking\n"
+                 "  (default)  compile and link to a native executable\n"
                  "  --target <abi>  set the C++ ABI for name mangling:\n"
                  "               itanium (POSIX) or msvc (Windows)\n"
                  "               (default: auto-detect from host)\n"
                  "  -o <file>  write output to <file>:\n"
                  "               .ll  -> LLVM IR\n"
                  "               .i/.ii -> C++ source after #include expansion\n"
+                 "               .o/.obj -> native object file (implies -c)\n"
+                 "               .exe (Windows) / no extension (POSIX) -> link executable\n"
                  "  -I <dir>   add <dir> to the #include <...> search path (repeatable)\n"
                  "  -h, --help show this help\n";
 }
@@ -761,7 +765,7 @@ bool hasExtension(const std::string& path, std::string_view ext) {
 }
 
 int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool showHir,
-        bool showMir, bool showLlvm, bool doRun, bool compileOnly,
+        bool showMir, bool showLlvm, bool doRun, bool compileOnly, bool linkMode,
         const std::string& outPath,
         const std::vector<std::filesystem::path>& includePaths,
         std::optional<ivy::CodeGen::Platform> targetPlatform) {
@@ -891,6 +895,31 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         return ok ? 0 : 1;
     }
 
+    if (linkMode && mir) {
+        // 8.2: Compile and link to a native executable.
+        std::string exePath = outPath;
+        if (exePath.empty()) {
+            // Default: source stem + .exe (Windows) or no extension (POSIX)
+            std::string stem = path.stem().string();
+#ifdef _WIN32
+            exePath = (path.parent_path() / (stem + ".exe")).string();
+#else
+            exePath = (path.parent_path() / stem).string();
+#endif
+        }
+        ivy::CodeGen cg(*mir);
+        if (targetPlatform) cg.setPlatform(*targetPlatform);
+        bool ok = cg.linkExecutable(exePath);
+        for (const ivy::Diagnostic& d : cg.diagnostics()) {
+            std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message
+                      << "\n";
+        }
+        if (ok) {
+            std::cerr << "ivyc: '" << exePath << "' generated\n";
+        }
+        return ok ? 0 : 1;
+    }
+
     if (showLlvm && mir) {
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
@@ -1013,6 +1042,28 @@ int main(int argc, char** argv) {
                   << "' — expected .ivy, .cpp, .cc, .cxx, or .c\n";
     }
 
-    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun, compileOnly,
-               outPath, includePaths, targetPlatform);
+    // 8.2: If -o has a .o/.obj extension, imply -c (compile only).
+    if (!compileOnly && !outPath.empty()) {
+        std::string outExtLower{getExtension(outPath)};
+        for (char& c : outExtLower) c = static_cast<char>(std::tolower(c));
+        if (outExtLower == "o" || outExtLower == "obj") {
+            compileOnly = true;
+        }
+    }
+
+    // 8.2: If -o has a .ll extension, imply --llvm (emit textual LLVM IR).
+    if (!showLlvm && hasExtension(outPath, "ll")) {
+        showLlvm = true;
+    }
+
+    // 8.2: If no action flag was given and -o is not a .ll/.i/.ii,
+    // default to compile + link to a native executable.
+    bool linkMode = !showTokens && !showAst && !showHir && !showMir &&
+                    !showLlvm && !doRun && !compileOnly &&
+                    (outPath.empty() ||
+                     (!hasExtension(outPath, "ll") && !hasExtension(outPath, "i") &&
+                      !hasExtension(outPath, "ii")));
+
+    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun,
+               compileOnly, linkMode, outPath, includePaths, targetPlatform);
 }
