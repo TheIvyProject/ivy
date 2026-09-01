@@ -594,6 +594,162 @@ bool Preprocessor::parsePragma(const std::vector<Token>& tokens,
 }
 
 // ---------------------------------------------------------------------------
+// 8.6: #error / #warning / #line directives
+// ---------------------------------------------------------------------------
+
+// Collects the message text from the rest of a #error or #warning line.
+// Tokens are joined with single spaces; string literal lexemes include
+// their quotes — we strip the surrounding quotes to get the raw text.
+static std::string collectMessage(const std::vector<Token>& tokens,
+                                  std::size_t start,
+                                  std::uint32_t dirLine,
+                                  std::size_t& end) {
+    std::string msg;
+    std::size_t p = start;
+    while (p < tokens.size() && tokens[p].kind != TokenKind::EndOfFile &&
+           tokens[p].line == dirLine) {
+        if (!msg.empty()) msg += ' ';
+        std::string_view lex = tokens[p].lexeme;
+        // Strip surrounding quotes from string literals.
+        if (tokens[p].kind == TokenKind::String && lex.size() >= 2 &&
+            lex.front() == '"' && lex.back() == '"') {
+            msg += std::string(lex.substr(1, lex.size() - 2));
+        } else {
+            msg += std::string(lex);
+        }
+        ++p;
+    }
+    end = p;
+    return msg;
+}
+
+bool Preprocessor::parseError(const std::vector<Token>& tokens,
+                               std::size_t& pos) {
+    const Token& hashTok = tokens[pos];
+    if (pos + 1 >= tokens.size()) return false;
+    const Token& dirTok = tokens[pos + 1];
+    if (dirTok.kind != TokenKind::Identifier && dirTok.kind != TokenKind::Keyword) {
+        return false;
+    }
+    if (dirTok.lexeme != "error") return false;
+
+    // 8.6: #error is processed even when inactive (skipped by conditionals)
+    // — C++ says #error in a skipped group is still an error. But the
+    // standard actually says #error in a skipped group is NOT processed.
+    // We follow the standard: only process when active.
+    if (!active()) {
+        skipLine(tokens, pos);
+        return true;
+    }
+
+    std::size_t p = pos + 2;
+    std::size_t end = p;
+    std::string msg = collectMessage(tokens, p, hashTok.line, end);
+    diagnostics_.push_back({hashTok.line, hashTok.col,
+                            "#error: " + msg, false});
+    hasError_ = true;
+    pos = end;
+    return true;
+}
+
+bool Preprocessor::parseWarning(const std::vector<Token>& tokens,
+                                 std::size_t& pos) {
+    const Token& hashTok = tokens[pos];
+    if (pos + 1 >= tokens.size()) return false;
+    const Token& dirTok = tokens[pos + 1];
+    if (dirTok.kind != TokenKind::Identifier && dirTok.kind != TokenKind::Keyword) {
+        return false;
+    }
+    if (dirTok.lexeme != "warning") return false;
+
+    // Like #error, #warning in a skipped group is not processed.
+    if (!active()) {
+        skipLine(tokens, pos);
+        return true;
+    }
+
+    std::size_t p = pos + 2;
+    std::size_t end = p;
+    std::string msg = collectMessage(tokens, p, hashTok.line, end);
+    diagnostics_.push_back({hashTok.line, hashTok.col,
+                            "#warning: " + msg, true});
+    pos = end;
+    return true;
+}
+
+bool Preprocessor::parseLine(const std::vector<Token>& tokens,
+                              std::size_t& pos) {
+    const Token& hashTok = tokens[pos];
+    if (pos + 1 >= tokens.size()) return false;
+    const Token& dirTok = tokens[pos + 1];
+    if (dirTok.kind != TokenKind::Identifier && dirTok.kind != TokenKind::Keyword) {
+        return false;
+    }
+    // Two forms: `#line N "file"` or `#line N`.
+    // Also support the C99 form: `# N "file"` (linemarker).
+    if (dirTok.lexeme != "line") return false;
+
+    // #line in a skipped group is not processed.
+    if (!active()) {
+        skipLine(tokens, pos);
+        return true;
+    }
+
+    std::size_t p = pos + 2;
+    if (atEnd(tokens, p) || tokens[p].line != hashTok.line) {
+        diagnostics_.push_back({hashTok.line, hashTok.col,
+                                "#line: expected line number", false});
+        skipLine(tokens, pos);
+        return true;
+    }
+
+    // Parse the line number (must be an integer literal).
+    if (tokens[p].kind != TokenKind::Integer) {
+        diagnostics_.push_back({hashTok.line, hashTok.col,
+                                "#line: expected integer line number", false});
+        skipLine(tokens, pos);
+        return true;
+    }
+    long long newLine = 0;
+    try {
+        newLine = std::stoll(std::string(tokens[p].lexeme));
+    } catch (...) {
+        diagnostics_.push_back({hashTok.line, hashTok.col,
+                                "#line: invalid line number", false});
+        skipLine(tokens, pos);
+        return true;
+    }
+    if (newLine < 1) {
+        diagnostics_.push_back({hashTok.line, hashTok.col,
+                                "#line: line number must be positive", false});
+        skipLine(tokens, pos);
+        return true;
+    }
+    ++p;
+
+    // Optional: `"file"` — if present, set the file name override.
+    if (!atEnd(tokens, p) && tokens[p].line == hashTok.line &&
+        tokens[p].kind == TokenKind::String) {
+        std::string_view lex = tokens[p].lexeme;
+        if (lex.size() >= 2 && lex.front() == '"' && lex.back() == '"') {
+            lineFile_ = std::string(lex.substr(1, lex.size() - 2));
+        }
+        ++p;
+    }
+
+    // Skip any remaining tokens on the line.
+    while (!atEnd(tokens, p) && tokens[p].line == hashTok.line) ++p;
+
+    // #line N sets the *next* line's number to N. The current line is
+    // hashTok.line, so the next line is hashTok.line + 1. The offset
+    // for subsequent tokens is: N - (hashTok.line + 1).
+    lineOffset_ = newLine - static_cast<long long>(hashTok.line + 1);
+
+    pos = p;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // #if / #elif constant-expression evaluation
 // ---------------------------------------------------------------------------
 namespace {
@@ -1095,29 +1251,37 @@ void Preprocessor::expandTokenVector(const std::vector<Token>& tokens) {
 }
 
 void Preprocessor::emitToken(const Token& tok) {
+    // 8.6: Apply #line remapping — adjust the token's line number by
+    // the current line offset so diagnostics report the remapped line.
+    Token t = tok;
+    if (lineOffset_ != 0 && t.line != 0) {
+        long long remapped = static_cast<long long>(t.line) + lineOffset_;
+        if (remapped < 1) remapped = 1;
+        t.line = static_cast<std::uint32_t>(remapped);
+    }
     // Only identifiers can be macro invocations. Keywords (TokenKind::Keyword)
     // are never replaced, even if a macro has the same name — matching C++.
-    if (tok.kind != TokenKind::Identifier) {
-        output_.push_back(tok);
+    if (t.kind != TokenKind::Identifier) {
+        output_.push_back(t);
         return;
     }
     // Predefined context-sensitive macros (__LINE__, __FILE__).
-    if (tryExpandPredefined(tok)) return;
-    const auto it = macros_.find(std::string(tok.lexeme));
+    if (tryExpandPredefined(t)) return;
+    const auto it = macros_.find(std::string(t.lexeme));
     if (it == macros_.end()) {
-        output_.push_back(tok);
+        output_.push_back(t);
         return;
     }
     const Macro& macro = it->second;
     if (!macro.isFunctionLike) {
-        expandObjectLike(tok, macro);
+        expandObjectLike(t, macro);
         return;
     }
     // Function-like macro name encountered in a single-token context (no
     // ability to consume following args). Emit verbatim; the caller that
     // has access to the surrounding token vector should use
     // expandTokenVector instead for proper function-like handling.
-    output_.push_back(tok);
+    output_.push_back(t);
 }
 
 void Preprocessor::processFile(const std::filesystem::path& file) {
@@ -1176,6 +1340,19 @@ void Preprocessor::processFile(const std::filesystem::path& file) {
             // persist regardless of conditional state — a pragma in a
             // skipped block has no effect, which is correct C++ behavior).
             if (parsePragma(local, after)) {
+                i = after;
+                continue;
+            }
+            // 8.6: #error / #warning / #line directives.
+            if (parseError(local, after)) {
+                i = after;
+                continue;
+            }
+            if (parseWarning(local, after)) {
+                i = after;
+                continue;
+            }
+            if (parseLine(local, after)) {
                 i = after;
                 continue;
             }
@@ -1272,6 +1449,21 @@ std::vector<Token> Preprocessor::run() {
                 i = after;
                 continue;
             }
+            // 8.6: #error / #warning / #line directives.
+            if (parseError(input_, after)) {
+                i = after;
+                continue;
+            }
+            if (parseWarning(input_, after)) {
+                i = after;
+                continue;
+            }
+            if (parseLine(input_, after)) {
+                i = after;
+                continue;
+            }
+            // Unrecognized directive. If active, emit `#` + skip line
+            // so the parser rejects it; if inactive, just skip.
             i = before;
             if (active()) {
                 emitToken(input_[i]);

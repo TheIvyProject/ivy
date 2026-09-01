@@ -1,0 +1,4 @@
+// 8.6 test: #line directive with error remapping
+#pragma ivy cnumber
+#line 100 "custom_file.ivy"
+int x = undefined_var;

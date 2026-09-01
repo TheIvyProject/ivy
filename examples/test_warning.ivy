@@ -1,0 +1,12 @@
+// 8.6 test: #warning directive (should print warning but continue)
+#pragma ivy cnumber
+#warning This is a warning - compilation should continue.
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    printf("warning was issued, but compilation succeeded\n");
+    return 0;
+}

@@ -68,6 +68,15 @@ public:
     // types like `int`/`unsigned`/`long`/`short`/`char`/`float`/`double`.
     bool cnumberEnabled() const { return cnumberEnabled_; }
 
+    // 8.6: Returns true if a `#error` directive was encountered.
+    // The caller should check this and abort compilation.
+    bool hasError() const { return hasError_; }
+
+    // 8.6: Returns the file name override set by `#line N "file"`.
+    // Empty when no override is in effect. Used by the caller to
+    // report diagnostics with the remapped file name.
+    const std::string& lineFile() const { return lineFile_; }
+
     // Reconstructs source text from the expanded token stream. Used by the
     // `-o file.i` / `-o file.ii` CLI mode. Whitespace between tokens is
     // approximated: a single space between same-line tokens, a newline when
@@ -145,12 +154,46 @@ private:
     // translation unit (not scoped — once on, stays on).
     bool cnumberEnabled_ = false;
 
+    // 8.6: Set to true when a `#error` directive is encountered. The
+    // caller (main.cpp) checks this to abort compilation.
+    bool hasError_ = false;
+
+    // 8.6: #line directive support. `lineOffset_` is added to the
+    // physical line number of subsequent tokens to produce the reported
+    // line number. `lineFile_` overrides the file name for diagnostics.
+    // When `lineFile_` is empty, the original file name is used.
+    //
+    // `#line N "file"` sets the *next* line's number to N, so the offset
+    // is `N - (physicalLineOfNextLine)`. Since #line is on line L, the
+    // next line is L+1, so offset = N - (L + 1).
+    long long lineOffset_ = 0;
+    std::string lineFile_;  // empty = use original file name
+
     // Parses a `#pragma` directive starting at `pos` (pointing at `#`).
     // Currently only recognizes `#pragma ivy cnumber`. Unknown pragmas
     // are dropped with a warning. `pos` is advanced past the directive
     // line. Returns true if the `#` was recognized as a pragma (so the
     // caller doesn't fall through to the unknown-directive path).
     bool parsePragma(const std::vector<Token>& tokens, std::size_t& pos);
+
+    // 8.6: Parses `#error message...` — collects the rest of the line as
+    // the error message text, reports a fatal diagnostic, and sets
+    // `hasError_` so the caller knows compilation should abort. `pos`
+    // points at `#`; on return `pos` is advanced past the directive line.
+    // Returns true if the directive was recognized as `#error`.
+    bool parseError(const std::vector<Token>& tokens, std::size_t& pos);
+
+    // 8.6: Parses `#warning message...` — like `#error` but non-fatal.
+    // Reports a warning diagnostic (isWarning = true). Returns true if the
+    // directive was recognized as `#warning`.
+    bool parseWarning(const std::vector<Token>& tokens, std::size_t& pos);
+
+    // 8.6: Parses `#line N` or `#line N "file"` — sets the line number
+    // (and optionally the file name) for the *next* line. Subsequent
+    // tokens have their line numbers remapped so diagnostics report the
+    // user-specified location. Returns true if the directive was recognized
+    // as `#line`.
+    bool parseLine(const std::vector<Token>& tokens, std::size_t& pos);
 
     // Predefined macros that are always defined and cannot be #undef'd
     // or re-#define'd by the user. `__LINE__` and `__FILE__` are

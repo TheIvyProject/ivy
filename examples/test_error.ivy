@@ -1,0 +1,6 @@
+// 8.6 test: #error directive (should fail to compile)
+#error This is a deliberate error - compilation should abort here.
+
+int main() {
+    return 0;
+}

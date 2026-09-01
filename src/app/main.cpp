@@ -837,10 +837,22 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     // are exactly those passed via -I; there is no implicit system path.
     ivy::Preprocessor pp(std::move(tokens), path, includePaths);
     tokens = pp.run();
+
+    // 8.6: Use the remapped file name from #line if available for all
+    // subsequent diagnostics (preprocessor, parser, HIR, MIR, codegen,
+    // interpreter).
+    const std::string diagFile = pp.lineFile().empty()
+                                     ? path.string() : pp.lineFile();
+
     for (const ivy::Diagnostic& d : pp.diagnostics()) {
-        std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
-        failed = true;
+        // 8.6: #warning emits warnings (isWarning = true).
+        const char* severity = d.isWarning ? "warning" : "error";
+        std::cerr << diagFile << ":" << d.line << ":" << d.col
+                  << ": " << severity << ": " << d.message << "\n";
+        if (!d.isWarning) failed = true;
     }
+    // 8.6: #error is fatal — abort even if no other stage failed.
+    if (pp.hasError()) failed = true;
     if (failed) return 1;
 
     if (emitPreprocessed) {
@@ -867,7 +879,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     ivy::Parser parser(tokens, pp.cnumberEnabled());
     std::unique_ptr<ivy::TranslationUnit> tu = parser.parse();
     for (const ivy::Diagnostic& d : parser.diagnostics()) {
-        std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
+        std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
         failed = true;
     }
     if (failed) return 1;
@@ -877,7 +889,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     ivy::HirBuilder builder(*tu);
     std::unique_ptr<ivy::hir::TranslationUnit> hir = builder.build();
     for (const ivy::Diagnostic& d : builder.diagnostics()) {
-        std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
+        std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
         failed = true;
     }
     if (failed) return 1;
@@ -887,7 +899,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     ivy::MirBuilder mirBuilder(*hir);
     std::unique_ptr<ivy::mir::TranslationUnit> mir = mirBuilder.build();
     for (const ivy::Diagnostic& d : mirBuilder.diagnostics()) {
-        std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
+        std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
         failed = true;
     }
     if (failed) return 1;
@@ -900,7 +912,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         ivy::mir::Interpreter interp(*mir);
         ivy::mir::Value result = interp.callMain();
         for (const auto& d : interp.diagnostics()) {
-            std::cerr << path << ":" << d.line << ":" << d.col
+            std::cerr << diagFile << ":" << d.line << ":" << d.col
                       << ": error: " << d.message << "\n";
         }
         if (interp.failed()) return 1;
@@ -925,7 +937,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         bool ok = cg.emitObject(objPath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
-            std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message
+            std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
                       << "\n";
         }
         if (ok) {
@@ -950,7 +962,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         bool ok = cg.linkExecutable(exePath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
-            std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message
+            std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
                       << "\n";
         }
         if (ok) {
@@ -974,7 +986,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             ok = cg.generate(std::cout);
         }
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
-            std::cerr << path << ":" << d.line << ":" << d.col << ": error: " << d.message
+            std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
                       << "\n";
         }
         return ok ? 0 : 1;

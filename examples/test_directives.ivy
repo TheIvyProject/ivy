@@ -1,0 +1,29 @@
+// 8.6 test: #error / #warning / #line directives
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // #warning should print a warning but continue compilation.
+    // #error would abort, so we only test #warning and #line here.
+    // #error is tested in a separate file.
+
+    // #line remapping: the next line should be reported as line 100.
+#line 100
+    // After #line 100, this line is physically L13 but reported as L101.
+    // If there's an error here, the diagnostic would say line 101.
+    int x = 0;
+
+    // Restore normal line numbering.
+#line 200 "custom.ivy"
+    // Now we're at "custom.ivy" line 201.
+    printf("hello from #line remapped code\n");
+
+    // Reset to default.
+#line 18
+    printf("x = %d\n", x);
+
+    return 0;
+}
