@@ -338,6 +338,43 @@ private:
     // Used for macro body tokens during recursive expansion.
     void emitToken(const Token& tok);
 
+    // 8.7: Stringify a sequence of argument tokens into a single string
+    // literal token. Used for the `#param` operator in function-like
+    // macro bodies. The tokens are joined with single spaces; leading/
+    // trailing whitespace is trimmed. String literals and char literals
+    // within the argument are escaped per C++ rules (backslashes and
+    // quotes are doubled). The result is stored in `buffers_` for stable
+    // lifetime and returned as a `String` token.
+    Token stringifyTokens(const std::vector<Token>& toks,
+                          std::uint32_t line, std::uint32_t col);
+
+    // 8.7: Paste (concatenate) two tokens into one. Used for the `##`
+    // operator in macro bodies. The pasted lexeme is `left.lexeme +
+    // right.lexeme`; the result is re-lexed to determine its token kind
+    // (e.g., `foo` → Identifier, `123` → Integer, `+=` → PlusAssign).
+    // If the paste produces an invalid token, a diagnostic is reported
+    // and the pasted lexeme is emitted as an Identifier.
+    Token pasteTokens(const Token& left, const Token& right);
+
+    // 8.7: Process a macro body for `#` (stringify) and `##` (paste)
+    // operators, substituting parameters from `paramMap` where needed.
+    // Returns the processed token vector (with all #/## resolved). This
+    // is called before `expandTokenVector` so that stringification uses
+    // raw (unexpanded) argument tokens and pasting joins raw tokens.
+    // For object-like macros, `paramMap` is empty (only ## is relevant).
+    //
+    // `paramMap` maps parameter names to ArgInfo, which holds both raw
+    // (unexpanded) and expanded argument tokens. `#` uses raw tokens;
+    // normal substitution uses expanded tokens.
+    struct ArgInfo {
+        const std::vector<Token>* raw = nullptr;
+        const std::vector<Token>* expanded = nullptr;
+    };
+    std::vector<Token> substituteBody(
+        const std::vector<Token>& body,
+        const std::unordered_map<std::string, ArgInfo>& paramMap,
+        const Token& macroNameTok);
+
     // Lexes `file` and recursively expands its #includes into `output_`.
     void processFile(const std::filesystem::path& file);
 };

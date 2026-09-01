@@ -66,6 +66,7 @@ enum class TokenKind : std::uint8_t {
     RBracket,     // ]
     Ellipsis,     // ...
     Hash,         // #
+    HashHash,     // ##  (8.7: token-paste operator in macro bodies)
 };
 
 constexpr std::string_view tokenKindName(TokenKind kind);
@@ -137,6 +138,7 @@ constexpr std::string_view tokenKindName(TokenKind kind) {
         case RBracket:     return "]";
         case Ellipsis:     return "...";
         case Hash:         return "#";
+        case HashHash:     return "##";
     }
     return "?";
 }

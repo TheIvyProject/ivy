@@ -1,0 +1,39 @@
+// 8.7 test: # stringify and ## token paste operators
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// Stringify: #param converts the argument to a string literal.
+#define STR(x) #x
+#define XSTR(x) STR(x)
+
+// Token paste: ## concatenates two tokens.
+#define CONCAT(a, b) a ## b
+#define CONCAT3(a, b, c) a ## b ## c
+
+// Practical: generate unique variable names.
+#define UNIQUE(prefix) CONCAT(prefix, __LINE__)
+
+// Paste with numbers.
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 5
+#define MAKE_VERSION(maj, min) CONCAT(v, CONCAT(maj, min))
+
+int main() {
+    // Stringify
+    printf("STR(hello) = %s\n", STR(hello));
+    printf("STR(1 + 2) = %s\n", STR(1 + 2));
+    printf("XSTR(VERSION_MAJOR) = %s\n", XSTR(VERSION_MAJOR));
+
+    // Token paste - create identifiers
+    int CONCAT(foo, bar) = 42;
+    printf("foobar = %d\n", CONCAT(foo, bar));
+
+    // Paste numbers
+    int CONCAT3(v, 1, 5) = 100;
+    printf("v15 = %d\n", CONCAT3(v, 1, 5));
+
+    return 0;
+}

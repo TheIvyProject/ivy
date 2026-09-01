@@ -1078,9 +1078,12 @@ void Preprocessor::expandObjectLike(const Token& tok, const Macro& macro) {
         return;
     }
     expansionStack_.push_back(std::string(tok.lexeme));
-    // Expand the body as a token vector so that function-like macros inside
-    // the body can consume their arguments from the body tokens.
-    expandTokenVector(macro.body);
+    // 8.7: Process ## (token paste) in object-like macro bodies.
+    // Object-like macros don't have parameters, so # (stringify) is
+    // not applicable, but ## can still appear. Pass an empty paramMap.
+    std::unordered_map<std::string, ArgInfo> emptyMap;
+    std::vector<Token> substituted = substituteBody(macro.body, emptyMap, tok);
+    expandTokenVector(substituted);
     expansionStack_.pop_back();
 }
 
@@ -1166,24 +1169,46 @@ void Preprocessor::expandFunctionLike(const std::vector<Token>& tokens,
         return;
     }
 
-    // Build a name→tokens map for substitution.
-    std::unordered_map<std::string, const std::vector<Token>*> paramMap;
+    // Build a name→ArgInfo map for substitution. Each argument has:
+    // - raw: unexpanded tokens (used by # stringify and ## paste)
+    // - expanded: macro-expanded tokens (used by normal substitution)
+    std::unordered_map<std::string, ArgInfo> paramMap;
+    // Pre-expand arguments: for each argument, run expandTokenVector on
+    // a copy and capture the result. We use a temporary output vector.
+    std::vector<std::vector<Token>> expandedArgs(args.size());
+    std::vector<Token> vaArgsRaw;       // raw __VA_ARGS__
+    std::vector<Token> vaArgsExpanded;  // expanded __VA_ARGS__
     for (std::size_t i = 0; i < macro.params.size(); ++i) {
-        paramMap[macro.params[i]] = &args[i];
+        expandedArgs[i] = [&] {
+            std::vector<Token> out;
+            std::swap(output_, out);
+            expandTokenVector(args[i]);
+            std::swap(output_, out);
+            return out;
+        }();
+        paramMap[macro.params[i]] = {&args[i], &expandedArgs[i]};
     }
     // For variadic macros, build `__VA_ARGS__` from the extra arguments
     // (those past the named ones), joined with comma tokens to match
     // the original call-site separators.
-    std::vector<Token> vaArgs;
     if (macro.isVariadic) {
         for (std::size_t i = macro.params.size(); i < args.size(); ++i) {
             if (i > macro.params.size()) {
-                // Insert a comma separator between variadic args.
-                vaArgs.push_back(Token{TokenKind::Comma, ",", nameTok.line, nameTok.col});
+                vaArgsRaw.push_back(Token{TokenKind::Comma, ",", nameTok.line, nameTok.col});
+                vaArgsExpanded.push_back(Token{TokenKind::Comma, ",", nameTok.line, nameTok.col});
             }
-            vaArgs.insert(vaArgs.end(), args[i].begin(), args[i].end());
+            vaArgsRaw.insert(vaArgsRaw.end(), args[i].begin(), args[i].end());
+            // Expand this variadic argument.
+            std::vector<Token> expArg = [&] {
+                std::vector<Token> out;
+                std::swap(output_, out);
+                expandTokenVector(args[i]);
+                std::swap(output_, out);
+                return out;
+            }();
+            vaArgsExpanded.insert(vaArgsExpanded.end(), expArg.begin(), expArg.end());
         }
-        paramMap["__VA_ARGS__"] = &vaArgs;
+        paramMap["__VA_ARGS__"] = {&vaArgsRaw, &vaArgsExpanded};
     }
 
     // Cycle + depth guard.
@@ -1203,23 +1228,13 @@ void Preprocessor::expandFunctionLike(const std::vector<Token>& tokens,
 
     expansionStack_.push_back(std::string(nameTok.lexeme));
 
-    // Build the substituted body: replace formal parameters with the
-    // actual-argument token sequences. Argument tokens come from the call
-    // site (not the body), so they are NOT painted blue and may themselves
-    // expand further macros — that happens when expandTokenVector runs
-    // emitToken on each argument token.
-    std::vector<Token> substituted;
-    for (const Token& bt : macro.body) {
-        if (bt.kind == TokenKind::Identifier) {
-            const auto it = paramMap.find(std::string(bt.lexeme));
-            if (it != paramMap.end()) {
-                substituted.insert(substituted.end(), it->second->begin(),
-                                   it->second->end());
-                continue;
-            }
-        }
-        substituted.push_back(bt);
-    }
+    // 8.7: Use substituteBody to handle # (stringify), ## (paste),
+    // and normal parameter substitution in one pass. Stringification
+    // uses raw (unexpanded) argument tokens; pasting joins raw tokens.
+    // The resulting token vector is then rescanned by expandTokenVector
+    // for further macro expansion.
+    std::vector<Token> substituted = substituteBody(macro.body, paramMap,
+                                                      nameTok);
     expandTokenVector(substituted);
     expansionStack_.pop_back();
     pos = p;
@@ -1282,6 +1297,166 @@ void Preprocessor::emitToken(const Token& tok) {
     // has access to the surrounding token vector should use
     // expandTokenVector instead for proper function-like handling.
     output_.push_back(t);
+}
+
+// ---------------------------------------------------------------------------
+// 8.7: # stringify and ## token-paste operators
+// ---------------------------------------------------------------------------
+
+Token Preprocessor::stringifyTokens(const std::vector<Token>& toks,
+                                     std::uint32_t line, std::uint32_t col) {
+    // Join all token lexemes with single spaces, trimming leading/trailing.
+    std::string raw;
+    for (std::size_t i = 0; i < toks.size(); ++i) {
+        if (i > 0) raw += ' ';
+        raw += std::string(toks[i].lexeme);
+    }
+    // Escape backslashes and double quotes per C++ stringification rules.
+    std::string escaped;
+    escaped += '"';
+    for (char c : raw) {
+        if (c == '\\' || c == '"') escaped += '\\';
+        escaped += c;
+    }
+    escaped += '"';
+    buffers_.push_back(std::move(escaped));
+    return Token{TokenKind::String, buffers_.back(), line, col};
+}
+
+Token Preprocessor::pasteTokens(const Token& left, const Token& right) {
+    // Paste the lexemes: left.lexeme + right.lexeme.
+    std::string pasted = std::string(left.lexeme) + std::string(right.lexeme);
+    // Re-lex the pasted string to determine the token kind.
+    // tokenize() returns a vector; we take the first token.
+    Lexer lex(pasted);
+    std::vector<Token> lexed = lex.tokenize();
+    if (lexed.empty() || lexed[0].kind == TokenKind::EndOfFile) {
+        // Invalid paste — report a diagnostic and emit as Identifier.
+        diagnostics_.push_back({left.line, left.col,
+                                "##: pasting '" + std::string(left.lexeme) +
+                                "' and '" + std::string(right.lexeme) +
+                                "' does not produce a valid token"});
+        buffers_.push_back(std::move(pasted));
+        return Token{TokenKind::Identifier, buffers_.back(), left.line, left.col};
+    }
+    Token result = lexed[0];
+    // Check that the lexer consumed the entire input (no leftover tokens).
+    if (lexed.size() > 1 && lexed[1].kind != TokenKind::EndOfFile) {
+        // The pasted string produced multiple tokens — this is an error
+        // in standard C++, but we'll be lenient and just report it.
+        diagnostics_.push_back({left.line, left.col,
+                                "##: pasting '" + std::string(left.lexeme) +
+                                "' and '" + std::string(right.lexeme) +
+                                "' produces multiple tokens"});
+    }
+    // Store the pasted lexeme in buffers_ for stable lifetime.
+    buffers_.push_back(std::move(pasted));
+    result.lexeme = buffers_.back();
+    result.line = left.line;
+    result.col = left.col;
+    return result;
+}
+
+std::vector<Token> Preprocessor::substituteBody(
+    const std::vector<Token>& body,
+    const std::unordered_map<std::string, ArgInfo>& paramMap,
+    const Token& macroNameTok) {
+
+    std::vector<Token> result;
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        const Token& bt = body[i];
+
+        // 8.7: # (stringify) — only in function-like macros with params.
+        // `#param` → stringify the raw (unexpanded) argument tokens.
+        if (bt.kind == TokenKind::Hash && !paramMap.empty()) {
+            // Check if the next token is a parameter name.
+            if (i + 1 < body.size() && body[i + 1].kind == TokenKind::Identifier) {
+                const auto it = paramMap.find(std::string(body[i + 1].lexeme));
+                if (it != paramMap.end()) {
+                    // Stringify the raw argument tokens.
+                    std::vector<Token> argCopy;
+                    if (it->second.raw) {
+                        argCopy = *it->second.raw;
+                    }
+                    result.push_back(stringifyTokens(argCopy, bt.line, bt.col));
+                    ++i;  // skip the parameter name
+                    continue;
+                }
+            }
+            // # not followed by a parameter — emit verbatim.
+            result.push_back(bt);
+            continue;
+        }
+
+        // 8.7: ## (token paste) — paste the previous result token with
+        // the next token. `left ## right` → paste(left, right).
+        if (bt.kind == TokenKind::HashHash) {
+            // Need a left operand (previous token in result) and a right
+            // operand (next token in body).
+            if (result.empty()) {
+                diagnostics_.push_back({bt.line, bt.col,
+                                        "##: no left operand for token pasting"});
+                continue;
+            }
+            Token leftTok = result.back();
+            result.pop_back();
+
+            // Determine the right token. If the next body token is a
+            // parameter, substitute with the last token of its raw
+            // argument (or empty if no argument). Otherwise, use the
+            // body token.
+            Token rightTok;
+            bool hasRight = false;
+            if (i + 1 < body.size()) {
+                const Token& next = body[i + 1];
+                if (next.kind == TokenKind::Identifier && !paramMap.empty()) {
+                    const auto it = paramMap.find(std::string(next.lexeme));
+                    if (it != paramMap.end() && it->second.raw &&
+                        !it->second.raw->empty()) {
+                        // Use the last token of the raw argument for pasting.
+                        rightTok = it->second.raw->back();
+                        hasRight = true;
+                        ++i;
+                    } else if (it != paramMap.end()) {
+                        // Empty argument — paste with "placemarker" (nothing).
+                        // Result is just the left token.
+                        result.push_back(leftTok);
+                        ++i;
+                        continue;
+                    }
+                }
+                if (!hasRight) {
+                    rightTok = next;
+                    hasRight = true;
+                    ++i;
+                }
+            }
+
+            if (hasRight) {
+                result.push_back(pasteTokens(leftTok, rightTok));
+            } else {
+                // ## at end of body with no right operand — emit left.
+                result.push_back(leftTok);
+            }
+            continue;
+        }
+
+        // Normal parameter substitution — use EXPANDED argument tokens.
+        if (bt.kind == TokenKind::Identifier && !paramMap.empty()) {
+            const auto it = paramMap.find(std::string(bt.lexeme));
+            if (it != paramMap.end()) {
+                if (it->second.expanded) {
+                    result.insert(result.end(), it->second.expanded->begin(),
+                                  it->second.expanded->end());
+                }
+                continue;
+            }
+        }
+
+        result.push_back(bt);
+    }
+
+    return result;
 }
 
 void Preprocessor::processFile(const std::filesystem::path& file) {

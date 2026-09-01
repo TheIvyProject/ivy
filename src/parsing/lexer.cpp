@@ -122,6 +122,7 @@ constexpr std::pair<std::string_view, TokenKind> kOperators[] = {
     {"[",    TokenKind::LBracket},
     {"]",    TokenKind::RBracket},
     {".",    TokenKind::Dot},
+    {"##",   TokenKind::HashHash},  // 8.7: token-paste operator
     {"#",    TokenKind::Hash},
 };
 
