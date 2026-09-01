@@ -43,6 +43,22 @@ bool isFloatType(const mir::Type& t) {
                                       t.base == "float16_t" || t.base == "float128_t");
 }
 
+// 8.5: Check if a name is a known runtime builtin function.
+// These are emitted as extern "C" calls (no mangling).
+bool isCodegenBuiltin(std::string_view name) {
+    if (name == "printf" || name == "puts" || name == "putchar" ||
+        name == "exit" || name == "abort" || name == "malloc" ||
+        name == "free")
+        return true;
+    if (name == "ivy::print" || name == "ivy::println" ||
+        name == "ivy::print_int" || name == "ivy::print_float" ||
+        name == "ivy::print_str" || name == "ivy::print_char" ||
+        name == "ivy::println_int" || name == "ivy::println_float" ||
+        name == "ivy::println_str" || name == "ivy::println_char")
+        return true;
+    return false;
+}
+
 // Splits a fully-qualified C++ name ("ns1::ns2::func") into its
 // scope path components: ["ns1", "ns2", "func"]. `nsPrefix` is
 // optional — when provided, it is prepended to the path if `name`
@@ -476,7 +492,12 @@ void CodeGen::collectExpr(const mir::Expr& e) {
         collectExpr(*v.thenBranch);
         collectExpr(*v.elseBranch);
     } else if (std::holds_alternative<M::Call>(n)) {
-        for (const auto& a : std::get<M::Call>(n).args) collectExpr(*a);
+        const M::Call& c = std::get<M::Call>(n);
+        // 8.5: Track ivy::print/println builtin usage.
+        if (isCodegenBuiltin(c.callee) &&
+            (c.callee.rfind("ivy::", 0) == 0))
+            usesIvyPrint_ = true;
+        for (const auto& a : c.args) collectExpr(*a);
     } else if (std::holds_alternative<M::Index>(n)) {
         const M::Index& v = std::get<M::Index>(n);
         collectExpr(*v.base);
@@ -535,6 +556,20 @@ void CodeGen::emitHeader() { emitLine("; LLVM IR emitted by ivyc"); }
 void CodeGen::emitGlobals() {
     if (usesMalloc_ && !declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
     if (usesFree_ && !declaredC_.contains("free")) emitLine("declare void @free(ptr)");
+    // 8.5: Declare ivy stdlib builtins (extern "C", no mangling).
+    // These are linked from the C runtime (libc) — the actual
+    // implementations are in lib/ivy_runtime.c (or inline wrappers).
+    // In interpreter mode, these are handled by callBuiltin().
+    if (usesIvyPrint_) {
+        emitLine("declare void @ivy_print_int(i32)");
+        emitLine("declare void @ivy_print_float(double)");
+        emitLine("declare void @ivy_print_str(ptr)");
+        emitLine("declare void @ivy_print_char(i8)");
+        emitLine("declare void @ivy_println_int(i32)");
+        emitLine("declare void @ivy_println_float(double)");
+        emitLine("declare void @ivy_println_str(ptr)");
+        emitLine("declare void @ivy_println_char(i8)");
+    }
     // Note: string constants and the __ivy_panic declaration are emitted
     // at the end of generate(), AFTER function lowering, because
     // emitBoundsCheck() adds new strings / sets declaredIvyPanic_ during
@@ -995,6 +1030,42 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 if (f->name == v.callee) { callee = f.get(); break; }
             }
         }
+        // 8.5: Builtin functions (ivy::print, printf, etc.) have no
+        // MIR Function entry. Treat them as extern "C" calls — the
+        // symbol name is the callee name (with :: replaced by _).
+        const bool isBuiltinCall = !callee && isCodegenBuiltin(v.callee);
+
+        // 8.5: ivy::print / ivy::println dispatch to typed overloads
+        // (ivy_print_int, ivy_print_float, etc.) based on arg type.
+        if (isBuiltinCall &&
+            (v.callee == "ivy::print" || v.callee == "ivy::println")) {
+            const bool isLn = (v.callee == "ivy::println");
+            const std::string base = isLn ? "ivy_println_" : "ivy_print_";
+            std::string val;
+            std::string ty;
+            std::string suffix;
+            if (!v.args.empty() && v.args[0]) {
+                const mir::Type& at = v.args[0]->type;
+                val = lowerExpr(*v.args[0]);
+                ty = valueLlvmType(at);
+                if (at.pointerDepth > 0 || at.base == "char" ||
+                    at.base == "int8_t" || at.base == "uint8_t")
+                    suffix = (at.pointerDepth > 0 ? "str" : "char");
+                else if (isFloatType(at))
+                    suffix = "float";
+                else
+                    suffix = "int";
+            }
+            const std::string sym = base + suffix;
+            if (suffix == "str") {
+                // For string args, pass ptr.
+                emitLine("call void @" + sym + "(" + ty + " " + val + ")");
+            } else if (!suffix.empty()) {
+                emitLine("call void @" + sym + "(" + ty + " " + val + ")");
+            }
+            return "";
+        }
+
         std::string args;
         for (std::size_t i = 0; i < v.args.size(); ++i) {
             const auto& a = v.args[i];
@@ -1012,9 +1083,18 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             args += (args.empty() ? "" : ", ") + ty + " " + val;
         }
         const std::string rt = llvmType(e.type);
-        const bool isExternC = callee && callee->isExternC;
-        const std::string sym = isExternC ? llvmGlobalName(v.callee)
-                                          : llvmGlobalName(mangleFunction(v.callee, callee));
+        const bool isExternC = (callee && callee->isExternC) || isBuiltinCall;
+        std::string sym;
+        if (isBuiltinCall) {
+            // 8.5: Replace :: with _ for builtin symbol names.
+            std::string s(v.callee);
+            for (char& c : s) if (c == ':') c = '_';
+            sym = s;
+        } else if (isExternC) {
+            sym = llvmGlobalName(v.callee);
+        } else {
+            sym = llvmGlobalName(mangleFunction(v.callee, callee));
+        }
         if (rt == "void") {
             emitLine("call void @" + sym + "(" + args + ")");
             return "";

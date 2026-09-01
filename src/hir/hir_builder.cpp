@@ -73,6 +73,25 @@ bool isNumeric(const hir::Type& t) {
     return false;  // unknown user-defined type (e.g. struct)
 }
 
+// 8.5: Check if a name is a known runtime builtin function.
+// These functions are resolved at runtime by the interpreter or linked
+// from libc in codegen mode. They don't need HIR registration.
+bool isBuiltinFn(std::string_view name) {
+    // C runtime builtins (already supported).
+    if (name == "printf" || name == "puts" || name == "putchar" ||
+        name == "exit" || name == "abort" || name == "malloc" ||
+        name == "free")
+        return true;
+    // 8.5: Ivy stdlib builtins.
+    if (name == "ivy::print" || name == "ivy::println" ||
+        name == "ivy::print_int" || name == "ivy::print_float" ||
+        name == "ivy::print_str" || name == "ivy::print_char" ||
+        name == "ivy::println_int" || name == "ivy::println_float" ||
+        name == "ivy::println_str" || name == "ivy::println_char")
+        return true;
+    return false;
+}
+
 bool isIntegerLike(const hir::Type& t) {
     if (t.pointerDepth > 0) return false;
     return isIntegerBase(t.base);
@@ -2431,7 +2450,12 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                             }
                         } else {
                             call.callee = bareName;
-                            error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                            // 8.5: Allow calls to known builtins
+                            // (printf, ivy::print, etc.) without HIR
+                            // registration — resolved at runtime.
+                            if (!isBuiltinFn(bareName)) {
+                                error(callee->loc, "call to undeclared function '" + std::string(bareName) + "'");
+                            }
                         }
                     } else {
                         std::vector<hir::Type> argTypes;
@@ -2457,7 +2481,13 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 call.callee = stringStorage_.back();
                 call.target = resolveFunction(call.callee);
                 if (!call.target) {
-                    error(callee->loc, "call to undeclared function '" + std::string(call.callee) + "'");
+                    // 8.5: Check if this is a known interpreter/codegen
+                    // builtin (ivy::print, ivy::println, printf, etc.).
+                    // These are resolved at runtime, not at HIR level.
+                    if (!isBuiltinFn(call.callee)) {
+                        error(callee->loc, "call to undeclared function '" +
+                              std::string(call.callee) + "'");
+                    }
                 }
             } else {
                 // Method call: `obj.method(args)` or `obj->method(args)`.
@@ -2650,6 +2680,15 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                     }
                 }
             }
+        } else if (isBuiltinFn(call.callee)) {
+            // 8.5: Builtin functions (ivy::print, printf, etc.) return
+            // void (except printf which returns int, but that's rarely
+            // used). Set void type for print/println, int for printf.
+            if (call.callee == "printf" || call.callee == "puts" ||
+                call.callee == "putchar")
+                out->type = hir::Type{"int", false, false, 0};
+            else
+                out->type = hir::Type{"void", false, false, 0};
         } else {
             out->type = dummyType();
         }

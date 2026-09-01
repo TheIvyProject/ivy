@@ -1071,6 +1071,26 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // 8.5: Auto-add the compiler's own lib/ directory to the include
+    // search path so `#include <ivy.h>` works without explicit -I.
+    // We look for lib/ relative to the executable's directory.
+    {
+        namespace fs = std::filesystem;
+        // Try: <exe_dir>/lib, <exe_dir>/../lib, <exe_dir>/../../lib
+        fs::path exeDir = fs::current_path();
+        // If running from build/Release, look for ../../lib
+        for (const auto& rel : {fs::path("lib"),
+                                 fs::path("..") / "lib",
+                                 fs::path("..") / ".." / "lib"}) {
+            fs::path candidate = exeDir / rel;
+            std::error_code ec;
+            if (fs::exists(candidate, ec)) {
+                includePaths.push_back(candidate);
+                break;
+            }
+        }
+    }
+
     // Validate source extension — warn (not error) on unknown extensions.
     // `.ivy` is the canonical Ivy extension; `.cpp`/`.cc`/`.cxx`/`.c` are
     // accepted for legacy migration. Other extensions are warned about but

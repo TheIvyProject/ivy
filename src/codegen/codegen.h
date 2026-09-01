@@ -64,6 +64,7 @@ private:
     std::unordered_set<std::string> declaredC_;  // names declared via extern "C"
     bool usesMalloc_ = false;
     bool usesFree_ = false;
+    bool usesIvyPrint_ = false;  // 8.5: ivy::print/println builtins used
 
     // per-function
     std::unordered_map<std::string_view, std::string> vars_;  // var name -> llvm value

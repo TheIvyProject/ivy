@@ -97,7 +97,10 @@ private:
 
     // Builtins
     Value callBuiltin(std::string_view name, const std::vector<Value>& args);
-    bool  isBuiltin(std::string_view name) const;
+    bool isBuiltin(std::string_view name) const;
+
+    // 8.5: Print a Value with type-aware formatting.
+    void printValue(const Value& v, const mir::Type& t);
 };
 
 }  // namespace mir

@@ -1,0 +1,28 @@
+// 8.5 test: ivy::print / ivy::println — type-aware printing
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // --- ivy::println with various types ---
+    ivy::println(42);
+    ivy::println(3.14);
+    ivy::println("Hello, Ivy!");
+    ivy::println('A');
+
+    // --- ivy::print (no newline) + ivy::println ---
+    ivy::print("value = ");
+    ivy::println(100);
+
+    // --- ivy::print with various types ---
+    ivy::print(7);
+    ivy::print(" ");
+    ivy::print(2.5);
+    ivy::print(" ");
+    ivy::print('X');
+    ivy::println();
+
+    return 0;
+}

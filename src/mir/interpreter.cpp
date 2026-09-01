@@ -378,10 +378,63 @@ Value Interpreter::evalExpr(const Expr& e) {
             error(e.loc, "IvyInterpret v0.2: pointer index not yet supported");
             return makeVoid();
         } else if constexpr (std::is_same_v<V, E::New>) {
-            error(e.loc, "IvyInterpret v0.2: 'new' not yet supported");
-            return makeVoid();
+            // 8.5: new T(args...) — allocate a cell with default-constructed
+            // value of type T, call constructor if args provided, return Ptr.
+            Value obj = defaultStructValue(v.type.base);
+            Cell c = makeCell(std::move(obj));
+            // If constructor args are provided, call the ctor with
+            // &obj as `this`. The HIR builder injects ctor calls at
+            // declaration sites, but `new T(args)` goes through here.
+            if (!v.args.empty()) {
+                // Build args: first is `this` (the pointer to the new obj),
+                // then the ctor args.
+                std::vector<Value> callArgs;
+                callArgs.push_back(makePtr(c));
+                for (const auto& a : v.args)
+                    callArgs.push_back(evalExpr(*a));
+                // Find and call the constructor: TypeName::TypeName
+                std::string ctorName = std::string(v.type.base) + "::" +
+                                       std::string(v.type.base);
+                // Try to find the function in MIR
+                for (const auto& f : tu_.functions) {
+                    if (f->name == ctorName && f->hasBody) {
+                        execFunction(*f, std::move(callArgs));
+                        break;
+                    }
+                }
+            }
+            return makePtr(c);
         } else if constexpr (std::is_same_v<V, E::Delete>) {
-            error(e.loc, "IvyInterpret v0.2: 'delete' not yet supported");
+            // 8.5: delete ptr — evaluate the pointer, mark cell as dead.
+            // For struct types, call destructor first.
+            Value ptr = evalExpr(*v.operand);
+            if (!ptr.isPtr()) {
+                error(e.loc, "delete: operand is not a pointer");
+                return makeVoid();
+            }
+            if (ptr.ptr.isNull) {
+                error(e.loc, "delete: null pointer");
+                return makeVoid();
+            }
+            // Call destructor if the pointed-to value is a struct with a dtor.
+            if (ptr.ptr.cell && ptr.ptr.cell->isStruct()) {
+                std::string typeName = ptr.ptr.cell->strct.typeName;
+                std::string dtorName = typeName + "::~" + typeName;
+                for (const auto& f : tu_.functions) {
+                    if (f->name == dtorName && f->hasBody) {
+                        std::vector<Value> callArgs;
+                        callArgs.push_back(makePtr(ptr.ptr.cell));
+                        execFunction(*f, std::move(callArgs));
+                        break;
+                    }
+                }
+            }
+            // Mark the cell as dead by setting kind to Void.
+            if (ptr.ptr.cell) {
+                ptr.ptr.cell->kind = Value::Void;
+                ptr.ptr.cell->strct.fields.clear();
+                ptr.ptr.cell->str = "";
+            }
             return makeVoid();
         } else if constexpr (std::is_same_v<V, E::Cast>) {
             // 8.4: Cast — evaluate the operand and convert.
@@ -807,6 +860,28 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
         args.push_back(a ? evalExpr(*a) : Value{});
     }
 
+    // 8.5: ivy::print / ivy::println need type info from the Expr to
+    // distinguish char from int. Handle them here instead of in
+    // callBuiltin, since we have access to the arg expressions.
+    if (c.callee == "ivy::print" || c.callee == "ivy::println") {
+        const bool isLn = (c.callee == "ivy::println");
+        if (args.empty() || (args.size() == 1 && isLn)) {
+            // println() with no args, or println() with 0-arg form.
+            if (isLn && args.empty()) *out_ << "\n";
+            else if (!args.empty()) {
+                // println with 1 arg
+                printValue(args[0], c.args[0] ? c.args[0]->type : mir::Type{});
+                *out_ << "\n";
+            }
+            return makeVoid();
+        }
+        if (!args.empty()) {
+            printValue(args[0], c.args[0] ? c.args[0]->type : mir::Type{});
+            if (isLn) *out_ << "\n";
+        }
+        return makeVoid();
+    }
+
     if (isBuiltin(c.callee)) return callBuiltin(c.callee, args);
 
     // 7.7: Virtual dispatch.  Read the object's dynamic type name and
@@ -869,8 +944,15 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
 // ============================================================
 
 bool Interpreter::isBuiltin(std::string_view name) const {
+    // 8.5: ivy::print / ivy::println are builtins for the interpreter.
+    // In codegen mode, they are extern "C" functions linked from libc.
     return name == "printf" || name == "puts" || name == "putchar" ||
-           name == "exit" || name == "abort";
+           name == "exit" || name == "abort" ||
+           name == "ivy::print" || name == "ivy::println" ||
+           name == "ivy::print_int" || name == "ivy::print_float" ||
+           name == "ivy::print_str" || name == "ivy::print_char" ||
+           name == "ivy::println_int" || name == "ivy::println_float" ||
+           name == "ivy::println_str" || name == "ivy::println_char";
 }
 
 namespace {
@@ -885,7 +967,39 @@ std::string extractString(const Value& v) {
     return {};
 }
 
+// 8.5: Format a double for ivy::print/println.
+// Trailing zeros are stripped (e.g. 3.0 → "3", 3.14 → "3.14").
+std::string formatFloat(double d) {
+    char buf[64] = {};
+    std::snprintf(buf, sizeof(buf), "%g", d);
+    return std::string(buf);
+}
+
 }  // namespace
+
+// 8.5: Print a Value to the output stream, using type info from the
+// MIR expression to distinguish char from int. Must be a member function
+// to access out_.
+void Interpreter::printValue(const Value& v, const mir::Type& t) {
+    if (v.isInt()) {
+        // If the type is char (or char-based), print as character.
+        if (t.base == "char" || t.base == "int8_t" || t.base == "uint8_t")
+            *out_ << (char)v.asInt();
+        else
+            *out_ << v.asInt();
+    } else if (v.isFloat()) {
+        *out_ << formatFloat(v.asFloat());
+    } else if (v.isStr()) {
+        *out_ << v.asStr();
+    } else if (v.isPtr()) {
+        if (v.ptr.isNull) *out_ << "nullptr";
+        else *out_ << "(ptr)";
+    } else if (v.isStruct()) {
+        *out_ << "{" << v.strct.typeName << "}";
+    } else if (v.isVoid()) {
+        *out_ << "void";
+    }
+}
 
 Value Interpreter::callBuiltin(std::string_view name,
                                 const std::vector<Value>& args) {
@@ -979,6 +1093,43 @@ Value Interpreter::callBuiltin(std::string_view name,
         std::exit(static_cast<int>((!args.empty() && args[0].isInt()) ? args[0].asInt() : 0));
     }
     if (name == "abort") { std::abort(); }
+
+    // 8.5: ivy::print / ivy::println are handled directly in evalCall
+    // (they need Expr type info to distinguish char from int).
+    // The typed overloads below are for codegen mode but also work
+    // if called directly (e.g. via function pointer — rare).
+    if (name == "ivy::print_int") {
+        *out_ << (args.empty() ? 0LL : (args[0].isInt() ? args[0].asInt() : 0));
+        return makeVoid();
+    }
+    if (name == "ivy::print_float") {
+        *out_ << formatFloat(args.empty() ? 0.0 : (args[0].isFloat() ? args[0].asFloat() : 0.0));
+        return makeVoid();
+    }
+    if (name == "ivy::print_str") {
+        *out_ << (args.empty() ? "" : extractString(args[0]));
+        return makeVoid();
+    }
+    if (name == "ivy::print_char") {
+        *out_ << (char)(args.empty() ? 0 : (args[0].isInt() ? args[0].asInt() : 0));
+        return makeVoid();
+    }
+    if (name == "ivy::println_int") {
+        *out_ << (args.empty() ? 0LL : (args[0].isInt() ? args[0].asInt() : 0)) << "\n";
+        return makeVoid();
+    }
+    if (name == "ivy::println_float") {
+        *out_ << formatFloat(args.empty() ? 0.0 : (args[0].isFloat() ? args[0].asFloat() : 0.0)) << "\n";
+        return makeVoid();
+    }
+    if (name == "ivy::println_str") {
+        *out_ << (args.empty() ? "" : extractString(args[0])) << "\n";
+        return makeVoid();
+    }
+    if (name == "ivy::println_char") {
+        *out_ << (char)(args.empty() ? 0 : (args[0].isInt() ? args[0].asInt() : 0)) << "\n";
+        return makeVoid();
+    }
     return makeVoid();
 }
 
