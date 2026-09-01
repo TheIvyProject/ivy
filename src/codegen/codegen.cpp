@@ -404,8 +404,32 @@ bool CodeGen::decodeBody(std::string_view body, std::string& bytes) {
 }
 
 bool CodeGen::decodeString(std::string_view raw, std::string& bytes) {
+    int width = 1;
+    return decodeStringTyped(raw, bytes, width);
+}
+
+// 8.8: Strip a string-literal prefix (L, u, U, u8) if present and return
+// the element width: 1 (plain/u8), 2 (L/u), 4 (U). `raw` is advanced
+// past the prefix.
+static int stripStringPrefix(std::string_view& raw) {
+    if (raw.size() >= 2 && raw[0] == 'u' && raw[1] == '8') {
+        raw.remove_prefix(2);
+        return 1;  // u8"..." → char (same as plain)
+    }
+    if (raw.size() >= 1) {
+        const char p = raw[0];
+        if (p == 'L') { raw.remove_prefix(1); return 2; }  // L"..." → wchar_t (i16)
+        if (p == 'u') { raw.remove_prefix(1); return 2; }  // u"..." → char16_t (i16)
+        if (p == 'U') { raw.remove_prefix(1); return 4; }  // U"..." → char32_t (i32)
+    }
+    return 1;
+}
+
+bool CodeGen::decodeStringTyped(std::string_view raw, std::string& bytes, int& width) {
+    width = stripStringPrefix(raw);
+    // Raw string R"delim(...)delim" (possibly prefixed, e.g. LR"(...)")
+    // — Ivy lexer routes raw strings separately, but handle defensively.
     if (raw.size() >= 3 && raw[0] == 'R' && raw[1] == '"') {
-        // Raw string R"delim(...)delim"
         const std::size_t open = raw.find('(');
         const std::size_t close = raw.rfind(')');
         if (open == std::string_view::npos || close == std::string_view::npos ||
@@ -424,6 +448,11 @@ bool CodeGen::decodeString(std::string_view raw, std::string& bytes) {
 }
 
 bool CodeGen::decodeChar(std::string_view raw, long long& value) {
+    // 8.8: Strip char literal prefix (L, u, U) if present.
+    if (raw.size() >= 1) {
+        const char p = raw[0];
+        if (p == 'L' || p == 'u' || p == 'U') raw.remove_prefix(1);
+    }
     if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') {
         error({0, 0}, "malformed character literal");
         return false;
@@ -461,12 +490,16 @@ void CodeGen::collectExpr(const mir::Expr& e) {
             using T = std::decay_t<decltype(n)>;
             if constexpr (std::is_same_v<T, mir::Expr::StringLit>) {
                 std::string bytes;
-                if (decodeString(n.raw, bytes)) {
-                    const auto it = strings_.find(bytes);
+                int width = 1;
+                if (decodeStringTyped(n.raw, bytes, width)) {
+                    // 8.8: Dedup key includes width so a plain "abc" and
+                    // L"abc" get separate globals.
+                    std::string key = std::to_string(width) + ":" + bytes;
+                    const auto it = strings_.find(key);
                     if (it == strings_.end()) {
                         const std::string name = "@.str." + std::to_string(stringList_.size());
-                        strings_.emplace(bytes, name);
-                        stringList_.emplace_back(name, bytes);
+                        strings_.emplace(key, name);
+                        stringList_.emplace_back(name, StringEntry{bytes, width});
                     }
                 }
             } else if constexpr (std::is_same_v<T, mir::Expr::New>) {
@@ -577,10 +610,16 @@ void CodeGen::emitGlobals() {
 }
 
 void CodeGen::emitStringConstants() {
-    for (const auto& [name, bytes] : stringList_) {
-        const std::size_t len = bytes.size() + 1;  // + NUL terminator
-        emitLine(name + " = private unnamed_addr constant [" + std::to_string(len) +
-                 " x i8] c\"" + llvmEscape(bytes) + "\\00\"");
+    for (const auto& [name, entry] : stringList_) {
+        const std::size_t len = entry.bytes.size() + 1;  // + NUL terminator
+        // 8.8: Emit the correct LLVM element type based on string prefix.
+        //   width=1 → [N x i8],   width=2 → [N x i16],  width=4 → [N x i32]
+        const char* elemTy = entry.width == 1 ? "i8"
+                           : entry.width == 2 ? "i16"
+                           : "i32";
+        emitLine(name + " = private unnamed_addr constant [" +
+                 std::to_string(len) + " x " + elemTy + "] c\"" +
+                 llvmEscape(entry.bytes) + "\\00\"");
     }
 }
 
@@ -691,8 +730,10 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::StringLit>(n)) {
         std::string bytes;
-        if (!decodeString(std::get<M::StringLit>(n).raw, bytes)) return "null";
-        const auto it = strings_.find(bytes);
+        int width = 1;
+        if (!decodeStringTyped(std::get<M::StringLit>(n).raw, bytes, width)) return "null";
+        std::string key = std::to_string(width) + ":" + bytes;
+        const auto it = strings_.find(key);
         if (it == strings_.end()) return "null";  // unreachable: pre-pass collected it
         std::string t = newTemp();
         emitLine(t + " = getelementptr i8, ptr " + it->second + ", i64 0");

@@ -67,6 +67,20 @@ bool isRawStringPrefix(std::string_view id) {
     return id == "R" || id == "u8R" || id == "uR" || id == "UR" || id == "LR";
 }
 
+// 8.8: Check if an identifier is a string/char literal prefix.
+// L   = wchar_t (wide string, [N x i16])
+// u   = char16_t ([N x i16])
+// U   = char32_t ([N x i32])
+// u8  = char (UTF-8, [N x i8] — same as plain string)
+bool isStringPrefix(std::string_view id) {
+    return id == "L" || id == "u" || id == "U" || id == "u8";
+}
+
+// 8.8: Check if an identifier is a char literal prefix.
+bool isCharPrefix(std::string_view id) {
+    return id == "L" || id == "u" || id == "U";
+}
+
 bool isIntegerSuffixChar(char c) {
     return c == 'u' || c == 'U' || c == 'l' || c == 'L' || c == 'f' || c == 'F';
 }
@@ -206,14 +220,20 @@ Token Lexer::lexToken() {
         const std::string_view id = source_.substr(start, pos_ - start);
         // Raw string prefixes (R"delim(...)delim", u8R"(...)", ...).
         if (isRawStringPrefix(id) && peek() == '"') return lexRawString(start, line, col);
+        // 8.8: String/char literal prefixes (L"...", u"...", U"...", u8"...").
+        // Also L'...', u'...', U'...' for prefixed char literals.
+        if (isStringPrefix(id)) {
+            if (peek() == '"') return lexStringLiteral(start, line, col);
+            if (peek() == '\'') return lexCharLiteral(start, line, col);
+        }
         const TokenKind kind = keywords().contains(id) ? TokenKind::Keyword : TokenKind::Identifier;
         return makeToken(kind, start, line, col);
     }
 
     if (isDigit(c) || (c == '.' && isDigit(peek(1)))) return lexNumber(line, col);
 
-    if (c == '"') return lexStringLiteral(line, col);
-    if (c == '\'') return lexCharLiteral(line, col);
+    if (c == '"') return lexStringLiteral(start, line, col);
+    if (c == '\'') return lexCharLiteral(start, line, col);
 
     // Longest-match operator scan.
     for (const auto& [text, kind] : kOperators) {
@@ -277,8 +297,9 @@ Token Lexer::lexNumber(std::uint32_t line, std::uint32_t col) {
     return makeToken(isFloat ? TokenKind::Float : TokenKind::Integer, start, line, col);
 }
 
-Token Lexer::lexStringLiteral(std::uint32_t line, std::uint32_t col) {
-    const std::size_t start = pos_;
+Token Lexer::lexStringLiteral(std::size_t start, std::uint32_t line, std::uint32_t col) {
+    // `start` may point at a prefix (L, u, U, u8) or at the opening '"'.
+    // In either case, `pos_` is at the opening '"', so advance past it.
     advance();  // opening '"'
     for (;;) {
         const char c = peek();
@@ -293,8 +314,9 @@ Token Lexer::lexStringLiteral(std::uint32_t line, std::uint32_t col) {
     return makeToken(TokenKind::String, start, line, col);
 }
 
-Token Lexer::lexCharLiteral(std::uint32_t line, std::uint32_t col) {
-    const std::size_t start = pos_;
+Token Lexer::lexCharLiteral(std::size_t start, std::uint32_t line, std::uint32_t col) {
+    // `start` may point at a prefix (L, u, U) or at the opening '\''.
+    // In either case, `pos_` is at the opening '\''.
     advance();  // opening '\''
     for (;;) {
         const char c = peek();

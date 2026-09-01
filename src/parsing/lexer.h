@@ -38,8 +38,8 @@ private:
     void skipTrivia();
     Token lexToken();
     Token lexNumber(std::uint32_t line, std::uint32_t col);
-    Token lexStringLiteral(std::uint32_t line, std::uint32_t col);
-    Token lexCharLiteral(std::uint32_t line, std::uint32_t col);
+    Token lexStringLiteral(std::size_t start, std::uint32_t line, std::uint32_t col);
+    Token lexCharLiteral(std::size_t start, std::uint32_t line, std::uint32_t col);
     Token lexRawString(std::size_t start, std::uint32_t line, std::uint32_t col);
     Token makeToken(TokenKind kind, std::size_t start, std::uint32_t line, std::uint32_t col) const;
     void errorAt(std::uint32_t line, std::uint32_t col, std::string_view message);

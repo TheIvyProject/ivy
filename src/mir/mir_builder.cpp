@@ -92,7 +92,24 @@ bool decodeBody(std::string_view body, std::string& bytes) {
     return true;
 }
 
+// 8.8: Strip a string-literal prefix (L, u, U, u8) if present.
+// Returns element width: 1 (plain/u8), 2 (L/u), 4 (U).
+static int stripStringPrefix(std::string_view& raw) {
+    if (raw.size() >= 2 && raw[0] == 'u' && raw[1] == '8') {
+        raw.remove_prefix(2);
+        return 1;
+    }
+    if (raw.size() >= 1) {
+        const char p = raw[0];
+        if (p == 'L') { raw.remove_prefix(1); return 2; }
+        if (p == 'u') { raw.remove_prefix(1); return 2; }
+        if (p == 'U') { raw.remove_prefix(1); return 4; }
+    }
+    return 1;
+}
+
 bool decodeString(std::string_view raw, std::string& bytes) {
+    stripStringPrefix(raw);  // 8.8: ignore width for interpreter; just strip
     if (raw.size() >= 3 && raw[0] == 'R' && raw[1] == '"') {
         std::size_t open = raw.find('(');
         std::size_t close = raw.rfind(')');
@@ -105,6 +122,11 @@ bool decodeString(std::string_view raw, std::string& bytes) {
 }
 
 bool decodeChar(std::string_view raw, long long& value) {
+    // 8.8: Strip char literal prefix (L, u, U) if present.
+    if (raw.size() >= 1) {
+        const char p = raw[0];
+        if (p == 'L' || p == 'u' || p == 'U') raw.remove_prefix(1);
+    }
     if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') return false;
     std::string bytes;
     if (!decodeBody(raw.substr(1, raw.size() - 2), bytes)) return false;

@@ -1,0 +1,40 @@
+// 8.8: Wide/UTF string prefixes — L"...", u"...", U"...", u8"..."
+// Tests that the lexer recognizes prefixes and codegen emits
+// the correct LLVM element types: [N x i8], [N x i16], [N x i32].
+
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // Plain string (i8)
+    const char* s1 = "hello";
+    printf("plain: %s\n", s1);
+
+    // u8 string (i8 — same as plain)
+    const char* s2 = u8"world";
+    printf("u8: %s\n", s2);
+
+    // Wide string L"..." (i16) — assign to char* for now
+    const char* w1 = L"wide";
+    printf("L: %s\n", w1);
+
+    // u string (i16)
+    const char* u1 = u"u16";
+    printf("u: %s\n", u1);
+
+    // U string (i32)
+    const char* U1 = U"u32";
+    printf("U: %s\n", U1);
+
+    // Prefixed char literals — all decode to int values
+    int wc = L'A';
+    int uc = u'B';
+    int Uc = U'C';
+    printf("chars: %d %d %d\n", wc, uc, Uc);
+
+    printf("done\n");
+    return 0;
+}

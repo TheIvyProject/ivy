@@ -58,9 +58,18 @@ private:
     bool failed_ = false;
     std::ostream* out_ = nullptr;
 
-    // module-wide
-    std::unordered_map<std::string, std::string> strings_;  // decoded bytes -> global name
-    std::vector<std::pair<std::string, std::string>> stringList_;  // global name, bytes
+    // module wide
+    // 8.8: Track element width for wide/UTF string prefixes.
+    //   width=1 → [N x i8]  (plain, u8"...")
+    //   width=2 → [N x i16] (L"...", u"...")
+    //   width=4 → [N x i32] (U"...")
+    struct StringEntry {
+        std::string bytes;  // decoded UTF-8 bytes (for width=1) or
+                            // per-element bytes (for width>1, little-endian)
+        int width = 1;      // element size in bytes
+    };
+    std::unordered_map<std::string, std::string> strings_;  // key -> global name
+    std::vector<std::pair<std::string, StringEntry>> stringList_;  // global name, entry
     std::unordered_set<std::string> declaredC_;  // names declared via extern "C"
     bool usesMalloc_ = false;
     bool usesFree_ = false;
@@ -192,7 +201,12 @@ private:
     // Decodes a string literal body (without quotes) into raw bytes.
     bool decodeBody(std::string_view body, std::string& bytes);
     // Decodes a full string literal (with quotes/raw prefix) into bytes.
+    // Legacy interface: assumes width=1 (plain or u8"..." string).
     bool decodeString(std::string_view raw, std::string& bytes);
+    // 8.8: Decodes a full string literal, reporting the element width
+    // (1 for plain/u8, 2 for L/u, 4 for U). For width>1, `bytes` contains
+    // per-element little-endian values.
+    bool decodeStringTyped(std::string_view raw, std::string& bytes, int& width);
     // Decodes a character literal into its integer value.
     bool decodeChar(std::string_view raw, long long& value);
     // Escapes raw bytes for inclusion in an LLVM string constant.
