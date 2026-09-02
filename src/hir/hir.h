@@ -48,6 +48,10 @@ struct Expr {
     struct Delete { std::unique_ptr<Expr> operand; bool isArray; };
     // Aggregate initializer for a struct: `Point p = {1, 2};`.
     // Elements map positionally to struct fields; type is the struct type.
+    // 9.3: `designators[i]` is the field name for `elements[i]` (empty =
+    // positional). After HIR lowering, designators are resolved to field
+    // indices and the HIR InitList becomes purely positional (elements
+    // reordered to match struct field order, padded with nullptr).
     struct InitList { std::vector<std::unique_ptr<Expr>> elements; };
     // Lambda closure value. After HIR lowering, a lambda expression
     // becomes an InitList that initializes a closure struct whose

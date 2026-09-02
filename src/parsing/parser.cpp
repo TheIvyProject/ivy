@@ -2477,15 +2477,43 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         // Braced aggregate initializer: `{ expr, expr, ... }`.
         // Permitted in initializer position (e.g. `Point p = {1, 2};`).
         // An empty `{}` is a value-initializer (zero-init for structs).
+        // 9.3: Designated initializers `{.field = value, ...}` are
+        // supported — each element can have a designator prefix.
         next();
         auto out = makeExpr<Expr::InitList>(loc);
         auto& il = std::get<Expr::InitList>(out->node);
         if (!at(TokenKind::RBrace)) {
-            il.elements.push_back(parseExpr());
+            // 9.3: Parse a single init element, which may be a
+            // designated initializer `.field = value` or a positional
+            // expression.
+            auto parseInitElement = [&]() {
+                if (at(TokenKind::Dot)) {
+                    // Designated initializer: `.field = value`
+                    next();  // consume '.'
+                    if (!at(TokenKind::Identifier)) {
+                        errorAt(peek(), "expected field name after '.' in designated initializer");
+                        return;
+                    }
+                    std::string_view fieldName = peek().lexeme;
+                    next();  // consume field name
+                    if (!at(TokenKind::Assign)) {
+                        errorAt(peek(), "expected '=' after field name in designated initializer");
+                        return;
+                    }
+                    next();  // consume '='
+                    il.designators.push_back(fieldName);
+                    il.elements.push_back(parseExpr());
+                } else {
+                    // Positional element
+                    il.designators.emplace_back();  // empty = positional
+                    il.elements.push_back(parseExpr());
+                }
+            };
+            parseInitElement();
             while (at(TokenKind::Comma)) {
                 next();
                 if (at(TokenKind::RBrace)) break;  // trailing comma
-                il.elements.push_back(parseExpr());
+                parseInitElement();
             }
         }
         expect(TokenKind::RBrace, "expected '}' to close braced initializer");

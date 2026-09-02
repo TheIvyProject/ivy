@@ -783,6 +783,9 @@ Value Interpreter::evalInitList(const Expr::InitList& il, const Type& ty, const 
         return makeVoid();
     }
 
+    // 9.3: The interpreter operates on MIR, where designated initializers
+    // have already been resolved to positional elements by the HIR builder.
+    // Elements are in struct field order, with nullptr for zero-init fields.
     Value::StructVal sv;
     sv.typeName = std::string(ty.base);
     for (std::size_t i = 0; i < si->fields.size(); ++i) {

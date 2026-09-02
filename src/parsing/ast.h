@@ -116,7 +116,14 @@ struct Expr {
     struct Delete { std::unique_ptr<Expr> operand; bool isArray; };      // unsafe only
     // Braced aggregate initializer: `Point p = {1, 2};` or `Point p{1, 2};`.
     // Used for struct types — elements map positionally to struct fields.
-    struct InitList { std::vector<std::unique_ptr<Expr>> elements; };
+    // 9.3: Designated initializers `{.field = value}` are supported via
+    // the `designators` vector — `designators[i]` is the field name for
+    // `elements[i]`, or empty string_view for a positional element.
+    // Mixed designated/positional is allowed (C++20 rules).
+    struct InitList {
+        std::vector<std::unique_ptr<Expr>> elements;
+        std::vector<std::string_view> designators;
+    };
     // Lambda expression: `[cap](params) -> ret { body }`.
     // `returnType.base` is empty when `-> ret` is omitted (deduced).
     // `body` is a `Stmt::Compound` stored as `std::unique_ptr<Stmt>`
@@ -217,6 +224,7 @@ inline std::unique_ptr<Expr> cloneExpr(const Expr& e) {
                 if (el) il.elements.push_back(cloneExpr(*el));
                 else il.elements.push_back(nullptr);
             }
+            il.designators = v.designators;  // 9.3: copy designator names
             out->node.emplace<Expr::InitList>(std::move(il));
         } else if constexpr (std::is_same_v<V, Expr::Lambda>) {
             // Lambdas are not cloned — they are unique AST nodes owned

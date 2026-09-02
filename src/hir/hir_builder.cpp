@@ -5,6 +5,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace ivy {
 namespace {
@@ -1933,53 +1934,94 @@ std::unique_ptr<hir::Expr> HirBuilder::buildStructInit(const Expr::InitList& il,
     }
     const StructDef& def = structs_[structType.base];
 
-    // Empty `{}` is a value-initializer — all fields default-initialized
-    // (zero for scalars, default member init if present, recursively for
-    // nested structs).  We still emit an InitList node so codegen can apply
-    // default member initializers when present.
-    if (il.elements.size() > def.fields.size()) {
-        error(loc, "too many initializers for struct '" + std::string(structType.base) +
-                       "' (expected at most " + std::to_string(def.fields.size()) +
-                       ", got " + std::to_string(il.elements.size()) + ")");
-        out->type = structType;
-        return out;
-    }
+    // 9.3: Designated initializers — resolve each element to a field
+    // index, reorder into a positional vector matching struct field
+    // order. C++20 rules: positional elements continue from the last
+    // designator's index + 1. Fields without an explicit initializer
+    // get their default member init (if any) or nullptr (zero-init).
+    //
+    // Build a field name → index map for O(1) lookup.
+    std::unordered_map<std::string_view, std::size_t> fieldIndex;
+    for (std::size_t i = 0; i < def.fields.size(); ++i)
+        fieldIndex[def.fields[i].name] = i;
 
-    auto& hlist = out->node.emplace<hir::Expr::InitList>();
+    // resolvedElements[i] will hold the initializer for field i (or nullptr).
+    std::vector<std::unique_ptr<hir::Expr>> resolvedElements(def.fields.size());
+
+    // Track which fields have been explicitly initialized (for error
+    // reporting on duplicate designators).
+    std::vector<bool> fieldInitialized(def.fields.size(), false);
+
+    // For positional elements, track the "current" field index. This
+    // starts at 0 and advances. After a designated initializer, the
+    // next positional element goes to designatorIndex + 1 (C++20 rule).
+    std::size_t positionalIndex = 0;
+
     for (std::size_t i = 0; i < il.elements.size(); ++i) {
         const auto& elem = il.elements[i];
-        // A nullptr element is a placeholder for a field that has no
-        // explicit initializer and no default member initializer — it
-        // will be zero-initialized by codegen. Preserve the slot so
-        // field indices stay aligned.
+        std::size_t targetIdx;
+
+        if (i < il.designators.size() && !il.designators[i].empty()) {
+            // Designated initializer: `.field = value`
+            auto it = fieldIndex.find(il.designators[i]);
+            if (it == fieldIndex.end()) {
+                error(loc, "struct '" + std::string(structType.base) +
+                               "' has no field named '" +
+                               std::string(il.designators[i]) + "'");
+                // Build the expression anyway to continue error recovery
+                if (elem) [[maybe_unused]] auto _ = buildExpr(*elem);
+                continue;
+            }
+            targetIdx = it->second;
+            if (fieldInitialized[targetIdx]) {
+                error(loc, "field '" + std::string(il.designators[i]) +
+                               "' of struct '" + std::string(structType.base) +
+                               "' is initialized more than once");
+            }
+            // C++20: after a designator, positional elements continue
+            // from the next field.
+            positionalIndex = targetIdx + 1;
+        } else {
+            // Positional element: use the current positional index.
+            targetIdx = positionalIndex;
+            if (targetIdx >= def.fields.size()) {
+                error(loc, "too many initializers for struct '" +
+                               std::string(structType.base) + "'");
+                if (elem) [[maybe_unused]] auto _ = buildExpr(*elem);
+                continue;
+            }
+            ++positionalIndex;
+        }
+
+        fieldInitialized[targetIdx] = true;
+
         if (!elem) {
-            hlist.elements.push_back(nullptr);
+            // nullptr placeholder — field has no explicit value, will
+            // be resolved below via default member init or zero-init.
             continue;
         }
-        // Look up field type from the StructDef fieldMap (by index — fields
-        // are sequential). Use the StructDecl field order directly.
-        hir::Type fieldType = def.fields[i].type;
+
+        hir::Type fieldType = def.fields[targetIdx].type;
         auto built = buildExpr(*elem);
         if (built && !isAssignable(fieldType, built->type)) {
-            error(built->loc, "field '" + std::string(def.fields[i].name) + "' of struct '" +
-                                  std::string(structType.base) + "' expects '" +
-                                  typeToString(fieldType) + "', got '" +
-                                  typeToString(built->type) + "'");
+            error(built->loc, "field '" + std::string(def.fields[targetIdx].name) +
+                                  "' of struct '" + std::string(structType.base) +
+                                  "' expects '" + typeToString(fieldType) +
+                                  "', got '" + typeToString(built->type) + "'");
         }
-        hlist.elements.push_back(std::move(built));
+        resolvedElements[targetIdx] = std::move(built);
     }
-    // Trailing fields without an explicit initializer: apply default
-    // member initializers (e.g. `Point p = {1};` where `y` has `= 0`).
-    // Fields without a default are left to codegen, which zero-inits
-    // them via `store ... zeroinitializer`.
-    for (std::size_t i = il.elements.size(); i < def.fields.size(); ++i) {
-        if (i < def.defaultInits.size() && def.defaultInits[i]) {
+
+    // Now build the final HIR InitList: for each field, use the resolved
+    // element, or the default member init, or nullptr (zero-init).
+    auto& hlist = out->node.emplace<hir::Expr::InitList>();
+    for (std::size_t i = 0; i < def.fields.size(); ++i) {
+        if (resolvedElements[i]) {
+            hlist.elements.push_back(std::move(resolvedElements[i]));
+        } else if (i < def.defaultInits.size() && def.defaultInits[i]) {
             auto built = buildExpr(*def.defaultInits[i]);
             hlist.elements.push_back(std::move(built));
         } else {
-            // No default — push a nullptr placeholder so the MIR/codegen
-            // can still map field indices correctly. Codegen skips null
-            // elements (leaving the field zero-initialized).
             hlist.elements.push_back(nullptr);
         }
     }

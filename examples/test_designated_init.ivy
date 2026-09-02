@@ -1,0 +1,53 @@
+#pragma ivy cnumber
+
+struct Point {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+};
+
+struct Config {
+    int32_t width;
+    int32_t height;
+    bool visible;
+};
+
+int main() {
+    // Designated initializers — out-of-order
+    Point p = {.z = 30, .x = 10, .y = 20};
+    ivy::println(p.x);
+    ivy::println(p.y);
+    ivy::println(p.z);
+
+    // Partial designated — y omitted (zero-init)
+    Point q = {.x = 1, .z = 3};
+    ivy::println(q.x);
+    ivy::println(q.y);
+    ivy::println(q.z);
+
+    // Mixed: positional then designated
+    Point r = {1, .z = 100};
+    ivy::println(r.x);
+    ivy::println(r.y);
+    ivy::println(r.z);
+
+    // Config with bool field
+    Config c = {.visible = true, .width = 800, .height = 600};
+    ivy::println(c.width);
+    ivy::println(c.height);
+    ivy::println(c.visible);
+
+    // Empty initializer (all zero)
+    Point s = {};
+    ivy::println(s.x);
+    ivy::println(s.y);
+    ivy::println(s.z);
+
+    // Pure positional (regression test)
+    Point t = {7, 8, 9};
+    ivy::println(t.x);
+    ivy::println(t.y);
+    ivy::println(t.z);
+
+    return 0;
+}
