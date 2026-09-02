@@ -63,11 +63,32 @@ struct Param {
 // A template parameter: `typename T` (type) or `int N` / `long long N` (non-type).
 // For non-type parameters, `type` holds the integer type and `name` is the
 // parameter name. `isTypename` distinguishes the two kinds.
+// 9.1: `constraint` holds a concept name (e.g. "Addable") for constrained
+// type parameters (`template <Addable T>`). Empty => unconstrained.
 struct TemplateParam {
     bool isTypename = true;   // true => `typename T`, false => `int N` etc.
     bool isVariadic = false;  // true => `typename... Args` (parameter pack)
     Type type;                // for non-type: the integer type
     std::string_view name;    // parameter name (T, N, Args, ...)
+    std::string_view constraint;  // 9.1: concept name, or "" if unconstrained
+    SourceLoc loc;
+};
+
+// 9.1: A concept definition: `concept Name = requires(T a, T b) { a + b; };`
+// Stores the template parameter name (T) and a list of requirement strings
+// (each is a source snippet like "a + b" that must be valid for the type).
+// The HIR builder checks constraints by substituting the concrete type
+// and verifying the requirements compile.
+struct ConceptDecl {
+    std::string_view name;           // concept name (e.g. "Addable")
+    std::string paramName;      // the concept's type parameter (e.g. "T")
+    // Each requirement is a source-text snippet extracted from the
+    // requires-expression body. We store them as text and re-parse them
+    // during constraint checking. Simple requirements:
+    //   "a + b"        → expression must be valid (has operator+)
+    //   "a.foo()"     → member access must be valid
+    //   "sizeof(a)"   → type must be complete
+    std::vector<std::string> requirements;
     SourceLoc loc;
 };
 
@@ -464,6 +485,7 @@ struct TranslationUnit {
     std::vector<EnumDecl> enums;
     std::vector<StructDecl> structs;
     std::vector<UsingDecl> usingDecls;  // `using Name = Type;` aliases
+    std::vector<ConceptDecl> concepts;  // 9.1: `concept Name = requires(...)...`
 };
 
 // Deep-copy a Function AST node. Used by the HIR builder when

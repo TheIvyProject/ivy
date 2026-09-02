@@ -128,6 +128,8 @@ private:
     void parseExternC(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs);
     void parseUsing(TranslationUnit& tu, SourceLoc loc);
     void parseTemplate(TranslationUnit& tu, SourceLoc loc);
+    // 9.1: Parse a concept definition: `concept Name = requires(T a) { a + b; };`
+    void parseConcept(TranslationUnit& tu, SourceLoc loc);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
                        std::vector<TemplateParam> tplParams = {});

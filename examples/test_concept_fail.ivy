@@ -1,0 +1,30 @@
+// 9.1: Test constraint failure — type that doesn't satisfy the concept
+// should produce a clear error message.
+
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+concept Addable = requires(T a, T b) {
+    a + b;
+};
+
+struct Foo {
+    int32_t x;
+};
+
+// No operator+ for Foo — constraint should fail
+template <Addable T>
+T add(T a, T b) {
+    return a + b;
+}
+
+int main() {
+    Foo f1;
+    Foo f2;
+    Foo result = add<Foo>(f1, f2);
+    printf("should not reach\n");
+    return 0;
+}

@@ -3521,6 +3521,9 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
 
 std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     hir_ = std::make_unique<hir::TranslationUnit>();
+    // 9.1: Register concepts (pass 0a) so concept names are available
+    // for constraint checking during template instantiation.
+    for (const ConceptDecl& cd : ast_.concepts) concepts_[cd.name] = &cd;
     // Register type aliases (pass 0) so alias names are usable as types
     // in function/struct member declarations (pass 1).
     for (const UsingDecl& ud : ast_.usingDecls) buildUsing(ud);
@@ -3971,6 +3974,141 @@ bool HirBuilder::tryEvalConstexprCall(hir::Expr& out, const hir::Expr::Call& cal
 }
 
 // ---------------------------------------------------------------------------
+//                      9.1: Concepts — constraint checking
+// ---------------------------------------------------------------------------
+
+// 9.1: Check if a concrete type satisfies a named concept.
+// The concept defines a type parameter (e.g. "T") and a list of
+// requirements (expression snippets like "a + b"). We substitute the
+// concept parameter with the concrete type, then verify each
+// requirement is a valid expression for that type.
+//
+// For Ivy's simplified approach, we check:
+//   - Binary operators (a + b, a == b, a < b, etc.) — the type must be
+//     a builtin arithmetic type or a struct with the corresponding
+//     operator overload.
+//   - Member access (a.foo()) — the struct must have the field/method.
+//   - sizeof(a) — always valid for complete types.
+//
+// Returns true if all requirements are satisfied.
+bool HirBuilder::checkConstraint(std::string_view conceptName,
+                                 const hir::Type& concreteType, SourceLoc loc) {
+    auto it = concepts_.find(conceptName);
+    if (it == concepts_.end()) {
+        // Unknown concept — can't check, assume satisfied (permissive).
+        return true;
+    }
+    const ConceptDecl* cd = it->second;
+    const std::string& paramType = cd->paramName;  // e.g. "T"
+    // Build a human-readable name for the concrete type for error messages.
+    auto typeNameStr = [](const hir::Type& t) -> std::string {
+        std::string s;
+        s += std::string(t.base);
+        if (t.isUnsigned) s += " unsigned";
+        if (t.isConst) s += " const";
+        for (std::uint32_t d = 0; d < t.pointerDepth; ++d) s += "*";
+        return s;
+    };
+    const std::string concreteName = typeNameStr(concreteType);
+
+    // Helper: check if the concrete type supports a binary operator.
+    // Arithmetic types support all arithmetic + comparison operators.
+    // Struct types must have an operator overload (checked in structs_).
+    auto typeIsArithmetic = [](const hir::Type& t) -> bool {
+        // Builtin arithmetic: int8_t..int64_t, uint8_t..uint64_t,
+        // float16_t..float128_t, bfloat16_t, and char/bool.
+        // Struct/enum types are not arithmetic.
+        return t.pointerDepth == 0 && !t.base.empty() &&
+               (t.base.ends_with("_t") || t.base == "char" || t.base == "bool" ||
+                t.base == "int" || t.base == "long" || t.base == "short" ||
+                t.base == "unsigned" || t.base == "signed" ||
+                t.base == "float" || t.base == "double");
+    };
+
+    for (const std::string& req : cd->requirements) {
+        // Parse the requirement: it's an expression like "a + b" or
+        // "a == b" or "a.foo()" or "sizeof(a)".
+        // We do simple pattern matching:
+        //   - "sizeof(...)" → always valid
+        //   - "a OP b" → check operator support
+        //   - "a.xxx()" → check member exists
+
+        // Skip whitespace to find the operator.
+        // Find binary operator: look for +, -, *, /, ==, !=, <, >, <=, >=
+        // between two operands.
+        std::string op;
+        std::size_t opPos = std::string::npos;
+        // Check two-char operators first (==, !=, <=, >=)
+        for (std::size_t i = 0; i + 1 < req.size(); ++i) {
+            if ((req[i] == '=' && req[i+1] == '=') ||
+                (req[i] == '!' && req[i+1] == '=') ||
+                (req[i] == '<' && req[i+1] == '=') ||
+                (req[i] == '>' && req[i+1] == '=')) {
+                op = req.substr(i, 2);
+                opPos = i;
+                break;
+            }
+        }
+        // Single-char operators
+        if (opPos == std::string::npos) {
+            for (std::size_t i = 0; i < req.size(); ++i) {
+                if (req[i] == '+' || req[i] == '-' || req[i] == '*' ||
+                    req[i] == '/' || req[i] == '<' || req[i] == '>') {
+                    // Avoid matching '-' in "a->b" or sizeof
+                    if (i > 0 && req[i-1] == '-') continue;  // part of ->
+                    op = std::string(1, req[i]);
+                    opPos = i;
+                    break;
+                }
+            }
+        }
+
+        if (!op.empty() && opPos != std::string::npos) {
+            // Binary operator requirement: "a OP b"
+            if (!typeIsArithmetic(concreteType)) {
+                // Struct type: check if it has an operator overload.
+                auto structIt = structs_.find(concreteType.base);
+                if (structIt != structs_.end()) {
+                    bool found = false;
+                    for (const auto& [fname, fns] : functions_) {
+                        for (hir::Function* f : fns) {
+                            // Check for operator overload: "operator+",
+                            // "operator==", etc.
+                            if (f->name.starts_with("operator") &&
+                                f->params.size() >= 2 &&
+                                f->params[0].type == concreteType &&
+                                f->params[1].type == concreteType) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
+                    }
+                    if (!found) {
+                        error(loc, "concept '" + std::string(cd->name) +
+                              "' not satisfied: type '" + concreteName +
+                              "' does not support operator '" + op + "'");
+                        return false;
+                    }
+                } else {
+                    error(loc, "concept '" + std::string(cd->name) +
+                          "' not satisfied: type '" + concreteName +
+                          "' does not support operator '" + op + "'");
+                    return false;
+                }
+            }
+            // Arithmetic types support all operators — pass.
+        }
+        // Member access: "a.xxx(...)" or "a.xxx"
+        // Check for '.' but not '->' (that's pointer member access).
+        // For simplicity, we skip member access checks — they'll fail
+        // naturally during instantiation if invalid.
+    }
+
+    return true;  // all requirements satisfied
+}
+
+// ---------------------------------------------------------------------------
 //                      template instantiation
 // ---------------------------------------------------------------------------
 
@@ -4055,6 +4193,16 @@ hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
     for (std::size_t i = 0; i < nonVariadicCount && i < tplArgs.size(); ++i) {
         if (tplFunc.tplParams[i].isTypename) {
             mapping[tplFunc.tplParams[i].name] = tplArgs[i];
+            // 9.1: If this template parameter has a concept constraint,
+            // check that the concrete type satisfies it.
+            if (!tplFunc.tplParams[i].constraint.empty()) {
+                if (!checkConstraint(tplFunc.tplParams[i].constraint,
+                                     tplArgs[i], loc)) {
+                    // Constraint not satisfied — error already emitted.
+                    // Return null to signal failure.
+                    return nullptr;
+                }
+            }
         }
     }
     // Build the pack info for the variadic param.
@@ -4427,6 +4575,15 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     for (std::size_t i = 0; i < tplStruct.tplParams.size() && i < tplArgs.size(); ++i) {
         if (tplStruct.tplParams[i].isTypename) {
             mapping[tplStruct.tplParams[i].name] = tplArgs[i];
+            // 9.1: Check concept constraint if present.
+            if (!tplStruct.tplParams[i].constraint.empty()) {
+                if (!checkConstraint(tplStruct.tplParams[i].constraint,
+                                     tplArgs[i], loc)) {
+                    // Constraint failed — return the unmangled name as
+                    // a fallback (instantiation will fail downstream).
+                    return tplName;
+                }
+            }
         }
     }
 

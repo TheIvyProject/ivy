@@ -156,7 +156,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| 9.1 | **Concepts** | ★★★ | `concept Addable = requires(T a, T b) { a + b; };` — constraint check tại template instantiation, error message rõ ràng thay vì lỗi substitution sâu |
+| 9.1 | **Concepts** ✅ | ★★★ | `concept Addable = requires(T a, T b) { a + b; };` — constraint check tại template instantiation, error message rõ ràng thay vì lỗi substitution sâu. `ConceptDecl` AST node stores requirements as text snippets. `TemplateParam.constraint` field holds concept name. `parseConcept()` parses `concept Name = requires(T a) { expr; };`. `parseTemplateParams()` accepts `Addable T` (constrained type param). `checkConstraint()` verifies binary operators for arithmetic types + struct operator overloads. Constraint failure emits clear error: `concept 'Addable' not satisfied: type 'Foo' does not support operator '+'` |
 | 9.2 | **Modules** | ★★★★ | `export module`, `import` — binary module interface (.ivm) thay #include. Cần đổi preprocessor architecture. Có thể hoãn vô thời hạn (Ivy dùng #include vẫn ổn) |
 | 9.3 | **Designated initializers** | ★ | `{.field = 42}` — parse trong InitList, map field name → offset, validate thứ tự |
 | 9.4 | **User-defined literals** | ★★ | `operator""_km(long long)` — lexer gộp suffix, HIR lookup UDL operator |

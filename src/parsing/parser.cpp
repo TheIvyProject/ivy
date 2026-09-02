@@ -603,6 +603,13 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
             continue;
         }
 
+        // 9.1: `concept Name = requires(T a) { a + b; };`
+        if (atKeyword("concept")) {
+            const SourceLoc loc = locOf(peek());
+            parseConcept(tu, loc);
+            continue;
+        }
+
         // `constexpr` / `consteval` — consume and fall through to
         // parseFunction (with the flags).  This lets Ivy support
         // compile-time evaluation without a separate dispatch path.
@@ -1351,8 +1358,13 @@ std::vector<TemplateParam> Parser::parseTemplateParams() {
             // Non-type template parameter: `int N`, `long long N`, ...
             tp.isTypename = false;
             tp.type = parseType();
+        } else if (at(TokenKind::Identifier)) {
+            // 9.1: Constrained type parameter: `Addable T`, `Comparable U`, ...
+            // The identifier is a concept name, followed by the parameter name.
+            tp.isTypename = true;
+            tp.constraint = next().lexeme;  // consume concept name
         } else {
-            errorAt(peek(), "expected 'typename' or a type in template parameter list");
+            errorAt(peek(), "expected 'typename', a concept name, or a type in template parameter list");
             synchronize();
             break;
         }
@@ -1441,6 +1453,82 @@ void Parser::parseTemplate(TranslationUnit& tu, SourceLoc loc) {
                   isConstexpr, isConsteval, std::move(tplParams));
     // Restore: remove the names we added (keep any from outer templates).
     templateParamNames_.resize(savedCount);
+}
+
+// 9.1: Parse a concept definition.
+// Syntax: `concept Name = requires (T a, T b) { a + b; a == b; };`
+// The requires-expression has a parameter list and a body of semicolon-
+// separated requirement expressions. We store the raw text of each
+// requirement for later constraint checking.
+void Parser::parseConcept(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("concept", "expected 'concept'");
+    ConceptDecl cd;
+    cd.loc = loc;
+    if (!at(TokenKind::Identifier)) {
+        errorAt(peek(), "expected concept name");
+        synchronize();
+        return;
+    }
+    cd.name = next().lexeme;
+    expect(TokenKind::Assign, "expected '=' in concept definition");
+    expectKeyword("requires", "expected 'requires' in concept definition");
+    // Parse the requires parameter list: (T a, T b, ...)
+    expect(TokenKind::LParen, "expected '(' after 'requires'");
+    std::vector<std::pair<std::string_view, std::string_view>> reqParams; // (type, name)
+    while (!at(TokenKind::RParen) && !at(TokenKind::EndOfFile)) {
+        // Each param is: Type name   (e.g. "T a", "const T& b")
+        // We parse the type and name. The type should be the concept's
+        // template param (e.g. T), but we accept any type.
+        // Simple parse: read tokens until we find an identifier followed
+        // by comma or ')'.
+        // For simplicity, we parse: [type tokens] identifier_name
+        // Type is everything up to the last identifier before ',' or ')'.
+        std::size_t typeStart = pos_;
+        std::size_t namePos = pos_;
+        // Scan forward to find the parameter name (last identifier before , or ))
+        int depth = 0;
+        while (!at(TokenKind::EndOfFile)) {
+            if (at(TokenKind::LParen)) { ++depth; next(); continue; }
+            if (at(TokenKind::RParen) && depth == 0) break;
+            if (at(TokenKind::RParen)) { --depth; next(); continue; }
+            if (at(TokenKind::Comma) && depth == 0) break;
+            if (at(TokenKind::Identifier)) namePos = pos_;
+            next();
+        }
+        // Extract type (everything from typeStart to namePos) and name
+        if (namePos >= typeStart && namePos < pos_) {
+            // Build type string from tokens typeStart..namePos-1
+            std::string typeStr;
+            for (std::size_t i = typeStart; i < namePos; ++i) {
+                if (i > typeStart) typeStr += ' ';
+                typeStr += std::string(tokens_[i].lexeme);
+            }
+            // First param's type is the concept parameter name (e.g. "T")
+            if (reqParams.empty() && !typeStr.empty())
+                cd.paramName = typeStr;
+            reqParams.emplace_back(typeStr, tokens_[namePos].lexeme);
+        }
+        if (at(TokenKind::Comma)) { next(); } else { break; }
+    }
+    expect(TokenKind::RParen, "expected ')' to close requires parameter list");
+    // Parse the body: { expr; expr; ... }
+    expect(TokenKind::LBrace, "expected '{' to start requires body");
+    while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile)) {
+        // Collect tokens until ';' for each requirement
+        std::string req;
+        while (!at(TokenKind::Semi) && !at(TokenKind::RBrace) &&
+               !at(TokenKind::EndOfFile)) {
+            if (!req.empty()) req += ' ';
+            req += std::string(peek().lexeme);
+            next();
+        }
+        if (at(TokenKind::Semi)) next();
+        if (!req.empty()) cd.requirements.push_back(req);
+    }
+    expect(TokenKind::RBrace, "expected '}' to close requires body");
+    // Optional trailing semicolon
+    if (at(TokenKind::Semi)) next();
+    tu.concepts.push_back(std::move(cd));
 }
 
 void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,

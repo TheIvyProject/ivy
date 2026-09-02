@@ -1,0 +1,48 @@
+// 9.1: Concepts — `concept Name = requires(T a, T b) { expr; };`
+// Constrained template parameters: `template <Addable T>`
+
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// Concept: type T must support operator+
+concept Addable = requires(T a, T b) {
+    a + b;
+};
+
+// Concept: type T must support == and !=
+concept Equality = requires(T a, T b) {
+    a == b;
+    a != b;
+};
+
+// Template with concept constraint: T must be Addable
+template <Addable T>
+T add(T a, T b) {
+    return a + b;
+}
+
+// Template with concept constraint: T must be Equality
+template <Equality T>
+int check_equal(T a, T b) {
+    if (a == b) return 1;
+    return 0;
+}
+
+int main() {
+    // int32_t satisfies Addable (has operator+)
+    int32_t x = add<int32_t>(3, 4);
+    printf("add(3,4) = %d\n", x);
+
+    // int32_t satisfies Equality (has operator==)
+    int32_t eq = check_equal<int32_t>(5, 5);
+    printf("equal(5,5) = %d\n", eq);
+
+    int32_t ne = check_equal<int32_t>(5, 6);
+    printf("equal(5,6) = %d\n", ne);
+
+    printf("done\n");
+    return 0;
+}

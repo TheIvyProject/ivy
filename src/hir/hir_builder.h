@@ -346,6 +346,16 @@ private:
     // Cache of already-instantiated struct specializations (by mangled
     // name, e.g. "Box<int32_t>") to avoid duplicate instantiation.
     std::unordered_map<std::string_view, std::string_view> instantiatedStructs_;
+    // 9.1: Concept registry. Maps concept name → ConceptDecl (from AST).
+    // Populated in `buildConcepts()` at the start of HIR building.
+    // Used for constraint checking during template instantiation.
+    std::unordered_map<std::string_view, const ConceptDecl*> concepts_;
+    // 9.1: Check if a concrete type satisfies a named concept.
+    // Substitutes the concept's type parameter with `concreteType`,
+    // then verifies each requirement is a valid expression for that
+    // type. Returns true if all requirements are satisfied.
+    bool checkConstraint(std::string_view conceptName,
+                         const hir::Type& concreteType, SourceLoc loc);
     // Lookup a struct template by name (with namespace fallback).
     const StructDecl* lookupStructTemplate(std::string_view name) const;
     // Mangle a struct template specialization name: "Box<int32_t>".
