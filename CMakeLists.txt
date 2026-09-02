@@ -22,6 +22,7 @@ add_executable(ivyc
     src/parsing/lexer.cpp
     src/parsing/preprocessor.cpp
     src/parsing/parser.cpp
+    src/parsing/module_io.cpp
     src/hir/hir_builder.cpp
     src/mir/mir_builder.cpp
     src/codegen/codegen.cpp

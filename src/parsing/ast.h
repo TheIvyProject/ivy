@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -401,6 +402,7 @@ struct Function {
     bool isVirtual = false;     // `virtual` method (7.7) — uses vtable dispatch
     bool isOverride = false;    // `override` marker (7.7) — checked at HIR build
     bool isPureVirtual = false; // `= 0` (7.7) — abstract method, no body
+    bool isExported = false;    // 9.2: `export` prefix — visible to importers
     // Member initializer list for constructors: `: x(42), y(3)`.
     // Each entry initializes a field by name with a single expression
     // (Ivy doesn't support multi-arg member init `x(a, b)` — use a
@@ -444,6 +446,7 @@ struct EnumDecl {
     std::vector<Enumerator> enumerators;
     bool isScoped = false;  // `enum class` / `enum struct`
     Type underlyingType;     // resolved; defaults to `int` if not specified
+    bool isExported = false; // 9.2: `export` prefix
     SourceLoc loc;
 };
 
@@ -469,6 +472,7 @@ struct StructDecl {
     std::vector<TemplateParam> tplParams;  // non-empty => template struct
     std::vector<BaseClass> bases;   // base classes (7.7)
     bool isClass = false;  // `class` vs `struct` (cosmetic only)
+    bool isExported = false; // 9.2: `export` prefix
     SourceLoc loc;
 };
 
@@ -486,6 +490,18 @@ struct TranslationUnit {
     std::vector<StructDecl> structs;
     std::vector<UsingDecl> usingDecls;  // `using Name = Type;` aliases
     std::vector<ConceptDecl> concepts;  // 9.1: `concept Name = requires(...)...`
+    // 9.2: Module declarations. If non-empty, this TU is a module interface.
+    // `export module math;` → moduleName="math", isExport=true
+    std::string moduleName;             // module name (e.g. "math"), or "" if not a module
+    bool isModuleExport = false;        // true => `export module` (interface), false => `module` (implementation)
+    // 9.2: Import declarations. `import math;` → {name="math", isCpp=false}
+    // `import cpp <stdio.h>;` → {name="stdio.h", isCpp=true}
+    struct ImportDecl {
+        std::string name;     // module name or C++ header name
+        bool isCpp = false;   // true => import C++ header (delegates to #include)
+        SourceLoc loc;
+    };
+    std::vector<ImportDecl> imports;
 };
 
 // Deep-copy a Function AST node. Used by the HIR builder when

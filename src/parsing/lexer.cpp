@@ -53,6 +53,9 @@ const std::unordered_set<std::string_view>& keywords() {
         // Ivy additions (contextual keywords, always tokenized as Keyword
         // so the parser can match them with atKeyword()).
         "final",        "override",
+        // 9.2: Module keywords (contextual in C++20, but we always tokenize
+        // as Keyword so atKeyword() works in parseTopLevel dispatch).
+        "import",       "module",
         // Ivy builtin types
         "int8_t",      "int16_t",      "int32_t",      "int64_t",
         "uint8_t",     "uint16_t",     "uint32_t",     "uint64_t",

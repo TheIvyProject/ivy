@@ -45,6 +45,12 @@ public:
 
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
+    // 9.2: Pre-declare names from an imported module's .ivm interface.
+    // This registers struct names, enum names, and type aliases so that
+    // isTypeStart()/parseType() recognize them during parsing.
+    // Function declarations are also registered so call resolution works.
+    void predeclareModuleImports(const TranslationUnit& imported);
+
 private:
     std::span<const Token> tokens_;
     std::size_t pos_ = 0;
@@ -130,6 +136,12 @@ private:
     void parseTemplate(TranslationUnit& tu, SourceLoc loc);
     // 9.1: Parse a concept definition: `concept Name = requires(T a) { a + b; };`
     void parseConcept(TranslationUnit& tu, SourceLoc loc);
+    // 9.2: Parse `export module name;` or `export` declaration prefix.
+    void parseExport(TranslationUnit& tu, SourceLoc loc);
+    // 9.2: Parse `module name;` (module implementation unit).
+    void parseModuleDecl(TranslationUnit& tu, SourceLoc loc);
+    // 9.2: Parse `import name;` or `import cpp <header>;`.
+    void parseImport(TranslationUnit& tu, SourceLoc loc);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
                        std::vector<TemplateParam> tplParams = {});

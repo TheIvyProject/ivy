@@ -107,6 +107,10 @@ constexpr struct {
     {"final", ""},     // final marker IS handled in parseStruct (rejected with msg)
     {"friend", "friends are not supported in the Ivy subset"},
     {"extern", "only 'extern \"C\"' is supported"},
+    {"concept", ""},  // 9.1: concepts ARE supported — handled in parseTopLevel
+    {"export", ""},   // 9.2: modules ARE supported — handled in parseTopLevel
+    {"import", ""},   // 9.2: modules ARE supported — handled in parseTopLevel
+    {"module", ""},   // 9.2: modules ARE supported — handled in parseTopLevel
     {"sizeof", ""},  // sizeof IS supported (7.6): `sizeof...(pack)` — handled in parsePrimary
 };
 
@@ -607,6 +611,28 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
         if (atKeyword("concept")) {
             const SourceLoc loc = locOf(peek());
             parseConcept(tu, loc);
+            continue;
+        }
+
+        // 9.2: `import name;` or `import cpp <header>;`
+        if (atKeyword("import")) {
+            const SourceLoc loc = locOf(peek());
+            parseImport(tu, loc);
+            continue;
+        }
+
+        // 9.2: `module name;` — module implementation unit declaration.
+        if (atKeyword("module")) {
+            const SourceLoc loc = locOf(peek());
+            parseModuleDecl(tu, loc);
+            continue;
+        }
+
+        // 9.2: `export` — either `export module name;` or
+        // `export <declaration>` (exported function/struct/enum).
+        if (atKeyword("export")) {
+            const SourceLoc loc = locOf(peek());
+            parseExport(tu, loc);
             continue;
         }
 
@@ -1529,6 +1555,128 @@ void Parser::parseConcept(TranslationUnit& tu, SourceLoc loc) {
     // Optional trailing semicolon
     if (at(TokenKind::Semi)) next();
     tu.concepts.push_back(std::move(cd));
+}
+
+// 9.2: Parse `export` — either `export module name;` or `export <decl>`.
+void Parser::parseExport(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("export", "expected 'export'");
+    // `export module name;` — module interface unit declaration.
+    if (atKeyword("module")) {
+        next();  // consume `module`
+        if (!at(TokenKind::Identifier)) {
+            errorAt(peek(), "expected module name after 'export module'");
+            synchronize();
+            return;
+        }
+        tu.moduleName = std::string(next().lexeme);
+        tu.isModuleExport = true;
+        expect(TokenKind::Semi, "expected ';' after module declaration");
+        return;
+    }
+    // `export <declaration>` — mark the following declaration as exported.
+    // Parse the declaration normally, then set isExported=true on the result.
+    // Supported: export function, export struct, export enum, export using.
+    if (atKeyword("struct") || atKeyword("class")) {
+        const bool isClass = atKeyword("class");
+        parseStruct(tu, loc, isClass);
+        if (!tu.structs.empty()) tu.structs.back().isExported = true;
+        return;
+    }
+    if (atKeyword("enum")) {
+        parseEnum(tu, loc);
+        if (!tu.enums.empty()) tu.enums.back().isExported = true;
+        return;
+    }
+    if (atKeyword("using")) {
+        parseUsing(tu, loc);
+        // UsingDecl doesn't have isExported — exports are tracked at TU level
+        return;
+    }
+    if (atKeyword("template")) {
+        // `export template <...> ret name(...) { ... }`
+        parseTemplate(tu, loc);
+        // Mark the last function/struct as exported
+        if (!tu.functions.empty()) tu.functions.back().isExported = true;
+        return;
+    }
+    // `export ret name(...) { ... }` — exported function
+    bool isConstexpr = false, isConsteval = false;
+    if (atKeyword("constexpr") || atKeyword("consteval")) {
+        ConstexprSpec spec = parseConstexprSpec();
+        isConstexpr = spec.isConstexpr;
+        isConsteval = spec.isConsteval;
+    }
+    if (!isTypeStart()) {
+        errorAt(peek(), "expected a declaration after 'export'");
+        synchronize();
+        return;
+    }
+    std::vector<Attribute> attrs = parseAttributeList();
+    parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                  isConstexpr, isConsteval);
+    if (!tu.functions.empty()) tu.functions.back().isExported = true;
+}
+
+// 9.2: Parse `module name;` — module implementation unit.
+void Parser::parseModuleDecl(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("module", "expected 'module'");
+    if (!at(TokenKind::Identifier)) {
+        errorAt(peek(), "expected module name after 'module'");
+        synchronize();
+        return;
+    }
+    tu.moduleName = std::string(next().lexeme);
+    tu.isModuleExport = false;  // implementation unit, not interface
+    expect(TokenKind::Semi, "expected ';' after module declaration");
+}
+
+// 9.2: Parse `import name;` or `import cpp <header>;`.
+void Parser::parseImport(TranslationUnit& tu, SourceLoc loc) {
+    expectKeyword("import", "expected 'import'");
+    TranslationUnit::ImportDecl imp;
+    imp.loc = loc;
+    // `import cpp <header>;` — import C++ header (delegates to #include)
+    if (atKeyword("cpp")) {
+        next();  // consume `cpp`
+        imp.isCpp = true;
+        // Expect `<header>` or `"header"`
+        if (at(TokenKind::Lt)) {
+            next();  // consume `<`
+            std::string header;
+            while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+                if (!header.empty()) header += ' ';
+                header += std::string(peek().lexeme);
+                next();
+            }
+            expect(TokenKind::Gt, "expected '>' after C++ header name");
+            imp.name = header;
+        } else if (at(TokenKind::String)) {
+            // `import cpp "header";` — quoted form
+            std::string_view raw = peek().lexeme;
+            if (raw.size() >= 2) raw = raw.substr(1, raw.size() - 2);
+            imp.name = std::string(raw);
+            next();
+        } else {
+            errorAt(peek(), "expected '<header>' or \"header\" after 'import cpp'");
+            synchronize();
+            return;
+        }
+    } else if (at(TokenKind::String)) {
+        // `import "math";` — quoted module name
+        std::string_view raw = peek().lexeme;
+        if (raw.size() >= 2) raw = raw.substr(1, raw.size() - 2);
+        imp.name = std::string(raw);
+        next();
+    } else if (at(TokenKind::Identifier)) {
+        // `import math;` — bare module name
+        imp.name = std::string(next().lexeme);
+    } else {
+        errorAt(peek(), "expected module name after 'import'");
+        synchronize();
+        return;
+    }
+    expect(TokenKind::Semi, "expected ';' after import");
+    tu.imports.push_back(std::move(imp));
 }
 
 void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
@@ -2579,6 +2727,26 @@ double Parser::parseFloatValue(std::string_view lexeme, const Token& tok) {
 }
 
 // --- driver ---
+
+// 9.2: Pre-declare names from an imported module's .ivm interface.
+// This registers struct names, enum names, and type aliases so that
+// isTypeStart()/parseType() recognize them during parsing.
+// Function declarations are also registered so call resolution works.
+void Parser::predeclareModuleImports(const TranslationUnit& imported) {
+    for (const StructDecl& sd : imported.structs) {
+        if (sd.isExported) {
+            structNames_.push_back(sd.name);
+        }
+    }
+    for (const EnumDecl& ed : imported.enums) {
+        if (ed.isExported) {
+            enumNames_.push_back(ed.name);
+        }
+    }
+    for (const UsingDecl& ud : imported.usingDecls) {
+        typeAliases_.push_back(ud.name);
+    }
+}
 
 std::unique_ptr<TranslationUnit> Parser::parse() {
     auto tu = std::make_unique<TranslationUnit>();

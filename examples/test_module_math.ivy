@@ -1,0 +1,20 @@
+// 9.2 test: Module interface unit — exports math functions.
+export module math;
+
+// Exported functions — signatures are stored in math.ivm
+export int32_t add(int32_t a, int32_t b) {
+    return a + b;
+}
+
+export int32_t mul(int32_t a, int32_t b) {
+    return a * b;
+}
+
+// Exported struct
+export struct Vec2 {
+    int32_t x;
+    int32_t y;
+};
+
+// Exported type alias
+using Scalar = int32_t;

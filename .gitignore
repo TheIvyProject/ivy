@@ -18,6 +18,7 @@ out/
 *.dll
 *.so
 *.dylib
+*.ivm
 
 # IDE / Editor configs
 .vscode/

@@ -21,6 +21,7 @@
 #include "mir/interpreter.h"
 #include "parsing/ast.h"
 #include "parsing/lexer.h"
+#include "parsing/module_io.h"
 #include "parsing/parser.h"
 #include "parsing/preprocessor.h"
 #include "parsing/token.h"
@@ -877,12 +878,122 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     }
 
     ivy::Parser parser(tokens, pp.cnumberEnabled());
+
+    // 9.2: Pre-scan tokens for `import` declarations and load .ivm
+    // module interfaces BEFORE parsing. This is critical because the
+    // parser needs to know struct/enum/type-alias names from imported
+    // modules to correctly parse declarations like `Vec2 v;`.
+    //
+    // We scan tokens for `import <name>;` patterns, resolve each to a
+    // .ivm file, read it into a temporary TU, and pre-declare its
+    // exported names in the parser. After parsing, the imported
+    // declarations are merged into the main TU for HIR/codegen.
+    std::vector<std::pair<std::string, ivy::TranslationUnit>> importedModules;
+    {
+        for (std::size_t i = 0; i + 2 < tokens.size(); ++i) {
+            // Look for: Keyword("import") Identifier(name) Semi
+            if (tokens[i].kind != ivy::TokenKind::Keyword ||
+                tokens[i].lexeme != "import") continue;
+            // Skip `import cpp` — handled differently
+            if (i + 1 < tokens.size() &&
+                tokens[i + 1].kind == ivy::TokenKind::Keyword &&
+                tokens[i + 1].lexeme == "cpp") continue;
+            // Handle `import "name";` (string literal form)
+            if (i + 1 < tokens.size() &&
+                tokens[i + 1].kind == ivy::TokenKind::String) {
+                std::string_view raw = tokens[i + 1].lexeme;
+                if (raw.size() >= 2) raw = raw.substr(1, raw.size() - 2);
+                std::string modName(raw);
+                std::filesystem::path ivmPath =
+                    ivy::resolveModulePath(modName, includePaths);
+                if (ivmPath.empty()) {
+                    std::cerr << "ivyc: error: module '" << modName
+                              << "' not found (searched .ivm files in include paths)\n";
+                    failed = true;
+                    continue;
+                }
+                ivy::TranslationUnit impTu;
+                if (!ivy::readModuleInterface(impTu, ivmPath)) {
+                    failed = true;
+                    continue;
+                }
+                parser.predeclareModuleImports(impTu);
+                importedModules.emplace_back(std::move(modName), std::move(impTu));
+                continue;
+            }
+            if (i + 1 >= tokens.size() ||
+                tokens[i + 1].kind != ivy::TokenKind::Identifier) continue;
+            std::string modName(tokens[i + 1].lexeme);
+            std::filesystem::path ivmPath =
+                ivy::resolveModulePath(modName, includePaths);
+            if (ivmPath.empty()) {
+                std::cerr << "ivyc: error: module '" << modName
+                          << "' not found (searched .ivm files in include paths)\n";
+                failed = true;
+                continue;
+            }
+            ivy::TranslationUnit impTu;
+            if (!ivy::readModuleInterface(impTu, ivmPath)) {
+                failed = true;
+                continue;
+            }
+            parser.predeclareModuleImports(impTu);
+            importedModules.emplace_back(std::move(modName), std::move(impTu));
+        }
+        if (failed) return 1;
+    }
+
     std::unique_ptr<ivy::TranslationUnit> tu = parser.parse();
     for (const ivy::Diagnostic& d : parser.diagnostics()) {
         std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message << "\n";
         failed = true;
     }
     if (failed) return 1;
+
+    // 9.2: Merge imported module declarations into the main TU.
+    // This makes imported functions, structs, enums, and type aliases
+    // available for HIR building and codegen.
+    for (auto& [modName, impTu] : importedModules) {
+        // Append imported declarations (functions, structs, enums, using, concepts)
+        for (auto& f : impTu.functions) tu->functions.push_back(std::move(f));
+        for (auto& s : impTu.structs) tu->structs.push_back(std::move(s));
+        for (auto& e : impTu.enums) tu->enums.push_back(std::move(e));
+        for (auto& u : impTu.usingDecls) tu->usingDecls.push_back(std::move(u));
+        for (auto& c : impTu.concepts) tu->concepts.push_back(std::move(c));
+    }
+
+    // 9.2: Process `import cpp` declarations (post-parse, warning only).
+    if (tu && !tu->imports.empty()) {
+        for (const auto& imp : tu->imports) {
+            if (imp.isCpp) {
+                std::cerr << "ivyc: warning: 'import cpp <" << imp.name
+                          << ">' — use #include instead for C++ headers\n";
+            }
+        }
+    }
+
+    // 9.2: If this is a module interface unit, write the .ivm file.
+    if (tu && !tu->moduleName.empty() && tu->isModuleExport) {
+        // Write .ivm next to the source file or in the output path.
+        std::filesystem::path ivmOut = path.parent_path() / (tu->moduleName + ".ivm");
+        if (!outPath.empty()) {
+            // If -o is specified, use it as the base for .ivm
+            std::filesystem::path outP(outPath);
+            if (outP.has_extension()) {
+                ivmOut = outP.parent_path() / (outP.stem().string() + ".ivm");
+            } else {
+                ivmOut = outP;
+                ivmOut.replace_extension(".ivm");
+            }
+        }
+        if (!ivy::writeModuleInterface(*tu, ivmOut)) {
+            std::cerr << "ivyc: warning: failed to write module interface '"
+                      << ivmOut.string() << "'\n";
+        } else {
+            std::cerr << "ivyc: module interface written to '"
+                      << ivmOut.string() << "'\n";
+        }
+    }
 
     if (showAst && tu) dumpAst(*tu, std::cout);
 

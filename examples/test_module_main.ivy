@@ -1,0 +1,26 @@
+// 9.2 test: Module consumer — imports math module and uses its exports.
+// Tests: imported struct type, imported type alias, imported function calls.
+import math;
+
+#pragma ivy cnumber
+
+int main() {
+    // Use exported struct from math module
+    Vec2 v;
+    v.x = 10;
+    v.y = 20;
+
+    // Use exported type alias
+    Scalar s = 42;
+
+    // Use exported functions (declarations only — definitions are linked
+    // from math.obj at link time)
+    int32_t sum = add(3, 4);
+
+    // Verify struct and alias work via interpreter
+    ivy::println(v.x);
+    ivy::println(v.y);
+    ivy::println(s);
+
+    return 0;
+}

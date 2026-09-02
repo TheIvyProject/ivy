@@ -2009,6 +2009,23 @@ bool CodeGen::generate(std::ostream& out) {
                      "(" + sig + ")");
         }
     }
+    // 9.2: Declare imported module functions (no body, not extern "C").
+    // These come from .ivm module interfaces — they have signatures but
+    // no bodies. The actual definitions are in the module's object file
+    // and will be resolved at link time.
+    for (const auto& fn : mir_.functions) {
+        if (!fn->isExternC && !fn->hasBody && !fn->isConsteval) {
+            std::string sig;
+            for (const mir::Param& p : fn->params) {
+                sig += (sig.empty() ? "" : ", ") + llvmType(p.type);
+            }
+            std::string sym = fn->isExternC
+                ? llvmGlobalName(fn->name)
+                : llvmGlobalName(mangleFunction(fn->name, fn.get()));
+            emitLine("declare " + llvmType(fn->returnType) + " @" + sym +
+                     "(" + sig + ")");
+        }
+    }
     for (const auto& fn : mir_.functions) {
         // Skip consteval functions — they must be evaluated at compile
         // time and have no runtime representation.  Every call to a
