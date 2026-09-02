@@ -163,7 +163,7 @@ Xếp theo giai đoạn tăng dần độ khó.
 | 9.5 | **Coroutines** | ★★★★+ | `co_await`/`co_return`/`co_yield` — cần transform CFG phức tạp. Có thể KHÔNG làm (không thuộc triết lý subset) |
 | 9.6 | **`std::move` + rvalue ref `T&&`** | ★★★ | Move semantics cho ownership tracking: move-out state trong MIR, use-after-move error. Nền cho smart pointer `ivy::unique_ptr<T>` |
 
-### Giai đoạn 10 — Độc lập hoàn toàn khỏi C++ (Ivy 1.0)
+### Giai đoạn 10 — Độc lập hoàn toàn khỏi C++ (Ivy 0.1)
 
 Giống như C++ thoát thai từ C ("C with Classes" 1979 → ngôn ngữ độc lập),
 Giai đoạn 10 tách Ivy ra khỏi gốc C++ để trở thành **ngôn ngữ độc lập**:
