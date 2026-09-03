@@ -110,7 +110,7 @@ To guarantee memory safety and zero resource leaks, `nextcase` adheres to strict
 Standard 3-clause loop for counted iteration.
 
 ```ivy
-for (mutable int32 i = 0; i < 10; ++i) {
+for (int32 i = 0; i < 10; ++i) {
     io::print(i);
 }
 ```
@@ -135,7 +135,7 @@ for (int32& x : numbers) {
 Repeats as long as condition evaluates to `true`.
 
 ```ivy
-mutable int32 count = 5;
+int32 count = 5;
 while (count > 0) {
     --count;
 }
@@ -145,7 +145,7 @@ while (count > 0) {
 Executes body once before testing condition.
 
 ```ivy
-mutable int32 count = 0;
+int32 count = 0;
 do {
     ++count;
 } while (count < 5);
@@ -164,7 +164,7 @@ do {
 
 
 ```ivy
-for (mutable int32 i = 0; i < 10; ++i) {
+for (int32 i = 0; i < 10; ++i) {
     if (i == 3) continue;
     if (i == 8) break;
     if (i == 7) return 0;
@@ -185,6 +185,6 @@ auto [x, y] = getPoint();
 
 ### 5. Declaration & Expression Statements
 
-- **Declaration Statement:** Declares local variables or constants (`mutable int32 x = 5;`).
+- **Declaration Statement:** Declares local variables or constants (`int32 x = 5;`, `const auto y = 10;`).
 - **Expression Statement:** Evaluates expressions for side effects (`callFunction();`, `x = y + 1;`).
 - **Compound Statement (Block):** Group of statements enclosed in `{ ... }` creating a lexical scope.

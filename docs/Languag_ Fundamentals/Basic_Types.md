@@ -3,7 +3,7 @@
 Ivy provides a set of built-in primitive types for representing boolean values, characters, numbers, and platform-dependent pointers.
 
 > **Note on Naming (`_t` suffix):**  
-> Ivy omits the `_t` suffix found in standard C/C++ types (such as `int32_t`, `size_t`) to keep type names clean, concise, and convenient to write. Furthermore, this design prevents naming collisions with standard C++ types (`std::*` / `<cstdint>`) when importing or interoperating C++ code into Ivy.
+> Ivy omits the `_t` suffix found in standard C/C++ types (such as `int32_t`, `size_t`) to keep type names clean, concise, and convenient to write. Furthermore, this design prevents naming collisions with standard C++ types (`std::*` / `<cstdint>`/`<stdfloat>`) when importing or interoperating C++ code into Ivy.
 
 ---
 
@@ -59,4 +59,31 @@ Ivy provides a set of built-in primitive types for representing boolean values, 
 | `iptr` | Signed integer matching pointer width (`intptr_t`) | 4 bytes / 8 bytes |
 | `uptr` | Unsigned integer matching pointer width (`uintptr_t`) | 4 bytes / 8 bytes |
 | `size` | Unsigned size type for memory and lengths (`size_t`) | 4 bytes / 8 bytes |
+
+---
+
+### ⚙️ C-Style Legacy Types (`#pragma ivy cnumber`)
+
+By default, Ivy strictly encourages explicit fixed-width numeric types. However, for seamless C interoperability or legacy code migration, traditional C numeric types can be enabled via the `#pragma ivy cnumber` directive:
+
+```ivy
+#pragma ivy cnumber
+
+short a = 10;
+int b = 20;
+long c = 30L;
+long long d = 40LL;
+
+unsigned int u = 100u;
+float f = 3.14f;
+double g = 3.14159265;
+```
+
+When enabled, the types map directly to platform C types:
+- `short` / `unsigned short`
+- `int` / `unsigned int`
+- `long` / `unsigned long`
+- `long long` / `unsigned long long`
+- `float` / `double` / `long double`
+
 
