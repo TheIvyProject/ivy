@@ -1,205 +1,76 @@
-# Ivy Lang
+<div align="center">
 
-> A safer subset of C++, compiled to LLVM IR by its own compiler (`ivyc`).
+# 🌿 Ivy Programming Language
 
-Ivy Lang is a language **within** C++. Source files are ordinary C++ (`.cpp`, `.cxx`, `.cc`) — the same syntax, the same file extensions — but the set of accepted programs is a curated subset chosen so the language can be made safe by construction, and safety semantics are expressed through standard C++ attributes (`[[ivy::...]]`).
+**A modern systems programming language built on the foundations of C++, fortified with compile-time memory safety, zero-cost abstractions, and clean ergonomics.**
 
-`ivyc` is a full compiler frontend with a classic pipeline:
+</div>
 
-```
-Lexer → Preprocessor → Parser → HIR → MIR → LLVM IR
-```
+---
 
-It accepts only the restricted C++ subset; anything outside it is a compile error. By default, Ivy uses its own fixed-width integer and floating-point types (`int8_t`…`int64_t`, `uint8_t`…`uint64_t`, `float16_t`…`float128_t`, `bfloat16_t`, `size_t`, `ptrdiff_t`, `bool`, `void`) and rejects C-style number types (`int`, `unsigned`, `long`, `short`, `char`, `float`, `double`, `long long`); `#pragma ivy cnumber` opts into the C-style types. Hex/octal/binary integer literals (`0xFF`, `017`, `0b1010`) are always allowed regardless of the pragma. The output is LLVM IR, which the LLVM backend lowers to native code. The `Preprocessor` stage currently expands `#include` (quoted and angle-bracket forms), object-like macros (`#define NAME body...`), function-like macros (`#define NAME(params) body...`, including variadic `...`/`__VA_ARGS__`), conditional compilation (`#ifdef`/`#ifndef`/`#if EXPR`/`#elif EXPR`/`#else`/`#endif`/`#undef`, with `#if`/`#elif` evaluating C++ integral constant expressions over integer literals, `defined()`, macro expansion, arithmetic, bitwise, logical, comparison, and ternary operators), predefined macros (`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__cplusplus`), and `#pragma ivy cnumber`, and is invoked between the lexer and the parser; `ivyc -o file.i` (or `.ii`) dumps the preprocessed C++ source text instead of continuing down the pipeline, mirroring `g++ -E`.
+## What is Ivy?
 
-In addition to native compilation, `ivyc` can **interpret** a program directly from HIR via `--run` — no LLVM IR or native code generation required. This is powered by **IvyInterpret**, a self-contained tree-walking interpreter that consumes HIR and executes it in-memory. See [IvyInterpret](#ivyinterpret) below.
+Ivy originally started as a safe subset of C++. However, maintaining strict C++ backwards compatibility imposed severe limitations: ISO/IEEE standardization constraints prevented critical syntax modernizations and deeper compile-time safety guarantees.
 
-## Design Philosophy
+To eliminate undefined behavior while retaining high performance and developer ergonomics, Ivy evolved into an **independent systems programming language**. It gives developers the familiar power and expressiveness of C++ while introducing modern ownership, lifetime checking, and clean language mechanics.
 
-**One-way source compatibility.**
+---
 
-```
-Ivy  ⊂  C++
-```
+## Core Language Features
 
-- Every valid Ivy program is valid C++ (same grammar, same extensions).
-- Not every valid C++ program is valid Ivy — `ivyc` rejects what it cannot make safe.
+- **Compile-Time Memory Safety:** Smartly integrates Rust-proven ownership, borrowing, and lifetime mechanics without garbage collection runtime overhead.
+- **Familiar Ergonomics (~80% C++ Syntax):** Designed so C++ developers feel instantly at home. The transition learning curve is drastically reduced.
+- **Native Lifetime Annotations:** Express reference validity cleanly without awkward attribute wrappers.
 
-Being source-compatible with C++ keeps the ecosystem intact: `clang-format`, IDEs, debuggers, and even other C++ compilers still understand Ivy sources. Per the standard, a conforming C++ compiler ignores unrecognized attributes (typically with a warning), so `[[ivy::...]]` never breaks a build.
-
-But Ivy does **not** compile by delegating to a C++ compiler. `ivyc` compiles C++ natively: it lexes and parses the subset itself, builds its own IR, checks safety at the MIR level, and emits LLVM IR.
-
-## Goals
-
-1. **Safety** — eliminate or quarantine undefined behavior: dangling pointers, lifetime violations, unchecked bounds, raw memory management, implicit unsafe casts.
-2. **Simplicity** — a curated subset of C++. Only features that can be made safe are in scope; everything else must be opted into explicitly.
-3. **Backward compatibility** — source stays C++: existing editors, formatters, debuggers, and libraries work as-is. Only the compiler changes.
-
-## Non-Goals
-
-- Not a new syntax for C++ (that is cppfront's territory).
-- Not a transpiler — Ivy is not lowered to C++ text.
-- Not compatible in the C++ → Ivy direction (`ivyc` accepts only the subset).
-
-## Compilation Pipeline
-
-```
-.ivy / .cpp / .cxx / .cc
-      │
-      ▼
-┌──────────┐
-│  Lexer   │  tokens (identifiers, keywords, attributes, ...)
-└──────────┘
-      ▼
-┌──────────────┐
-│ Preprocessor │  #include + object-like & function-like macros (#define, variadic __VA_ARGS__) + conditional compilation (#ifdef/#ifndef/#if/#elif/#else/#endif/#undef) + predefined (__LINE__/__FILE__/__DATE__/__TIME__/__cplusplus); -o file.i dumps text
-└──────────────┘
-      ▼
-┌──────────┐
-│  Parser  │  AST of the restricted C++ grammar; rejects anything outside the subset
-└──────────┘
-      ▼
-┌──────────┐
-│   HIR    │  type-checked, high-level IR; Ivy attributes lowered into IR annotations
-└──────────┘
-      ▼
-┌──────────┐
-│   MIR    │  CFG-based IR; where safety analysis runs (lifetimes, unsafe blocks)
-└──────────┘
-      ▼
-┌──────────┐
-│ LLVM IR  │  emitted via the LLVM infrastructure
-└──────────┘
-      ▼
-   LLVM backend → native binary
-```
-
-Each stage is a separate module, so the safety analyses (lifetime checking, `[[ivy::unsafe]]` enforcement, bounds checks) have a well-defined place to run: on the MIR, before LLVM IR is emitted.
-
-## Attribute Reference
-
-### Lifetime Attributes
-
-| Attribute | Applies to | Meaning |
-|---|---|---|
-| `[[ivy::lt_def(a)]]` | function | Declares a named lifetime parameter `a` for the function. |
-| `[[ivy::lt(a)]]` | parameter | The pointer must live at least as long as lifetime `a`. Enforced at call sites. |
-| `[[ivy::lt_ret(a)]]` | function return | The returned pointer is valid only for lifetime `a`. Callers may not use the result beyond it. |
-
-Lifetime attributes let a function express the same guarantees Rust expresses with lifetimes, without changing C++ syntax.
-
-### Safety Attributes
-
-| Attribute | Applies to | Meaning |
-|---|---|---|
-| `[[ivy::unsafe]]` | compound statement | Opts out of safety checks for the block: raw pointers, `malloc`/`free`, C APIs, explicit casts. The only place such code is allowed. |
-
-## Examples
-
-### Lifetime Attributes
-
-```cpp
-// Test Lifetime Attributes
-[[ivy::lt_def(a)]] const char* [[ivy::lt_ret(a)]] select_first(
-    const char* x [[ivy::lt(a)]],
-    const char* y [[ivy::lt(a)]]
+```ivy
+lifetime<$a, $b>
+const int32& $a foo(
+    const int32& $a x,
+    const int32& $b y
 ) {
-    return x;
+    return x; // ✅ OK: lifetime $a satisfies return lifetime $a
+    // return y; // ❌ Error: lifetime $b cannot satisfy return lifetime $a
 }
 ```
 
-`select_first` declares one lifetime parameter `a`. Both `x` and `y` must outlive `a`, and the returned pointer is only guaranteed valid for `a` — the caller cannot use it past the lifetime of the arguments it passed in.
+- **Zero-Cost Abstractions:** Pure systems performance compiled directly to native code via LLVM.
+- **Deterministic RAII & Explicit Moves:** Resources destruct automatically upon exiting scope; moved-out variables are tracked and verified at compile-time.
 
-### Unsafe Block and C API Allocation
+---
 
-```cpp
-// Test Unsafe Block and C API Allocation
-void raw_alloc() {
-    [[ivy::unsafe]] {
-        void* p = malloc(1024);
-        free(p);
-    }
-}
+## Modern Compiler Pipeline
+
+The `ivyc` compiler architecture draws strong architectural inspiration from modern compilers (such as rustc):
+
+```
+Source (.ivy) ──► Lexer ──► Preprocessor ──► Parser ──► AST ──► HIR ──► MIR ──► LLVM IR ──► Native Binary
 ```
 
-Raw memory management is invisible outside `[[ivy::unsafe]]` blocks. Any `malloc`, `free`, `new`, `delete`, or raw-pointer operation outside such a block is a compile error in Ivy.
+- **HIR (High-level IR):** Performs rigorous type inference, template instantiation, and semantic validation.
+- **MIR (Mid-level IR):** Control Flow Graph (CFG) representation where borrow checking, lifetime verification, and safety validations occur.
+- **LLVM IR:** Emits optimized intermediate representation to leverage world-class LLVM optimization and code-generation pipelines.
+
+---
 
 ## IvyInterpret
 
-**IvyInterpret** is ivyc's built-in interpreter for running programs without native code generation. It is MIR-based (`src/mir/interpreter.*`) — the engine behind `--run`. It consumes fully type-checked *and* lifetime-checked MIR, so every compile-time safety guarantee carries over, and it adds runtime checks (null dereference, use-after-free) through a pluggable `Machine` hook. Built-ins available: `printf`, `puts`, `putchar`, `exit`, `abort`, `malloc`, `free`.
+Unlike the restricted `constexpr` mechanisms in standard C++, Ivy features **IvyInterpret**—a built-in, MIR-level tree-walking interpreter embedded directly within `ivyc`.
 
-### Usage
+- Executes MIR in memory with zero backend compilation overhead (`ivyc --run <file.ivy>`).
+- Enables advanced compile-time evaluation: pure code paths and side-effect-free calculations can run during compilation to embed direct values into output binaries.
+- Guarantees full memory safety validation before execution.
 
-```
-ivyc --run source.ivy
-```
+---
 
-The `--run` flag runs the full pipeline Lexer → Preprocessor → Parser → HIR → MIR, then hands the MIR translation unit to IvyInterpret v0.2 instead of emitting LLVM IR. The interpreter calls `main()` and returns its exit code. Runtime errors are printed to `stderr`.
+## Status & Documentation
 
-### What it supports
+Ivy is actively establishing its independent language specifications and foundational documentation following its departure from strict C++ conformance.
 
-Because it executes MIR, IvyInterpret v0.2 supports everything the language currently covers: functions and recursion, structs (nested access, aggregate init, copy assignment), enums, namespaces (qualified calls), lambdas with captures, control flow (`if`/`while`/`do-while`/`for`/`break`/`continue`), pointers/references, `extern "C"` built-ins, and constexpr-folded code paths.
+- **Official Documentation:** Explore language fundamentals, syntax, and memory safety rules in [`docs/`](docs/).
+- **Legacy Archive:** Historical documentation and previous C++-subset specifications are archived at [TheIvyProject/ivy (archive-2026-4-9)](https://github.com/TheIvyProject/ivy/tree/archive-2026-4-9).
 
-### Design goals
+---
 
-- **Independent**: depends only on `mir/` data structures — not on parsing or codegen internals.
-- **Safe by default**: inherits all MIR-level lifetime checks; runtime safety policy is injected via the `Machine` trait, keeping the core interpreter decoupled from safety logic.
-- **Foundation for tooling**: intended host for future REPL support and build tooling.
+## License
 
-## Restrictions (The Subset)
-
-`ivyc` accepts only a subset of C++. By default it forbids constructs that cannot be made safe, such as:
-
-- raw pointer arithmetic and pointer-to-integer casts,
-- implicit pointer conversions and `reinterpret_cast`,
-- `malloc`/`free`/`new`/`delete` outside `[[ivy::unsafe]]`,
-- returning a pointer whose lifetime is not tied to a parameter or to `[[ivy::lt_def]]` lifetimes,
-- uninitialized variables and implicit `void*` conversions,
-- language features outside the subset's grammar (exceptions are banned outright; other features such as `switch`, `goto`, operator overloading, inheritance, and C-style casts are excluded or restricted — decided per feature).
-
-### Supported features
-
-- **Functions**: top-level function definitions, `extern "C"` declarations, parameters, return values.
-- **Types**: fixed-width integer/float types (`int8_t`…`int64_t`, `uint8_t`…`uint64_t`, `float16_t`…`float128_t`, `bfloat16_t`, `size_t`, `ptrdiff_t`, `bool`, `void`). C-style types (`int`, `char`, `long`, `float`, `double`, …) require `#pragma ivy cnumber`.
-- **Enums** (P4.1): unscoped (`enum`) and scoped (`enum class` / `enum struct`) enumerations with implicit/explicit values, constant-expression values (arithmetic, bitwise), explicit underlying type (`enum E : int64_t`), `EnumName::Value` for scoped enums. Enum constants are folded to integer literals at the HIR stage.
-- **Namespaces** (P4.2): `namespace` blocks with nested namespaces, bare-name resolution within a namespace, qualified calls (`ns::func(args)`), qualified enum access (`ns::EnumName::Value`, `ns::enum_constant`). `extern "C"` functions are not mangled.
-- **Name mangling** (P4.3): C++ symbol names are mangled according to the target platform's ABI — Itanium ABI (`_Z` prefix, `N...E` nested names, type codes) for POSIX, MSVC ABI (`?` prefix, `@`-separated scopes, type codes, `@Z` terminator) for Windows. The ABI is auto-detected from the host platform or overridden via `--target itanium|msvc`. Scoped enums (`enum class`) are mangled as nested types; unscoped enums collapse to their underlying integer type.
-- **Structs / classes** (P4.4): `struct` and `class` aggregate types with field layout (sequential offsets, natural alignment, struct size rounded up to max alignment per C ABI). Member access via `.` (struct lvalue → GEP) and `->` (pointer-to-struct → load pointer then GEP). Nested struct member access (GEP chaining), namespace-qualified struct types (`ns::Struct`), struct copy assignment (LLVM aggregate load/store), zero-initialization for struct variables without explicit initializers. Named LLVM struct types (`%struct.Name = type { ... }`) emitted before function definitions. Access specifiers (`public:`/`private:`/`protected:`) are parsed and ignored (all members are public in Ivy). Variadic parameters (`...`) are accepted in `extern "C"` declarations (e.g. `printf`). `main` is never mangled to preserve the C ABI entry point. Aggregate initialization `{ }` (basic/partial/empty) and struct reassignment with init lists are supported. Default member initializers (`int x = 42;` in the struct body) are applied when a struct variable is declared without an explicit initializer and for trailing fields in partial aggregate init lists; fields without a default are zero-initialized.
-- **Lambdas** (P4.5): lambda expressions `[caps](params) -> ret { body }` in primary expressions. Capture modes: `[x]` (by value), `[&x]` (by reference), `[]` (no captures). Each lambda is lowered to a closure struct type (`__lambdaN_closure`) + a call-operator function (`__lambdaN(closure_ptr, params...)`). Captured variables are injected as local declarations at the top of the body (`T cap = __closure->cap` for by-value; `T& cap = *(__closure->cap)` for by-reference) under an implicit unsafe scope so the compiler-generated closure access is always safe while user code in the body is still checked normally. Calling a lambda (`lambda_expr(args)`) passes `&closure` as the implicit first argument. Return type deduction from the first `return` statement when `-> ret` is omitted.
-- **constexpr / consteval** (P4.7): `constexpr` and `consteval` function declarations are evaluated at compile time by the HIR builder — call sites with constant arguments fold to literal values during HIR construction. `consteval` functions are never emitted to LLVM IR (they exist only at compile time).
-- **Function templates** (P4.8): `template <typename T> T add(T a, T b)` declarations with explicit instantiation at the call site (`add<int>(3, 4)`). The template body AST is cloned and type-substituted (`T → int`) into a concrete HIR function registered under a mangled name (`add<int>`); duplicate instantiations are deduplicated. MIR and codegen need no special handling — instantiated functions are ordinary concrete functions.
-- **Exceptions are banned** (P4.9): `try`, `catch`, and `throw` are rejected outright as compile errors, per the safety philosophy. Error handling is via return codes today; `Result<T>`-style types are planned.
-- **Control flow**: `if`/`else`, `while`, `do-while`, `for`, `break`, `continue`, `return`, ternary `?:`.
-- **Operators**: arithmetic, comparison, logical, bitwise, assignment, compound assignment.
-- **Preprocessor**: `#define` (object-like, function-like, variadic), `#include`, `#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif` with constant-expression evaluation, `#undef`, `#pragma ivy cnumber`, predefined macros (`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__cplusplus`).
-- **Safety**: `[[ivy::unsafe]]` blocks for pointer arithmetic, `malloc`/`free`, casts; `[[ivy::lt_def]]`/`[[ivy::lt_ret]]` lifetime annotations.
-
-Each forbidden construct is either rejected outright or requires an explicit `[[ivy::unsafe]]` opt-out. The goal is: **if it compiles, it is safe by construction** — no annotation required for the common path.
-
-## Roadmap
-
-- [x] Lexer: token definitions incl. attributes
-- [x] Preprocessor: `#include`, `#define` (object-like, function-like, variadic), conditional compilation, predefined macros, `#pragma ivy cnumber`
-- [x] Parser: AST for the restricted grammar
-- [x] HIR: type checking, attribute lowering
-- [x] MIR: CFG construction, lifetime checker, `[[ivy::unsafe]]` enforcement
-- [x] LLVM IR emission (LLVM infrastructure)
-- [x] IvyInterpret: `--run` immediate execution — MIR-based, with safety guarantees
-- [x] constexpr/consteval: compile-time call folding in the HIR builder; consteval functions skipped in codegen
-- [x] Function templates: explicit instantiation (`func<int>(args)`)
-- [x] `.ivy` source file extension (canonical) + legacy `.cpp/.cc/.cxx/.c` migration
-- [ ] Basic gaps: `switch`/`case`, `auto` deduction, array types `T[N]`, global variables
-- [ ] Class model: member functions, constructors/destructors (RAII)
-- [ ] Function overloading + default arguments
-- [ ] Template classes, template argument deduction
-- [ ] IvyMake: Ivy-based build configuration system (replace CMake)
-- [ ] Test suite: safe programs compile clean, unsafe programs are rejected
-
-The full multi-phase plan (phases 6–10, up to full independence from C++ and self-hosting) lives in [PLAN.md](PLAN.md).
-
-## Status
-
-In active development. The core compiler pipeline (Lexer, Preprocessor, Parser, HIR, MIR, LLVM IR codegen) is implemented for the current subset, **IvyInterpret v0.2** provides safe immediate execution via `--run`, and constexpr/consteval plus function templates are working end-to-end. Work continues on closing the basic C++ gaps listed in the roadmap.
-
-# License
-[Apache License 2.0](LICENSE)
+Ivy is distributed under the [Apache License 2.0](LICENSE).
