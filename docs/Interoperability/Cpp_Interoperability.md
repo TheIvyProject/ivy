@@ -20,11 +20,14 @@ import cpp "legacy_library.h";
 
 ---
 
-### 2. Under the Hood: Auxiliary Compilation & ABI Sharing
+### 2. Zero-Cost Binary Compatibility: Why No FFI Is Needed
 
-Unlike traditional FFI (Foreign Function Interface) which requires `extern "C"` bindings:
-1. **Auxiliary Clang Compiler:** `ivyc` delegates C++ header parsing and compilation to an auxiliary C++ compiler (such as Clang) to produce object files or module interfaces.
-2. **Direct ABI Compatibility:** Ivy natively follows the platform's C++ ABI (Itanium ABI for Linux/macOS, MSVC ABI for Windows). Name mangling, memory layout, and calling conventions match 100%, allowing direct zero-overhead linking.
+Ivy originally originated as a safe subset of C++. Although it has branched out into an independent language, its underlying **memory layout, struct alignment, calling conventions, and ABI are identical to C++**.
+
+Because Ivy and C++ are functionally one and the same at the machine level:
+- **No FFI Glue Layer:** There is zero marshalling, no wrapper overhead, and no runtime conversion cost. Ivy binaries and C++ binaries are 100% interoperable natively.
+- **Direct ABI Matching:** Ivy strictly targets the host platform's C++ ABI (MSVC ABI on Windows, Itanium ABI on Linux/macOS).
+- **Auxiliary Compiler Pipeline:** When encountering `import cpp`, `ivyc` calls an auxiliary compiler (such as Clang) to compile the C++ source/headers into compatible object files, and the linker directly joins them together seamlessly.
 
 ---
 
