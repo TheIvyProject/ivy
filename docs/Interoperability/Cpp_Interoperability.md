@@ -27,7 +27,7 @@ Ivy originally originated as a safe subset of C++. Although it has branched out 
 Because Ivy and C++ are functionally one and the same at the machine level:
 - **No FFI Glue Layer:** There is zero marshalling, no wrapper overhead, and no runtime conversion cost. Ivy binaries and C++ binaries are 100% interoperable natively.
 - **Direct ABI Matching:** Ivy strictly targets the host platform's C++ ABI (MSVC ABI on Windows, Itanium ABI on Linux/macOS).
-- **Auxiliary Compiler Pipeline:** When encountering `import cpp`, `ivyc` calls an auxiliary compiler (such as Clang) to compile the C++ source/headers into compatible object files, and the linker directly joins them together seamlessly.
+- **Auxiliary Compiler Pipeline:** Ivy does not ship with a built-in C++ compiler. When downloading Ivy, users can optionally bundle Clang. If Clang is not bundled, Ivy automatically discovers an existing C++ compiler available on the host machine (e.g. Clang, GCC, MSVC `cl.exe`) to compile C++ source/headers into compatible object files, and the linker directly joins them together seamlessly.
 
 ---
 
