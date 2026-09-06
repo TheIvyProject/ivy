@@ -138,3 +138,53 @@ struct Square : public Shape {
     }
 };
 ```
+
+---
+
+### 7. OOP Direction: No `as` / `is` Keywords
+
+Ivy keeps object-oriented syntax aligned with C++ and **does not introduce `as` / `is` keywords** for polymorphism or casting. Those keywords are intentionally rejected because they push Ivy toward the style of other languages instead of preserving its C++-shaped mental model.
+
+#### Design Rules
+
+1. **Upcasting stays implicit**, just like C++:
+
+```ivy
+Shape& shape = square;
+```
+
+2. **Compile-time checked conversions use C++-style casts**:
+
+```ivy
+float32 x = static_cast<float32>(value);
+```
+
+3. **Low-level reinterpretation remains explicit and unsafe-only**:
+
+```ivy
+unsafe {
+    Foo* ptr = reinterpret_cast<Foo*>(raw);
+}
+```
+
+4. **`dynamic_cast` remains banned** to avoid RTTI overhead and hidden runtime cost.
+
+#### Safe Polymorphism Without New Keywords
+
+For object-oriented code, Ivy prefers:
+
+- implicit upcast to base references/pointers,
+- `virtual` dispatch,
+- `override` for derived methods,
+- explicit helper APIs for checked downcasts if Ivy later adds them, using **C++-style library forms** rather than new language keywords.
+
+Preferred direction:
+
+```ivy
+Shape& base = square;
+
+// Possible future library design, not new syntax
+auto derived = ivy::dyn_cast<Square>(base);
+```
+
+This keeps the language surface small, preserves C++ familiarity, and avoids turning Ivy into a hybrid syntax that imitates unrelated languages.

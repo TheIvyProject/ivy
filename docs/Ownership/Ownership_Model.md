@@ -50,3 +50,23 @@ unsafe {
 | **Raw Pointers** | ❌ Forbidden | ✅ Allowed |
 | **Manual `free()` / Pointer Arithmetic** | ❌ Forbidden | ✅ Allowed |
 | **Unsafe Blocks** | Disallowed | `unsafe { ... }` |
+
+---
+
+### 4. Ownership Across OOP Boundaries
+
+Object-oriented features do **not** weaken Ivy's ownership rules.
+
+1. **Upcasting does not transfer ownership.** Converting `Derived&` to `Base&` only changes the view of the object, not its owner.
+2. **Method calls borrow `this`.** A non-`const` method borrows `this` mutably; a `const` method borrows `this` immutably.
+3. **Casts do not bypass borrow checking.** Any reference produced through a cast must still satisfy lifetime and aliasing rules.
+4. **Unsafe casts stay unsafe.** Reinterpretation across unrelated object layouts remains restricted to `unsafe`.
+
+```ivy
+Square sq = {4};
+Shape& base = sq; // Borrow/view conversion only, ownership stays with `sq`
+
+int32 area = base.area();
+```
+
+This rule is one reason Ivy avoids adding `as` / `is` keywords for OOP. Safe polymorphism should remain C++-shaped and explicit, while ownership and borrowing continue to be enforced uniformly by the compiler.
