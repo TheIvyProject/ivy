@@ -1,0 +1,75 @@
+// A2 test: `unsafe { }` keyword block
+// Tests that `unsafe { }` works as a keyword block (new form),
+// and that `[[ivy::unsafe]] { }` still works (backward-compat alias).
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+    void* malloc(unsigned long n);
+    void free(void* p);
+}
+
+int main() {
+    int x = 42;
+
+    // --- A2: new `unsafe { }` keyword block form ---
+    unsafe {
+        int* p = &x;
+        *p = 100;
+        printf("unsafe keyword block: *p = %d\n", *p);
+    }
+
+    // --- A2: unsafe with new/delete ---
+    unsafe {
+        int* p = new int(7);
+        printf("unsafe new: %d\n", *p);
+        delete p;
+    }
+
+    // --- A2: unsafe with malloc/free ---
+    unsafe {
+        void* p = malloc(1024);
+        printf("unsafe malloc ok\n");
+        free(p);
+    }
+
+    // --- A2: unsafe with const_cast ---
+    const int ci = 777;
+    unsafe {
+        int* mut = const_cast<int*>(&ci);
+        printf("const_cast<int*>(&ci) ok, val = %d\n", *mut);
+    }
+
+    // --- A2: unsafe with C-style cast ---
+    unsafe {
+        double e = 2.71828;
+        int cint = (int)e;
+        printf("(int)2.71828 = %d\n", cint);
+    }
+
+    // --- A2: backward-compat — [[ivy::unsafe]] { } still works ---
+    [[ivy::unsafe]] {
+        int* p = &x;
+        printf("legacy [[ivy::unsafe]]: *p = %d\n", *p);
+    }
+
+    // --- A2: nested unsafe blocks ---
+    unsafe {
+        int* p = &x;
+        unsafe {
+            *p = 200;
+        }
+        printf("nested unsafe: *p = %d\n", *p);
+    }
+
+    // --- A2: unsafe block with multiple statements ---
+    unsafe {
+        int a = 1;
+        int b = 2;
+        int c = a + b;
+        printf("multi-stmt unsafe: %d + %d = %d\n", a, b, c);
+    }
+
+    printf("x = %d\n", x);
+    return 0;
+}

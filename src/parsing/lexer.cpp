@@ -53,10 +53,18 @@ const std::unordered_set<std::string_view>& keywords() {
         // Ivy additions (contextual keywords, always tokenized as Keyword
         // so the parser can match them with atKeyword()).
         "final",        "override",
+        // A2: unsafe keyword block — `unsafe { ... }`
+        "unsafe",
         // 9.2: Module keywords (contextual in C++20, but we always tokenize
         // as Keyword so atKeyword() works in parseTopLevel dispatch).
         "import",       "module",
-        // Ivy builtin types
+        // Ivy builtin types — new Ivy-native names (without _t suffix)
+        "int8",        "int16",        "int32",        "int64",
+        "uint8",       "uint16",       "uint32",       "uint64",
+        "int128",      "uint128",
+        "float16",     "float32",      "float64",      "float128",
+        "bfloat16",    "iptr",         "uptr",         "size",
+        // Legacy _t-suffixed names (backward-compat aliases)
         "int8_t",      "int16_t",      "int32_t",      "int64_t",
         "uint8_t",     "uint16_t",     "uint32_t",     "uint64_t",
         "float16_t",   "float32_t",    "float64_t",    "float128_t",

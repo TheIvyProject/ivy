@@ -11,7 +11,8 @@ bool isNumericM(const mir::Type& t) {
     if (t.arraySize > 0) return false;
     static const std::string_view intBases[] = {
         "int8_t","int16_t","int32_t","int64_t","uint8_t","uint16_t",
-        "uint32_t","uint64_t","size_t","ptrdiff_t","int","long",
+        "uint32_t","uint64_t","int128_t","uint128_t",
+        "size_t","ptrdiff_t","uptr_t","int","long",
         "long long","short","unsigned","char","unsigned char",
         "signed char","bool"
     };

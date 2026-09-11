@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <string>
+#include <unordered_map>
 
 namespace ivy {
 namespace {
@@ -165,11 +166,13 @@ std::vector<Attribute> Parser::parseAttributeList() {
         next();  // [
 
         std::string_view ns, name;
-        if (at(TokenKind::Identifier)) {
+        // A2: Accept both Identifier and Keyword here so that
+        // `unsafe` (now a keyword) works inside [[ivy::unsafe]].
+        if (at(TokenKind::Identifier) || at(TokenKind::Keyword)) {
             ns = next().lexeme;
             if (at(TokenKind::ColonColon)) {
                 next();
-                if (!at(TokenKind::Identifier)) {
+                if (!at(TokenKind::Identifier) && !at(TokenKind::Keyword)) {
                     errorAt(peek(), "expected attribute name after '::'");
                 } else {
                     name = next().lexeme;
@@ -295,7 +298,14 @@ bool Parser::isTypeStart() const {
         kw == "bool" || kw == "char" || kw == "short" || kw == "int" ||
         kw == "long" || kw == "float" || kw == "double" ||
         kw == "auto" ||  // type deduction
-        // Ivy builtin types
+        // Ivy builtin types — new Ivy-native names (without _t suffix)
+        kw == "int8" || kw == "int16" || kw == "int32" || kw == "int64" ||
+        kw == "uint8" || kw == "uint16" || kw == "uint32" || kw == "uint64" ||
+        kw == "int128" || kw == "uint128" ||
+        kw == "float16" || kw == "float32" || kw == "float64" ||
+        kw == "float128" || kw == "bfloat16" ||
+        kw == "iptr" || kw == "uptr" || kw == "size" ||
+        // Legacy _t-suffixed names (backward-compat)
         kw == "int8_t" || kw == "int16_t" || kw == "int32_t" || kw == "int64_t" ||
         kw == "uint8_t" || kw == "uint16_t" || kw == "uint32_t" || kw == "uint64_t" ||
         kw == "float16_t" || kw == "float32_t" || kw == "float64_t" ||
@@ -431,21 +441,45 @@ Type Parser::parseType() {
     if (atKeyword("unsigned") || atKeyword("signed")) {
         if (!cnumberEnabled_) {
             errorAt(peek(), "C-style type '" + std::string(peek().lexeme) +
-                    "' requires #pragma ivy cnumber; use a fixed-width type like int32_t/uint32_t");
+                    "' requires #pragma ivy cnumber; use a fixed-width type like int32/uint32");
         }
         t.isUnsigned = atKeyword("unsigned");
         next();
     }
-    if (atKeyword("int8_t") || atKeyword("int16_t") || atKeyword("int32_t") ||
+    if (atKeyword("int8") || atKeyword("int16") || atKeyword("int32") ||
+        atKeyword("int64") || atKeyword("uint8") || atKeyword("uint16") ||
+        atKeyword("uint32") || atKeyword("uint64") || atKeyword("float16") ||
+        atKeyword("float32") || atKeyword("float64") || atKeyword("float128") ||
+        atKeyword("bfloat16") || atKeyword("int128") || atKeyword("uint128") ||
+        atKeyword("iptr") || atKeyword("uptr") || atKeyword("size") ||
+        // Legacy _t-suffixed names (backward-compat)
+        atKeyword("int8_t") || atKeyword("int16_t") || atKeyword("int32_t") ||
         atKeyword("int64_t") || atKeyword("uint8_t") || atKeyword("uint16_t") ||
         atKeyword("uint32_t") || atKeyword("uint64_t") || atKeyword("float16_t") ||
         atKeyword("float32_t") || atKeyword("float64_t") || atKeyword("float128_t") ||
         atKeyword("bfloat16_t") || atKeyword("size_t") || atKeyword("ptrdiff_t") ||
         atKeyword("nullptr_t") || atKeyword("max_align_t")) {
-        t.base = next().lexeme;
+        // A1: Normalize Ivy-native names to canonical _t form so
+        // downstream stages (HIR/MIR/codegen) see the same type identity.
+        static const std::unordered_map<std::string_view, std::string_view>
+            normalize = {
+                {"int8", "int8_t"}, {"int16", "int16_t"},
+                {"int32", "int32_t"}, {"int64", "int64_t"},
+                {"uint8", "uint8_t"}, {"uint16", "uint16_t"},
+                {"uint32", "uint32_t"}, {"uint64", "uint64_t"},
+                {"float16", "float16_t"}, {"float32", "float32_t"},
+                {"float64", "float64_t"}, {"float128", "float128_t"},
+                {"bfloat16", "bfloat16_t"},
+                {"int128", "int128_t"}, {"uint128", "uint128_t"},
+                {"iptr", "ptrdiff_t"}, {"uptr", "uptr_t"},
+                {"size", "size_t"},
+            };
+        const std::string_view lex = next().lexeme;
+        auto it = normalize.find(lex);
+        t.base = (it != normalize.end()) ? it->second : lex;
     } else if (atKeyword("char")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'char' requires #pragma ivy cnumber; use int8_t/uint8_t");
+            errorAt(peek(), "C-style type 'char' requires #pragma ivy cnumber; use int8/uint8");
         }
         next();
         t.base = "char";
@@ -453,26 +487,26 @@ Type Parser::parseType() {
         // are — those are handled via isUnsigned above. No trailing int.
     } else if (atKeyword("short")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'short' requires #pragma ivy cnumber; use int16_t/uint16_t");
+            errorAt(peek(), "C-style type 'short' requires #pragma ivy cnumber; use int16/uint16");
         }
         next();
         if (atKeyword("int")) next();  // `short int` == `short`
         t.base = "short";
     } else if (atKeyword("int")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'int' requires #pragma ivy cnumber; use int32_t/uint32_t");
+            errorAt(peek(), "C-style type 'int' requires #pragma ivy cnumber; use int32/uint32");
         }
         next();
         t.base = "int";
     } else if (atKeyword("float")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'float' requires #pragma ivy cnumber; use float32_t");
+            errorAt(peek(), "C-style type 'float' requires #pragma ivy cnumber; use float32");
         }
         next();
         t.base = "float";
     } else if (atKeyword("double")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'double' requires #pragma ivy cnumber; use float64_t");
+            errorAt(peek(), "C-style type 'double' requires #pragma ivy cnumber; use float64");
         }
         next();
         t.base = "double";
@@ -480,7 +514,7 @@ Type Parser::parseType() {
         t.base = next().lexeme;
     } else if (atKeyword("long")) {
         if (!cnumberEnabled_) {
-            errorAt(peek(), "C-style type 'long' requires #pragma ivy cnumber; use int64_t");
+            errorAt(peek(), "C-style type 'long' requires #pragma ivy cnumber; use int64");
         }
         next();
         if (atKeyword("long")) {
@@ -498,7 +532,7 @@ Type Parser::parseType() {
         }
     } else {
         if (!t.isUnsigned && !t.isConst) {
-            errorAt(peek(), "expected a type (void, bool, int8_t, int16_t, int32_t, int64_t, uint8_t, ..., float32_t, float64_t, ...)");
+            errorAt(peek(), "expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)");
         } else {
             t.base = "int";  // "unsigned" / "signed" / "const ..." alone → int
             if (t.isUnsigned) t.isUnsigned = true;
@@ -889,11 +923,13 @@ void Parser::parseEnum(TranslationUnit& tu, SourceLoc loc) {
         const std::string_view b = underlyingType.base;
         const bool isInt = b == "int" || b == "int8_t" || b == "int16_t" ||
                            b == "int32_t" || b == "int64_t" ||
+                           b == "int128_t" ||
                            b == "uint8_t" || b == "uint16_t" ||
                            b == "uint32_t" || b == "uint64_t" ||
+                           b == "uint128_t" ||
                            b == "char" || b == "short" || b == "long" ||
                            b == "long long" || b == "bool" ||
-                           b == "size_t" || b == "ptrdiff_t";
+                           b == "size_t" || b == "ptrdiff_t" || b == "uptr_t";
         if (!isInt) {
             errorAt(peek(), "enum underlying type must be an integer type");
         }
@@ -1836,7 +1872,24 @@ std::vector<Param> Parser::parseParams() {
 std::unique_ptr<Stmt> Parser::parseStatement() {
     const SourceLoc loc = locOf(peek());
 
-    // [[ivy::unsafe]] { ... }
+    // A2: `unsafe { ... }` keyword block (preferred form)
+    if (atKeyword("unsafe")) {
+        next();  // consume 'unsafe'
+        // Set inUnsafe_ before parsing body so new/delete/etc. are allowed.
+        const bool saved = inUnsafe_;
+        inUnsafe_ = true;
+        std::unique_ptr<Stmt> body;
+        if (at(TokenKind::LBrace)) {
+            body = parseCompound();
+        } else {
+            // Allow single-statement unsafe body: `unsafe stmt;`
+            body = parseStatement();
+        }
+        inUnsafe_ = saved;
+        return makeStmt<Stmt::Unsafe>(loc, std::move(body));
+    }
+
+    // Legacy: [[ivy::unsafe]] { ... } (backward-compat alias)
     if (at(TokenKind::LBracket) && peek(1).kind == TokenKind::LBracket) {
         std::vector<Attribute> attrs = parseAttributeList();
         validateAttributes(attrs, {"unsafe"});
@@ -2581,7 +2634,11 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
              peek(1).lexeme.rfind("int", 0) == 0 ||
              peek(1).lexeme.rfind("uint", 0) == 0 ||
              peek(1).lexeme.rfind("float", 0) == 0 ||
-             peek(1).lexeme == "size_t" || peek(1).lexeme == "ptrdiff_t")) {
+             peek(1).lexeme == "bfloat16" || peek(1).lexeme == "bfloat16_t" ||
+             peek(1).lexeme == "size" || peek(1).lexeme == "size_t" ||
+             peek(1).lexeme == "ptrdiff_t" || peek(1).lexeme == "iptr" ||
+             peek(1).lexeme == "uptr" || peek(1).lexeme == "nullptr_t" ||
+             peek(1).lexeme == "max_align_t")) {
             next();  // consume '('
             Type targetType = parseType();
             expect(TokenKind::RParen, "expected ')' after C-style cast type");
@@ -2670,7 +2727,7 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
 
 std::unique_ptr<Expr> Parser::parseNew(SourceLoc loc) {
     if (!inUnsafe_) {
-        errorAt(peek(), "'new' requires an [[ivy::unsafe]] block in the Ivy subset");
+        errorAt(peek(), "'new' requires an unsafe block in the Ivy subset");
     }
     next();  // new
     Type type = parseType();
@@ -2691,7 +2748,7 @@ std::unique_ptr<Expr> Parser::parseNew(SourceLoc loc) {
 
 std::unique_ptr<Expr> Parser::parseDelete(SourceLoc loc) {
     if (!inUnsafe_) {
-        errorAt(peek(), "'delete' requires an [[ivy::unsafe]] block in the Ivy subset");
+        errorAt(peek(), "'delete' requires an unsafe block in the Ivy subset");
     }
     next();  // delete
     bool isArray = false;

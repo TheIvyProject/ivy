@@ -22,17 +22,18 @@ static int typeRank(std::string_view b) {
     if (b == "int32_t" || b == "uint32_t")  return 3;
     if (b == "long" || b == "int64_t" || b == "uint64_t") return 4;
     if (b == "long long") return 4;
-    if (b == "size_t" || b == "ptrdiff_t")  return 4;
+    if (b == "size_t" || b == "ptrdiff_t" || b == "uptr_t")  return 4;
     if (b == "float16_t" || b == "bfloat16_t") return 5;
     if (b == "float" || b == "float32_t")  return 6;
     if (b == "double" || b == "long double" || b == "float64_t") return 7;
     if (b == "float128_t") return 8;
+    if (b == "int128_t" || b == "uint128_t") return 9;
     return -1;
 }
 
 static bool isIvyUnsigned(std::string_view b) {
     return b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
-           b == "size_t";
+           b == "uint128_t" || b == "size_t" || b == "uptr_t";
 }
 
 static bool isFloatBase(std::string_view b) {
@@ -45,8 +46,10 @@ static bool isIntegerBase(std::string_view b) {
     return b == "bool" || b == "char" || b == "short" || b == "int" ||
            b == "long" || b == "long long" ||
            b == "int8_t" || b == "int16_t" || b == "int32_t" || b == "int64_t" ||
+           b == "int128_t" ||
            b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
-           b == "size_t" || b == "ptrdiff_t";
+           b == "uint128_t" ||
+           b == "size_t" || b == "ptrdiff_t" || b == "uptr_t";
 }
 
 // Approximate bit-width of a numeric type base name.  Used for overload
@@ -59,9 +62,10 @@ static int typeWidth(std::string_view b) {
     if (b == "int" || b == "int32_t" || b == "uint32_t" || b == "float" ||
         b == "float32_t" || b == "bfloat16_t" || b == "float16_t") return 32;
     if (b == "long" || b == "int64_t" || b == "uint64_t" || b == "size_t" ||
-        b == "ptrdiff_t" || b == "long long" || b == "double" ||
+        b == "ptrdiff_t" || b == "uptr_t" || b == "long long" || b == "double" ||
         b == "float64_t") return 64;
-    if (b == "long double" || b == "float128_t") return 128;
+    if (b == "long double" || b == "float128_t" ||
+        b == "int128_t" || b == "uint128_t") return 128;
     return 0;
 }
 
@@ -407,9 +411,14 @@ std::uint64_t HirBuilder::typeSize(const hir::Type& t) const {
     if (b == "bool" || b == "char" || b == "int8_t" || b == "uint8_t") return 1;
     if (b == "short" || b == "int16_t" || b == "uint16_t" || b == "float16_t" || b == "bfloat16_t") return 2;
     if (b == "int" || b == "unsigned" || b == "int32_t" || b == "uint32_t" ||
-        b == "float" || b == "float32_t" || b == "size_t" || b == "ptrdiff_t") return 4;
+        b == "float" || b == "float32_t") return 4;
+    // A1: size_t/ptrdiff_t/uptr_t are pointer-sized (8 bytes on x64).
+    // NOTE: previously grouped with 4-byte types — fixed to match codegen.
+    if (b == "size_t" || b == "ptrdiff_t" || b == "uptr_t") return 8;
     if (b == "long" || b == "long long" || b == "int64_t" || b == "uint64_t" ||
-        b == "double" || b == "long double" || b == "float64_t" || b == "float128_t") return 8;
+        b == "double" || b == "long double" || b == "float64_t") return 8;
+    // 128-bit types
+    if (b == "float128_t" || b == "int128_t" || b == "uint128_t") return 16;
     // 8.3: Struct type — look up the pre-computed size from buildStruct.
     auto it = structs_.find(b);
     if (it != structs_.end()) return it->second.size;
@@ -960,7 +969,7 @@ bool HirBuilder::checkCondition(const hir::Expr& e) {
 
 void HirBuilder::requireUnsafe(SourceLoc loc, std::string_view what) {
     if (unsafeDepth_ == 0) {
-        error(loc, std::string(what) + " requires an [[ivy::unsafe]] block");
+        error(loc, std::string(what) + " requires an unsafe block");
     }
 }
 
@@ -2912,7 +2921,13 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             const bool lhsIsVar = std::holds_alternative<hir::Expr::IdentRef>(as.lhs->node);
             const bool lhsIsIdx = std::holds_alternative<hir::Expr::Index>(as.lhs->node);
             const bool lhsIsMem = std::holds_alternative<hir::Expr::Member>(as.lhs->node);
-            if (!lhsIsVar && !lhsIsIdx && !lhsIsMem) {
+            // A2: Allow `*ptr = val` (prefix unary deref) as assignable lhs.
+            const bool lhsIsDeref = [&] {
+                if (auto* u = std::get_if<hir::Expr::Unary>(&as.lhs->node))
+                    return u->isPrefix && u->op == "*";
+                return false;
+            }();
+            if (!lhsIsVar && !lhsIsIdx && !lhsIsMem && !lhsIsDeref) {
                 error(e.loc, "left-hand side of assignment is not assignable");
             } else if (as.op == "=") {
                 if (as.lhs->type.isConst && as.lhs->type.pointerDepth == 0) {

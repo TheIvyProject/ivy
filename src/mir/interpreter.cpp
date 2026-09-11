@@ -21,8 +21,10 @@ static bool isIntegerBase(std::string_view b) {
     return b == "bool" || b == "char" || b == "short" || b == "int" ||
            b == "long" || b == "long long" ||
            b == "int8_t" || b == "int16_t" || b == "int32_t" || b == "int64_t" ||
+           b == "int128_t" ||
            b == "uint8_t" || b == "uint16_t" || b == "uint32_t" || b == "uint64_t" ||
-           b == "size_t" || b == "ptrdiff_t";
+           b == "uint128_t" ||
+           b == "size_t" || b == "ptrdiff_t" || b == "uptr_t";
 }
 
 // ============================================================

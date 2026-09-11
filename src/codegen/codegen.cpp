@@ -40,7 +40,8 @@ namespace {
 bool isFloatType(const mir::Type& t) {
     return t.pointerDepth == 0 && (t.base == "float" || t.base == "double" ||
                                       t.base == "float32_t" || t.base == "float64_t" ||
-                                      t.base == "float16_t" || t.base == "float128_t");
+                                      t.base == "float16_t" || t.base == "float128_t" ||
+                                      t.base == "bfloat16_t");
 }
 
 // 8.5: Check if a name is a known runtime builtin function.
@@ -195,17 +196,20 @@ std::string CodeGen::llvmType(const mir::Type& t) const {
     if (t.base == "int16_t") return "i16";
     if (t.base == "int32_t") return "i32";
     if (t.base == "int64_t") return "i64";
+    if (t.base == "int128_t") return "i128";  // A1: new 128-bit signed int
     if (t.base == "uint8_t") return "i8";
     if (t.base == "uint16_t") return "i16";
     if (t.base == "uint32_t") return "i32";
     if (t.base == "uint64_t") return "i64";
+    if (t.base == "uint128_t") return "i128";  // A1: new 128-bit unsigned int
     if (t.base == "float16_t") return "half";
     if (t.base == "float32_t") return "float";
     if (t.base == "float64_t") return "double";
     if (t.base == "float128_t") return "fp128";
     if (t.base == "bfloat16_t") return "bfloat";
     if (t.base == "size_t") return "i64";  // x64
-    if (t.base == "ptrdiff_t") return "i64";
+    if (t.base == "ptrdiff_t") return "i64";  // x64 (iptr → ptrdiff_t)
+    if (t.base == "uptr_t") return "i64";  // A1: new unsigned pointer-sized int
     if (t.base == "nullptr_t") return "ptr";
     if (t.base == "max_align_t") return "i8";  // alignment only
     // User-defined enum type — resolve to its underlying integer type.
@@ -253,8 +257,8 @@ std::string CodeGen::sizeofType(const mir::Type& t) const {
     if (b == "int64_t" || b == "uint64_t") return "8";
     if (b == "float16_t" || b == "bfloat16_t") return "2";
     if (b == "float64_t") return "8";
-    if (b == "float128_t") return "16";
-    if (b == "size_t" || b == "ptrdiff_t") return "8";  // x64
+    if (b == "float128_t" || b == "int128_t" || b == "uint128_t") return "16";
+    if (b == "size_t" || b == "ptrdiff_t" || b == "uptr_t") return "8";  // x64
     // User-defined enum — size of its underlying type.
     if (auto eIt = enumTypes_.find(b); eIt != enumTypes_.end()) {
         mir::Type underlying = t;
@@ -1602,7 +1606,9 @@ std::string CodeGen::itaniumMangleType(const mir::Type& t) const {
     if (t.base == "int16_t" || t.base == "uint16_t") return t.base == "uint16_t" ? "Us" : "s";
     if (t.base == "int32_t" || t.base == "uint32_t") return t.base == "uint32_t" ? "Ui" : "i";
     if (t.base == "int64_t" || t.base == "uint64_t") return t.base == "uint64_t" ? "Uy" : "x";
-    if (t.base == "size_t" || t.base == "ptrdiff_t") return t.base == "size_t" ? "m" : "l";
+    if (t.base == "int128_t" || t.base == "uint128_t") return t.base == "uint128_t" ? "Uo" : "o";  // A1: 128-bit
+    if (t.base == "size_t" || t.base == "ptrdiff_t" || t.base == "uptr_t")
+        return t.base == "size_t" ? "m" : (t.base == "uptr_t" ? "m" : "l");  // size_t/uptr_t → m, ptrdiff_t → l
     if (t.base == "float16_t") return "Dh";
     if (t.base == "float32_t") return "f";
     if (t.base == "float64_t") return "d";
@@ -1741,8 +1747,10 @@ std::string CodeGen::msvcMangleType(const mir::Type& t) const {
     if (t.base == "uint32_t") return "I";
     if (t.base == "int64_t") return "_J";
     if (t.base == "uint64_t") return "_K";
+    if (t.base == "int128_t" || t.base == "uint128_t") return "_J";  // A1: 128-bit → same as 64-bit (MSVC has no 128-bit mangling)
     if (t.base == "size_t") return "_K";
     if (t.base == "ptrdiff_t") return "J";
+    if (t.base == "uptr_t") return "_K";  // A1: unsigned pointer-sized → _K (unsigned)
     if (t.base == "float16_t") return "M";
     if (t.base == "float32_t") return "M";
     if (t.base == "float64_t") return "N";

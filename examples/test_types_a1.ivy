@@ -1,0 +1,75 @@
+// A1 test: Ivy-native type names (without _t suffix)
+// Tests that int8, int16, int32, int64, uint8, uint16, uint32, uint64,
+// float16, float32, float64, float128, bfloat16, int128, uint128,
+// iptr, uptr, size all work as type keywords.
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // --- Signed integers (new names) ---
+    int8  a = 5;
+    int16 b = 10;
+    int32 c = 15;
+    int64 d = 20;
+
+    // --- Unsigned integers (new names) ---
+    uint8  e = 65;
+    uint16 f = 100;
+    uint32 g = 200;
+    uint64 h = 300;
+
+    // --- Floating-point (new names) ---
+    float16 k = 1;
+    float32 i = 3;
+    float64 j = 3;
+
+    // --- Pointer-sized & size types ---
+    iptr  p = 10;
+    uptr  u = 20;
+    size  s = 42;
+
+    // --- Arithmetic with new types ---
+    int32  r  = a + b;
+    float64 fr = i + j;
+
+    // --- Backward-compat: _t-suffixed names still work ---
+    int8_t  a2 = 5;
+    int16_t b2 = 10;
+    int32_t c2 = 15;
+    int64_t d2 = 20;
+    uint8_t  e2 = 65;
+    uint32_t g2 = 200;
+    float32_t i2 = 3;
+    float64_t j2 = 3;
+    size_t s2 = 42;
+
+    // --- Mixed: new + old in same expression ---
+    int32 mixed = a + b2;   // int8 + int16_t → int32
+    float64 fmixed = i + j2; // float32 + float64_t → float64
+
+    // --- sizeof on new types ---
+    printf("sizeof(int8)   = %d\n", sizeof(int8));
+    printf("sizeof(int16)  = %d\n", sizeof(int16));
+    printf("sizeof(int32)  = %d\n", sizeof(int32));
+    printf("sizeof(int64)  = %d\n", sizeof(int64));
+    printf("sizeof(uint8)  = %d\n", sizeof(uint8));
+    printf("sizeof(uint32) = %d\n", sizeof(uint32));
+    printf("sizeof(uint64) = %d\n", sizeof(uint64));
+    printf("sizeof(float32)= %d\n", sizeof(float32));
+    printf("sizeof(float64)= %d\n", sizeof(float64));
+    printf("sizeof(size)   = %d\n", sizeof(size));
+    printf("sizeof(iptr)   = %d\n", sizeof(iptr));
+    printf("sizeof(uptr)   = %d\n", sizeof(uptr));
+
+    printf("a=%d b=%d c=%d d=%lld\n", a, b, c, d);
+    printf("e=%d f=%d g=%d h=%lld\n", e, f, g, h);
+    printf("i=%f j=%f k=%f\n", i, j, k);
+    printf("s=%lld p=%lld u=%lld\n", s, p, u);
+    printf("r=%d fr=%f\n", r, fr);
+    printf("mixed=%d fmixed=%f\n", mixed, fmixed);
+
+    return 0;
+}
