@@ -1,0 +1,49 @@
+// A4 test: move() builtin + use-after-move check
+// Tests move(expr) marks variable as moved-out, use-after-move is error,
+// and reassignment re-initializes.
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // --- A4: Basic move ---
+    int a = 100;
+    int b = move(a);  // 'a' is now moved-out
+    printf("b = %d\n", b);
+
+    // --- A4: Reassign re-initializes ---
+    a = 200;          // 'a' is valid again
+    int c = a;        // OK — no error
+    printf("c = %d\n", c);
+
+    // --- A4: move on Ivy-native types ---
+    int32 x = 42;
+    int32 y = move(x);
+    printf("y = %d\n", y);
+    x = 99;           // re-initialize
+    printf("x = %d\n", x);
+
+    // --- A4: move in expression context ---
+    int p = 10;
+    int q = 20;
+    int r = move(p) + move(q);
+    printf("r = %d\n", r);
+
+    // --- A4: move with float ---
+    float pi = 3.14;
+    float pi2 = move(pi);
+    printf("pi2 = %f\n", pi2);
+    pi = 2.71;        // re-initialize
+    printf("pi = %f\n", pi);
+
+    // --- A4: chain move ---
+    int v = 500;
+    int w = move(v);
+    int z = move(w);  // w is now moved-out
+    printf("z = %d\n", z);
+
+    printf("A4 OK\n");
+    return 0;
+}

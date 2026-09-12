@@ -46,12 +46,20 @@ private:
     // on demand when a template-id call is encountered.
     std::unordered_map<std::string_view, const Function*> templates_;
     std::vector<std::unordered_map<std::string_view, hir::Type>> scopes_;
+    // A4: Move-state tracking — parallel to `scopes_`, pushed/popped together.
+    // Tracks whether a variable is Initialized or MovedOut (after `move()`).
+    enum class MoveState { Initialized, MovedOut };
+    std::vector<std::unordered_map<std::string_view, MoveState>> moveStates_;
     // Per-scope stack of local variables that need a destructor call
     // when the scope exits (RAII).  Parallel to `scopes_` — pushed/
     // popped together.  Each entry is the variable name; the dtor is
     // looked up via `structs_[type.base].dtor`.
     std::vector<std::vector<std::string_view>> dtorStacks_;
     int unsafeDepth_ = 0;
+    // A4: When true, use-after-move check is bypassed for IdentRef
+    // (used when building the lhs of an assignment — re-assignment
+    // re-initializes a moved-out variable).
+    bool inAssignLhs_ = false;
     hir::Function* current_ = nullptr;
     bool hasReturnInBody_ = false;
 

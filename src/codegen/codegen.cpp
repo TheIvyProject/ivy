@@ -47,6 +47,8 @@ bool isFloatType(const mir::Type& t) {
 // 8.5: Check if a name is a known runtime builtin function.
 // These are emitted as extern "C" calls (no mangling).
 bool isCodegenBuiltin(std::string_view name) {
+    // A4: move() is a pass-through (no-op at codegen).
+    if (name == "move") return true;
     if (name == "printf" || name == "puts" || name == "putchar" ||
         name == "exit" || name == "abort" || name == "malloc" ||
         name == "free")
@@ -1079,6 +1081,14 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         // MIR Function entry. Treat them as extern "C" calls — the
         // symbol name is the callee name (with :: replaced by _).
         const bool isBuiltinCall = !callee && isCodegenBuiltin(v.callee);
+
+        // A4: move() is a pass-through — just lower the operand.
+        if (isBuiltinCall && v.callee == "move") {
+            if (!v.args.empty() && v.args[0]) {
+                return lowerExpr(*v.args[0]);
+            }
+            return "";
+        }
 
         // 8.5: ivy::print / ivy::println dispatch to typed overloads
         // (ivy_print_int, ivy_print_float, etc.) based on arg type.

@@ -82,6 +82,8 @@ bool isNumeric(const hir::Type& t) {
 // These functions are resolved at runtime by the interpreter or linked
 // from libc in codegen mode. They don't need HIR registration.
 bool isBuiltinFn(std::string_view name) {
+    // A4: move() builtin.
+    if (name == "move") return true;
     // C runtime builtins (already supported).
     if (name == "printf" || name == "puts" || name == "putchar" ||
         name == "exit" || name == "abort" || name == "malloc" ||
@@ -826,12 +828,14 @@ void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
     current_ = &fn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
+    moveStates_.push_back({});
     dtorStacks_.push_back({});
     for (const hir::Param& p : fn.params) {
         if (!p.name.empty()) declare(p.name, p.type, p.loc);
     }
     std::unique_ptr<hir::Stmt> c = buildCompound(body, fn.loc);
     scopes_.pop_back();
+    moveStates_.pop_back();
     dtorStacks_.pop_back();
     if (c) {
         fn.body = std::make_unique<hir::Stmt::Compound>(
@@ -856,6 +860,8 @@ void HirBuilder::declare(std::string_view name, hir::Type type, SourceLoc loc) {
     // type comparisons, recordDtorVar, and codegen see the real type.
     type = resolveTypeAlias(type);
     scope.emplace(name, type);
+    // A4: New variable starts in Initialized state.
+    moveStates_.back().emplace(name, MoveState::Initialized);
 }
 
 void HirBuilder::recordDtorVar(std::string_view name, const hir::Type& type) {
@@ -978,6 +984,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildCompound(const Stmt::Compound& c, So
     out->loc = loc;
     auto& compound = out->node.emplace<hir::Stmt::Compound>();
     scopes_.push_back({});
+    moveStates_.push_back({});
     dtorStacks_.push_back({});
     for (const auto& s : c.stmts) compound.stmts.push_back(buildStmt(*s));
     // Before popping the scope, emit destructor calls for any local
@@ -985,6 +992,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildCompound(const Stmt::Compound& c, So
     // declaration order (handled by emitDtorCalls).
     emitDtorCalls(dtorStacks_.size() - 1, loc, compound.stmts);
     scopes_.pop_back();
+    moveStates_.pop_back();
     dtorStacks_.pop_back();
     return out;
 }
@@ -1539,6 +1547,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         const A::For& v = std::get<A::For>(n);
         auto& fr = out->node.emplace<hir::Stmt::For>();
         scopes_.push_back({});
+        moveStates_.push_back({});
         dtorStacks_.push_back({});  // for-init scope (RAII)
         if (v.init) fr.init = buildStmt(*v.init);
         if (v.cond) {
@@ -1548,6 +1557,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         if (v.incr) fr.incr = buildExpr(*v.incr);
         fr.body = buildStmt(*v.body);
         scopes_.pop_back();
+        moveStates_.pop_back();
         dtorStacks_.pop_back();
         return out;
     }
@@ -2097,9 +2107,18 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         const std::string_view name = std::get<A::IdentRef>(n).name;
         // Check variable scopes first.
         bool found = false;
-        for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-            const auto hit = it->find(name);
-            if (hit != it->end()) {
+        for (size_t si = scopes_.size(); si-- > 0;) {
+            const auto hit = scopes_[si].find(name);
+            if (hit != scopes_[si].end()) {
+                // A4: use-after-move check (skip for assignment lhs —
+                // re-assignment re-initializes a moved-out variable).
+                if (!inAssignLhs_) {
+                    auto& ms = moveStates_[si];
+                    auto msIt = ms.find(name);
+                    if (msIt != ms.end() && msIt->second == MoveState::MovedOut) {
+                        error(e.loc, "use of moved-out variable '" + std::string(name) + "'");
+                    }
+                }
                 out->node = hir::Expr::IdentRef{name};
                 out->type = hit->second;
                 found = true;
@@ -2369,6 +2388,31 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         // lambdas (handled in a dedicated branch).
         if (std::holds_alternative<A::IdentRef>(callee->node)) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
+            // A4: `move(expr)` builtin — marks the operand as moved-out
+            // and passes through its value (semantically an rvalue cast).
+            if (bareName == "move" && call.args.size() == 1 &&
+                call.args[0] && std::holds_alternative<hir::Expr::IdentRef>(call.args[0]->node)) {
+                const std::string_view varName = std::get<hir::Expr::IdentRef>(call.args[0]->node).name;
+                // Mark variable as moved-out in its scope.
+                for (size_t si = moveStates_.size(); si-- > 0;) {
+                    auto it = moveStates_[si].find(varName);
+                    if (it != moveStates_[si].end()) {
+                        if (it->second == MoveState::MovedOut) {
+                            error(e.loc, "'" + std::string(varName) + "' is already moved-out");
+                        }
+                        it->second = MoveState::MovedOut;
+                        break;
+                    }
+                }
+                // Pass-through: result is the operand expression.
+                // Create a fresh IdentRef to avoid dangling references
+                // when the Call node is destroyed.
+                auto movedOut = std::make_unique<hir::Expr>();
+                movedOut->node = hir::Expr::IdentRef{varName};
+                movedOut->type = call.args[0]->type;
+                movedOut->loc = e.loc;
+                return movedOut;
+            }
             // Only attempt if `bareName` is NOT a known function/template
             // (otherwise `a()` for a function `a` would be misread).
             bool isFunc = !resolveOverloads(bareName).empty() ||
@@ -2908,7 +2952,9 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         const A::Assign& v = std::get<A::Assign>(n);
         auto& as = out->node.emplace<hir::Expr::Assign>();
         as.op = v.op;
+        inAssignLhs_ = true;  // A4: bypass use-after-move for lhs
         as.lhs = buildExpr(*v.lhs);
+        inAssignLhs_ = false;
         // Aggregate init on assignment: `p = {1, 2};` — resolve elements
         // against the lhs struct type so implicit conversions are applied.
         if (v.op == "=" && as.lhs && std::holds_alternative<ivy::Expr::InitList>(v.rhs->node)) {
@@ -2939,6 +2985,18 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             } else if (!(isNumeric(as.lhs->type) && isNumeric(as.rhs->type))) {
                 error(e.loc, "compound assignment '" + std::string(as.op) +
                                  "' expects numeric operands");
+            }
+        }
+        // A4: Reassignment re-initializes a moved-out variable.
+        if (as.op == "=" && as.lhs &&
+            std::holds_alternative<hir::Expr::IdentRef>(as.lhs->node)) {
+            const std::string_view varName = std::get<hir::Expr::IdentRef>(as.lhs->node).name;
+            for (size_t si = moveStates_.size(); si-- > 0;) {
+                auto it = moveStates_[si].find(varName);
+                if (it != moveStates_[si].end()) {
+                    it->second = MoveState::Initialized;
+                    break;
+                }
             }
         }
         out->type = as.lhs ? as.lhs->type : dummyType();
@@ -3451,6 +3509,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
     current_ = rawFn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
+    moveStates_.push_back({});
     dtorStacks_.push_back({});  // parameter scope (RAII)
     // Declare the closure pointer parameter.
     declare("__closure", hir::Type{closureTypeSv, false, false, false, 1}, loc);
@@ -3524,6 +3583,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
         out->loc = loc;
         auto& compound = out->node.emplace<hir::Stmt::Compound>();
         scopes_.push_back({});
+        moveStates_.push_back({});
         dtorStacks_.push_back({});  // lambda body scope (RAII)
 
         // Build injected capture declarations under an implicit unsafe
@@ -3543,6 +3603,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
             }
         }
         scopes_.pop_back();
+        moveStates_.pop_back();
         dtorStacks_.pop_back();
 
         rawFn->body = std::make_unique<hir::Stmt::Compound>(
@@ -3550,6 +3611,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
     }
 
     scopes_.pop_back();
+    moveStates_.pop_back();
     dtorStacks_.pop_back();
     // Check for missing return (unless void).
     if (!rawFn->returnType.isConst && rawFn->returnType.pointerDepth == 0 &&

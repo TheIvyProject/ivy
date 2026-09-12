@@ -887,6 +887,12 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
         return makeVoid();
     }
 
+    // A4: move() is a pass-through — just return the operand value.
+    if (c.callee == "move") {
+        if (!args.empty()) return args[0];
+        return Value{};
+    }
+
     if (isBuiltin(c.callee)) return callBuiltin(c.callee, args);
 
     // 7.7: Virtual dispatch.  Read the object's dynamic type name and
@@ -949,6 +955,8 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
 // ============================================================
 
 bool Interpreter::isBuiltin(std::string_view name) const {
+    // A4: move() is a builtin pass-through.
+    if (name == "move") return true;
     // 8.5: ivy::print / ivy::println are builtins for the interpreter.
     // In codegen mode, they are extern "C" functions linked from libc.
     return name == "printf" || name == "puts" || name == "putchar" ||
