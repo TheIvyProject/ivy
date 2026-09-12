@@ -145,6 +145,11 @@ private:
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
                        std::vector<TemplateParam> tplParams = {});
+    // A3: `fn name(params) -> ReturnType { body }` — trailing return type form.
+    // Same as parseFunction but return type comes after `->` instead of before name.
+    void parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
+                               bool isExternC, bool isConstexpr = false, bool isConsteval = false,
+                               std::vector<TemplateParam> tplParams = {});
     std::vector<Param> parseParams();
     // Parse an operator name (after `operator` keyword): returns the
     // operator symbol string (e.g. "+", "==", "[]", "()", "++", "->").

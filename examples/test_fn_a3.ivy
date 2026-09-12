@@ -1,0 +1,81 @@
+// A3 test: `fn` keyword + trailing return type
+// Tests `fn name(params) -> Type { body }` syntax in various contexts.
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// --- A3: Basic fn with trailing return type ---
+fn add(int a, int b) -> int {
+    return a + b;
+}
+
+// --- A3: fn with void return ---
+fn greet() -> void {
+    printf("hello from fn\n");
+}
+
+// --- A3: fn with pointer return type (needs lifetime attrs) ---
+[[ivy::lt_def(a)]] [[ivy::lt_ret(a)]] fn identity(int* a [[ivy::lt(a)]]) -> int* {
+    return a;
+}
+
+// --- A3: fn with const return type ---
+fn ConstRet() -> const int {
+    return 42;
+}
+
+// --- A3: fn with Ivy-native types ---
+fn square(int32 x) -> int32 {
+    return x * x;
+}
+
+// --- A3: fn with multiple params ---
+fn mul(int a, int b, int c) -> int {
+    return a * b * c;
+}
+
+// --- A3: fn prototype (declaration only) ---
+fn declOnly(int x) -> int;
+
+// --- A3: fn inside namespace ---
+namespace NS {
+    fn innerFn(int x) -> int {
+        return x + 1;
+    }
+}
+
+// --- A3: fn with constexpr ---
+constexpr fn constFn(int x) -> int {
+    return x * 2;
+}
+
+// --- A3: fn with template ---
+template <typename T>
+fn templFn(T x) -> T {
+    return x;
+}
+
+// --- A3: Old-style (leading return type) still works ---
+int oldStyle(int a, int b) {
+    return a - b;
+}
+
+int main() {
+    printf("add(3, 4) = %d\n", add(3, 4));
+    greet();
+    int v = 55;
+    int* p = identity(&v);
+    unsafe {
+        printf("identity(&v) = %d\n", *p);
+    }
+    printf("ConstRet() = %d\n", ConstRet());
+    printf("square(7) = %d\n", square(7));
+    printf("mul(2, 3, 4) = %d\n", mul(2, 3, 4));
+    printf("NS::innerFn(9) = %d\n", NS::innerFn(9));
+    printf("constFn(5) = %d\n", constFn(5));
+    printf("templFn<int>(99) = %d\n", templFn<int>(99));
+    printf("oldStyle(10, 3) = %d\n", oldStyle(10, 3));
+    return 0;
+}

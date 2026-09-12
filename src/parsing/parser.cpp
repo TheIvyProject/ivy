@@ -96,6 +96,7 @@ constexpr struct {
     {"goto", "goto is not supported in the Ivy subset"},
     {"lambda", ""},  // lambdas have no keyword; handled via '[' in parsePrimary
     {"auto", ""},  // auto type deduction IS supported — handled in isTypeStart/parseType
+    {"fn", ""},  // A3: fn trailing return type IS supported — handled in parseTopLevel
     {"decltype", "'decltype' is not supported in the Ivy subset"},
     {"operator", ""},  // operator overloading IS supported (7.4) — handled in parseStruct/parseFunction
     {"asm", "'asm' is not supported in the Ivy subset"},
@@ -675,6 +676,15 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
         // compile-time evaluation without a separate dispatch path.
         if (atKeyword("constexpr") || atKeyword("consteval")) {
             ConstexprSpec spec = parseConstexprSpec();
+            // A3: `constexpr fn name() -> Type { }` — trailing return type form
+            if (atKeyword("fn")) {
+                const SourceLoc floc = locOf(peek());
+                next();  // consume 'fn'
+                std::vector<Attribute> attrs = parseAttributeList();
+                parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false,
+                                      spec.isConstexpr, spec.isConsteval);
+                continue;
+            }
             // After consuming constexpr/consteval, the rest must be a
             // function or variable declaration.
             if (!isTypeStart()) {
@@ -704,8 +714,28 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
             if (reported) continue;
         }
 
+        // A3: `fn name(params) -> Type { body }` — trailing return type form.
+        // (checked here so attributes like [[ivy::lt_ret(a)]] before `fn` work)
+        if (atKeyword("fn")) {
+            const SourceLoc floc = locOf(peek());
+            next();  // consume 'fn'
+            std::vector<Attribute> attrs = parseAttributeList();
+            parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false);
+            continue;
+        }
+
         const SourceLoc loc = locOf(peek());
         std::vector<Attribute> attrs = parseAttributeList();
+
+        // A3: `[[ivy::...]] fn name(params) -> Type { body }` — attributes before fn
+        if (atKeyword("fn")) {
+            next();  // consume 'fn'
+            std::vector<Attribute> midAttrs = parseAttributeList();
+            attrs.insert(attrs.end(), std::make_move_iterator(midAttrs.begin()),
+                         std::make_move_iterator(midAttrs.end()));
+            parseFunctionTrailing(tu, loc, std::move(attrs), /*isExternC=*/false);
+            continue;
+        }
 
         parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false);
     }
@@ -821,6 +851,15 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
         // `constexpr` / `consteval` inside namespace
         if (atKeyword("constexpr") || atKeyword("consteval")) {
             ConstexprSpec spec = parseConstexprSpec();
+            // A3: `constexpr fn name() -> Type { }` — trailing return type form
+            if (atKeyword("fn")) {
+                const SourceLoc floc = locOf(peek());
+                next();  // consume 'fn'
+                std::vector<Attribute> attrs = parseAttributeList();
+                parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false,
+                                      spec.isConstexpr, spec.isConsteval);
+                continue;
+            }
             if (!isTypeStart()) {
                 errorAt(peek(), "expected a type after constexpr/consteval");
                 synchronize();
@@ -830,6 +869,15 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
             std::vector<Attribute> attrs = parseAttributeList();
             parseFunction(tu, floc, std::move(attrs), /*isExternC=*/false,
                           spec.isConstexpr, spec.isConsteval);
+            continue;
+        }
+        // A3: `fn name(params) -> Type { body }` — trailing return type form.
+        // (checked here so attributes like [[ivy::lt_ret(a)]] before `fn` work)
+        if (atKeyword("fn")) {
+            const SourceLoc floc = locOf(peek());
+            next();  // consume 'fn'
+            std::vector<Attribute> attrs = parseAttributeList();
+            parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false);
             continue;
         }
         // Unsupported constructs
@@ -848,6 +896,17 @@ void Parser::parseNamespace(TranslationUnit& tu, SourceLoc /*loc*/) {
         }
         const SourceLoc floc = locOf(peek());
         std::vector<Attribute> attrs = parseAttributeList();
+
+        // A3: `[[ivy::...]] fn name(params) -> Type { body }` — attributes before fn
+        if (atKeyword("fn")) {
+            next();  // consume 'fn'
+            std::vector<Attribute> midAttrs = parseAttributeList();
+            attrs.insert(attrs.end(), std::make_move_iterator(midAttrs.begin()),
+                         std::make_move_iterator(midAttrs.end()));
+            parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false);
+            continue;
+        }
+
         parseFunction(tu, floc, std::move(attrs), /*isExternC=*/false);
     }
 
@@ -1510,6 +1569,15 @@ void Parser::parseTemplate(TranslationUnit& tu, SourceLoc loc) {
         isConstexpr = spec.isConstexpr;
         isConsteval = spec.isConsteval;
     }
+    // A3: `template <...> fn name() -> Type { }` — trailing return type form
+    if (atKeyword("fn")) {
+        next();  // consume 'fn'
+        std::vector<Attribute> attrs = parseAttributeList();
+        parseFunctionTrailing(tu, loc, std::move(attrs), /*isExternC=*/false,
+                              isConstexpr, isConsteval, std::move(tplParams));
+        templateParamNames_.resize(savedCount);
+        return;
+    }
     std::vector<Attribute> attrs = parseAttributeList();
     parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
                   isConstexpr, isConsteval, std::move(tplParams));
@@ -1642,6 +1710,15 @@ void Parser::parseExport(TranslationUnit& tu, SourceLoc loc) {
         isConstexpr = spec.isConstexpr;
         isConsteval = spec.isConsteval;
     }
+    // A3: `export fn name() -> Type { }` — trailing return type form
+    if (atKeyword("fn")) {
+        next();  // consume 'fn'
+        std::vector<Attribute> attrs = parseAttributeList();
+        parseFunctionTrailing(tu, loc, std::move(attrs), /*isExternC=*/false,
+                              isConstexpr, isConsteval);
+        if (!tu.functions.empty()) tu.functions.back().isExported = true;
+        return;
+    }
     if (!isTypeStart()) {
         errorAt(peek(), "expected a declaration after 'export'");
         synchronize();
@@ -1741,6 +1818,66 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     expect(TokenKind::LParen, "expected '(' after function name '" + std::string(name) + "'");
     std::vector<Param> params = parseParams();
     expect(TokenKind::RParen, "expected ')' to close parameter list");
+
+    Function fn;
+    fn.attrs = std::move(attrs);
+    fn.returnType = std::move(returnType);
+    fn.name = name;
+    fn.namespacePrefix = currentNamespacePrefix();
+    fn.params = std::move(params);
+    fn.tplParams = std::move(tplParams);
+    fn.isExternC = isExternC;
+    fn.isConstexpr = isConstexpr;
+    fn.isConsteval = isConsteval;
+    fn.loc = loc;
+
+    if (at(TokenKind::LBrace)) {
+        std::unique_ptr<Stmt> bodyStmt = parseCompound();
+        fn.body =
+            std::make_unique<Stmt::Compound>(std::move(std::get<Stmt::Compound>(bodyStmt->node)));
+    } else {
+        expect(TokenKind::Semi, "expected '{' for function body or ';' for a declaration");
+    }
+
+    tu.functions.push_back(std::move(fn));
+}
+
+void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
+                                   std::vector<Attribute> attrs,
+                                   bool isExternC, bool isConstexpr, bool isConsteval,
+                                   std::vector<TemplateParam> tplParams) {
+    // `fn` keyword already consumed by caller.
+    // Parse: name ( params ) -> ReturnType { body }
+
+    if (!at(TokenKind::Identifier)) {
+        errorAt(peek(), "expected function name after 'fn'");
+        synchronize();
+        return;
+    }
+    const std::string_view name = qualifyName(next().lexeme);
+
+    expect(TokenKind::LParen, "expected '(' after function name '" + std::string(name) + "'");
+    std::vector<Param> params = parseParams();
+    expect(TokenKind::RParen, "expected ')' to close parameter list");
+
+    // Trailing return type: `-> Type`
+    if (!at(TokenKind::Arrow)) {
+        errorAt(peek(), "expected '->' after parameter list in 'fn' declaration");
+        synchronize();
+        return;
+    }
+    next();  // consume '->'
+    Type returnType = parseType();
+    if (returnType.base.empty()) {
+        synchronize();
+        return;
+    }
+
+    // Attributes after return type (same as leading form).
+    std::vector<Attribute> midAttrs = parseAttributeList();
+    attrs.insert(attrs.end(), std::make_move_iterator(midAttrs.begin()),
+                 std::make_move_iterator(midAttrs.end()));
+    validateAttributes(attrs, {"lt_def", "lt_ret"});
 
     Function fn;
     fn.attrs = std::move(attrs);

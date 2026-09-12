@@ -55,6 +55,8 @@ const std::unordered_set<std::string_view>& keywords() {
         "final",        "override",
         // A2: unsafe keyword block — `unsafe { ... }`
         "unsafe",
+        // A3: fn keyword for trailing return type — `fn name() -> Type { }`
+        "fn",
         // 9.2: Module keywords (contextual in C++20, but we always tokenize
         // as Keyword so atKeyword() works in parseTopLevel dispatch).
         "import",       "module",
