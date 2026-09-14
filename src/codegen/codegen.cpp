@@ -2199,16 +2199,14 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     // 2) Emit the object file.
     if (!emitObject(objPath)) return false;
 
-    // 3) Locate the linker. We prefer clang++ because it automatically
-    // finds the MSVC CRT / Windows SDK on Windows and the system libc
-    // on POSIX, without requiring a developer command prompt.
+    // 3) Locate the linker/compiler. We prefer clang++ because it
+    // automatically finds the MSVC CRT / Windows SDK on Windows and
+    // the system libc on POSIX.
     std::string linkerPath;
     const char* envLinker = std::getenv("IVY_LINKER");
     if (envLinker && *envLinker) {
         linkerPath = envLinker;
     } else {
-        // Search PATH for clang++ via _popen("where clang++") (Windows)
-        // or popen("command -v clang++") (POSIX).
 #ifdef _WIN32
         const char* cmd = "where clang++";
 #else
@@ -2223,7 +2221,6 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         if (pipe) {
             char buf[1024];
             if (fgets(buf, sizeof(buf), pipe)) {
-                // Strip trailing newline / CR.
                 std::size_t n = std::strlen(buf);
                 while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
                     buf[--n] = '\0';
@@ -2244,13 +2241,63 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         return false;
     }
 
-    // 4) Build the linker command line and invoke it.
-    std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\" -o \"" + exePath + "\"";
+    // A7: Compile C++ headers (from `import cpp`) into temporary object
+    // files using `clang++ -c`. These are linked together with the Ivy
+    // object file in step 4.
+    std::vector<std::string> cppObjPaths;
+    for (std::size_t i = 0; i < cppHeaders_.size(); ++i) {
+        std::string cppObj = (exeP.parent_path() /
+            (exeP.stem().string() + "__cpp" + std::to_string(i) + objExt)).string();
+        std::string cppCmd = "\"" + linkerPath + "\" -x c++ -c \"" +
+            cppHeaders_[i] + "\" -o \"" + cppObj + "\"";
+        // NOTE: -x c++ forces clang++ to treat the input as C++ source
+        // regardless of extension (e.g. .hpp headers).
+#ifdef _WIN32
+        STARTUPINFOA si2{};
+        si2.cb = sizeof(si2);
+        PROCESS_INFORMATION pi2{};
+        std::string cmdline2 = cppCmd;
+        std::vector<char> buf2(cmdline2.begin(), cmdline2.end());
+        buf2.push_back('\0');
+        BOOL ok2 = CreateProcessA(nullptr, buf2.data(), nullptr, nullptr, FALSE,
+                                   0, nullptr, nullptr, &si2, &pi2);
+        int rc2 = 1;
+        if (ok2) {
+            WaitForSingleObject(pi2.hProcess, INFINITE);
+            DWORD ec2 = 0;
+            GetExitCodeProcess(pi2.hProcess, &ec2);
+            rc2 = static_cast<int>(ec2);
+            CloseHandle(pi2.hProcess);
+            CloseHandle(pi2.hThread);
+        }
+#else
+        int rc2 = std::system(cppCmd.c_str());
+#endif
+        if (rc2 != 0) {
+            error({}, "failed to compile C++ header '" + cppHeaders_[i] +
+                  "' (exit code " + std::to_string(rc2) + "): " + cppCmd);
+            std::error_code ec;
+            fs::remove(objPath, ec);
+            for (const auto& p : cppObjPaths) fs::remove(p, ec);
+            return false;
+        }
+        cppObjPaths.push_back(cppObj);
+    }
+
+    // 4) Build the linker command line: clang++ <ivy.o> <cpp0.o> ... -o exe
+    std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\"";
+    for (const std::string& cppObj : cppObjPaths) {
+        cmd += " \"" + cppObj + "\"";
+    }
+    cmd += " -o \"" + exePath + "\"";
 
     // 5) Run the linker and capture exit code.
 #ifdef _WIN32
-    // Use CreateProcessA to avoid cmd.exe's quirky quoting rules.
-    std::string cmdline = "\"" + linkerPath + "\" \"" + objPath + "\" -o \"" + exePath + "\"";
+    std::string cmdline = "\"" + linkerPath + "\" \"" + objPath + "\"";
+    for (const std::string& cppObj : cppObjPaths) {
+        cmdline += " \"" + cppObj + "\"";
+    }
+    cmdline += " -o \"" + exePath + "\"";
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
@@ -2274,14 +2321,15 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     int rc = std::system(cmd.c_str());
 #endif
     if (rc != 0) {
-        // Link failed — keep the temp obj for debugging.
+        // Link failed — keep temp objs for debugging.
         error({}, "linker failed (exit code " + std::to_string(rc) + "): " + cmd);
         return false;
     }
 
-    // 6) Clean up the temporary object file.
+    // 6) Clean up temporary object files.
     std::error_code ec;
     fs::remove(objPath, ec);
+    for (const auto& p : cppObjPaths) fs::remove(p, ec);
     return true;
 }
 

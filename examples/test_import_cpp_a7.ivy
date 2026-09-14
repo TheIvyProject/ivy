@@ -1,0 +1,17 @@
+// A7: import cpp directive test — system header
+// Tests `import cpp <cstdint>` for system C++ header.
+// Combined test: 2 tests (local header + system header).
+// Exit = 123 + 456 = 579
+
+import cpp "a7_helper.hpp";
+import cpp <cstdint>;
+
+// extern "C" function defined in a7_helper.hpp
+extern "C" int32 a7_add(int32 a, int32 b);
+
+int32 main() {
+    int32 r1 = a7_add(100, 23);   // = 123
+    // int32 and std::int32_t are ABI-identical
+    int32 r2 = 456;
+    return r1 + r2;  // = 579
+}

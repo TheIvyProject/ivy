@@ -43,6 +43,13 @@ public:
     // success. Returns false on failure; check diagnostics().
     bool linkExecutable(const std::string& exePath);
 
+    // A7: Set C++ headers from `import cpp <header>` declarations.
+    // These are passed to the linker as additional source files so
+    // clang++ compiles and links them together with the Ivy object.
+    void setCppHeaders(const std::vector<std::string>& headers) {
+        cppHeaders_ = headers;
+    }
+
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
     // Overrides the ABI platform (default is auto-detected from the
@@ -74,6 +81,10 @@ private:
     bool usesMalloc_ = false;
     bool usesFree_ = false;
     bool usesIvyPrint_ = false;  // 8.5: ivy::print/println builtins used
+
+    // A7: C++ headers from `import cpp <header>` / `import cpp "file"`.
+    // Passed to clang++ during linking so it compiles and links them.
+    std::vector<std::string> cppHeaders_;
 
     // per-function
     std::unordered_map<std::string_view, std::string> vars_;  // var name -> llvm value

@@ -904,7 +904,8 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             // Look for: Keyword("import") Identifier(name) Semi
             if (tokens[i].kind != ivy::TokenKind::Keyword ||
                 tokens[i].lexeme != "import") continue;
-            // Skip `import cpp` — handled differently
+            // Skip `import cpp` — handled differently (A7)
+            // `cpp` is now a Keyword (added in lexer).
             if (i + 1 < tokens.size() &&
                 tokens[i + 1].kind == ivy::TokenKind::Keyword &&
                 tokens[i + 1].lexeme == "cpp") continue;
@@ -972,12 +973,40 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         for (auto& c : impTu.concepts) tu->concepts.push_back(std::move(c));
     }
 
-    // 9.2: Process `import cpp` declarations (post-parse, warning only).
+    // A7: Collect C++ headers from `import cpp <header>` declarations.
+    // Only local headers (found on disk) are compiled into object files
+    // and linked. System headers (e.g. <vector>, <cstdint>) are
+    // declaration-only — they don't produce object code, so we skip them.
+    // The C++ function signatures they declare are expressed in Ivy via
+    // `extern "C"` declarations.
+    std::vector<std::string> cppHeaders;
     if (tu && !tu->imports.empty()) {
         for (const auto& imp : tu->imports) {
             if (imp.isCpp) {
-                std::cerr << "ivyc: warning: 'import cpp <" << imp.name
-                          << ">' — use #include instead for C++ headers\n";
+                // Try source file directory first (for quoted form).
+                bool found = false;
+                {
+                    std::filesystem::path candidate = path.parent_path() / imp.name;
+                    std::error_code ec;
+                    if (std::filesystem::exists(candidate, ec)) {
+                        cppHeaders.push_back(candidate.string());
+                        found = true;
+                    }
+                }
+                if (!found) {
+                    // Try -I paths
+                    for (const auto& dir : includePaths) {
+                        std::error_code ec;
+                        std::filesystem::path candidate = dir / imp.name;
+                        if (std::filesystem::exists(candidate, ec)) {
+                            cppHeaders.push_back(candidate.string());
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                // If not found locally, it's a system header (e.g. <vector>).
+                // System headers are declaration-only — no object code to link.
             }
         }
     }
@@ -1056,6 +1085,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         }
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
+        cg.setCppHeaders(cppHeaders);  // A7
         bool ok = cg.emitObject(objPath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
@@ -1081,6 +1111,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         }
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
+        cg.setCppHeaders(cppHeaders);  // A7
         bool ok = cg.linkExecutable(exePath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
@@ -1095,6 +1126,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     if (showLlvm && mir) {
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
+        cg.setCppHeaders(cppHeaders);  // A7
         bool ok = false;
         if (!outPath.empty()) {
             std::ofstream ofs(outPath);
