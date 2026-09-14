@@ -1527,6 +1527,25 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         out->node = hir::Stmt::Continue{};
         return out;
     }
+    // A6: nextcase — pass through to HIR. MIR builder handles the jump.
+    // RAII: same as Break — destroy innermost scope locals.
+    if (std::holds_alternative<A::NextCase>(n)) {
+        const auto& v = std::get<A::NextCase>(n);
+        if (!dtorStacks_.empty() && !dtorStacks_.back().empty()) {
+            auto wrap = std::make_unique<hir::Stmt>();
+            wrap->loc = s.loc;
+            auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+            emitDtorCalls(dtorStacks_.size() - 1, s.loc, wc.stmts);
+            dtorStacks_.back().clear();
+            auto nc = std::make_unique<hir::Stmt>();
+            nc->loc = s.loc;
+            nc->node = hir::Stmt::NextCase{v.target};
+            wc.stmts.push_back(std::move(nc));
+            return wrap;
+        }
+        out->node = hir::Stmt::NextCase{v.target};
+        return out;
+    }
     if (std::holds_alternative<A::If>(n)) {
         const A::If& v = std::get<A::If>(n);
         auto& ifs = out->node.emplace<hir::Stmt::If>();
@@ -1620,6 +1639,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         const A::Switch& v = std::get<A::Switch>(n);
         auto& sw = out->node.emplace<hir::Stmt::Switch>();
         sw.cond = buildExpr(*v.cond);
+        sw.switchLabel = v.switchLabel;  // A6
         // Condition must be an integer type.
         if (sw.cond) {
             const auto& t = sw.cond->type;
@@ -1636,6 +1656,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
         bool hasDefault = false;
         for (const auto& ac : v.cases) {
             hir::Stmt::CaseClause cc;
+            cc.caseLabel = ac.caseLabel;  // A6
             if (ac.value) {
                 cc.value = buildExpr(*ac.value);
             } else {
@@ -1645,16 +1666,28 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildStmt(const Stmt& s) {
             }
             for (const auto& st : ac.stmts)
                 cc.stmts.push_back(buildStmt(*st));
-            // Ivy no-fallthrough: last stmt of each case must be break/return/continue/switch.
-            // We emit a compile error only if the case is non-empty and doesn't end that way.
+            // A6: Ivy no-fallthrough — last stmt of each case must be
+            // break/return/continue/nextcase. If the last stmt is a
+            // Compound (block), check its last stmt recursively.
             if (!cc.stmts.empty()) {
-                const hir::Stmt* last = cc.stmts.back().get();
-                bool terminated = std::holds_alternative<hir::Stmt::Break>(last->node) ||
-                                  std::holds_alternative<hir::Stmt::Return>(last->node) ||
-                                  std::holds_alternative<hir::Stmt::Continue>(last->node);
-                if (!terminated)
+                std::function<bool(const hir::Stmt*)> isTerminator =
+                    [&](const hir::Stmt* s) -> bool {
+                    if (!s) return false;
+                    if (std::holds_alternative<hir::Stmt::Break>(s->node) ||
+                        std::holds_alternative<hir::Stmt::Return>(s->node) ||
+                        std::holds_alternative<hir::Stmt::Continue>(s->node) ||
+                        std::holds_alternative<hir::Stmt::NextCase>(s->node))
+                        return true;
+                    // Recurse into compound (e.g. `case: { ... break; }`)
+                    if (auto* c = std::get_if<hir::Stmt::Compound>(&s->node)) {
+                        if (c->stmts.empty()) return false;
+                        return isTerminator(c->stmts.back().get());
+                    }
+                    return false;
+                };
+                if (!isTerminator(cc.stmts.back().get()))
                     error(s.loc, "Ivy forbids implicit fallthrough: case must end with "
-                                 "break, return, or continue");
+                                 "break, return, continue, or nextcase");
             }
             sw.cases.push_back(std::move(cc));
         }

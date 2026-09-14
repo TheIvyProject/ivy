@@ -59,8 +59,21 @@ private:
     void releaseBorrowsInScope();
 
     // Loop context for break/continue. incr may be null (while/do-while).
-    struct LoopCtx { mir::Block* cond; mir::Block* incr; mir::Block* exit; };
+    // A6: For switch contexts, caseBlocks holds the entry blocks of each
+    // case (in order), and caseLabels maps label → block for `nextcase LABEL;`.
+    // switchExit is the exit block (= exit for break).
+    struct LoopCtx {
+        mir::Block* cond;   // null inside switch
+        mir::Block* incr;   // null inside switch
+        mir::Block* exit;   // jump target for break
+        // A6: switch-specific data
+        std::vector<mir::Block*> caseBlocks;  // case entry blocks in order
+        std::unordered_map<std::string_view, mir::Block*> caseLabels;  // label → block
+    };
     std::vector<LoopCtx> loops_;
+
+    // A6: Current case index within the switch being built (for unlabeled nextcase).
+    int caseIndex_ = -1;
 
     void error(SourceLoc loc, std::string message);
 

@@ -2210,6 +2210,20 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
         expect(TokenKind::Semi, "expected ';' after 'continue'");
         return makeStmt<Stmt::Continue>(loc);
     }
+    // A6: nextcase — `nextcase;` (unlabeled) or `nextcase LABEL;` (labeled)
+    if (atKeyword("nextcase")) {
+        next();
+        std::string_view target;
+        if (!at(TokenKind::Semi)) {
+            if (peek().kind != TokenKind::Identifier)
+                errorAt(peek(), "expected case label after 'nextcase'");
+            else
+                target = peek().lexeme;
+            next();
+        }
+        expect(TokenKind::Semi, "expected ';' after 'nextcase'");
+        return makeStmt<Stmt::NextCase>(loc, Stmt::NextCase{target});
+    }
     if (atKeyword("switch")) return parseSwitch();
     if (atKeyword("goto")) {
         errorAt(peek(), "goto is not supported in the Ivy subset");
@@ -2360,6 +2374,21 @@ std::unique_ptr<Stmt> Parser::parseReturn() {
 std::unique_ptr<Stmt> Parser::parseSwitch() {
     const SourceLoc loc = locOf(peek());
     next();  // switch
+
+    // A6: Optional switch label — `switch LABEL: (cond) { }`
+    // The label appears between 'switch' and '('.
+    std::string_view switchLabel;
+    if (!at(TokenKind::LParen)) {
+        // Could be a label (Identifier followed by ':')
+        if (peek().kind == TokenKind::Identifier && peek(1).kind == TokenKind::Colon) {
+            switchLabel = peek().lexeme;
+            next();  // consume Identifier
+            next();  // consume ':'
+        } else {
+            errorAt(peek(), "expected '(' after 'switch'");
+        }
+    }
+
     expect(TokenKind::LParen, "expected '(' after 'switch'");
     std::unique_ptr<Expr> cond = parseExpr();
     expect(TokenKind::RParen, "expected ')' after switch condition");
@@ -2367,11 +2396,32 @@ std::unique_ptr<Stmt> Parser::parseSwitch() {
 
     Stmt::Switch sw;
     sw.cond = std::move(cond);
+    sw.switchLabel = switchLabel;  // A6
 
     while (!at(TokenKind::RBrace) && !at(TokenKind::EndOfFile)) {
         Stmt::CaseClause clause;
         if (atKeyword("case")) {
             next();  // case
+            // A6: Optional case label — `case LABEL: value:`
+            // Distinguish from `case value:` by counting colons ahead.
+            // `case LABEL: value:` has two colons; `case value:` has one.
+            if (peek().kind == TokenKind::Identifier &&
+                peek(1).kind == TokenKind::Colon) {
+                bool hasTwoColons = false;
+                int colonCount = 0;
+                for (int i = 0; i < 10 && peek(i).kind != TokenKind::EndOfFile; ++i) {
+                    if (peek(i).kind == TokenKind::Colon) {
+                        if (++colonCount >= 2) { hasTwoColons = true; break; }
+                    }
+                    if (peek(i).kind == TokenKind::Semi ||
+                        peek(i).kind == TokenKind::LBrace) break;
+                }
+                if (hasTwoColons) {
+                    clause.caseLabel = peek().lexeme;
+                    next();  // consume Identifier
+                    next();  // consume ':'
+                }
+            }
             clause.value = parseExpr();
             expect(TokenKind::Colon, "expected ':' after case value");
         } else if (atKeyword("default")) {

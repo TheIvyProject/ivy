@@ -280,6 +280,11 @@ void dumpStmt(const ivy::Stmt& s, std::ostream& os, int depth) {
                    },
                    [&](const ivy::Stmt::Break&) { os << pad << "break\n"; },
                    [&](const ivy::Stmt::Continue&) { os << pad << "continue\n"; },
+                   [&](const ivy::Stmt::NextCase& v) {
+                       os << pad << "nextcase";
+                       if (!v.target.empty()) os << " " << v.target;
+                       os << "\n";
+                   },
                    [&](const ivy::Stmt::ExprStmt& v) {
                        os << pad << "expr\n";
                        dumpExpr(*v.value, os, depth + 1);
@@ -530,6 +535,11 @@ void dumpHirStmt(const ivy::hir::Stmt& s, std::ostream& os, int depth) {
                    },
                    [&](const ivy::hir::Stmt::Break&) { os << pad << "break\n"; },
                    [&](const ivy::hir::Stmt::Continue&) { os << pad << "continue\n"; },
+                   [&](const ivy::hir::Stmt::NextCase& v) {
+                       os << pad << "nextcase";
+                       if (!v.target.empty()) os << " " << v.target;
+                       os << "\n";
+                   },
                    [&](const ivy::hir::Stmt::ExprStmt& v) {
                        os << pad << "expr\n";
                        dumpHirExpr(*v.value, os, depth + 1);

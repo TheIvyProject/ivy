@@ -693,6 +693,34 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         }
         return;
     }
+    // A6: nextcase — jump to next case or labeled case.
+    if (std::holds_alternative<H::NextCase>(n)) {
+        const auto& v = std::get<H::NextCase>(n);
+        if (loops_.empty()) return;  // not inside switch — should not happen
+        const LoopCtx& l = loops_.back();
+        if (v.target.empty()) {
+            // Unlabeled: jump to next case block. We need to find which
+            // case block we're currently in, then jump to the next one.
+            // Since nextcase can appear anywhere in the case body (not
+            // just as the last statement), we track the current case index.
+            // The caseBlocks vector is ordered — find current block index.
+            // We use the caseIndex_ field which is set before building
+            // each case body.
+            if (caseIndex_ + 1 < static_cast<int>(l.caseBlocks.size()))
+                jumpTo(l.caseBlocks[caseIndex_ + 1]);
+            else
+                jumpTo(l.exit);  // last case → exit
+        } else {
+            // Labeled: jump to the block registered for this label.
+            auto it = l.caseLabels.find(v.target);
+            if (it != l.caseLabels.end())
+                jumpTo(it->second);
+            else
+                error(s.loc, "nextcase target '" + std::string(v.target) +
+                      "' is not a case label in this switch");
+        }
+        return;
+    }
     if (std::holds_alternative<H::ExprStmt>(n)) {
         const H::ExprStmt& v = std::get<H::ExprStmt>(n);
         std::unique_ptr<mir::Expr> e = buildExpr(*v.value);
@@ -765,6 +793,13 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         for (std::size_t i = 0; i < v.cases.size(); ++i)
             caseBlocks.push_back(newBlock());
 
+        // A6: Build case label → block map for `nextcase LABEL;`.
+        std::unordered_map<std::string_view, mir::Block*> caseLabels;
+        for (std::size_t i = 0; i < v.cases.size(); ++i) {
+            if (!v.cases[i].caseLabel.empty())
+                caseLabels[v.cases[i].caseLabel] = caseBlocks[i];
+        }
+
         // Find default block (or use exitB if no default clause).
         mir::Block* defaultBlock = exitB;
         for (std::size_t i = 0; i < v.cases.size(); ++i) {
@@ -789,15 +824,21 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         }
 
         // Build each case body. break → jumpTo(exitB).
+        // A6: Push caseBlocks/caseLabels for nextcase support.
         for (std::size_t i = 0; i < v.cases.size(); ++i) {
             cur_ = caseBlocks[i];
-            loops_.push_back(LoopCtx{nullptr, nullptr, exitB});
+            caseIndex_ = static_cast<int>(i);  // A6: for unlabeled nextcase
+            LoopCtx lc{nullptr, nullptr, exitB};
+            lc.caseBlocks = caseBlocks;
+            lc.caseLabels = caseLabels;
+            loops_.push_back(std::move(lc));
             for (const auto& st : v.cases[i].stmts) buildStmt(*st);
             loops_.pop_back();
             // If the block isn't already terminated (break emitted a Jump),
             // add a fall-through jump to exitB (safety net for return/continue).
             jumpTo(exitB);
         }
+        caseIndex_ = -1;
         cur_ = exitB;
         return;
     }

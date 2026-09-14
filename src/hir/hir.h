@@ -205,22 +205,28 @@ struct Stmt {
     struct Return { std::unique_ptr<Expr> value; };  // may be null
     struct Break {};
     struct Continue {};
+    // A6: nextcase — target is empty for unlabeled (jump to next case),
+    // or a case label for labeled jump.
+    struct NextCase { std::string_view target; };
     struct ExprStmt { std::unique_ptr<Expr> value; };
     struct Unsafe { std::unique_ptr<Stmt> body; };  // [[ivy::unsafe]] lowered
     struct Null {};
     // switch: cond is integral; default case has value == nullptr.
-    // Ivy requires every case to end with break/return/continue (no fallthrough).
+    // Ivy requires every case to end with break/return/continue/nextcase (no fallthrough).
+    // A6: caseLabel for `nextcase LABEL;`, switchLabel for labeled switch.
     struct CaseClause {
         std::unique_ptr<Expr> value;  // null => default
         std::vector<std::unique_ptr<Stmt>> stmts;
+        std::string_view caseLabel;  // A6
     };
     struct Switch {
         std::unique_ptr<Expr> cond;
         std::vector<CaseClause> cases;
+        std::string_view switchLabel;  // A6
     };
 
     SourceLoc loc;
-    std::variant<Compound, Decl, If, While, DoWhile, For, Return, Break, Continue, ExprStmt,
+    std::variant<Compound, Decl, If, While, DoWhile, For, Return, Break, Continue, NextCase, ExprStmt,
                  Unsafe, Null, Switch>
         node;
 };

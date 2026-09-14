@@ -62,6 +62,20 @@ Khi sẵn sàng loại bỏ hoàn toàn, đánh dấu "Removed" và xóa code pa
 
 ---
 
+## 5. Implicit switch fallthrough → bắt buộc terminator
+
+| | |
+|---|---|
+| **Task** | A6 |
+| **Form mới (preferred)** | Mọi nhánh `case` (non-empty) phải kết thúc bằng `break`, `return`, `continue`, hoặc `nextcase` |
+| **Form cũ (deprecated)** | Implicit fallthrough — case không có terminator, tự rơi vào case kế tiếp (C/C++ behavior) |
+| **File ảnh hưởng** | `src/hir/hir_builder.cpp` — `Switch` lowering có `isTerminator` check đệ quy vào `Compound` |
+| **Cơ chế** | HIR builder kiểm tra từng case (non-empty): statement cuối cùng phải là `break`/`return`/`continue`/`nextcase`. Nếu case body là `{ ... }` (Compound), đệ quy vào `stmts.back()` để tìm terminator thực sự. Nếu thiếu → compile error: "Ivy forbids implicit fallthrough: case must end with break, return, continue, or nextcase". |
+| **Khi nào loại bỏ** | Đã được áp dụng — implicit fallthrough đã báo lỗi ngay từ A6. |
+| **Cách loại bỏ** | Không cần loại bỏ thêm — đây là enforcement mới, không phải alias. Code C/C++ legacy có implicit fallthrough phải thêm `nextcase;` hoặc `break;` tường minh khi migrate sang Ivy. |
+
+---
+
 ## Ghi chú: Các syntax KHÔNG bị deprecated
 
 Các syntax sau có form mới nhưng **vẫn được giữ lâu dài**, không nằm trong diện loại bỏ:

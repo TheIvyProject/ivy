@@ -59,6 +59,8 @@ const std::unordered_set<std::string_view>& keywords() {
         "fn",
         // A5: lifetime keyword for `lifetime<$a, $b>` declaration
         "lifetime",
+        // A6: nextcase keyword for explicit switch case jumping
+        "nextcase",
         // 9.2: Module keywords (contextual in C++20, but we always tokenize
         // as Keyword so atKeyword() works in parseTopLevel dispatch).
         "import",       "module",

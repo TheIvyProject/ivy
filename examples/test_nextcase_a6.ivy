@@ -1,0 +1,77 @@
+// A6: nextcase statement + strict fallthrough check
+
+// Test 1: Unlabeled nextcase — jump to next case
+fn test_unlabeled() -> int32 {
+    int32 result = 0;
+    switch (2) {
+        case 1: {
+            result = 100;
+            break;
+        }
+        case 2: {
+            result = 200;
+            nextcase;  // jump to case 3
+        }
+        case 3: {
+            result = result + 300;  // 200 + 300 = 500
+            break;
+        }
+        default: {
+            result = 0;
+            break;
+        }
+    }
+    return result;  // 500
+}
+
+// Test 2: Labeled nextcase — jump to specific case
+fn test_labeled() -> int32 {
+    int32 result = 0;
+    switch MAIN: (1) {
+        case FOO: 1: {
+            result = 10;
+            nextcase BAR;  // jump to case BAR
+        }
+        case BAR: 2: {
+            result = result + 20;  // 10 + 20 = 30
+            break;
+        }
+        default: {
+            result = 0;
+            break;
+        }
+    }
+    return result;  // 30
+}
+
+// Test 3: Standard switch with break (no nextcase)
+fn test_standard() -> int32 {
+    int32 result = 0;
+    switch (3) {
+        case 1: {
+            result = 1;
+            break;
+        }
+        case 2: {
+            result = 2;
+            break;
+        }
+        case 3: {
+            result = 3;
+            break;
+        }
+        default: {
+            result = 0;
+            break;
+        }
+    }
+    return result;  // 3
+}
+
+// Main — 500 + 30 + 3 = 533
+fn main() -> int32 {
+    int32 a = test_unlabeled();   // 500
+    int32 b = test_labeled();      // 30
+    int32 c = test_standard();     // 3
+    return a + b + c;             // 533
+}

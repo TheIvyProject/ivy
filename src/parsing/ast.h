@@ -297,6 +297,10 @@ struct Stmt {
     struct Return { std::unique_ptr<Expr> value; };  // may be null
     struct Break {};
     struct Continue {};
+    // A6: nextcase — explicit switch case jumping.
+    // target is empty for unlabeled `nextcase;` (jump to next case),
+    // or a case label for `nextcase LABEL;`.
+    struct NextCase { std::string_view target; };
     struct ExprStmt { std::unique_ptr<ivy::Expr> value; };
     struct Unsafe { std::unique_ptr<Stmt> body; };
     struct Null {};
@@ -308,19 +312,23 @@ struct Stmt {
     };
     // switch/case: cond is integral; each CaseClause has a constant value
     // (null => default). Ivy forbids implicit fallthrough: every case must
-    // end with break/return/continue or be provably unreachable — this is
-    // checked in the HIR builder.
+    // end with break/return/continue/nextcase or be provably unreachable —
+    // this is checked in the HIR builder.
+    // A6: switchLabel is set for `switch LABEL: { }` (labeled switch).
+    // caseLabel is set for `case LABEL: value:` (labeled case).
     struct CaseClause {
         std::unique_ptr<Expr> value;  // null => default
         std::vector<std::unique_ptr<Stmt>> stmts;
+        std::string_view caseLabel;  // A6: label for `nextcase LABEL;`
     };
     struct Switch {
         std::unique_ptr<Expr> cond;
         std::vector<CaseClause> cases;
+        std::string_view switchLabel;  // A6: label for labeled switch
     };
 
     SourceLoc loc;
-    std::variant<Compound, Decl, If, While, DoWhile, For, RangeFor, Return, Break, Continue, ExprStmt,
+    std::variant<Compound, Decl, If, While, DoWhile, For, RangeFor, Return, Break, Continue, NextCase, ExprStmt,
                  Unsafe, Null, Switch, StructuredBinding>
         node;
 };
@@ -376,9 +384,11 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
         } else if constexpr (std::is_same_v<V, Stmt::Switch>) {
             Stmt::Switch sw;
             sw.cond = v.cond ? cloneExpr(*v.cond) : nullptr;
+            sw.switchLabel = v.switchLabel;  // A6
             for (const auto& c : v.cases) {
                 Stmt::CaseClause cc;
                 cc.value = c.value ? cloneExpr(*c.value) : nullptr;
+                cc.caseLabel = c.caseLabel;  // A6
                 for (const auto& st : c.stmts) cc.stmts.push_back(cloneStmt(*st));
                 sw.cases.push_back(std::move(cc));
             }
@@ -389,7 +399,7 @@ inline std::unique_ptr<Stmt> cloneStmt(const Stmt& s) {
             sb.init = v.init ? cloneExpr(*v.init) : nullptr;
             out->node.emplace<Stmt::StructuredBinding>(std::move(sb));
         } else {
-            out->node = v;  // Break, Continue, Null
+            out->node = v;  // Break, Continue, NextCase, Null
         }
     }, s.node);
     return out;
