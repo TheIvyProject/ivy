@@ -225,6 +225,79 @@ void MirBuilder::checkStore(const mir::Expr& target, const mir::Expr& value, Sou
     }
 }
 
+// A5: Borrow checker — enforce aliasing XOR mutability.
+// When creating a mutable reference (T& or T*), there must be no other
+// borrows (shared or mutable). When creating a shared reference (const T&
+// or const T*), there must be no mutable borrow.
+
+void MirBuilder::checkBorrow(std::string_view name, bool isMutable, SourceLoc loc) {
+    if (unsafeDepth_ > 0) return;  // unsafe opts out of borrow checking
+    if (borrowScopes_.empty()) return;
+    // Find the variable in the borrow state (search innermost scope first).
+    for (auto it = borrowScopes_.rbegin(); it != borrowScopes_.rend(); ++it) {
+        auto hit = it->find(name);
+        if (hit == it->end()) continue;
+        BorrowState& bs = hit->second;
+        if (isMutable) {
+            // Mutable borrow: no other borrows allowed.
+            if (bs.sharedCount > 0) {
+                error(loc, "cannot create a mutable reference to '" + std::string(name) +
+                               "' — it is already borrowed immutably");
+                return;
+            }
+            if (bs.hasMutable) {
+                error(loc, "cannot create a second mutable reference to '" +
+                               std::string(name) + "' — only one mutable borrow at a time");
+                return;
+            }
+            bs.hasMutable = true;
+        } else {
+            // Shared borrow: no mutable borrow allowed.
+            if (bs.hasMutable) {
+                error(loc, "cannot create an immutable reference to '" + std::string(name) +
+                               "' — it is already borrowed mutably");
+                return;
+            }
+            ++bs.sharedCount;
+        }
+        return;
+    }
+    // Variable not in any borrow scope — it's likely a parameter.
+    // Parameters can be borrowed; track in the outermost scope.
+    auto& outer = borrowScopes_.front();
+    auto& bs = outer[name];
+    if (isMutable) {
+        if (bs.sharedCount > 0) {
+            error(loc, "cannot create a mutable reference to '" + std::string(name) +
+                           "' — it is already borrowed immutably");
+            return;
+        }
+        if (bs.hasMutable) {
+            error(loc, "cannot create a second mutable reference to '" +
+                           std::string(name) + "' — only one mutable borrow at a time");
+            return;
+        }
+        bs.hasMutable = true;
+    } else {
+        if (bs.hasMutable) {
+            error(loc, "cannot create an immutable reference to '" + std::string(name) +
+                           "' — it is already borrowed mutably");
+            return;
+        }
+        ++bs.sharedCount;
+    }
+}
+
+void MirBuilder::releaseBorrowsInScope() {
+    // This is a simplification: we don't track which specific variable
+    // each reference borrows, so on scope exit we just clear the
+    // innermost borrow scope. A more precise implementation would
+    // track reference→source-variable mappings and decrement counts.
+    // For now, the borrow checker catches violations at creation time,
+    // which is the primary safety goal.
+    if (!borrowScopes_.empty()) borrowScopes_.pop_back();
+}
+
 // --- expressions ---
 
 std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
@@ -295,6 +368,10 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
                     out->lifetime = params_.contains(name) ? params_.at(name)
                                                            : mir::Lifetime{};
                 }
+                // A5: Borrow checker — aliasing XOR mutability.
+                // `&var` (non-const) = mutable borrow; `const &var` = shared.
+                // The const-ness is on the *result* type (out->type).
+                checkBorrow(name, /*isMutable=*/!out->type.isConst, e.loc);
             } else {
                 out->lifetime.kind = mir::Lifetime::Kind::Unknown;
             }
@@ -464,6 +541,14 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         a.type = d.type;
         if (d.init) {
             a.init = buildExpr(*d.init);
+            // A5: Borrow checker — when initializing a reference, the
+            // initializer is an lvalue (IdentRef or Deref). Enforce
+            // aliasing XOR mutability on the source variable.
+            if (d.type.isReference && a.init) {
+                if (auto* id = std::get_if<mir::Expr::IdentRef>(&a.init->node)) {
+                    checkBorrow(id->name, /*isMutable=*/!d.type.isConst, s.loc);
+                }
+            }
             declare(d.name, a.init ? a.init->lifetime : mir::Lifetime{});
         } else {
             declare(d.name, {});
@@ -550,6 +635,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
     if (std::holds_alternative<H::For>(n)) {
         const H::For& v = std::get<H::For>(n);
         scopes_.push_back({});
+        borrowScopes_.push_back({});  // A5
         if (v.init) buildStmt(*v.init);  // decl lives in the current (pre-cond) block
 
         mir::Block* condB = newBlock();
@@ -583,6 +669,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         jumpTo(condB);
         cur_ = exitB;
         scopes_.pop_back();
+        borrowScopes_.pop_back();  // A5
         return;
     }
     if (std::holds_alternative<H::Return>(n)) {
@@ -724,6 +811,7 @@ void MirBuilder::buildFunction(mir::Function& fn, const hir::Function& hf) {
     params_.clear();
     scopes_.clear();
     loops_.clear();
+    borrowScopes_.clear();
 
     for (const hir::Lifetime& l : hf.lifetimes) {
         fn.lifetimes.push_back(mir::Lifetime{mir::Lifetime::Kind::Named, l.name});
@@ -740,9 +828,11 @@ void MirBuilder::buildFunction(mir::Function& fn, const hir::Function& hf) {
     }
 
     scopes_.push_back({});
+    borrowScopes_.push_back({});  // A5: function-level borrow scope
     cur_ = newBlock();
     for (const auto& st : hf.body->stmts) buildStmt(*st);
     scopes_.pop_back();
+    borrowScopes_.pop_back();  // A5
 }
 
 std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {

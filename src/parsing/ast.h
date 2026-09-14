@@ -58,6 +58,10 @@ struct Param {
     std::vector<Attribute> attrs;
     std::unique_ptr<Expr> defaultValue;  // `= expr` — filled at call site
     bool isPack = false;  // true => `Args... args` (function parameter pack)
+    // A5: Native lifetime annotation (e.g. `$a` in `const int32& $a x`).
+    // Empty when no lifetime annotation is present. Stored without the
+    // leading `$` so it matches legacy `[[ivy::lt(a)]]` semantics.
+    std::string_view lifetime;
     SourceLoc loc;
 };
 
@@ -400,6 +404,13 @@ struct Function {
     std::vector<Param> params;
     std::vector<TemplateParam> tplParams;  // non-empty => template function
     std::unique_ptr<Stmt::Compound> body;  // null => declaration only
+    // A5: Native lifetime declaration — `lifetime<$a, $b>`.
+    // Each entry is the lifetime name without the leading `$`.
+    // When non-empty, this takes precedence over legacy `[[ivy::lt_def]]`.
+    std::vector<std::string_view> declaredLifetimes;
+    // A5: Native return lifetime annotation — `$a` on the return type.
+    // When non-empty, takes precedence over legacy `[[ivy::lt_ret]]`.
+    std::string_view returnLifetime;
     bool isExternC = false;
     bool isConstexpr = false;   // `constexpr` function / variable
     bool isConsteval = false;   // `consteval` function (implies constexpr)

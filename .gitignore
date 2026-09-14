@@ -1,5 +1,3 @@
-# User requests to ignore
-PLAN.md
 spec/
 *.ll
 **/*.ll

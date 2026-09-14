@@ -639,6 +639,12 @@ std::string CodeGen::valueName(std::string_view name) {
 std::string CodeGen::lowerLValue(const mir::Expr& e) {
     const auto& n = e.node;
     using M = mir::Expr;
+    // A5: Reference return from a function call — the call result is
+    // already an address (reference), so lower it as an expression.
+    // This handles `const T& r = func(...)` where func returns `const T&`.
+    if (std::holds_alternative<M::Call>(n)) {
+        return lowerExpr(e);
+    }
     if (std::holds_alternative<M::This>(n)) {
         // `this` — same semantics as IdentRef{name="this"}.
         const auto it = vars_.find("this");
@@ -1505,11 +1511,18 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
     if (std::holds_alternative<I::Ret>(n)) {
         const I::Ret& r = std::get<I::Ret>(n);
         if (r.value) {
-            const std::string v = lowerExpr(*r.value);
-            const std::string fromTy = valueLlvmType(r.value->type);
-            const std::string toTy = valueLlvmType(curFnReturnType_);
-            const std::string c = emitCast(v, fromTy, toTy, inst.loc);
-            emitLine("ret " + toTy + " " + c);
+            // A5: If the function returns a reference, we need to return
+            // the address of the referenced object, not its value.
+            if (curFnReturnType_.isReference) {
+                const std::string addr = lowerLValue(*r.value);
+                emitLine("ret ptr " + addr);
+            } else {
+                const std::string v = lowerExpr(*r.value);
+                const std::string fromTy = valueLlvmType(r.value->type);
+                const std::string toTy = valueLlvmType(curFnReturnType_);
+                const std::string c = emitCast(v, fromTy, toTy, inst.loc);
+                emitLine("ret " + toTy + " " + c);
+            }
         } else {
             emitLine("ret void");
         }

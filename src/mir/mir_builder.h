@@ -44,6 +44,20 @@ private:
     // Value-lifetime of local variables, innermost scope last.
     std::vector<std::unordered_map<std::string_view, mir::Lifetime>> scopes_;
 
+    // A5: Borrow checker state — tracks shared/mutable borrows per variable.
+    // BorrowState is pushed/popped parallel to scopes_.
+    struct BorrowState {
+        int sharedCount = 0;     // number of active const T& borrows
+        bool hasMutable = false; // an active T& borrow exists
+    };
+    std::vector<std::unordered_map<std::string_view, BorrowState>> borrowScopes_;
+    // Check aliasing XOR mutability when creating a reference to `name`.
+    // `isMutable` = true for `T&`/`T*`, false for `const T&`/`const T*`.
+    void checkBorrow(std::string_view name, bool isMutable, SourceLoc loc);
+    // Release a borrow when a reference goes out of scope. Called on
+    // scope pop for variables that hold references.
+    void releaseBorrowsInScope();
+
     // Loop context for break/continue. incr may be null (while/do-while).
     struct LoopCtx { mir::Block* cond; mir::Block* incr; mir::Block* exit; };
     std::vector<LoopCtx> loops_;

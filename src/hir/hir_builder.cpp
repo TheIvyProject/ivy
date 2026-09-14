@@ -204,6 +204,17 @@ void HirBuilder::error(SourceLoc loc, std::string message) {
 // --- signatures (pass 1) ---
 
 void HirBuilder::lowerLifetimeAttributes(hir::Function& fn, const Function& af) {
+    // A5: Native `lifetime<$a, $b>` declaration takes precedence over
+    // legacy `[[ivy::lt_def(a)]]` attributes. Process native first.
+    for (std::string_view lt : af.declaredLifetimes) {
+        if (std::any_of(fn.lifetimes.begin(), fn.lifetimes.end(),
+                        [&](const hir::Lifetime& l) { return l.name == lt; })) {
+            error(af.loc, "duplicate lifetime '$" + std::string(lt) + "'");
+            continue;
+        }
+        fn.lifetimes.push_back(hir::Lifetime{lt, af.loc});
+    }
+    // Legacy `[[ivy::lt_def(a)]]` — only add if not already declared natively.
     for (const Attribute& a : af.attrs) {
         if (a.name == "lt_def") {
             for (std::string_view arg : a.args) {
@@ -219,20 +230,45 @@ void HirBuilder::lowerLifetimeAttributes(hir::Function& fn, const Function& af) 
                 error(a.loc, "[[ivy::lt_ret]] expects exactly one lifetime argument");
                 continue;
             }
-            fn.returnLifetime = a.args[0];
+            // A5: Native `returnLifetime` takes precedence over legacy.
+            if (fn.returnLifetime.empty()) {
+                fn.returnLifetime = a.args[0];
+            }
         }
     }
-    // Validate lt_ret references a declared lifetime.
+    // A5: Native return lifetime — set from `fn.returnLifetime` (AST).
+    // This was already set by the parser; only set if not yet set.
+    if (fn.returnLifetime.empty() && !af.returnLifetime.empty()) {
+        fn.returnLifetime = af.returnLifetime;
+    }
+    // Validate return lifetime references a declared lifetime.
     if (!fn.returnLifetime.empty() &&
         std::none_of(fn.lifetimes.begin(), fn.lifetimes.end(),
                      [&](const hir::Lifetime& l) { return l.name == fn.returnLifetime; })) {
-        error(af.loc, "[[ivy::lt_ret(" + std::string(fn.returnLifetime) +
-                          ")]]: lifetime '" + std::string(fn.returnLifetime) +
-                          "' is not declared via [[ivy::lt_def(...)]]");
+        error(af.loc, "return lifetime '$" + std::string(fn.returnLifetime) +
+                          "' is not declared in lifetime<...>");
     }
 }
 
 std::string_view HirBuilder::lowerParamAttribute(hir::Function& fn, const Param& ap) {
+    // A5: Native lifetime annotation (`$a` on parameter) takes precedence.
+    if (!ap.lifetime.empty()) {
+        const std::string_view lt = ap.lifetime;
+        const bool declared =
+            std::any_of(fn.lifetimes.begin(), fn.lifetimes.end(),
+                        [&](const hir::Lifetime& l) { return l.name == lt; });
+        if (!declared) {
+            error(ap.loc, "lifetime '$" + std::string(lt) +
+                             "' is not declared in lifetime<...>");
+            return {};
+        }
+        if (ap.type.pointerDepth == 0 && !ap.type.isReference) {
+            error(ap.loc, "lifetime annotation requires a reference or pointer parameter");
+            return {};
+        }
+        return lt;
+    }
+    // Legacy `[[ivy::lt(a)]]` attribute.
     for (const Attribute& a : ap.attrs) {
         if (a.name != "lt") continue;
         if (a.args.size() != 1) {
@@ -248,8 +284,8 @@ std::string_view HirBuilder::lowerParamAttribute(hir::Function& fn, const Param&
                              "' is not declared via [[ivy::lt_def(...)]]");
             continue;
         }
-        if (ap.type.pointerDepth == 0) {
-            error(a.loc, "[[ivy::lt]] requires a pointer parameter");
+        if (ap.type.pointerDepth == 0 && !ap.type.isReference) {
+            error(a.loc, "[[ivy::lt]] requires a reference or pointer parameter");
             continue;
         }
         return lt;
@@ -789,7 +825,8 @@ void HirBuilder::buildSignature(const Function& af) {
     // like malloc — are exempt.)
     if (af.body && fn->returnType.pointerDepth > 0 && fn->returnLifetime.empty()) {
         error(af.loc, "function '" + std::string(af.name) +
-                          "' returns a pointer but has no [[ivy::lt_ret(...)]] attribute");
+                          "' returns a pointer but has no return lifetime — "
+                          "use `lifetime<$a>` and annotate the return type with $a");
     }
 
     // Check for redefinition and register the overload.

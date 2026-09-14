@@ -243,7 +243,22 @@ void Interpreter::execInst(FrameCtx& frame, const Inst& inst) {
         }
         case K::Ret: {
             const auto& rt = std::get<Inst::Ret>(inst.node);
-            if (rt.value) frame.retVal = evalExpr(*rt.value);
+            if (rt.value) {
+                // A5: If the function returns a reference, we need to
+                // return a Ptr value pointing to the referenced cell,
+                // so the caller can alias it. evalExpr would deref it
+                // (losing the address). Use lvalueCell instead.
+                if (frame.fn && frame.fn->returnType.isReference) {
+                    Cell target = lvalueCell(*rt.value);
+                    if (target) {
+                        frame.retVal = makePtr(target);
+                    } else {
+                        frame.retVal = evalExpr(*rt.value);
+                    }
+                } else {
+                    frame.retVal = evalExpr(*rt.value);
+                }
+            }
             frame.returned = true;
             break;
         }
@@ -683,6 +698,14 @@ Value Interpreter::evalAssign(const Expr::Assign& a, const Expr& e) {
 
 Cell Interpreter::lvalueCell(const Expr& e) {
     using E = Expr;
+    // A5: Reference return from a function call — the call result is
+    // a pointer value (the referenced storage). Evaluate the call and
+    // return the cell it points to.
+    if (const auto* call = std::get_if<E::Call>(&e.node)) {
+        Value v = evalExpr(e);
+        if (v.isPtr() && !v.ptr.isNull) return v.ptr.cell;
+        return nullptr;
+    }
     if (std::get_if<E::This>(&e.node)) {
         Cell c = lookupCell("this");
         // If cell IS itself a reference (Ptr), return the pointed-to cell.

@@ -1,0 +1,51 @@
+// A5: lifetime<$a> syntax + borrow checker (aliasing XOR mutability)
+
+// Test 1: Basic lifetime declaration + return lifetime (C-style leading return)
+lifetime<$a>
+const int32& $a first(const int32& $a x, const int32& $a y) {
+    return x;  // OK: $a satisfies return $a
+}
+
+// Test 2: Multiple immutable borrows (allowed)
+fn multi_borrow() -> int32 {
+    int32 a = 42;
+    const int32& r1 = a;  // immutable borrow
+    const int32& r2 = a;  // second immutable borrow — allowed
+    return r1 + r2;       // OK: both are const → 84
+}
+
+// Test 3: Single mutable borrow (allowed)
+fn mut_borrow() -> int32 {
+    int32 a = 42;
+    int32& r = a;     // mutable borrow — allowed (only one)
+    r = 100;
+    return r;         // → 100
+}
+
+// Test 4: Function with fn syntax + lifetime
+lifetime<$a>
+fn select_ref(const int32& $a x, const int32& $a y) -> const int32& $a {
+    return x;  // OK
+}
+
+// Test 5: unsafe bypasses borrow checker
+fn unsafe_borrow() -> int32 {
+    int32 a = 42;
+    int32& r1 = a;
+    unsafe {
+        int32& r2 = a;  // OK inside unsafe — bypasses borrow checker
+    }
+    return r1;  // → 42
+}
+
+// Main — run all tests: 84 + 100 + 42 = 226
+fn main() -> int32 {
+    int32 x = 10;
+    int32 y = 20;
+    const int32& r = first(x, y);
+    int32 result = multi_borrow();   // 84
+    int32 m = mut_borrow();         // 100
+    const int32& s = select_ref(x, y);
+    int32 u = unsafe_borrow();      // 42
+    return result + m + u;         // 226
+}

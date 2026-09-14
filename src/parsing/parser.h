@@ -105,6 +105,13 @@ private:
         return pos_ < tokens_.size() &&
                peek().kind == TokenKind::Keyword && peek().lexeme == kw;
     }
+    // A5: Check if the current token is a Lifetime ($identifier).
+    bool atLifetime() const { return at(TokenKind::Lifetime); }
+    // A5: Strip the leading '$' from a Lifetime token lexeme and return
+    // the bare lifetime name. Call this after consuming the token.
+    static std::string_view lifetimeName(std::string_view lexeme) {
+        return lexeme.substr(lexeme[0] == '$' ? 1 : 0);
+    }
     // Consumes the token; on mismatch reports an error and consumes it anyway
     // so callers always make progress.
     const Token& expect(TokenKind kind, std::string_view what);
@@ -120,6 +127,9 @@ private:
     // --- declarations ---
     bool isTypeStart() const;
     Type parseType();
+    // A5: Parse `lifetime<$a, $b, ...>` — returns the declared lifetime
+    // names (without the leading `$`). Returns empty if not at `lifetime`.
+    std::vector<std::string_view> parseLifetimeDecl();
 
     // Parses optional `constexpr`/`consteval` specifiers before a type.
     // Returns flags; consumes the keyword if present.
@@ -144,12 +154,14 @@ private:
     void parseImport(TranslationUnit& tu, SourceLoc loc);
     void parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                        bool isExternC, bool isConstexpr = false, bool isConsteval = false,
-                       std::vector<TemplateParam> tplParams = {});
+                       std::vector<TemplateParam> tplParams = {},
+                       std::vector<std::string_view> declaredLifetimes = {});
     // A3: `fn name(params) -> ReturnType { body }` — trailing return type form.
     // Same as parseFunction but return type comes after `->` instead of before name.
     void parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                                bool isExternC, bool isConstexpr = false, bool isConsteval = false,
-                               std::vector<TemplateParam> tplParams = {});
+                               std::vector<TemplateParam> tplParams = {},
+                               std::vector<std::string_view> declaredLifetimes = {});
     std::vector<Param> parseParams();
     // Parse an operator name (after `operator` keyword): returns the
     // operator symbol string (e.g. "+", "==", "[]", "()", "++", "->").

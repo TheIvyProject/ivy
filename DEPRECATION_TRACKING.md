@@ -48,6 +48,20 @@ Khi sẵn sàng loại bỏ hoàn toàn, đánh dấu "Removed" và xóa code pa
 
 ---
 
+## 4. `[[ivy::lt_def]]` / `[[ivy::lt_ret]]` / `[[ivy::lt]]` attributes → `lifetime<$a>` / `$a` syntax
+
+| | |
+|---|---|
+| **Task** | A5 |
+| **Form mới (preferred)** | `lifetime<$a, $b>` declaration + `const T& $a x` param annotation + `-> const T& $a` return annotation |
+| **Form cũ (deprecated)** | `[[ivy::lt_def(a, b)]]` + `const T& x [[ivy::lt(a)]]` + `[[ivy::lt_ret(a)]]` |
+| **File ảnh hưởng** | `src/parsing/parser.cpp` (parseLifetimeDecl, parseParams, parseFunction, parseFunctionTrailing), `src/hir/hir_builder.cpp` (lowerLifetimeAttributes, lowerParamAttribute) |
+| **Cơ chế** | Parser thêm `lifetime` keyword + `$identifier` Lifetime token. `lifetime<$a, $b>` parsed vào `ast::Function::declaredLifetimes`. `$a` trên param parsed vào `ast::Param::lifetime`. `$a` trên return parsed vào `ast::Function::returnLifetime`. HIR builder lower native syntax vào `hir::Function::lifetimes` / `hir::Param::lifetime` / `hir::Function::returnLifetime` — cùng cấu trúc mà legacy attributes dùng. Native syntax takes precedence over legacy attributes khi cả hai cùng xuất hiện. |
+| **Khi nào loại bỏ** | Sau khi migration toàn bộ codebase sang `lifetime<$a>` syntax. |
+| **Cách loại bỏ** | 1) Xóa `lowerLifetimeAttributes()` legacy `lt_def`/`lt_ret` branch. 2) Sửa `lowerParamAttribute()` không còn xử lý `lt` attribute. 3) Cập nhật error messages. 4) Xóa `lt_def`/`lt_ret`/`lt` khỏi `validateAttributes` allowed lists. |
+
+---
+
 ## Ghi chú: Các syntax KHÔNG bị deprecated
 
 Các syntax sau có form mới nhưng **vẫn được giữ lâu dài**, không nằm trong diện loại bỏ:

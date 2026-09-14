@@ -57,6 +57,8 @@ const std::unordered_set<std::string_view>& keywords() {
         "unsafe",
         // A3: fn keyword for trailing return type — `fn name() -> Type { }`
         "fn",
+        // A5: lifetime keyword for `lifetime<$a, $b>` declaration
+        "lifetime",
         // 9.2: Module keywords (contextual in C++20, but we always tokenize
         // as Keyword so atKeyword() works in parseTopLevel dispatch).
         "import",       "module",
@@ -227,6 +229,13 @@ Token Lexer::lexToken() {
     const std::size_t start = pos_;
     const std::uint32_t line = line_, col = col_;
     const char c = peek();
+
+    // A5: $identifier — lifetime variable token (e.g. $a, $b).
+    if (c == '$' && isIdentStart(peek(1))) {
+        advance();  // consume '$'
+        while (isIdentContinue(peek())) advance();
+        return makeToken(TokenKind::Lifetime, start, line, col);
+    }
 
     if (isIdentStart(c)) {
         while (isIdentContinue(peek())) advance();

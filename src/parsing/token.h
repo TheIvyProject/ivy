@@ -13,6 +13,7 @@ enum class TokenKind : std::uint8_t {
     Float,
     String,
     Char,
+    Lifetime,  // A5: $identifier — lifetime variable token
     EndOfFile,
 
     // Operators & punctuation
@@ -87,6 +88,7 @@ constexpr std::string_view tokenKindName(TokenKind kind) {
         case Float:        return "float";
         case String:       return "string";
         case Char:         return "char";
+        case Lifetime:     return "lifetime";
         case EndOfFile:    return "eof";
         case Plus:         return "+";
         case Minus:        return "-";

@@ -1,5 +1,6 @@
 #include "parsing/parser.h"
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 #include <unordered_map>
@@ -553,6 +554,42 @@ Type Parser::parseType() {
     return t;
 }
 
+// A5: Parse `lifetime<$a, $b, ...>` — the declared lifetime names
+// (without the leading `$`). The caller checks `atKeyword("lifetime")`
+// before calling. Returns empty vector if parsing fails.
+std::vector<std::string_view> Parser::parseLifetimeDecl() {
+    // Precondition: atKeyword("lifetime") is true.
+    next();  // consume 'lifetime'
+    std::vector<std::string_view> lifetimes;
+    if (!at(TokenKind::Lt)) {
+        errorAt(peek(), "expected '<' after 'lifetime'");
+        return lifetimes;
+    }
+    next();  // consume '<'
+    while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+        if (!atLifetime()) {
+            errorAt(peek(), "expected a lifetime variable ($name) in lifetime<...>");
+            synchronize();
+            return lifetimes;
+        }
+        const std::string_view lt = lifetimeName(next().lexeme);
+        // Check for duplicates.
+        if (std::any_of(lifetimes.begin(), lifetimes.end(),
+                        [&](std::string_view s) { return s == lt; })) {
+            errorAt(peek(), "duplicate lifetime '$" + std::string(lt) + "'");
+        } else {
+            lifetimes.push_back(lt);
+        }
+        if (at(TokenKind::Comma)) {
+            next();  // consume ','
+        } else {
+            break;
+        }
+    }
+    expect(TokenKind::Gt, "expected '>' to close lifetime<...>");
+    return lifetimes;
+}
+
 Parser::ConstexprSpec Parser::parseConstexprSpec() {
     ConstexprSpec spec;
     // Allow constexpr and consteval in any order (though typically only one).
@@ -669,6 +706,98 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
             const SourceLoc loc = locOf(peek());
             parseExport(tu, loc);
             continue;
+        }
+
+        // A5: `lifetime<$a, $b>` — lifetime declaration prefix.
+        // Must appear before a function declaration (fn or C-style).
+        // The parsed lifetime names are passed to the function parser.
+        if (atKeyword("lifetime")) {
+            std::vector<std::string_view> lifetimes = parseLifetimeDecl();
+            // After lifetime<...>, the next token must be a function start:
+            //   - `fn` (trailing return form)
+            //   - `constexpr`/`consteval` then `fn`
+            //   - `template<...>` then function
+            //   - a type (C-style leading return)
+            //   - attributes `[[ivy::...]]` then fn/type
+            if (atKeyword("constexpr") || atKeyword("consteval")) {
+                ConstexprSpec spec = parseConstexprSpec();
+                if (atKeyword("fn")) {
+                    const SourceLoc floc = locOf(peek());
+                    next();  // consume 'fn'
+                    std::vector<Attribute> attrs = parseAttributeList();
+                    parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false,
+                                          spec.isConstexpr, spec.isConsteval, {}, std::move(lifetimes));
+                    continue;
+                }
+                if (!isTypeStart()) {
+                    errorAt(peek(), "expected a function after lifetime<...> + constexpr");
+                    synchronize();
+                    continue;
+                }
+                const SourceLoc loc = locOf(peek());
+                std::vector<Attribute> attrs = parseAttributeList();
+                parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                              spec.isConstexpr, spec.isConsteval, {}, std::move(lifetimes));
+                continue;
+            }
+            // `lifetime<...> template<...> ...` — template after lifetime
+            if (atKeyword("template")) {
+                // Parse template manually to pass lifetimes through.
+                const SourceLoc tloc = locOf(peek());
+                next();  // consume 'template'
+                expect(TokenKind::Lt, "expected '<' after 'template'");
+                std::vector<TemplateParam> tplParams = parseTemplateParams();
+                // Now parse the function that follows.
+                if (atKeyword("fn")) {
+                    const SourceLoc floc = locOf(peek());
+                    next();  // consume 'fn'
+                    std::vector<Attribute> attrs = parseAttributeList();
+                    parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false,
+                                          false, false, std::move(tplParams), std::move(lifetimes));
+                    continue;
+                }
+                if (!isTypeStart()) {
+                    errorAt(peek(), "expected a function after 'template<...>'");
+                    synchronize();
+                    continue;
+                }
+                const SourceLoc loc = locOf(peek());
+                std::vector<Attribute> attrs = parseAttributeList();
+                parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                              false, false, std::move(tplParams), std::move(lifetimes));
+                continue;
+            }
+            // `lifetime<...> fn name() -> Type { }`
+            if (atKeyword("fn")) {
+                const SourceLoc floc = locOf(peek());
+                next();  // consume 'fn'
+                std::vector<Attribute> attrs = parseAttributeList();
+                parseFunctionTrailing(tu, floc, std::move(attrs), /*isExternC=*/false,
+                                      false, false, {}, std::move(lifetimes));
+                continue;
+            }
+            // `lifetime<...> [[attrs]] fn ...` or `lifetime<...> Type name(...)`
+            {
+                const SourceLoc loc = locOf(peek());
+                std::vector<Attribute> attrs = parseAttributeList();
+                if (atKeyword("fn")) {
+                    next();  // consume 'fn'
+                    std::vector<Attribute> midAttrs = parseAttributeList();
+                    attrs.insert(attrs.end(), std::make_move_iterator(midAttrs.begin()),
+                                 std::make_move_iterator(midAttrs.end()));
+                    parseFunctionTrailing(tu, loc, std::move(attrs), /*isExternC=*/false,
+                                          false, false, {}, std::move(lifetimes));
+                    continue;
+                }
+                if (!isTypeStart()) {
+                    errorAt(peek(), "expected a function declaration after lifetime<...>");
+                    synchronize();
+                    continue;
+                }
+                parseFunction(tu, loc, std::move(attrs), /*isExternC=*/false,
+                              false, false, {}, std::move(lifetimes));
+                continue;
+            }
         }
 
         // `constexpr` / `consteval` — consume and fall through to
@@ -1794,12 +1923,21 @@ void Parser::parseImport(TranslationUnit& tu, SourceLoc loc) {
 
 void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attribute> attrs,
                            bool isExternC, bool isConstexpr, bool isConsteval,
-                           std::vector<TemplateParam> tplParams) {
+                           std::vector<TemplateParam> tplParams,
+                           std::vector<std::string_view> declaredLifetimes) {
     Type returnType = parseType();
     if (returnType.base.empty()) {
         // parseType already reported the error; recover at statement-ish boundary.
         synchronize();
         return;
+    }
+
+    // A5: Return lifetime annotation `$a` comes right after the return type,
+    // before any attributes or function name.
+    // E.g. `const int32& $a foo(...) { ... }` (leading-return form).
+    std::string_view retLifetime;
+    if (atLifetime()) {
+        retLifetime = lifetimeName(next().lexeme);
     }
 
     // Attributes between the return type and the name, e.g. [[ivy::lt_ret(a)]].
@@ -1826,6 +1964,8 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     fn.namespacePrefix = currentNamespacePrefix();
     fn.params = std::move(params);
     fn.tplParams = std::move(tplParams);
+    fn.declaredLifetimes = std::move(declaredLifetimes);
+    fn.returnLifetime = retLifetime;
     fn.isExternC = isExternC;
     fn.isConstexpr = isConstexpr;
     fn.isConsteval = isConsteval;
@@ -1845,7 +1985,8 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
 void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
                                    std::vector<Attribute> attrs,
                                    bool isExternC, bool isConstexpr, bool isConsteval,
-                                   std::vector<TemplateParam> tplParams) {
+                                   std::vector<TemplateParam> tplParams,
+                                   std::vector<std::string_view> declaredLifetimes) {
     // `fn` keyword already consumed by caller.
     // Parse: name ( params ) -> ReturnType { body }
 
@@ -1873,6 +2014,13 @@ void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
         return;
     }
 
+    // A5: Return lifetime annotation: `$a` after the return type.
+    // E.g. `fn foo(...) -> const int32& $a { ... }`
+    std::string_view retLifetime;
+    if (atLifetime()) {
+        retLifetime = lifetimeName(next().lexeme);
+    }
+
     // Attributes after return type (same as leading form).
     std::vector<Attribute> midAttrs = parseAttributeList();
     attrs.insert(attrs.end(), std::make_move_iterator(midAttrs.begin()),
@@ -1886,6 +2034,8 @@ void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
     fn.namespacePrefix = currentNamespacePrefix();
     fn.params = std::move(params);
     fn.tplParams = std::move(tplParams);
+    fn.declaredLifetimes = std::move(declaredLifetimes);
+    fn.returnLifetime = retLifetime;
     fn.isExternC = isExternC;
     fn.isConstexpr = isConstexpr;
     fn.isConsteval = isConsteval;
@@ -1980,6 +2130,11 @@ std::vector<Param> Parser::parseParams() {
         if (at(TokenKind::Ellipsis)) {
             next();  // consume `...`
             p.isPack = true;
+        }
+        // A5: Native lifetime annotation on parameter — `$a` between
+        // type and name. E.g. `const int32& $a x` → p.lifetime = "a".
+        if (atLifetime()) {
+            p.lifetime = lifetimeName(next().lexeme);
         }
         if (at(TokenKind::Identifier)) {
             p.name = next().lexeme;
