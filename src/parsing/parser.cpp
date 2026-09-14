@@ -1872,12 +1872,12 @@ void Parser::parseModuleDecl(TranslationUnit& tu, SourceLoc loc) {
     expect(TokenKind::Semi, "expected ';' after module declaration");
 }
 
-// 9.2: Parse `import name;` or `import cpp <header>;`.
+// 9.2: Parse `import name;`, `import cpp <header>;`, or `import c <header>;`.
 void Parser::parseImport(TranslationUnit& tu, SourceLoc loc) {
     expectKeyword("import", "expected 'import'");
     TranslationUnit::ImportDecl imp;
     imp.loc = loc;
-    // `import cpp <header>;` — import C++ header (delegates to #include)
+    // `import cpp <header>;` — import C++ header (C++ ABI, cpp:: namespace)
     if (atKeyword("cpp")) {
         next();  // consume `cpp`
         imp.isCpp = true;
@@ -1900,6 +1900,32 @@ void Parser::parseImport(TranslationUnit& tu, SourceLoc loc) {
             next();
         } else {
             errorAt(peek(), "expected '<header>' or \"header\" after 'import cpp'");
+            synchronize();
+            return;
+        }
+    } else if (atKeyword("c")) {
+        // `import c <header>;` — import C header (C ABI, extern "C" required)
+        next();  // consume `c`
+        imp.isC = true;
+        // Expect `<header>` or `"header"`
+        if (at(TokenKind::Lt)) {
+            next();  // consume `<`
+            std::string header;
+            while (!at(TokenKind::Gt) && !at(TokenKind::EndOfFile)) {
+                if (!header.empty()) header += ' ';
+                header += std::string(peek().lexeme);
+                next();
+            }
+            expect(TokenKind::Gt, "expected '>' after C header name");
+            imp.name = header;
+        } else if (at(TokenKind::String)) {
+            // `import c "header";` — quoted form
+            std::string_view raw = peek().lexeme;
+            if (raw.size() >= 2) raw = raw.substr(1, raw.size() - 2);
+            imp.name = std::string(raw);
+            next();
+        } else {
+            errorAt(peek(), "expected '<header>' or \"header\" after 'import c'");
             synchronize();
             return;
         }

@@ -523,11 +523,13 @@ struct TranslationUnit {
     // `export module math;` → moduleName="math", isExport=true
     std::string moduleName;             // module name (e.g. "math"), or "" if not a module
     bool isModuleExport = false;        // true => `export module` (interface), false => `module` (implementation)
-    // 9.2: Import declarations. `import math;` → {name="math", isCpp=false}
+    // 9.2: Import declarations. `import math;` → {name="math", isCpp=false, isC=false}
     // `import cpp <stdio.h>;` → {name="stdio.h", isCpp=true}
+    // `import c <stdio.h>;` → {name="stdio.h", isC=true}
     struct ImportDecl {
-        std::string name;     // module name or C++ header name
-        bool isCpp = false;   // true => import C++ header (delegates to #include)
+        std::string name;     // module name, C++ header name, or C header name
+        bool isCpp = false;   // true => import C++ header (C++ ABI, cpp:: namespace)
+        bool isC = false;     // true => import C header (C ABI, extern "C" required)
         SourceLoc loc;
     };
     std::vector<ImportDecl> imports;

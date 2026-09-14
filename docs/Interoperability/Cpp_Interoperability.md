@@ -1,6 +1,6 @@
 # 🔄 C++ Interoperability (`import cpp`)
 
-Ivy provides native, seamless interoperability with C++ libraries and standard headers without requiring manual FFI wrappers or C-shim glue code.
+Ivy provides native, seamless interoperability with C++ libraries and standard headers without requiring manual FFI wrappers, C-shim glue code, or redundant function re-declarations.
 
 ---
 
@@ -27,11 +27,37 @@ Ivy originally originated as a safe subset of C++. Although it has branched out 
 Because Ivy and C++ are functionally one and the same at the machine level:
 - **No FFI Glue Layer:** There is zero marshalling, no wrapper overhead, and no runtime conversion cost. Ivy binaries and C++ binaries are 100% interoperable natively.
 - **Direct ABI Matching:** Ivy strictly targets the host platform's C++ ABI (MSVC ABI on Windows, Itanium ABI on Linux/macOS).
+- **No Redundant Declarations:** Because Ivy uses C++ ABI natively, you do **not** need to re-declare functions from imported C++ headers in your `.ivy` file, and you do **not** need `extern "C"` wrappers. The C++ header's function signatures are directly callable from Ivy code.
 - **Auxiliary Compiler Pipeline:** Ivy does not ship with a built-in C++ compiler. When downloading Ivy, users can optionally bundle Clang. If Clang is not bundled, Ivy automatically discovers an existing C++ compiler available on the host machine (e.g. Clang, GCC, MSVC `cl.exe`) to compile C++ source/headers into compatible object files, and the linker directly joins them together seamlessly.
 
 ---
 
-### 3. Safety Classification of C++ APIs
+### 3. The `cpp::` Virtual Namespace
+
+All symbols imported via `import cpp` are placed into the **`cpp::` virtual namespace**. This means:
+- C++ functions and types are accessible via the `cpp::` prefix.
+- No `extern "C"` declaration is needed — Ivy's ABI is C++, so the linker resolves C++ mangled symbols directly.
+- No function re-declaration is needed in the `.ivy` file — the header's declarations are used as-is.
+
+```ivy
+import cpp "math/geometry.hpp";
+
+void main() {
+    // Call C++ function directly via cpp:: namespace
+    double area = cpp::circle_area(5.0);
+
+    // Use C++ types directly
+    cpp::Point p;
+    p.x = 3.0;
+    p.y = 4.0;
+}
+```
+
+> **Contrast with `import c`:** C headers use a different ABI (C calling convention, no name mangling). Because of this ABI mismatch, `import c` **requires** explicit `extern "C"` declarations in the `.ivy` file and does **not** use the `cpp::` namespace. See [C_Interoperability.md](./C_Interoperability.md) for details.
+
+---
+
+### 4. Safety Classification of C++ APIs
 
 Because C++ does not enforce Ivy's compile-time memory safety and lifetime guarantees, Ivy classifies imported C++ APIs into three distinct safety tiers:
 
@@ -45,7 +71,7 @@ import cpp "geometry/vector.hpp";
 
 void main() {
     // Vector manages its own memory safely via RAII
-    Vector v;
+    cpp::Vector v;
     v.push_back(42); // ✅ Safe: direct execution
 }
 ```

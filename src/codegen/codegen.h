@@ -50,6 +50,13 @@ public:
         cppHeaders_ = headers;
     }
 
+    // C interop: Set C headers from `import c <header>` declarations.
+    // Compiled with `clang -x c -c` and linked together with the Ivy object.
+    // C function signatures must be declared via `extern "C"` in the .ivy file.
+    void setCHeaders(const std::vector<std::string>& headers) {
+        cHeaders_ = headers;
+    }
+
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
     // Overrides the ABI platform (default is auto-detected from the
@@ -85,6 +92,10 @@ private:
     // A7: C++ headers from `import cpp <header>` / `import cpp "file"`.
     // Passed to clang++ during linking so it compiles and links them.
     std::vector<std::string> cppHeaders_;
+
+    // C headers from `import c <header>` / `import c "file"`.
+    // Compiled with `clang -x c -c` and linked with the Ivy object.
+    std::vector<std::string> cHeaders_;
 
     // per-function
     std::unordered_map<std::string_view, std::string> vars_;  // var name -> llvm value

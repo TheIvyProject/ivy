@@ -1,0 +1,13 @@
+// C interop: import c directive test
+// Exit = c_add(100, 200) + c_mul(3, 4) = 300 + 12 = 312
+import c "c_helper.h";
+import c <stdint.h>;
+
+extern "C" int32 c_add(int32 a, int32 b);
+extern "C" int32 c_mul(int32 a, int32 b);
+
+int32 main() {
+    int32 sum = c_add(100, 200);   // = 300
+    int32 product = c_mul(3, 4);  // = 12
+    return sum + product;          // = 312
+}

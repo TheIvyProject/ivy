@@ -909,6 +909,11 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             if (i + 1 < tokens.size() &&
                 tokens[i + 1].kind == ivy::TokenKind::Keyword &&
                 tokens[i + 1].lexeme == "cpp") continue;
+            // Skip `import c` — handled differently (C interop)
+            // `c` is now a Keyword (added in lexer).
+            if (i + 1 < tokens.size() &&
+                tokens[i + 1].kind == ivy::TokenKind::Keyword &&
+                tokens[i + 1].lexeme == "c") continue;
             // Handle `import "name";` (string literal form)
             if (i + 1 < tokens.size() &&
                 tokens[i + 1].kind == ivy::TokenKind::String) {
@@ -977,8 +982,6 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     // Only local headers (found on disk) are compiled into object files
     // and linked. System headers (e.g. <vector>, <cstdint>) are
     // declaration-only — they don't produce object code, so we skip them.
-    // The C++ function signatures they declare are expressed in Ivy via
-    // `extern "C"` declarations.
     std::vector<std::string> cppHeaders;
     if (tu && !tu->imports.empty()) {
         for (const auto& imp : tu->imports) {
@@ -1006,6 +1009,43 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                     }
                 }
                 // If not found locally, it's a system header (e.g. <vector>).
+                // System headers are declaration-only — no object code to link.
+            }
+        }
+    }
+
+    // C interop: Collect C headers from `import c <header>` declarations.
+    // Same logic as C++ headers: only local headers found on disk are
+    // compiled into object files (using `clang -x c -c`) and linked.
+    // System headers (e.g. <stdio.h>) are declaration-only — skip them.
+    // C function signatures must be declared via `extern "C"` in the .ivy file.
+    std::vector<std::string> cHeaders;
+    if (tu && !tu->imports.empty()) {
+        for (const auto& imp : tu->imports) {
+            if (imp.isC) {
+                // Try source file directory first (for quoted form).
+                bool found = false;
+                {
+                    std::filesystem::path candidate = path.parent_path() / imp.name;
+                    std::error_code ec;
+                    if (std::filesystem::exists(candidate, ec)) {
+                        cHeaders.push_back(candidate.string());
+                        found = true;
+                    }
+                }
+                if (!found) {
+                    // Try -I paths
+                    for (const auto& dir : includePaths) {
+                        std::error_code ec;
+                        std::filesystem::path candidate = dir / imp.name;
+                        if (std::filesystem::exists(candidate, ec)) {
+                            cHeaders.push_back(candidate.string());
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                // If not found locally, it's a system header (e.g. <stdio.h>).
                 // System headers are declaration-only — no object code to link.
             }
         }
@@ -1086,6 +1126,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         cg.setCppHeaders(cppHeaders);  // A7
+        cg.setCHeaders(cHeaders);      // C interop
         bool ok = cg.emitObject(objPath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
@@ -1112,6 +1153,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         cg.setCppHeaders(cppHeaders);  // A7
+        cg.setCHeaders(cHeaders);      // C interop
         bool ok = cg.linkExecutable(exePath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
@@ -1127,6 +1169,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         ivy::CodeGen cg(*mir);
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         cg.setCppHeaders(cppHeaders);  // A7
+        cg.setCHeaders(cHeaders);      // C interop
         bool ok = false;
         if (!outPath.empty()) {
             std::ofstream ofs(outPath);

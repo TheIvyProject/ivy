@@ -2284,10 +2284,59 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         cppObjPaths.push_back(cppObj);
     }
 
-    // 4) Build the linker command line: clang++ <ivy.o> <cpp0.o> ... -o exe
+    // C interop: Compile C headers (from `import c`) into temporary object
+    // files using `clang++ -x c -c`. The `-x c` flag forces C mode (not C++).
+    // We use clang++ (not clang) as the compiler so that C++ runtime libraries
+    // are available when mixing C and C++ code. The C object files are
+    // compatible with the C++ linker.
+    std::vector<std::string> cObjPaths;
+    for (std::size_t i = 0; i < cHeaders_.size(); ++i) {
+        std::string cObj = (exeP.parent_path() /
+            (exeP.stem().string() + "__c" + std::to_string(i) + objExt)).string();
+        std::string cCmd = "\"" + linkerPath + "\" -x c -c \"" +
+            cHeaders_[i] + "\" -o \"" + cObj + "\"";
+        // NOTE: -x c forces clang++ to treat the input as C source
+        // (not C++), so C headers compile with C ABI (no name mangling).
+#ifdef _WIN32
+        STARTUPINFOA siC{};
+        siC.cb = sizeof(siC);
+        PROCESS_INFORMATION piC{};
+        std::string cmdlineC = cCmd;
+        std::vector<char> bufC(cmdlineC.begin(), cmdlineC.end());
+        bufC.push_back('\0');
+        BOOL okC = CreateProcessA(nullptr, bufC.data(), nullptr, nullptr, FALSE,
+                                  0, nullptr, nullptr, &siC, &piC);
+        int rcC = 1;
+        if (okC) {
+            WaitForSingleObject(piC.hProcess, INFINITE);
+            DWORD ecC = 0;
+            GetExitCodeProcess(piC.hProcess, &ecC);
+            rcC = static_cast<int>(ecC);
+            CloseHandle(piC.hProcess);
+            CloseHandle(piC.hThread);
+        }
+#else
+        int rcC = std::system(cCmd.c_str());
+#endif
+        if (rcC != 0) {
+            error({}, "failed to compile C header '" + cHeaders_[i] +
+                  "' (exit code " + std::to_string(rcC) + "): " + cCmd);
+            std::error_code ec;
+            fs::remove(objPath, ec);
+            for (const auto& p : cppObjPaths) fs::remove(p, ec);
+            for (const auto& p : cObjPaths) fs::remove(p, ec);
+            return false;
+        }
+        cObjPaths.push_back(cObj);
+    }
+
+    // 4) Build the linker command line: clang++ <ivy.o> <cpp0.o> ... <c0.o> ... -o exe
     std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\"";
     for (const std::string& cppObj : cppObjPaths) {
         cmd += " \"" + cppObj + "\"";
+    }
+    for (const std::string& cObj : cObjPaths) {
+        cmd += " \"" + cObj + "\"";
     }
     cmd += " -o \"" + exePath + "\"";
 
@@ -2296,6 +2345,9 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     std::string cmdline = "\"" + linkerPath + "\" \"" + objPath + "\"";
     for (const std::string& cppObj : cppObjPaths) {
         cmdline += " \"" + cppObj + "\"";
+    }
+    for (const std::string& cObj : cObjPaths) {
+        cmdline += " \"" + cObj + "\"";
     }
     cmdline += " -o \"" + exePath + "\"";
     STARTUPINFOA si{};
@@ -2330,6 +2382,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     std::error_code ec;
     fs::remove(objPath, ec);
     for (const auto& p : cppObjPaths) fs::remove(p, ec);
+    for (const auto& p : cObjPaths) fs::remove(p, ec);
     return true;
 }
 
