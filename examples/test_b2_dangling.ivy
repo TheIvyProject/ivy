@@ -1,0 +1,12 @@
+// B2: Negative test — dangling reference should be caught
+// This file SHOULD produce a compile error.
+
+fn dangling_ref() -> const int32& {
+    int32 x = 42;
+    return x;  // ERROR: returning reference to local variable (dangling)
+}
+
+fn main() -> int32 {
+    const int32& r = dangling_ref();
+    return r;
+}

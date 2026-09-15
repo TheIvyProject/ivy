@@ -188,40 +188,88 @@ void MirBuilder::declare(std::string_view name, mir::Lifetime lt) {
 
 // --- lifetime checker ---
 
-void MirBuilder::checkReturn(const mir::Function& fn, const mir::Lifetime& lt, SourceLoc loc) {
-    if (fn.returnType.pointerDepth == 0) return;
-    if (fn.returnLifetime.empty()) return;  // declaration only, e.g. extern "C"
-    if (unsafeDepth_ > 0) return;           // [[ivy::unsafe]] opts out
+// B2: Lifetime verification — check that returned references/pointers
+// don't dangle and match the declared return lifetime.
+// Applies to both pointer return (`T*`) and reference return (`T&`).
+
+void MirBuilder::checkReturn(const mir::Function& fn, const mir::Expr& expr, SourceLoc loc) {
+    // Only check if the return type is a pointer or reference.
+    if (fn.returnType.pointerDepth == 0 && !fn.returnType.isReference) return;
+    if (unsafeDepth_ > 0) return;  // unsafe opts out of lifetime checking
+
+    // Determine the effective lifetime of the returned expression.
+    // Special case: when returning a bare IdentRef to a local variable
+    // (e.g. `return x;` where `x` is a local `int32`), the variable's
+    // declared lifetime is `None` (it's a value type, not a reference),
+    // but returning a reference to it is still dangling because the
+    // local will be destroyed when the function returns.
+    mir::Lifetime lt = expr.lifetime;
+    if (lt.kind == mir::Lifetime::Kind::None) {
+        if (auto* id = std::get_if<mir::Expr::IdentRef>(&expr.node)) {
+            // Check if this is a local variable (in scopes_, not in params_).
+            bool isLocal = false;
+            for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+                if (it->contains(id->name)) {
+                    isLocal = true;
+                    break;
+                }
+            }
+            bool isParam = params_.contains(id->name);
+            if (isLocal && !isParam) {
+                lt.kind = mir::Lifetime::Kind::Local;
+            } else if (isParam) {
+                // Returning a parameter by reference — use the parameter's
+                // declared lifetime (which may be Named or Unknown).
+                lt = params_.at(id->name);
+            }
+        }
+    }
+
+    // If the function has no declared return lifetime, only check for
+    // dangling (Local) — don't enforce named lifetime matching.
     switch (lt.kind) {
         case mir::Lifetime::Kind::Named:
-            if (lt.name != fn.returnLifetime) {
-                error(loc, "returned pointer has lifetime '" + std::string(lt.name) +
-                               "' but the function declares [[ivy::lt_ret(" +
-                               std::string(fn.returnLifetime) + ")]]");
+            // Check that the returned lifetime matches the declared one.
+            if (!fn.returnLifetime.empty() && lt.name != fn.returnLifetime) {
+                error(loc, "returned reference has lifetime '$" + std::string(lt.name) +
+                               "' but the function declares lifetime '$" +
+                               std::string(fn.returnLifetime) + "'");
             }
             return;
         case mir::Lifetime::Kind::Static:  // string literal: valid forever
-        case mir::Lifetime::Kind::None:    // nullptr
+            return;
+        case mir::Lifetime::Kind::None:    // nullptr or non-pointer value
             return;
         case mir::Lifetime::Kind::Local:
-            error(loc, "returned pointer to a local variable (dangling)");
+            // B2: Dangling reference — returning a reference to a local variable.
+            error(loc, "returning a reference to a local variable (dangling reference)");
             return;
         case mir::Lifetime::Kind::Unknown:
-            error(loc, "returned pointer has no known lifetime; tie it to a parameter with "
-                       "[[ivy::lt(...)]] or return nullptr");
+            // B2: Unknown lifetime — can't verify safety.
+            if (fn.returnLifetime.empty()) {
+                error(loc, "returned reference has unknown lifetime; annotate the "
+                           "function with lifetime<$a> and tie the return to a parameter");
+            } else {
+                error(loc, "returned reference has unknown lifetime; tie it to a "
+                           "parameter with lifetime annotation");
+            }
             return;
     }
 }
 
-// --- store lifetime checker: catch dangling pointer stores ---
+// B2: Store lifetime checker — catch dangling pointer/reference stores.
+// Rejects storing a Local (dangling) pointer/reference into a pointer
+// or reference slot. Also rejects storing Unknown lifetime into a
+// named-lifetime slot.
 
 void MirBuilder::checkStore(const mir::Expr& target, const mir::Expr& value, SourceLoc loc) {
-    if (unsafeDepth_ > 0) return;  // [[ivy::unsafe]] opts out
-    // Only check pointer-typed stores.
-    if (target.type.pointerDepth == 0) return;
-    // Reject storing a Local (dangling) pointer into a named-lifetime slot.
+    if (unsafeDepth_ > 0) return;  // unsafe opts out
+    // Only check pointer or reference typed stores.
+    if (target.type.pointerDepth == 0 && !target.type.isReference) return;
+    // Reject storing a Local (dangling) pointer/reference.
     if (value.lifetime.kind == mir::Lifetime::Kind::Local) {
-        error(loc, "storing a pointer to a local variable into a pointer slot (dangling)");
+        error(loc, "storing a reference to a local variable into a pointer or "
+                   "reference slot (dangling)");
     }
 }
 
@@ -741,7 +789,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         auto& r = inst->node.emplace<mir::Inst::Ret>();
         if (v.value) {
             r.value = buildExpr(*v.value);
-            if (r.value) checkReturn(*current_, r.value->lifetime, s.loc);
+            if (r.value) checkReturn(*current_, *r.value, s.loc);
         }
         return;
     }

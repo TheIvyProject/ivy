@@ -1,0 +1,40 @@
+// B2: Lifetime verification — valid lifetime matching + dangling detection
+
+// Test 1: Valid lifetime — return reference with matching lifetime
+lifetime<$a>
+fn pick(const int32& $a x, const int32& $a y) -> const int32& $a {
+    return x;  // OK: $a matches return lifetime $a
+}
+
+// Test 2: Multiple lifetimes — return correct one
+lifetime<$a, $b>
+fn select_a(const int32& $a x, const int32& $b y) -> const int32& $a {
+    return x;  // OK: $a matches
+}
+
+// Test 3: Parameter reference return — valid with lifetime
+lifetime<$a>
+fn identity(const int32& $a x) -> const int32& $a {
+    return x;  // OK: $a matches
+}
+
+// Test 4: Unsafe bypasses lifetime check
+fn unsafe_return() -> int32 {
+    int32 a = 42;
+    unsafe {
+        int32& r = a;
+        r = 99;
+    }
+    return a;  // → 99
+}
+
+// Main — run all valid tests
+fn main() -> int32 {
+    int32 x = 10;
+    int32 y = 20;
+    const int32& r1 = pick(x, y);       // 10
+    const int32& r2 = select_a(x, y);   // 10
+    const int32& r3 = identity(x);      // 10
+    int32 u = unsafe_return();           // 99
+    return r1 + r2 + r3 + u;            // 10 + 10 + 10 + 99 = 129
+}

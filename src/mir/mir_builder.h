@@ -105,7 +105,7 @@ private:
 
     std::unique_ptr<mir::Expr> buildExpr(const hir::Expr& e);
     void buildStmt(const hir::Stmt& s);
-    void checkReturn(const mir::Function& fn, const mir::Lifetime& lt, SourceLoc loc);
+    void checkReturn(const mir::Function& fn, const mir::Expr& expr, SourceLoc loc);
     void checkStore(const mir::Expr& target, const mir::Expr& value, SourceLoc loc);
     void buildFunction(mir::Function& fn, const hir::Function& hf);
 
