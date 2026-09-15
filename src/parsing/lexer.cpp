@@ -66,8 +66,6 @@ const std::unordered_set<std::string_view>& keywords() {
         "import",       "module",
         // A7: `cpp` keyword for `import cpp <header>` directive
         "cpp",
-        // `c` keyword for `import c <header>` directive (C interop)
-        "c",
         // Ivy builtin types — new Ivy-native names (without _t suffix)
         "int8",        "int16",        "int32",        "int64",
         "uint8",       "uint16",       "uint32",       "uint64",

@@ -1,0 +1,73 @@
+// B1: Borrow checker — aliasing XOR mutability with precise scope release
+
+// Test 1: Shared borrow released on scope exit → re-borrow mutably OK
+fn test_scope_release() -> int32 {
+    int32 a = 42;
+    {
+        const int32& r1 = a;  // immutable borrow
+        const int32& r2 = a;  // second immutable — allowed
+        // r1, r2 go out of scope here → borrows released
+    }
+    // Now mutable borrow is OK because shared borrows were released
+    int32& r3 = a;           // OK — no active borrows
+    r3 = 100;
+    return r3;               // → 100
+}
+
+// Test 2: Mutable borrow released → shared borrow OK after
+fn test_mut_release() -> int32 {
+    int32 a = 42;
+    {
+        int32& r = a;        // mutable borrow — exclusive
+        r = 50;
+        // r goes out of scope → mutable borrow released
+    }
+    const int32& s = a;      // OK — mutable borrow was released
+    return s;                // → 50
+}
+
+// Test 3: Multiple shared borrows across nested scopes
+fn test_nested_shared() -> int32 {
+    int32 a = 42;
+    const int32& outer = a;  // shared borrow in outer scope
+    {
+        const int32& inner1 = a;  // OK — another shared borrow
+        const int32& inner2 = a;  // OK — third shared borrow
+        // inner1, inner2 released here
+    }
+    // outer still alive — shared borrow count = 1
+    return outer;            // → 42
+}
+
+// Test 4: For loop scope releases borrows
+fn test_loop_scope() -> int32 {
+    int32 sum = 0;
+    int32 a = 10;
+    for (int32 i = 0; i < 3; i = i + 1) {
+        const int32& elem = a;  // shared borrow of a
+        sum = sum + elem;
+        // elem released at end of loop iteration
+    }
+    return sum;              // → 30
+}
+
+// Test 5: unsafe bypasses borrow checker
+fn test_unsafe_bypass() -> int32 {
+    int32 a = 42;
+    int32& r1 = a;
+    unsafe {
+        int32& r2 = a;  // OK inside unsafe
+        r2 = 99;
+    }
+    return r1;               // → 99
+}
+
+// Main — run all tests: 100 + 50 + 42 + 30 + 99 = 321
+fn main() -> int32 {
+    int32 r1 = test_scope_release();   // 100
+    int32 r2 = test_mut_release();     // 50
+    int32 r3 = test_nested_shared();   // 42
+    int32 r4 = test_loop_scope();      // 30
+    int32 r5 = test_unsafe_bypass();   // 99
+    return r1 + r2 + r3 + r4 + r5;    // 321
+}

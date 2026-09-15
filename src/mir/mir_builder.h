@@ -44,18 +44,38 @@ private:
     // Value-lifetime of local variables, innermost scope last.
     std::vector<std::unordered_map<std::string_view, mir::Lifetime>> scopes_;
 
-    // A5: Borrow checker state — tracks shared/mutable borrows per variable.
-    // BorrowState is pushed/popped parallel to scopes_.
-    struct BorrowState {
-        int sharedCount = 0;     // number of active const T& borrows
-        bool hasMutable = false; // an active T& borrow exists
+    // B1: Borrow checker — production-quality aliasing XOR mutability.
+    // Each BorrowScope tracks per-variable borrow state and a list of
+    // active references (ref name → source variable name) so that borrows
+    // are released precisely when the reference goes out of scope.
+    struct BorrowEntry {
+        std::string refVar;       // name of the reference variable (the borrower)
+        std::string sourceVar;    // name of the borrowed variable (the borrowee)
+        bool isMutable;           // true = T&, false = const T&
     };
-    std::vector<std::unordered_map<std::string_view, BorrowState>> borrowScopes_;
+    struct BorrowState {
+        int sharedCount = 0;      // number of active const T& borrows
+        bool hasMutable = false;  // an active T& borrow exists
+    };
+    struct BorrowScope {
+        // Per-variable borrow counts (for fast aliasing XOR check).
+        std::unordered_map<std::string_view, BorrowState> states;
+        // Active references in this scope (for precise release on scope exit).
+        std::vector<BorrowEntry> activeRefs;
+    };
+    std::vector<BorrowScope> borrowScopes_;
     // Check aliasing XOR mutability when creating a reference to `name`.
     // `isMutable` = true for `T&`/`T*`, false for `const T&`/`const T*`.
-    void checkBorrow(std::string_view name, bool isMutable, SourceLoc loc);
-    // Release a borrow when a reference goes out of scope. Called on
-    // scope pop for variables that hold references.
+    // Returns true if the borrow is allowed (and records it).
+    bool checkBorrow(std::string_view name, bool isMutable, SourceLoc loc);
+    // Register a reference variable → source variable mapping so that
+    // the borrow is released when the reference goes out of scope.
+    void registerBorrower(std::string_view refVar, std::string_view sourceVar,
+                          bool isMutable);
+    // Release a borrow for a specific reference variable (when it goes
+    // out of scope). Decrements the source variable's borrow count.
+    void releaseBorrower(std::string_view refVar);
+    // Release all borrows in the innermost scope (on scope pop).
     void releaseBorrowsInScope();
 
     // Loop context for break/continue. incr may be null (while/do-while).

@@ -1903,8 +1903,10 @@ void Parser::parseImport(TranslationUnit& tu, SourceLoc loc) {
             synchronize();
             return;
         }
-    } else if (atKeyword("c")) {
+    } else if (peek().kind == TokenKind::Identifier && peek().lexeme == "c") {
         // `import c <header>;` — import C header (C ABI, extern "C" required)
+        // `c` is a contextual keyword: it's only special after `import`,
+        // so it's NOT in the lexer keyword set (allows `int32 c = ...`).
         next();  // consume `c`
         imp.isC = true;
         // Expect `<header>` or `"header"`

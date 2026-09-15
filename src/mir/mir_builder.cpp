@@ -225,77 +225,127 @@ void MirBuilder::checkStore(const mir::Expr& target, const mir::Expr& value, Sou
     }
 }
 
-// A5: Borrow checker — enforce aliasing XOR mutability.
+// B1: Borrow checker — production-quality aliasing XOR mutability.
 // When creating a mutable reference (T& or T*), there must be no other
 // borrows (shared or mutable). When creating a shared reference (const T&
 // or const T*), there must be no mutable borrow.
+// Returns true if the borrow is allowed (and records the count).
 
-void MirBuilder::checkBorrow(std::string_view name, bool isMutable, SourceLoc loc) {
-    if (unsafeDepth_ > 0) return;  // unsafe opts out of borrow checking
-    if (borrowScopes_.empty()) return;
-    // Find the variable in the borrow state (search innermost scope first).
+bool MirBuilder::checkBorrow(std::string_view name, bool isMutable, SourceLoc loc) {
+    if (unsafeDepth_ > 0) return true;  // unsafe opts out of borrow checking
+    if (borrowScopes_.empty()) return true;
+    // Find the variable's borrow state (search innermost scope first).
+    // The variable may have been declared in an outer scope, so we search
+    // all borrow scopes. But we record the state in the scope where the
+    // variable was declared (the first scope that has it).
+    BorrowScope* scope = nullptr;
+    BorrowState* bs = nullptr;
     for (auto it = borrowScopes_.rbegin(); it != borrowScopes_.rend(); ++it) {
-        auto hit = it->find(name);
-        if (hit == it->end()) continue;
-        BorrowState& bs = hit->second;
-        if (isMutable) {
-            // Mutable borrow: no other borrows allowed.
-            if (bs.sharedCount > 0) {
-                error(loc, "cannot create a mutable reference to '" + std::string(name) +
-                               "' — it is already borrowed immutably");
-                return;
-            }
-            if (bs.hasMutable) {
-                error(loc, "cannot create a second mutable reference to '" +
-                               std::string(name) + "' — only one mutable borrow at a time");
-                return;
-            }
-            bs.hasMutable = true;
-        } else {
-            // Shared borrow: no mutable borrow allowed.
-            if (bs.hasMutable) {
-                error(loc, "cannot create an immutable reference to '" + std::string(name) +
-                               "' — it is already borrowed mutably");
-                return;
-            }
-            ++bs.sharedCount;
+        auto hit = it->states.find(name);
+        if (hit != it->states.end()) {
+            scope = &(*it);
+            bs = &hit->second;
+            break;
         }
-        return;
     }
-    // Variable not in any borrow scope — it's likely a parameter.
-    // Parameters can be borrowed; track in the outermost scope.
-    auto& outer = borrowScopes_.front();
-    auto& bs = outer[name];
+    if (!bs) {
+        // Variable not in any borrow scope — likely a parameter.
+        // Track in the outermost scope so cross-scope borrows of
+        // parameters work correctly.
+        scope = &borrowScopes_.front();
+        bs = &scope->states[name];
+    }
     if (isMutable) {
-        if (bs.sharedCount > 0) {
+        // Mutable borrow: no other borrows allowed.
+        if (bs->sharedCount > 0) {
             error(loc, "cannot create a mutable reference to '" + std::string(name) +
                            "' — it is already borrowed immutably");
-            return;
+            return false;
         }
-        if (bs.hasMutable) {
+        if (bs->hasMutable) {
             error(loc, "cannot create a second mutable reference to '" +
                            std::string(name) + "' — only one mutable borrow at a time");
-            return;
+            return false;
         }
-        bs.hasMutable = true;
+        bs->hasMutable = true;
     } else {
-        if (bs.hasMutable) {
+        // Shared borrow: no mutable borrow allowed.
+        if (bs->hasMutable) {
             error(loc, "cannot create an immutable reference to '" + std::string(name) +
                            "' — it is already borrowed mutably");
-            return;
+            return false;
         }
-        ++bs.sharedCount;
+        ++bs->sharedCount;
+    }
+    return true;
+}
+
+// B1: Register a reference variable → source variable mapping.
+// Called after checkBorrow() succeeds. The borrow is released when
+// the reference variable goes out of scope (releaseBorrower).
+void MirBuilder::registerBorrower(std::string_view refVar,
+                                 std::string_view sourceVar,
+                                 bool isMutable) {
+    if (unsafeDepth_ > 0) return;  // unsafe: no tracking
+    if (borrowScopes_.empty()) return;
+    // Record in the innermost scope — the reference is declared here.
+    borrowScopes_.back().activeRefs.push_back({
+        std::string(refVar), std::string(sourceVar), isMutable
+    });
+}
+
+// B1: Release a borrow for a specific reference variable.
+// Decrements the source variable's borrow count. Called when a
+// reference variable goes out of scope.
+void MirBuilder::releaseBorrower(std::string_view refVar) {
+    if (borrowScopes_.empty()) return;
+    // Search innermost-to-outermost for the reference.
+    for (auto it = borrowScopes_.rbegin(); it != borrowScopes_.rend(); ++it) {
+        for (auto& entry : it->activeRefs) {
+            if (entry.refVar == refVar) {
+                // Find the source variable's BorrowState.
+                for (auto sc = borrowScopes_.rbegin(); sc != borrowScopes_.rend(); ++sc) {
+                    auto hit = sc->states.find(entry.sourceVar);
+                    if (hit != sc->states.end()) {
+                        if (entry.isMutable) {
+                            hit->second.hasMutable = false;
+                        } else {
+                            if (hit->second.sharedCount > 0) --hit->second.sharedCount;
+                        }
+                        break;
+                    }
+                }
+                // Mark as released (set refVar empty so we don't double-release).
+                entry.refVar.clear();
+                return;
+            }
+        }
     }
 }
 
+// B1: Release all borrows in the innermost scope (on scope pop).
+// Iterates over all activeRefs in the innermost scope and releases
+// each one, then pops the scope.
 void MirBuilder::releaseBorrowsInScope() {
-    // This is a simplification: we don't track which specific variable
-    // each reference borrows, so on scope exit we just clear the
-    // innermost borrow scope. A more precise implementation would
-    // track reference→source-variable mappings and decrement counts.
-    // For now, the borrow checker catches violations at creation time,
-    // which is the primary safety goal.
-    if (!borrowScopes_.empty()) borrowScopes_.pop_back();
+    if (borrowScopes_.empty()) return;
+    BorrowScope& inner = borrowScopes_.back();
+    // Release each active reference in this scope.
+    for (auto& entry : inner.activeRefs) {
+        if (entry.refVar.empty()) continue;  // already released
+        // Find the source variable's BorrowState (search all scopes).
+        for (auto& sc : borrowScopes_) {
+            auto hit = sc.states.find(entry.sourceVar);
+            if (hit != sc.states.end()) {
+                if (entry.isMutable) {
+                    hit->second.hasMutable = false;
+                } else {
+                    if (hit->second.sharedCount > 0) --hit->second.sharedCount;
+                }
+                break;
+            }
+        }
+    }
+    borrowScopes_.pop_back();
 }
 
 // --- expressions ---
@@ -368,9 +418,12 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
                     out->lifetime = params_.contains(name) ? params_.at(name)
                                                            : mir::Lifetime{};
                 }
-                // A5: Borrow checker — aliasing XOR mutability.
+                // B1: Borrow checker — aliasing XOR mutability.
                 // `&var` (non-const) = mutable borrow; `const &var` = shared.
                 // The const-ness is on the *result* type (out->type).
+                // For `&var`, the borrow is temporary (lives within the
+                // expression). For reference declarations (const T& r = x),
+                // the borrow is tracked via registerBorrower in Decl handler.
                 checkBorrow(name, /*isMutable=*/!out->type.isConst, e.loc);
             } else {
                 out->lifetime.kind = mir::Lifetime::Kind::Unknown;
@@ -527,7 +580,13 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
     using H = hir::Stmt;
 
     if (std::holds_alternative<H::Compound>(n)) {
+        // B1: Compound blocks have their own borrow scope so that
+        // references created inside are released when the block ends.
+        scopes_.push_back({});
+        borrowScopes_.push_back({});
         for (const auto& st : std::get<H::Compound>(n).stmts) buildStmt(*st);
+        scopes_.pop_back();
+        releaseBorrowsInScope();
         return;
     }
     if (std::holds_alternative<H::Null>(n)) {
@@ -541,12 +600,16 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         a.type = d.type;
         if (d.init) {
             a.init = buildExpr(*d.init);
-            // A5: Borrow checker — when initializing a reference, the
+            // B1: Borrow checker — when initializing a reference, the
             // initializer is an lvalue (IdentRef or Deref). Enforce
             // aliasing XOR mutability on the source variable.
             if (d.type.isReference && a.init) {
                 if (auto* id = std::get_if<mir::Expr::IdentRef>(&a.init->node)) {
-                    checkBorrow(id->name, /*isMutable=*/!d.type.isConst, s.loc);
+                    bool isMut = !d.type.isConst;
+                    if (checkBorrow(id->name, isMut, s.loc)) {
+                        // B1: Track ref→source so borrow is released on scope exit.
+                        registerBorrower(d.name, id->name, isMut);
+                    }
                 }
             }
             declare(d.name, a.init ? a.init->lifetime : mir::Lifetime{});
@@ -635,7 +698,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
     if (std::holds_alternative<H::For>(n)) {
         const H::For& v = std::get<H::For>(n);
         scopes_.push_back({});
-        borrowScopes_.push_back({});  // A5
+        borrowScopes_.push_back({});  // B1
         if (v.init) buildStmt(*v.init);  // decl lives in the current (pre-cond) block
 
         mir::Block* condB = newBlock();
@@ -669,7 +732,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         jumpTo(condB);
         cur_ = exitB;
         scopes_.pop_back();
-        borrowScopes_.pop_back();  // A5
+        releaseBorrowsInScope();  // B1
         return;
     }
     if (std::holds_alternative<H::Return>(n)) {
@@ -869,11 +932,11 @@ void MirBuilder::buildFunction(mir::Function& fn, const hir::Function& hf) {
     }
 
     scopes_.push_back({});
-    borrowScopes_.push_back({});  // A5: function-level borrow scope
+    borrowScopes_.push_back({});  // B1: function-level borrow scope
     cur_ = newBlock();
     for (const auto& st : hf.body->stmts) buildStmt(*st);
     scopes_.pop_back();
-    borrowScopes_.pop_back();  // A5
+    releaseBorrowsInScope();  // B1
 }
 
 std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {

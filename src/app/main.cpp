@@ -910,10 +910,13 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                 tokens[i + 1].kind == ivy::TokenKind::Keyword &&
                 tokens[i + 1].lexeme == "cpp") continue;
             // Skip `import c` — handled differently (C interop)
-            // `c` is now a Keyword (added in lexer).
+            // `c` is a contextual keyword (not in lexer keyword set).
             if (i + 1 < tokens.size() &&
-                tokens[i + 1].kind == ivy::TokenKind::Keyword &&
-                tokens[i + 1].lexeme == "c") continue;
+                tokens[i + 1].kind == ivy::TokenKind::Identifier &&
+                tokens[i + 1].lexeme == "c" &&
+                i + 2 < tokens.size() &&
+                (tokens[i + 2].kind == ivy::TokenKind::Lt ||
+                 tokens[i + 2].kind == ivy::TokenKind::String)) continue;
             // Handle `import "name";` (string literal form)
             if (i + 1 < tokens.size() &&
                 tokens[i + 1].kind == ivy::TokenKind::String) {
