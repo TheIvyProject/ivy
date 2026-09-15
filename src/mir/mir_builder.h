@@ -78,6 +78,24 @@ private:
     // Release all borrows in the innermost scope (on scope pop).
     void releaseBorrowsInScope();
 
+    // B3: Move-state tracking — parallel to `scopes_`, pushed/popped
+    // together. Tracks whether a variable is Initialized or MovedOut
+    // (after `move()`). This is the MIR-level tracking that complements
+    // the HIR-level move-state checking.
+    enum class MoveState { Initialized, MovedOut };
+    std::vector<std::unordered_map<std::string_view, MoveState>> moveStates_;
+    // B3: When true, use-after-move check is bypassed for IdentRef
+    // (used when building the lhs of an assignment — re-assignment
+    // re-initializes a moved-out variable).
+    bool inAssignLhs_ = false;
+    // B3: Mark a variable as moved-out in its scope.
+    void markMovedOut(std::string_view name);
+    // B3: Check if a variable is moved-out (search all scopes).
+    // Returns true if the variable is found and is MovedOut.
+    bool isMovedOut(std::string_view name) const;
+    // B3: Re-initialize a moved-out variable (after re-assignment).
+    void reinitialize(std::string_view name);
+
     // Loop context for break/continue. incr may be null (while/do-while).
     // A6: For switch contexts, caseBlocks holds the entry blocks of each
     // case (in order), and caseLabels maps label → block for `nextcase LABEL;`.

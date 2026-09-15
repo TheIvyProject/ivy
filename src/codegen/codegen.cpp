@@ -1088,7 +1088,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         // symbol name is the callee name (with :: replaced by _).
         const bool isBuiltinCall = !callee && isCodegenBuiltin(v.callee);
 
-        // A4: move() is a pass-through — just lower the operand.
+        // A4/B3: move() is a pass-through — just lower the operand.
         if (isBuiltinCall && v.callee == "move") {
             if (!v.args.empty() && v.args[0]) {
                 return lowerExpr(*v.args[0]);

@@ -2458,8 +2458,9 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         // lambdas (handled in a dedicated branch).
         if (std::holds_alternative<A::IdentRef>(callee->node)) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
-            // A4: `move(expr)` builtin — marks the operand as moved-out
-            // and passes through its value (semantically an rvalue cast).
+            // A4/B3: `move(expr)` builtin — marks the operand as moved-out.
+            // B3: Keep as a Call node (not pass-through) so the MIR builder
+            // can also track move-state for MIR-level safety checks.
             if (bareName == "move" && call.args.size() == 1 &&
                 call.args[0] && std::holds_alternative<hir::Expr::IdentRef>(call.args[0]->node)) {
                 const std::string_view varName = std::get<hir::Expr::IdentRef>(call.args[0]->node).name;
@@ -2474,14 +2475,19 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                         break;
                     }
                 }
-                // Pass-through: result is the operand expression.
-                // Create a fresh IdentRef to avoid dangling references
-                // when the Call node is destroyed.
-                auto movedOut = std::make_unique<hir::Expr>();
-                movedOut->node = hir::Expr::IdentRef{varName};
-                movedOut->type = call.args[0]->type;
-                movedOut->loc = e.loc;
-                return movedOut;
+                // B3: Keep as Call node — MIR builder and codegen/interpreter
+                // all handle `move()` as a builtin call.
+                // B3: Propagate the argument's type so downstream knows
+                // the result type of `move(x)` is the same as `x`'s type.
+                if (!call.args.empty() && call.args[0]) {
+                    out->type = call.args[0]->type;
+                }
+                // Reuse the existing Call node (created at line 2422).
+                // Do NOT emplace a new Call — that would destroy the
+                // existing node and leave `call` as a dangling reference.
+                call.callee = bareName;
+                // call.args and call.tplArgs are already populated.
+                return out;
             }
             // Only attempt if `bareName` is NOT a known function/template
             // (otherwise `a()` for a function `a` would be misread).

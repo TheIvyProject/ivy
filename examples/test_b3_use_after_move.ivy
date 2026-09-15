@@ -1,0 +1,8 @@
+// B3: Negative test — use-after-move should be caught
+// This file SHOULD produce a compile error.
+
+fn main() -> int32 {
+    int32 a = 42;
+    int32 b = move(a);
+    return a;  // ERROR: use of moved-out variable 'a'
+}

@@ -1,0 +1,27 @@
+// B3: Move semantics + use-after-move check (MIR-level tracking)
+// Positive test: valid move() usage, re-assignment, unsafe bypass
+
+fn main() -> int32 {
+    // Test 1: Basic move — b takes ownership, a is moved-out
+    int32 a = 42;
+    int32 b = move(a);
+    // a is moved-out here — reading it would be an error
+
+    // Test 2: Re-assign after move — a is re-initialized
+    a = 99;
+
+    // Test 3: Move in expression context
+    int32 x = 10;
+    int32 y = move(x);
+    x = 20;  // re-initialize
+
+    // Test 4: unsafe bypasses move check
+    int32 p = 5;
+    unsafe {
+        int32 q = move(p);
+        // In unsafe, reading p after move is allowed (no check)
+        p = q + 1;  // p = 6
+    }
+
+    return b + a + y + x + p;  // 42 + 99 + 10 + 20 + 6 = 177
+}

@@ -186,6 +186,39 @@ void MirBuilder::declare(std::string_view name, mir::Lifetime lt) {
     scopes_.back().emplace(name, lt);
 }
 
+// B3: Mark a variable as moved-out in its scope.
+void MirBuilder::markMovedOut(std::string_view name) {
+    for (auto it = moveStates_.rbegin(); it != moveStates_.rend(); ++it) {
+        auto hit = it->find(name);
+        if (hit != it->end()) {
+            hit->second = MoveState::MovedOut;
+            return;
+        }
+    }
+}
+
+// B3: Check if a variable is moved-out (search all scopes).
+bool MirBuilder::isMovedOut(std::string_view name) const {
+    for (auto it = moveStates_.rbegin(); it != moveStates_.rend(); ++it) {
+        auto hit = it->find(name);
+        if (hit != it->end()) {
+            return hit->second == MoveState::MovedOut;
+        }
+    }
+    return false;
+}
+
+// B3: Re-initialize a moved-out variable (after re-assignment).
+void MirBuilder::reinitialize(std::string_view name) {
+    for (auto it = moveStates_.rbegin(); it != moveStates_.rend(); ++it) {
+        auto hit = it->find(name);
+        if (hit != it->end()) {
+            hit->second = MoveState::Initialized;
+            return;
+        }
+    }
+}
+
 // --- lifetime checker ---
 
 // B2: Lifetime verification — check that returned references/pointers
@@ -437,6 +470,12 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
     }
     if (std::holds_alternative<H::IdentRef>(n)) {
         const std::string_view name = std::get<H::IdentRef>(n).name;
+        // B3: Use-after-move check — reading a moved-out variable is
+        // an error (unless we're in the lhs of an assignment, where
+        // re-assignment re-initializes). Also bypassed in unsafe.
+        if (!inAssignLhs_ && unsafeDepth_ == 0 && isMovedOut(name)) {
+            error(e.loc, "use of moved-out variable '" + std::string(name) + "'");
+        }
         out->node = mir::Expr::IdentRef{name};
         out->lifetime = lookup(name);
         return out;
@@ -516,6 +555,33 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
     }
     if (std::holds_alternative<H::Call>(n)) {
         const H::Call& v = std::get<H::Call>(n);
+        // B3: `move(x)` builtin — mark the operand variable as moved-out
+        // and pass through its value. The MIR Call node is kept so that
+        // codegen/interpreter can handle it (they treat move() as no-op).
+        if (v.callee == "move" && v.args.size() == 1 && v.args[0]) {
+            // Build the argument first (so nested expressions are processed).
+            auto arg = buildExpr(*v.args[0]);
+            // Mark the variable as moved-out (if it's an IdentRef).
+            if (arg && std::holds_alternative<mir::Expr::IdentRef>(arg->node)) {
+                const std::string_view varName =
+                    std::get<mir::Expr::IdentRef>(arg->node).name;
+                if (unsafeDepth_ == 0) {
+                    if (isMovedOut(varName)) {
+                        error(e.loc, "'" + std::string(varName) +
+                               "' is already moved-out");
+                    }
+                    markMovedOut(varName);
+                }
+            }
+            // Emit as a Call node (codegen/interpreter handle move() as
+            // pass-through). The result lifetime is the operand's lifetime.
+            auto& call = out->node.emplace<mir::Expr::Call>();
+            call.callee = v.callee;
+            if (arg) call.args.push_back(std::move(arg));
+            else call.args.push_back(nullptr);
+            if (arg) out->lifetime = arg->lifetime;
+            return out;
+        }
         auto& call = out->node.emplace<mir::Expr::Call>();
         call.callee = v.callee;
         call.isVirtual = v.isVirtual;        // 7.7
@@ -561,9 +627,21 @@ std::unique_ptr<mir::Expr> MirBuilder::buildExpr(const hir::Expr& e) {
         const H::Assign& v = std::get<H::Assign>(n);
         auto& as = out->node.emplace<mir::Expr::Assign>();
         as.op = v.op;
+        // B3: Set inAssignLhs_ while building lhs — this bypasses
+        // the use-after-move check so re-assignment to a moved-out
+        // variable is allowed (it re-initializes the variable).
+        inAssignLhs_ = true;
         as.lhs = buildExpr(*v.lhs);
+        inAssignLhs_ = false;
         as.rhs = buildExpr(*v.rhs);
         if (as.rhs) out->lifetime = as.rhs->lifetime;
+        // B3: Re-assignment re-initializes a moved-out variable.
+        if (as.op == "=" && as.lhs &&
+            std::holds_alternative<mir::Expr::IdentRef>(as.lhs->node)) {
+            const std::string_view varName =
+                std::get<mir::Expr::IdentRef>(as.lhs->node).name;
+            reinitialize(varName);
+        }
         return out;
     }
     if (std::holds_alternative<H::New>(n)) {
@@ -630,11 +708,14 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
     if (std::holds_alternative<H::Compound>(n)) {
         // B1: Compound blocks have their own borrow scope so that
         // references created inside are released when the block ends.
+        // B3: Compound blocks also have their own move-state scope.
         scopes_.push_back({});
         borrowScopes_.push_back({});
+        moveStates_.push_back({});
         for (const auto& st : std::get<H::Compound>(n).stmts) buildStmt(*st);
         scopes_.pop_back();
         releaseBorrowsInScope();
+        moveStates_.pop_back();
         return;
     }
     if (std::holds_alternative<H::Null>(n)) {
@@ -664,6 +745,8 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         } else {
             declare(d.name, {});
         }
+        // B3: New variable starts in Initialized state.
+        moveStates_.back().emplace(d.name, MoveState::Initialized);
         return;
     }
     if (std::holds_alternative<H::If>(n)) {
@@ -747,6 +830,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         const H::For& v = std::get<H::For>(n);
         scopes_.push_back({});
         borrowScopes_.push_back({});  // B1
+        moveStates_.push_back({});    // B3
         if (v.init) buildStmt(*v.init);  // decl lives in the current (pre-cond) block
 
         mir::Block* condB = newBlock();
@@ -781,6 +865,7 @@ void MirBuilder::buildStmt(const hir::Stmt& s) {
         cur_ = exitB;
         scopes_.pop_back();
         releaseBorrowsInScope();  // B1
+        moveStates_.pop_back();   // B3
         return;
     }
     if (std::holds_alternative<H::Return>(n)) {
@@ -964,6 +1049,7 @@ void MirBuilder::buildFunction(mir::Function& fn, const hir::Function& hf) {
     scopes_.clear();
     loops_.clear();
     borrowScopes_.clear();
+    moveStates_.clear();           // B3
 
     for (const hir::Lifetime& l : hf.lifetimes) {
         fn.lifetimes.push_back(mir::Lifetime{mir::Lifetime::Kind::Named, l.name});
@@ -981,10 +1067,12 @@ void MirBuilder::buildFunction(mir::Function& fn, const hir::Function& hf) {
 
     scopes_.push_back({});
     borrowScopes_.push_back({});  // B1: function-level borrow scope
+    moveStates_.push_back({});    // B3: function-level move-state scope
     cur_ = newBlock();
     for (const auto& st : hf.body->stmts) buildStmt(*st);
     scopes_.pop_back();
     releaseBorrowsInScope();  // B1
+    moveStates_.pop_back();   // B3
 }
 
 std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
