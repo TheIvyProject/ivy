@@ -1,0 +1,45 @@
+// Ivy Standard Library — math module
+export module math;
+
+export int32 add(int32 a, int32 b) {
+    return a + b;
+}
+
+export int32 sub(int32 a, int32 b) {
+    return a - b;
+}
+
+export int32 mul(int32 a, int32 b) {
+    return a * b;
+}
+
+export int32 min(int32 a, int32 b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+export int32 max(int32 a, int32 b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+export int32 abs(int32 n) {
+    if (n < 0) {
+        return 0 - n;
+    }
+    return n;
+}
+
+export int32 clamp(int32 val, int32 lo, int32 hi) {
+    if (val < lo) {
+        return lo;
+    }
+    if (val > hi) {
+        return hi;
+    }
+    return val;
+}

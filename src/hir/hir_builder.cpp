@@ -810,6 +810,14 @@ void HirBuilder::buildSignature(const Function& af) {
 
     lowerLifetimeAttributes(*fn, af);
 
+    // B4: nullptr_t and raw pointer return types require unsafe unless declaration only (extern C)
+    if (af.body && fn->returnType.base == "nullptr_t") {
+        requireUnsafe(af.loc, "return type 'nullptr_t'");
+    }
+    if (af.body && fn->returnType.pointerDepth > 0) {
+        requireUnsafe(af.loc, "raw pointer return type");
+    }
+
     for (const Param& ap : af.params) {
         hir::Param p;
         p.type = resolveTemplateStructType(resolveTypeAlias(ap.type), ap.loc);
@@ -817,6 +825,12 @@ void HirBuilder::buildSignature(const Function& af) {
         p.loc = ap.loc;
         p.lifetime = lowerParamAttribute(*fn, ap);
         p.defaultValue = ap.defaultValue.get();
+        if (af.body && p.type.base == "nullptr_t") {
+            requireUnsafe(ap.loc, "parameter type 'nullptr_t'");
+        }
+        if (af.body && p.type.pointerDepth > 0) {
+            requireUnsafe(ap.loc, "raw pointer parameter type");
+        }
         fn->params.push_back(std::move(p));
     }
 
@@ -1050,6 +1064,12 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
     if (decl.type.pointerDepth == 0 && decl.type.base == "void") {
         error(loc, "variable '" + std::string(d.name) + "' cannot have type void");
     }
+    if (decl.type.pointerDepth > 0) {
+        requireUnsafe(loc, "raw pointer variable declaration");
+    }
+    if (decl.type.base == "nullptr_t") {
+        requireUnsafe(loc, "type 'nullptr_t'");
+    }
 
     // `auto` type deduction: infer type from the initializer expression.
     // `auto x = expr;`  →  type = expr.type (with pointer/ref from the declared auto)
@@ -1078,6 +1098,9 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
         // Strip reference from plain `auto x = ref_expr` (copy semantics).
         if (!decl.type.isReference) inferred.isReference = false;
         decl.type = inferred;
+        if (decl.type.pointerDepth > 0) {
+            requireUnsafe(loc, "raw pointer variable declaration");
+        }
         declare(d.name, inferred, loc);
         return out;
     }
@@ -2152,6 +2175,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         return out;
     }
     if (std::holds_alternative<A::NullptrLit>(n)) {
+        requireUnsafe(e.loc, "'nullptr' literal");
         out->node = hir::Expr::NullptrLit{};
         out->type = nullptrType();
         return out;
@@ -2279,6 +2303,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 out->type = dummyType();
                 return out;
             }
+            requireUnsafe(e.loc, "address-of operator '&' taking raw pointer");
             out->type = ot;
             ++out->type.pointerDepth;
             return out;

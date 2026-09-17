@@ -376,6 +376,11 @@ std::filesystem::path resolveModulePath(std::string_view moduleName,
     auto candidate = std::filesystem::current_path() / (std::string(moduleName) + ".ivm");
     std::error_code ec;
     if (std::filesystem::exists(candidate, ec)) return candidate;
+
+    // Check std directory for pre-compiled .ivm interface files
+    auto stdCandidate = std::filesystem::current_path() / "std" / (std::string(moduleName) + ".ivm");
+    if (std::filesystem::exists(stdCandidate, ec)) return stdCandidate;
+
     return {};
 }
 

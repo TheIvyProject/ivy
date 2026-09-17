@@ -1,0 +1,15 @@
+// B4 positive test: nullptr & raw pointers are valid inside unsafe { }
+fn main() -> int32 {
+    int32 result = 0;
+    unsafe {
+        int32 x = 42;
+        int32* p = &x;
+        result = *p;
+
+        int32* null_p = nullptr;
+        if (null_p == nullptr) {
+            result = result + 8;
+        }
+    }
+    return result; // 42 + 8 = 50
+}

@@ -1,0 +1,5 @@
+// B4 negative test: nullptr literal in safe zone should fail compile
+fn main() -> int32 {
+    int32* p = nullptr;
+    return 0;
+}
