@@ -133,7 +133,75 @@ void execute(int32* buffer, int32 length) {
 
 ---
 
-### 7. `import c` vs `import cpp` — Summary
+### 7. Reverse Interoperability: Calling Ivy from C
+
+Ivy functions can also be exported to plain C. Because C does not support C++ name mangling, you export functions with `extern "C"` linkage in Ivy.
+
+#### Why C Can Use Ivy:
+1. **Identical POD Memory Layout:** Plain Old Data (POD) structs in Ivy share identical byte-level layout, alignment, and padding with C `struct`.
+2. **C Calling Convention via `extern "C"`:** Exporting an Ivy function with `extern "C"` disables C++ name mangling and forces standard C calling conventions, making the object file 100% link-compatible with any C compiler (`clang`, `gcc`, `cl.exe`).
+
+#### Workflow:
+
+1. **Write and Export Ivy functions with `extern "C"`:**
+   ```ivy
+   // crypto.ivy
+   export module crypto;
+
+   // Export with C linkage (no mangling)
+   export extern "C" int32 ivy_hash(const char* data, int32 len) {
+       int32 hash = 5381;
+       unsafe {
+           for (int32 i = 0; i < len; i += 1) {
+               hash = ((hash << 5) + hash) + static_cast<int32>(data[i]);
+           }
+       }
+       return hash;
+   }
+
+   export extern "C" struct IvyBuffer {
+       int32 capacity;
+       int32 length;
+   };
+   ```
+
+2. **C Header Declaration (`crypto.h`):**
+   ```c
+   // crypto.h
+   #pragma once
+   #include <stdint.h>
+
+   typedef struct {
+       int32_t capacity;
+       int32_t length;
+   } IvyBuffer;
+
+   int32_t ivy_hash(const char* data, int32_t len);
+   ```
+
+3. **Include and Call from C:**
+   ```c
+   // main.c
+   #include <stdio.h>
+   #include "crypto.h"
+
+   int main(void) {
+       const char* text = "Hello from C";
+       int32_t h = ivy_hash(text, 12);
+       printf("Hash: %d\n", h);
+       return 0;
+   }
+   ```
+
+4. **Compile and Link:**
+   ```bash
+   ivyc -c crypto.ivy -o crypto.obj
+   clang main.c crypto.obj -o app
+   ```
+
+---
+
+### 8. `import c` vs `import cpp` — Summary
 
 | Aspect | `import c` | `import cpp` |
 |--------|-----------|-------------|

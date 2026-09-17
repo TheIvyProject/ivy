@@ -121,3 +121,75 @@ cpp::get_name:
 ```
 
 > **Rule:** When lifetime or ownership cannot be formally modeled by Ivy's Borrow Checker, the compiler conservatively flags the API as `unsafe`.
+
+---
+
+### 5. Reverse Interoperability: Calling Ivy from C++
+
+Because Ivy shares the exact C++ ABI, calling convention, and memory layout, C++ can consume Ivy modules natively without wrappers, glue layers, or serialization overhead.
+
+#### Why C++ Can Directly Use Ivy:
+1. **Identical Memory Layout:** Ivy structs and classes have identical member layout, alignment, padding, and vtable structures to C++. A `Point` struct in Ivy is binary-identical to a `struct Point` in C++.
+2. **Matching Name Mangling & Calling Convention:** Ivy compiles directly to standard machine code following the host C++ ABI (MSVC on Windows, Itanium on Linux/macOS). C++ linkers resolve Ivy symbols as native C++ symbols.
+3. **Zero-Copy Data Sharing:** Pass objects, references (`const T&`, `T&`), and pointers between Ivy and C++ with zero marshalling or copying.
+
+#### Workflow:
+
+1. **Write Ivy code with `export`:**
+   ```ivy
+   // math_ops.ivy
+   export module math_ops;
+
+   export struct Vector3 {
+       float32 x;
+       float32 y;
+       float32 z;
+
+       float32 lengthSquared() const {
+           return this.x * this.x + this.y * this.y + this.z * this.z;
+       }
+   };
+
+   export int32 compute(int32 a, int32 b) {
+       return a * b + 42;
+   }
+   ```
+
+2. **C++ Header Declaration (`math_ops.hpp`):**
+   `ivyc` can emit a matching C++ header or you can declare matching signatures directly in C++:
+   ```cpp
+   // math_ops.hpp
+   #pragma once
+   #include <cstdint>
+
+   struct Vector3 {
+       float x;
+       float y;
+       float z;
+
+       float lengthSquared() const;
+   };
+
+   int32_t compute(int32_t a, int32_t b);
+   ```
+
+3. **Include and Call from C++:**
+   ```cpp
+   // main.cpp
+   #include <iostream>
+   #include "math_ops.hpp"
+
+   int main() {
+       Vector3 v{1.0f, 2.0f, 3.0f};
+       std::cout << "Len sq: " << v.lengthSquared() << "\n";
+       std::cout << "Compute: " << compute(10, 5) << "\n";
+       return 0;
+   }
+   ```
+
+4. **Compile and Link:**
+   ```bash
+   ivyc -c math_ops.ivy -o math_ops.obj
+   clang++ main.cpp math_ops.obj -o app
+   ```
+
