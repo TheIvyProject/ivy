@@ -965,6 +965,35 @@ void HirBuilder::emitDtorCalls(std::size_t uptoScope, SourceLoc loc,
 
 bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const {
     if (from.base == "nullptr") return to.pointerDepth > 0 || to.isReference;
+    // B5: Implicit conversion T → expected<T, E> and E → expected<T, E>.
+    // A value of type T can be assigned to an expected<T, E> (success),
+    // and a value of type E can be assigned to an expected<T, E> (error).
+    // When both T and E are assignable from `from` (e.g. T=int32, E=Err,
+    // from=Err — enum-to-int conversion makes T also assignable), we
+    // prefer the EXACT match (to.base == from.base) to avoid
+    // incorrectly wrapping an error value as a success.
+    if (to.pointerDepth == 0 && to.base != from.base) {
+        hir::Type tArg, eArg;
+        if (isExpectedStruct(to, tArg, eArg)) {
+            bool tExact = tArg.base == from.base &&
+                tArg.pointerDepth == from.pointerDepth;
+            bool eExact = eArg.base == from.base &&
+                eArg.pointerDepth == from.pointerDepth;
+            // When T==E (same type), prefer T (success).
+            // When E differs from T and matches exactly, prefer E.
+            if (eExact && !tExact && eArg.base != tArg.base) {
+                return true;
+            }
+            if (tExact) {
+                return true;
+            }
+            // Fall back to general assignability.
+            // T → expected<T, E>
+            if (isAssignable(tArg, from)) return true;
+            // E → expected<T, E>
+            if (isAssignable(eArg, from)) return true;
+        }
+    }
     if (from.isReference) {
         // Reference can bind to reference of same type.
         if (to.isReference && to.base == from.base &&
@@ -1014,6 +1043,55 @@ bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const 
     if (to.base != from.base) return false;
     if (!to.isConst && from.isConst) return false;
     return true;
+}
+
+// B5: Check if a struct type is an instantiation of expected<T, E>.
+// The mangled name has the form "expected<T,E>". We also verify the
+// struct has the canonical fields: [hasValue, value, error].
+bool HirBuilder::isExpectedStruct(const hir::Type& type,
+                                   hir::Type& tplArg0, hir::Type& tplArg1) const {
+    // Quick reject: non-struct types.
+    if (type.pointerDepth > 0) return false;
+    auto it = structs_.find(type.base);
+    if (it == structs_.end()) return false;
+    // Check the field layout: hasValue (bool), value (T), error (E).
+    const auto& fields = it->second.fields;
+    if (fields.size() != 3) return false;
+    if (fields[0].name != "hasValue" || fields[1].name != "value" ||
+        fields[2].name != "error") {
+        return false;
+    }
+    // Extract the template type arguments from the field types.
+    tplArg0 = fields[1].type;
+    tplArg1 = fields[2].type;
+    return true;
+}
+
+// B5: Wrap a value of type T or E into an expected<T, E> InitList.
+// `valueIdx` is 1 (field "value", hasValue=true) or 2 (field "error",
+// hasValue=false).  The resulting InitList has 3 elements:
+//   [hasValue, value, error] — positional, matching struct field order.
+std::unique_ptr<hir::Expr> HirBuilder::wrapExpectedValue(
+    std::unique_ptr<hir::Expr> value,
+    const hir::Type& expectedType,
+    std::size_t valueIdx, SourceLoc loc) {
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    auto& il = out->node.emplace<hir::Expr::InitList>();
+    il.elements.resize(3);
+    // Field 0: hasValue (bool) — true if wrapping a value, false if
+    // wrapping an error.
+    auto hasVal = std::make_unique<hir::Expr>();
+    hasVal->loc = loc;
+    hasVal->node.emplace<hir::Expr::BoolLit>(valueIdx == 1);
+    hasVal->type = boolType();
+    il.elements[0] = std::move(hasVal);
+    // Field at valueIdx: the wrapped value/error.
+    il.elements[valueIdx] = std::move(value);
+    // The other field (error or value) is zero-initialized (nullptr).
+    // Codegen/interpreter will zero-init the missing field.
+    out->type = expectedType;
+    return out;
 }
 
 bool HirBuilder::checkCondition(const hir::Expr& e) {
@@ -1117,6 +1195,35 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                 error(loc, "cannot initialize variable '" + std::string(d.name) + "' of type '" +
                                typeToString(decl.type) + "' with a value of type '" +
                                typeToString(decl.init->type) + "'");
+            } else if (decl.init) {
+                // B5: Auto-wrap T → expected<T, E> (success) and
+                // E → expected<T, E> (error) on variable initialization.
+                // Prefer exact match when both T and E are assignable.
+                if (decl.type.base != decl.init->type.base) {
+                    hir::Type tArg, eArg;
+                    if (isExpectedStruct(decl.type, tArg, eArg)) {
+                        bool tExact = tArg.base == decl.init->type.base &&
+                            tArg.pointerDepth == decl.init->type.pointerDepth;
+                        bool eExact = eArg.base == decl.init->type.base &&
+                            eArg.pointerDepth == decl.init->type.pointerDepth;
+                        bool wrapped = false;
+                        if (eExact && !tExact && eArg.base != tArg.base) {
+                            decl.init = wrapExpectedValue(std::move(decl.init), decl.type, 2, loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && tExact) {
+                            decl.init = wrapExpectedValue(std::move(decl.init), decl.type, 1, loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && isAssignable(tArg, decl.init->type)) {
+                            decl.init = wrapExpectedValue(std::move(decl.init), decl.type, 1, loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && isAssignable(eArg, decl.init->type)) {
+                            decl.init = wrapExpectedValue(std::move(decl.init), decl.type, 2, loc);
+                        }
+                    }
+                }
             }
         }
     } else if (checkInit) {
@@ -1388,6 +1495,44 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
         } else if (ret.value && !isAssignable(rt, ret.value->type)) {
             error(loc, "cannot return value of type '" + typeToString(ret.value->type) +
                            "' from function returning '" + typeToString(rt) + "'");
+        } else if (ret.value) {
+            // B5: Auto-wrap T → expected<T, E> (success) and
+            // E → expected<T, E> (error) on return statements.
+            // When both T and E are assignable from the return value
+            // (e.g. T=int32, E=Err, value=Err — enum-to-int makes T
+            // also assignable), prefer the EXACT match (E case) to
+            // avoid incorrectly wrapping an error as a success.
+            // When T and E are the same type (T==E), prefer T (success)
+            // since success is the more common intent.
+            if (rt.base != ret.value->type.base) {
+                hir::Type tArg, eArg;
+                if (isExpectedStruct(rt, tArg, eArg)) {
+                    bool tExact = tArg.base == ret.value->type.base &&
+                        tArg.pointerDepth == ret.value->type.pointerDepth;
+                    bool eExact = eArg.base == ret.value->type.base &&
+                        eArg.pointerDepth == ret.value->type.pointerDepth;
+                    bool wrapped = false;
+                    // Prefer exact E match (error case) — only when
+                    // E is different from T to avoid ambiguity.
+                    if (eExact && !tExact && eArg.base != tArg.base) {
+                        ret.value = wrapExpectedValue(std::move(ret.value), rt, 2, loc);
+                        wrapped = true;
+                    }
+                    // Then exact T match (success case).
+                    if (!wrapped && tExact) {
+                        ret.value = wrapExpectedValue(std::move(ret.value), rt, 1, loc);
+                        wrapped = true;
+                    }
+                    // Fall back to general assignability.
+                    if (!wrapped && isAssignable(tArg, ret.value->type)) {
+                        ret.value = wrapExpectedValue(std::move(ret.value), rt, 1, loc);
+                        wrapped = true;
+                    }
+                    if (!wrapped && isAssignable(eArg, ret.value->type)) {
+                        ret.value = wrapExpectedValue(std::move(ret.value), rt, 2, loc);
+                    }
+                }
+            }
         }
     } else if (current_->returnType.pointerDepth == 0 && current_->returnType.base != "void") {
         error(loc, "function '" + std::string(current_->name) +
@@ -2950,7 +3095,20 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                         auto cIt = eIt->second.constants.find(v.name);
                         if (cIt != eIt->second.constants.end()) {
                             out->node = hir::Expr::IntegerLit{cIt->second};
-                            out->type = eIt->second.underlyingType;
+                            // B5: The type of `EnumName::Value` should
+                            // be the enum type itself (e.g. `Err`),
+                            // NOT the underlying integer type. This
+                            // allows isAssignable() to distinguish
+                            // enum-typed values from plain integers,
+                            // which is essential for implicit
+                            // E → expected<T, E> conversion.
+                            // Use eIt->first (stable string_view into
+                            // the enums_ map key) to avoid dangling
+                            // references to temporary strings.
+                            out->type.base = eIt->first;
+                            out->type.pointerDepth = 0;
+                            out->type.isReference = false;
+                            out->type.tplArgs.clear();
                             return true;
                         }
                         error(e.loc, "enum '" + std::string(enumName) +
@@ -2980,7 +3138,12 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                         auto cIt = edef.constants.find(v.name);
                         if (cIt != edef.constants.end()) {
                             out->node = hir::Expr::IntegerLit{cIt->second};
-                            out->type = edef.underlyingType;
+                            // B5: type is the enum type, not underlying.
+                            // Use enumName (stable map key).
+                            out->type.base = enumName;
+                            out->type.pointerDepth = 0;
+                            out->type.isReference = false;
+                            out->type.tplArgs.clear();
                             return out;
                         }
                     }
@@ -3082,6 +3245,33 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 } else if (!isAssignable(as.lhs->type, as.rhs->type)) {
                     error(e.loc, "cannot assign value of type '" + typeToString(as.rhs->type) +
                                      "' to '" + typeToString(as.lhs->type) + "'");
+                } else if (as.lhs->type.base != as.rhs->type.base) {
+                    // B5: Auto-wrap T → expected<T, E> (success) and
+                    // E → expected<T, E> (error) on assignment.
+                    // Prefer exact match when both T and E are assignable.
+                    hir::Type tArg, eArg;
+                    if (isExpectedStruct(as.lhs->type, tArg, eArg)) {
+                        bool tExact = tArg.base == as.rhs->type.base &&
+                            tArg.pointerDepth == as.rhs->type.pointerDepth;
+                        bool eExact = eArg.base == as.rhs->type.base &&
+                            eArg.pointerDepth == as.rhs->type.pointerDepth;
+                        bool wrapped = false;
+                        if (eExact && !tExact && eArg.base != tArg.base) {
+                            as.rhs = wrapExpectedValue(std::move(as.rhs), as.lhs->type, 2, e.loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && tExact) {
+                            as.rhs = wrapExpectedValue(std::move(as.rhs), as.lhs->type, 1, e.loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && isAssignable(tArg, as.rhs->type)) {
+                            as.rhs = wrapExpectedValue(std::move(as.rhs), as.lhs->type, 1, e.loc);
+                            wrapped = true;
+                        }
+                        if (!wrapped && isAssignable(eArg, as.rhs->type)) {
+                            as.rhs = wrapExpectedValue(std::move(as.rhs), as.lhs->type, 2, e.loc);
+                        }
+                    }
                 }
             } else if (!(isNumeric(as.lhs->type) && isNumeric(as.rhs->type))) {
                 error(e.loc, "compound assignment '" + std::string(as.op) +

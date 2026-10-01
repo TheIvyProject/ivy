@@ -156,6 +156,14 @@ bool writeModuleInterface(const TranslationUnit& tu,
             out << ' ' << escape(serializeType(base.type));
         }
         out << ' ' << (sd.isClass ? 1 : 0);
+        // B5: Serialize template parameters for template structs.
+        // Format: ` tplParams_count [name1 isTypename1] [name2 isTypename2] ...`
+        out << ' ' << sd.tplParams.size();
+        for (const auto& tp : sd.tplParams) {
+            out << ' ' << escape(std::string(tp.name))
+                << ' ' << (tp.isTypename ? 1 : 0)
+                << ' ' << (tp.isVariadic ? 1 : 0);
+        }
         out << '\n';
     }
 
@@ -302,6 +310,20 @@ bool readModuleInterface(TranslationUnit& tu,
             int isClass;
             ls >> isClass;
             sd.isClass = isClass;
+            // B5: Deserialize template parameters.
+            std::size_t tplParamCount;
+            ls >> tplParamCount;
+            for (std::size_t i = 0; i < tplParamCount; ++i) {
+                std::string tplName;
+                int isTypename;
+                int isVariadic;
+                ls >> tplName >> isTypename >> isVariadic;
+                TemplateParam tp;
+                tp.name = intern(unescape(tplName));
+                tp.isTypename = isTypename != 0;
+                tp.isVariadic = isVariadic != 0;
+                sd.tplParams.push_back(std::move(tp));
+            }
             tu.structs.push_back(std::move(sd));
         } else if (kind == "enum") {
             EnumDecl ed;

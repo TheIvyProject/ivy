@@ -1516,6 +1516,14 @@ void Parser::parseStruct(TranslationUnit& tu, SourceLoc loc, bool isClass,
             method.params = std::move(params);
             method.loc = memberLoc;
 
+            // B5: `const` method qualifier — `Ret name(params) const { }`.
+            // The `const` keyword after the parameter list marks the method
+            // as const (does not modify `this`). We accept and ignore it
+            // for now (no const-overload resolution yet).
+            if (atKeyword("const")) {
+                next();  // consume 'const'
+            }
+
             // Optional `override` marker (7.7).
             if (atKeyword("override")) {
                 next();
@@ -1826,10 +1834,24 @@ void Parser::parseExport(TranslationUnit& tu, SourceLoc loc) {
         return;
     }
     if (atKeyword("template")) {
-        // `export template <...> ret name(...) { ... }`
+        // `export template <...> ret name(...) { ... }`  or
+        // `export template <...> struct Name { ... }`
         parseTemplate(tu, loc);
-        // Mark the last function/struct as exported
-        if (!tu.functions.empty()) tu.functions.back().isExported = true;
+        // Mark the last function/struct as exported.
+        // B5: `export template <typename T> struct expected { ... }`
+        // must set isExported on the struct, not just the function.
+        // We check both and mark whichever was most recently added.
+        // For template structs, the struct is added; for template
+        // functions, the function is added.
+        bool structWasLast = !tu.structs.empty() &&
+            !tu.structs.back().tplParams.empty();
+        bool funcWasLast = !tu.functions.empty() &&
+            !tu.functions.back().tplParams.empty();
+        if (structWasLast) {
+            tu.structs.back().isExported = true;
+        } else if (funcWasLast) {
+            tu.functions.back().isExported = true;
+        }
         return;
     }
     // `export ret name(...) { ... }` — exported function

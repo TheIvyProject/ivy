@@ -1,0 +1,23 @@
+// Ivy Standard Library — expected<T, E> module
+// Result type: success (T) or error (E), replacing try/catch.
+//
+// Usage:
+//   import expected;
+//   expected<int32, ErrorCode> result = computeResult(42);
+//   if (result.hasValue) {
+//       int32 value = result.value;
+//   } else {
+//       ErrorCode err = result.error;
+//   }
+//
+// Implicit conversions:
+//   - T → expected<T, E>  (success: hasValue=true)
+//   - E → expected<T, E>  (error:   hasValue=false)
+export module expected;
+
+export template <typename T, typename E>
+struct expected {
+    bool hasValue;
+    T value;
+    E error;
+};

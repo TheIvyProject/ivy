@@ -241,6 +241,18 @@ private:
                        std::vector<std::unique_ptr<hir::Stmt>>& out);
     bool isAssignable(const hir::Type& to, const hir::Type& from) const;
     bool checkCondition(const hir::Expr& e);
+
+    // B5: expected<T, E> support.
+    // Check if a struct type is an instantiation of expected<T, E>.
+    // `tplArg0` / `tplArg1` receive the T and E type arguments if true.
+    bool isExpectedStruct(const hir::Type& type,
+                          hir::Type& tplArg0, hir::Type& tplArg1) const;
+    // B5: Wrap a value of type T or E into an expected<T, E> InitList.
+    // `valueIdx` is the field index of `value` (1) or `error` (2).
+    std::unique_ptr<hir::Expr> wrapExpectedValue(
+        std::unique_ptr<hir::Expr> value,
+        const hir::Type& expectedType,
+        std::size_t valueIdx, SourceLoc loc);
     void requireUnsafe(SourceLoc loc, std::string_view what);
     void checkCall(hir::Expr::Call& call, SourceLoc loc);
 

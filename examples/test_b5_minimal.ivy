@@ -1,0 +1,14 @@
+// B5 minimal test: expected<T, E> with implicit T conversion (success only)
+import expected;
+
+expected<int32, int32> computeResult(int32 input) {
+    return input * 2;
+}
+
+int32 main() {
+    expected<int32, int32> result = computeResult(21);
+    if (result.hasValue) {
+        return result.value;
+    }
+    return 0;
+}

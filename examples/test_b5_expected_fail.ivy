@@ -1,0 +1,27 @@
+// B5 negative test: returning a type that matches neither T nor E of expected<T,E>.
+// This file SHOULD produce a compile error.
+
+import expected;
+
+struct Other {
+    int32 x;
+};
+
+enum class ErrorCode {
+    NotFound,
+    IoError
+};
+
+expected<int32, ErrorCode> computeResult(int32 input) {
+    Other o;
+    o.x = 0;
+    if (input < 0) {
+        return o;  // ERROR: Other matches neither int32 (T) nor ErrorCode (E)
+    }
+    return input;
+}
+
+int32 main() {
+    expected<int32, ErrorCode> result = computeResult(42);
+    return result.value;
+}

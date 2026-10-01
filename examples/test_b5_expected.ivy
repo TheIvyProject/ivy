@@ -1,0 +1,54 @@
+// B5 positive test: ivy::expected<T, E> — implicit conversion from T and E.
+// Pattern: function returns expected<int32, ErrorCode>, caller checks hasValue.
+
+import expected;
+
+enum class ErrorCode {
+    NotFound = 1,
+    PermissionDenied = 2,
+    IoError = 3
+};
+
+// Returns expected<int32, ErrorCode> — implicit conversion from T (int32)
+// on success and E (ErrorCode) on error.
+expected<int32, ErrorCode> computeResult(int32 input) {
+    if (input < 0) {
+        return ErrorCode::IoError;  // E -> expected<T, E> (error)
+    }
+    return input * 2;               // T -> expected<T, E> (success)
+}
+
+int32 main() {
+    // Success case: input = 21 → result = 42
+    expected<int32, ErrorCode> result = computeResult(21);
+    int32 sum = 0;
+    if (result.hasValue) {
+        sum = result.value;         // 42
+    } else {
+        sum = 0;
+    }
+
+    // Error case: input = -1 → ErrorCode::IoError (3)
+    expected<int32, ErrorCode> errResult = computeResult(-1);
+    int32 errCode = 0;
+    if (!errResult.hasValue) {
+        errCode = errResult.error;  // 3
+    }
+
+    // Reassignment: success → error (implicit E -> expected<T,E>)
+    result = ErrorCode::NotFound;  // 1
+    int32 errCode2 = 0;
+    if (!result.hasValue) {
+        errCode2 = result.error;    // 1
+    }
+
+    // Reassignment: error → success (implicit T -> expected<T,E>)
+    errResult = 100;
+    int32 val = 0;
+    if (errResult.hasValue) {
+        val = errResult.value;      // 100
+    }
+
+    // 42 + 3 + 1 + 100 = 146
+    return sum + errCode + errCode2 + val;
+}
