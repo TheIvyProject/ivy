@@ -104,6 +104,7 @@ struct Expr {
     struct CharLit { std::string_view raw; };
     struct BoolLit { bool value; };
     struct NullptrLit {};
+    struct NulloptLit {};  // B6: nullopt → empty optional<T>
     struct IdentRef { std::string_view name; };
     struct This {};  // `this` pointer in method bodies (6.7)
     struct Unary { std::string_view op; bool isPrefix; std::unique_ptr<Expr> operand; };
@@ -172,7 +173,7 @@ struct Expr {
     struct Cast { CastKind kind; Type targetType; std::unique_ptr<Expr> operand; };
 
     SourceLoc loc;
-    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, IdentRef, This,
+    std::variant<IntegerLit, FloatLit, StringLit, CharLit, BoolLit, NullptrLit, NulloptLit, IdentRef, This,
                  Unary, Binary, Ternary, Call, Index, Member, Assign, New, Delete, InitList,
                  Lambda, PackExpansion, FoldExpr, SizeofPack, SizeOf, AlignOf, Cast>
         node;

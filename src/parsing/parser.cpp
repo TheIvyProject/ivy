@@ -2914,6 +2914,11 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         next();
         return makeExpr<Expr::NullptrLit>(loc);
     }
+    // B6: nullopt literal → empty optional<T>
+    if (atKeyword("nullopt")) {
+        next();
+        return makeExpr<Expr::NulloptLit>(loc);
+    }
     if (at(TokenKind::Identifier)) {
         next();
         return makeExpr<Expr::IdentRef>(loc, t.lexeme);

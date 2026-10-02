@@ -1,0 +1,17 @@
+// B6 test: nullopt → optional (empty case)
+import optional;
+
+optional<int32> findValue(int32 input) {
+    if (input > 0) {
+        return input;
+    }
+    return nullopt;
+}
+
+int32 main() {
+    optional<int32> result = findValue(0);  // empty
+    if (result.hasValue) {
+        return result.value;
+    }
+    return -1;  // expected: hasValue=false → return -1
+}

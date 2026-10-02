@@ -1,0 +1,25 @@
+// B6 negative test: returning a type that matches neither T nor nullopt.
+// This file SHOULD produce a compile error.
+
+import optional;
+
+struct Other {
+    int32 x;
+};
+
+optional<int32> findValue(int32 input) {
+    Other o;
+    o.x = 0;
+    if (input > 0) {
+        return o;  // ERROR: Other matches neither int32 (T) nor nullopt
+    }
+    return nullopt;
+}
+
+int32 main() {
+    optional<int32> result = findValue(42);
+    if (result.hasValue) {
+        return result.value;
+    }
+    return -1;
+}

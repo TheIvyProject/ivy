@@ -99,6 +99,7 @@ void dumpExpr(const ivy::Expr& e, std::ostream& os, int depth) {
                    [&](const ivy::Expr::CharLit& v) { os << pad << "char " << v.raw; },
                    [&](const ivy::Expr::BoolLit& v) { os << pad << "bool " << (v.value ? "true" : "false"); },
                    [&](const ivy::Expr::NullptrLit&) { os << pad << "nullptr"; },
+                   [&](const ivy::Expr::NulloptLit&) { os << pad << "nullopt"; },
                    [&](const ivy::Expr::IdentRef& v) { os << pad << "ident " << v.name; },
                    [&](const ivy::Expr::This&) { os << pad << "this"; },
                    [&](const ivy::Expr::Unary& v) {

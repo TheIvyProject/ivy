@@ -994,6 +994,19 @@ bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const 
             if (isAssignable(eArg, from)) return true;
         }
     }
+    // B6: Implicit conversion T → optional<T>.
+    // nullopt → optional<T> is handled by the `from.base == "nullopt"` check below.
+    if (to.pointerDepth == 0 && to.base != from.base) {
+        hir::Type tArg;
+        if (isOptionalStruct(to, tArg)) {
+            if (isAssignable(tArg, from)) return true;
+        }
+    }
+    // B6: nullopt → optional<T> (empty optional).
+    if (from.base == "nullopt" && to.pointerDepth == 0) {
+        hir::Type tArg;
+        if (isOptionalStruct(to, tArg)) return true;
+    }
     if (from.isReference) {
         // Reference can bind to reference of same type.
         if (to.isReference && to.base == from.base &&
@@ -1091,6 +1104,49 @@ std::unique_ptr<hir::Expr> HirBuilder::wrapExpectedValue(
     // The other field (error or value) is zero-initialized (nullptr).
     // Codegen/interpreter will zero-init the missing field.
     out->type = expectedType;
+    return out;
+}
+
+// B6: Check if a struct type is an instantiation of optional<T>.
+// The struct must have exactly 2 fields: [hasValue (bool), value (T)].
+bool HirBuilder::isOptionalStruct(const hir::Type& type,
+                                    hir::Type& tplArg0) const {
+    if (type.pointerDepth > 0) return false;
+    auto it = structs_.find(type.base);
+    if (it == structs_.end()) return false;
+    const auto& fields = it->second.fields;
+    if (fields.size() != 2) return false;
+    if (fields[0].name != "hasValue" || fields[1].name != "value") {
+        return false;
+    }
+    tplArg0 = fields[1].type;
+    return true;
+}
+
+// B6: Wrap a value of type T into an optional<T> InitList.
+// When hasValue=true: [true, value]  (T → optional<T>)
+// When hasValue=false: [false, <zero>]  (nullopt → optional<T>)
+// If `value` is nullptr, the value field is left unset (zero-initialized
+// by codegen/interpreter).
+std::unique_ptr<hir::Expr> HirBuilder::wrapOptionalValue(
+    std::unique_ptr<hir::Expr> value,
+    const hir::Type& optionalType,
+    bool hasValue, SourceLoc loc) {
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    auto& il = out->node.emplace<hir::Expr::InitList>();
+    il.elements.resize(2);
+    // Field 0: hasValue (bool).
+    auto hasVal = std::make_unique<hir::Expr>();
+    hasVal->loc = loc;
+    hasVal->node.emplace<hir::Expr::BoolLit>(hasValue);
+    hasVal->type = boolType();
+    il.elements[0] = std::move(hasVal);
+    // Field 1: value (T) — only set if we have a value.
+    if (value) {
+        il.elements[1] = std::move(value);
+    }
+    out->type = optionalType;
     return out;
 }
 
@@ -1221,6 +1277,17 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                         }
                         if (!wrapped && isAssignable(eArg, decl.init->type)) {
                             decl.init = wrapExpectedValue(std::move(decl.init), decl.type, 2, loc);
+                        }
+                    }
+                }
+                // B6: Auto-wrap T → optional<T> and nullopt → optional<T>.
+                if (decl.type.base != decl.init->type.base) {
+                    hir::Type tArg;
+                    if (isOptionalStruct(decl.type, tArg)) {
+                        if (decl.init->type.base == "nullopt") {
+                            decl.init = wrapOptionalValue(nullptr, decl.type, false, loc);
+                        } else if (isAssignable(tArg, decl.init->type)) {
+                            decl.init = wrapOptionalValue(std::move(decl.init), decl.type, true, loc);
                         }
                     }
                 }
@@ -1530,6 +1597,18 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
                     }
                     if (!wrapped && isAssignable(eArg, ret.value->type)) {
                         ret.value = wrapExpectedValue(std::move(ret.value), rt, 2, loc);
+                    }
+                }
+            }
+            // B6: Auto-wrap T → optional<T> (hasValue=true) and
+            // nullopt → optional<T> (hasValue=false) on return.
+            if (rt.base != ret.value->type.base) {
+                hir::Type tArg;
+                if (isOptionalStruct(rt, tArg)) {
+                    if (ret.value->type.base == "nullopt") {
+                        ret.value = wrapOptionalValue(nullptr, rt, false, loc);
+                    } else if (isAssignable(tArg, ret.value->type)) {
+                        ret.value = wrapOptionalValue(std::move(ret.value), rt, true, loc);
                     }
                 }
             }
@@ -2323,6 +2402,15 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         requireUnsafe(e.loc, "'nullptr' literal");
         out->node = hir::Expr::NullptrLit{};
         out->type = nullptrType();
+        return out;
+    }
+    // B6: nullopt literal → type base "nullopt", wrapped to optional<T>
+    // at return/declaration/assignment points.
+    if (std::holds_alternative<A::NulloptLit>(n)) {
+        out->node = hir::Expr::NullptrLit{};
+        hir::Type t;
+        t.base = "nullopt";
+        out->type = t;
         return out;
     }
     if (std::holds_alternative<A::This>(n)) {
@@ -3270,6 +3358,17 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                         }
                         if (!wrapped && isAssignable(eArg, as.rhs->type)) {
                             as.rhs = wrapExpectedValue(std::move(as.rhs), as.lhs->type, 2, e.loc);
+                        }
+                    }
+                    // B6: Auto-wrap T → optional<T> and nullopt → optional<T>.
+                    {
+                        hir::Type tArg;
+                        if (isOptionalStruct(as.lhs->type, tArg)) {
+                            if (as.rhs->type.base == "nullopt") {
+                                as.rhs = wrapOptionalValue(nullptr, as.lhs->type, false, e.loc);
+                            } else if (isAssignable(tArg, as.rhs->type)) {
+                                as.rhs = wrapOptionalValue(std::move(as.rhs), as.lhs->type, true, e.loc);
+                            }
                         }
                     }
                 }

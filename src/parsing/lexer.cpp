@@ -78,6 +78,8 @@ const std::unordered_set<std::string_view>& keywords() {
         "float16_t",   "float32_t",    "float64_t",    "float128_t",
         "bfloat16_t",  "size_t",       "ptrdiff_t",    "nullptr_t",
         "max_align_t",
+        // B6: nullopt keyword for empty optional<T>
+        "nullopt",
     };
     return k;
 }

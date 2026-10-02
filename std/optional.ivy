@@ -1,0 +1,22 @@
+// Ivy Standard Library — optional<T> module
+// Optional value type: present (T) or empty, replacing nullable pointers.
+//
+// Usage:
+//   import optional;
+//   optional<int32> result = findValue(42);
+//   if (result.hasValue) {
+//       int32 value = result.value;
+//   } else {
+//       // value not found
+//   }
+//
+// Implicit conversions:
+//   - T → optional<T>      (present: hasValue=true)
+//   - nullopt → optional<T> (empty:  hasValue=false)
+export module optional;
+
+export template <typename T>
+struct optional {
+    bool hasValue;
+    T value;
+};

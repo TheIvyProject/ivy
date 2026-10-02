@@ -1,0 +1,11 @@
+// B6 test: assignment to optional<T>
+import optional;
+
+int32 main() {
+    optional<int32> result = 10;   // T → optional<T> on declaration
+    result = 20;                    // T → optional<T> on assignment
+    if (result.hasValue) {
+        return result.value;        // 20
+    }
+    return -1;
+}

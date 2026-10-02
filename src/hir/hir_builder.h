@@ -253,6 +253,19 @@ private:
         std::unique_ptr<hir::Expr> value,
         const hir::Type& expectedType,
         std::size_t valueIdx, SourceLoc loc);
+
+    // B6: optional<T> support.
+    // Check if a struct type is an instantiation of optional<T>.
+    // `tplArg0` receives the T type argument if true.
+    bool isOptionalStruct(const hir::Type& type,
+                          hir::Type& tplArg0) const;
+    // B6: Wrap a value of type T into an optional<T> InitList.
+    // `hasValue` is true for T → optional, false for nullopt → optional.
+    std::unique_ptr<hir::Expr> wrapOptionalValue(
+        std::unique_ptr<hir::Expr> value,
+        const hir::Type& optionalType,
+        bool hasValue, SourceLoc loc);
+
     void requireUnsafe(SourceLoc loc, std::string_view what);
     void checkCall(hir::Expr::Call& call, SourceLoc loc);
 

@@ -1,0 +1,17 @@
+// B6 test: optional<T> — T → optional (success) and nullopt → optional (empty)
+import optional;
+
+optional<int32> findValue(int32 input) {
+    if (input > 0) {
+        return input;       // T → optional<T> (hasValue=true)
+    }
+    return nullopt;          // nullopt → optional<T> (hasValue=false)
+}
+
+int32 main() {
+    optional<int32> result = findValue(42);
+    if (result.hasValue) {
+        return result.value;  // 42
+    }
+    return -1;
+}
