@@ -402,12 +402,27 @@ Value Interpreter::evalExpr(const Expr& e) {
         } else if constexpr (std::is_same_v<V, E::New>) {
             // 8.5: new T(args...) — allocate a cell with default-constructed
             // value of type T, call constructor if args provided, return Ptr.
-            Value obj = defaultStructValue(v.type.base);
+            // C2: routes through __ivy_alloc/__ivy_free at codegen level;
+            // interpreter models heap as shared_ptr cells.
+            Value obj;
+            // Check if T is a struct type — default-construct.
+            bool isStruct = false;
+            for (const auto& s : tu_.structs)
+                if (s.name == v.type.base) { obj = defaultStructValue(v.type.base); isStruct = true; break; }
+            if (!isStruct) {
+                // Scalar types (int, float, etc.): use the ctor arg if
+                // provided, otherwise zero-init.
+                if (!v.args.empty()) {
+                    obj = evalExpr(*v.args[0]);
+                } else {
+                    obj = makeInt(0);
+                }
+            }
             Cell c = makeCell(std::move(obj));
-            // If constructor args are provided, call the ctor with
-            // &obj as `this`. The HIR builder injects ctor calls at
+            // If constructor args are provided for a struct, call the ctor
+            // with &obj as `this`. The HIR builder injects ctor calls at
             // declaration sites, but `new T(args)` goes through here.
-            if (!v.args.empty()) {
+            if (!v.args.empty() && isStruct) {
                 // Build args: first is `this` (the pointer to the new obj),
                 // then the ctor args.
                 std::vector<Value> callArgs;
@@ -428,14 +443,15 @@ Value Interpreter::evalExpr(const Expr& e) {
             return makePtr(c);
         } else if constexpr (std::is_same_v<V, E::Delete>) {
             // 8.5: delete ptr — evaluate the pointer, mark cell as dead.
+            // C2: null-safe (matches __ivy_free semantics — no-op on null).
             // For struct types, call destructor first.
             Value ptr = evalExpr(*v.operand);
             if (!ptr.isPtr()) {
                 error(e.loc, "delete: operand is not a pointer");
                 return makeVoid();
             }
+            // C2: null-safe delete — no error, just return.
             if (ptr.ptr.isNull) {
-                error(e.loc, "delete: null pointer");
                 return makeVoid();
             }
             // Call destructor if the pointed-to value is a struct with a dtor.
@@ -993,7 +1009,12 @@ bool Interpreter::isBuiltin(std::string_view name) const {
            name == "ivy::print_int" || name == "ivy::print_float" ||
            name == "ivy::print_str" || name == "ivy::print_char" ||
            name == "ivy::println_int" || name == "ivy::println_float" ||
-           name == "ivy::println_str" || name == "ivy::println_char";
+           name == "ivy::println_str" || name == "ivy::println_char" ||
+           // C2: Ivy-safe allocator builtins.
+           // malloc/free are accepted as aliases forwarding to __ivy_alloc/__ivy_free
+           // so existing unsafe code keeps working under the interpreter.
+           name == "__ivy_alloc" || name == "__ivy_free" ||
+           name == "malloc" || name == "free";
 }
 
 namespace {
@@ -1044,6 +1065,32 @@ void Interpreter::printValue(const Value& v, const mir::Type& t) {
 
 Value Interpreter::callBuiltin(std::string_view name,
                                 const std::vector<Value>& args) {
+    // C2: Ivy-safe allocator builtins.
+    //   __ivy_alloc(n) — allocate a cell holding a zeroed Int of n bytes
+    //                    (interpreter models heap as shared_ptr cells).
+    //   __ivy_free(p)  — null-safe no-op (shared_ptr GC handles reclamation).
+    //   malloc/free    — aliases forwarding to __ivy_alloc/__ivy_free
+    //                    so unsafe libc code works under the interpreter.
+    if (name == "__ivy_alloc" || name == "malloc") {
+        long long n = args.empty() ? 0 : (args[0].isInt() ? args[0].asInt() : 0);
+        if (n <= 0) n = 1;
+        Provenance prov;
+        prov.kind = Provenance::Heap;
+        prov.allocId = static_cast<uint32_t>(++nextHeapAllocId_);
+        Cell c = makeCell(makeInt(0));
+        return makePtr(std::move(c), prov);
+    }
+    if (name == "__ivy_free" || name == "free") {
+        // Null-safe: if the arg is a null pointer, do nothing.
+        // Otherwise we simply drop our reference — the shared_ptr Cell
+        // is reclaimed when the last owner goes out of scope.
+        if (!args.empty() && args[0].isPtr() && !args[0].ptr.isNull) {
+            // Clear the pointee to mark it logically dead (use-after-free
+            // detection could hook here in the future).
+            args[0].ptr.cell->kind = Value::Void;
+        }
+        return makeVoid();
+    }
     if (name == "puts") {
         std::string s = !args.empty() ? extractString(args[0]) : "";
         *out_ << s << "\n";

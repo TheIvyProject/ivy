@@ -1,0 +1,31 @@
+// Ivy Standard Library — alloc module
+// C2: Ivy-safe allocator API.  User code goes through __ivy_alloc /
+// __ivy_free (wrapping libc malloc/free) rather than calling libc
+// directly.  This indirection allows future arena layers and safety
+// instrumentation.
+//
+// Usage:
+//   import alloc;
+//   // low-level: allocate raw bytes
+//   void* p = alloc_raw(64);
+//   free_raw(p);
+//   // idiomatic: use new/delete (which call __ivy_alloc/__ivy_free)
+//   Point* pt = new Point();
+//   delete pt;
+
+export module alloc;
+
+// C2: Ivy-safe allocator — wraps libc malloc.
+extern "C" void* __ivy_alloc(unsigned long n);
+// C2: Ivy-safe deallocator — wraps libc free (null-safe).
+extern "C" void __ivy_free(void* p);
+
+// Ivy-facing wrappers (for code that wants explicit alloc/free
+// without using the `new`/`delete` keywords).
+export void* alloc_raw(unsigned long n) {
+    return __ivy_alloc(n);
+}
+
+export void free_raw(void* p) {
+    __ivy_free(p);
+}

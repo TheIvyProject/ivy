@@ -87,6 +87,9 @@ private:
     std::unordered_set<std::string> declaredC_;  // names declared via extern "C"
     bool usesMalloc_ = false;
     bool usesFree_ = false;
+    // C2: Ivy-safe allocator flags (replace raw malloc/free for new/delete).
+    bool usesIvyAlloc_ = false;
+    bool usesIvyFree_ = false;
     bool usesIvyPrint_ = false;  // 8.5: ivy::print/println builtins used
 
     // A7: C++ headers from `import cpp <header>` / `import cpp "file"`.
@@ -253,6 +256,10 @@ private:
     // `ivy_main()`. If ivy_main returns void, main returns 0.
     // If ivy_main returns int32, main forwards the exit code.
     void emitEntryPoint();
+    // C2: Emits inline definitions for __ivy_alloc / __ivy_free
+    // (thin wrappers over libc malloc/free).  Called when new/delete
+    // are used, so the linker doesn't need an external libivyrt.
+    void emitIvyAllocators();
 
     // Returns the alloca slot name for a variable (unique per function).
     std::string valueName(std::string_view name);

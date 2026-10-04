@@ -509,9 +509,9 @@ void CodeGen::collectExpr(const mir::Expr& e) {
                     }
                 }
             } else if constexpr (std::is_same_v<T, mir::Expr::New>) {
-                usesMalloc_ = true;
+                usesIvyAlloc_ = true;
             } else if constexpr (std::is_same_v<T, mir::Expr::Delete>) {
-                usesFree_ = true;
+                usesIvyFree_ = true;
             }
         },
         e.node);
@@ -661,6 +661,52 @@ void CodeGen::emitEntryPoint() {
         emitLine("}");
     }
     emitLine("");
+}
+
+// C2: Emit inline definitions for __ivy_alloc and __ivy_free.
+// These are thin wrappers over libc malloc/free, emitted directly in
+// the LLVM IR so no external libivyrt is needed.  This matches the
+// pattern of __ivy_panic (inline IR, uses libc underneath).
+//
+//   define ptr @__ivy_alloc(i64 %n) {
+//     %p = call ptr @malloc(i64 %n)
+//     ret ptr %p
+//   }
+//   define void @__ivy_free(ptr %p) {
+//     %isnull = icmp eq ptr %p, null
+//     br i1 %isnull, label %skip, label %do_free
+//   do_free:
+//     call void @free(ptr %p)
+//     br label %skip
+//   skip:
+//     ret void
+//   }
+void CodeGen::emitIvyAllocators() {
+    if (!usesIvyAlloc_ && !usesIvyFree_) return;
+    // Declare libc malloc/free (if not already declared by user).
+    if (!declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
+    if (!declaredC_.contains("free")) emitLine("declare void @free(ptr)");
+    if (usesIvyAlloc_) {
+        emitLine("; C2: Ivy-safe allocator — wraps libc malloc");
+        emitLine("define ptr @__ivy_alloc(i64 %n) {");
+        emitLine("  %p = call ptr @malloc(i64 %n)");
+        emitLine("  ret ptr %p");
+        emitLine("}");
+        emitLine("");
+    }
+    if (usesIvyFree_) {
+        emitLine("; C2: Ivy-safe deallocator — wraps libc free (null-safe)");
+        emitLine("define void @__ivy_free(ptr %p) {");
+        emitLine("  %isnull = icmp eq ptr %p, null");
+        emitLine("  br i1 %isnull, label %skip, label %do_free");
+        emitLine("do_free:");
+        emitLine("  call void @free(ptr %p)");
+        emitLine("  br label %skip");
+        emitLine("skip:");
+        emitLine("  ret void");
+        emitLine("}");
+        emitLine("");
+    }
 }
 
 // --- expressions ---
@@ -1281,9 +1327,10 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::New>(n)) {
         const M::New& v = std::get<M::New>(n);
-        usesMalloc_ = true;
+        // C2: Use Ivy-safe allocator instead of raw malloc.
+        usesIvyAlloc_ = true;
         std::string t = newTemp();
-        emitLine(t + " = call ptr @malloc(i64 " + sizeofType(v.type) + ")");
+        emitLine(t + " = call ptr @__ivy_alloc(i64 " + sizeofType(v.type) + ")");
         if (!v.args.empty()) {
             const std::string val = lowerExpr(*v.args[0]);
             emitLine("store " + llvmType(v.type) + " " + val + ", ptr " + t);
@@ -1292,9 +1339,10 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
     }
     if (std::holds_alternative<M::Delete>(n)) {
         const M::Delete& v = std::get<M::Delete>(n);
-        usesFree_ = true;
+        // C2: Use Ivy-safe deallocator instead of raw free.
+        usesIvyFree_ = true;
         const std::string p = lowerExpr(*v.operand);
-        emitLine("call void @free(ptr " + p + ")");
+        emitLine("call void @__ivy_free(ptr " + p + ")");
         return "";
     }
     if (std::holds_alternative<M::InitList>(n)) {
@@ -2108,6 +2156,9 @@ bool CodeGen::generate(std::ostream& out) {
     // This must come after all user functions are lowered so we know
     // the user's main return type.
     emitEntryPoint();
+    // C2: Emit Ivy-safe allocator wrappers (__ivy_alloc/__ivy_free).
+    // Must come after function lowering so we know if new/delete were used.
+    emitIvyAllocators();
     // 8.2: Emit string constants and the __ivy_panic declaration AFTER
     // function lowering. emitBoundsCheck() (called from lowerFunction())
     // adds new panic-message strings to stringList_ and sets

@@ -73,6 +73,9 @@ private:
     bool failed_ = false;
     std::ostream* out_;
 
+    // C2: monotonic heap-allocation ID for __ivy_alloc provenance tracking.
+    std::uint32_t nextHeapAllocId_ = 0;
+
     // Helpers
     void error(SourceLoc loc, std::string msg);
     Frame& topFrame() { return frames_.back().locals; }

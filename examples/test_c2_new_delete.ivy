@@ -1,0 +1,44 @@
+// C2 test: new/delete uses __ivy_alloc/__ivy_free (Ivy-safe allocator)
+// Verifies that `new` calls __ivy_alloc and `delete` calls __ivy_free,
+// both in interpreter mode and codegen (LLVM IR) mode.
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // --- C2: new int + delete (basic alloc/free cycle) ---
+    unsafe {
+        int* p = new int(42);
+        printf("new int(42) = %d\n", *p);
+        delete p;
+    }
+
+    // --- C2: multiple allocations ---
+    unsafe {
+        int* a = new int(10);
+        int* b = new int(20);
+        printf("a + b = %d\n", *a + *b);
+        delete a;
+        delete b;
+    }
+
+    // --- C2: null-safe delete (deleting a null pointer should not crash) ---
+    unsafe {
+        int* p = nullptr;
+        delete p;  // no-op, must not crash
+        printf("null-safe delete ok\n");
+    }
+
+    // --- C2: alloc, write, read, free ---
+    unsafe {
+        int* p = new int(0);
+        *p = 99;
+        printf("write/read after new: %d\n", *p);
+        delete p;
+    }
+
+    printf("C2 new/delete tests passed\n");
+    return 0;
+}
