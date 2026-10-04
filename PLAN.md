@@ -136,7 +136,7 @@ sẵn của nền tảng, tĩnh hóa khi cần, chỉ tự viết **lớp wrappe
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| C1 | **`ivy_main()` entry point** | ★★ | Codegen: emit `main()` (C entry, CRT gọi) → gọi `ivy_main()`. **Không** tự emit `_start` (giao cho CRT). `ivy_main()` thay `main()` trong user code. Return `int32` exit code. Đơn giản hơn C1 cũ vì không cần viết `_start` asm |
+| C1 ✅ | **`ivy_main()` entry point** | ★★ | Codegen: `mangleFunction` rename user `main` → `ivy_main`, sinh C `main()` wrapper gọi `ivy_main()`. `void main()` → auto return 0. `int32 main()` → forward exit code. `std/start.ivy` (Zig-style runtime entry spec). Interpreter: gọi `main` trên MIR. **Không** tự emit `_start` (giao cho CRT) |
 | C2 | **Memory allocator dùng libc** | ★★ | `libivyrt` dùng `malloc`/`free` của libc bên trong, nhưng ** expose Ivy-safe API** (`__ivy_alloc`/`__ivy_free`). Arena layer (bump alloc) phía trên cho temporary. Không reimplement `malloc` — chỉ wrap. Tương tự `std::alloc::System` của Rust |
 | C3 | **`ivy::print()`/`format()` type-safe** | ★★ | `ivy::print()` / `ivy::println()` — type-aware wrapper. Dùng `write` syscall (POSIX) hoặc `WriteFile` (Windows) bên dưới, **không** dùng `printf` trực tiếp. Format string `{}` placeholder. Interpreter: built-in. Tự viết format logic (an toàn), chỉ ủy thác I/O raw cho OS/CRT |
 | C4 | **Static CRT linking (tùy chọn)** | ★★ | CLI flag `--crt-static`: link CRT tĩnh (như Rust `crt-static`). Linux: link `libc.a` thay vì `libc.so`. Windows: link `libcmt` thay vì `msvcrt`. Mặc định: dynamic link (như Rust). Target bare-metal sau này: `#![no_std]` tương đương |

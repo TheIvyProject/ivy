@@ -629,6 +629,40 @@ void CodeGen::emitStringConstants() {
     }
 }
 
+// C1: Emit the C entry point `main()` that calls `ivy_main()`.
+// The user's `main` has been renamed to `ivy_main` by mangleFunction().
+// We inspect the MIR to find the user's main function and determine
+// its return type:
+//   - void:   `define i32 @main() { call void @ivy_main(); ret i32 0 }`
+//   - int32:  `define i32 @main() { %r = call i32 @ivy_main(); ret i32 %r }`
+void CodeGen::emitEntryPoint() {
+    // Find the user's main function to determine return type.
+    const mir::Function* userMain = nullptr;
+    for (const auto& fn : mir_.functions) {
+        if (fn->name == "main" && fn->hasBody) {
+            userMain = fn.get();
+            break;
+        }
+    }
+    if (!userMain) return;  // no user main → no wrapper needed
+
+    const bool isVoidRet = llvmType(userMain->returnType) == "void";
+    emitLine("; C1: C entry point — calls ivy_main()");
+    if (isVoidRet) {
+        emitLine("define i32 @main() {");
+        emitLine("  call void @ivy_main()");
+        emitLine("  ret i32 0");
+        emitLine("}");
+    } else {
+        const std::string retTy = llvmType(userMain->returnType);
+        emitLine("define " + retTy + " @main() {");
+        emitLine("  %r = call " + retTy + " @ivy_main()");
+        emitLine("  ret " + retTy + " %r");
+        emitLine("}");
+    }
+    emitLine("");
+}
+
 // --- expressions ---
 
 std::string CodeGen::valueName(std::string_view name) {
@@ -1575,8 +1609,9 @@ void CodeGen::lowerBlock(const mir::Block& b, int index, bool isVoidRet) {
 
 std::string CodeGen::mangleFunction(std::string_view name,
                                      const mir::Function* fn) const {
-    // `main` is never mangled — it's the C entry point.
-    if (name == "main") return std::string(name);
+    // C1: User's `main` is renamed to `ivy_main` — the C entry point
+    // `main()` is synthesized by emitEntryPoint() and calls ivy_main().
+    if (name == "main") return "ivy_main";
     if (fn && fn->isExternC) return std::string(name);
     return platform_ == Platform::Itanium
         ? itaniumMangleFunction(name, fn)
@@ -2069,6 +2104,10 @@ bool CodeGen::generate(std::ostream& out) {
         if (fn->isConsteval) continue;
         if (fn->hasBody) lowerFunction(*fn);
     }
+    // C1: Emit the C entry point `main()` wrapper that calls ivy_main().
+    // This must come after all user functions are lowered so we know
+    // the user's main return type.
+    emitEntryPoint();
     // 8.2: Emit string constants and the __ivy_panic declaration AFTER
     // function lowering. emitBoundsCheck() (called from lowerFunction())
     // adds new panic-message strings to stringList_ and sets

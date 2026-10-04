@@ -249,6 +249,10 @@ private:
     // Emits all accumulated string constants at module level. Called
     // after function lowering in generate().
     void emitStringConstants();
+    // C1: Emits the C entry point `main()` which calls the user's
+    // `ivy_main()`. If ivy_main returns void, main returns 0.
+    // If ivy_main returns int32, main forwards the exit code.
+    void emitEntryPoint();
 
     // Returns the alloca slot name for a variable (unique per function).
     std::string valueName(std::string_view name);

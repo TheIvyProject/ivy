@@ -1,0 +1,4 @@
+// C1 test: int32 main() — user returns exit code
+int32 main() {
+    return 42;
+}

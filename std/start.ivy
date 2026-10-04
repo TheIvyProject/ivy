@@ -1,0 +1,23 @@
+// Ivy Standard Library — start.ivy (runtime entry point)
+// Zig-style: C runtime calls main() → ivy_main() (user code).
+//
+// User writes:
+//   void main() { ... }       // no return needed, exit 0
+//   int32 main() { return 42; }  // exit code 42
+//
+// This module provides the C entry point `main()` which forwards
+// to the user's `ivy_main()` and normalises the exit code.
+
+export module start;
+
+// Forward declaration of the user's entry point.
+// Return type is int32 (Ivy's default) or void — the codegen
+// wrapper handles both cases.
+extern "C" int32 ivy_main();
+
+// C entry point — called by CRT.
+// We define main() here so the linker finds a standard `main`
+// symbol.  The actual user function is `ivy_main()`.
+export extern "C" int32 main() {
+    return ivy_main();
+}

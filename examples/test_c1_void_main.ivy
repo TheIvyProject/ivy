@@ -1,0 +1,4 @@
+// C1 test: void main() — no return needed, auto exit 0
+void main() {
+    // no return statement — auto exit 0
+}

@@ -40,7 +40,12 @@ Interpreter::Interpreter(const TranslationUnit& tu, Machine* machine)
 // Public entry points
 // ============================================================
 
-Value Interpreter::callMain() { return call("main", {}); }
+Value Interpreter::callMain() {
+    // C1: At codegen, user's `main` is renamed to `ivy_main` and a
+    // C `main()` wrapper is emitted. The interpreter operates on MIR
+    // where the function is still named `main`, so we call it directly.
+    return call("main", {});
+}
 
 Value Interpreter::call(std::string_view name, std::vector<Value> args) {
     const Function* fn = nullptr;
