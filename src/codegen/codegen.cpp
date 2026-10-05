@@ -692,31 +692,13 @@ void CodeGen::emitEntryPoint() {
 //     ret void
 //   }
 void CodeGen::emitIvyAllocators() {
-    if (!usesIvyAlloc_ && !usesIvyFree_) return;
-    // Declare libc malloc/free (if not already declared by user).
-    if (!declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
-    if (!declaredC_.contains("free")) emitLine("declare void @free(ptr)");
-    if (usesIvyAlloc_) {
-        emitLine("; C2: Ivy-safe allocator — wraps libc malloc");
-        emitLine("define ptr @__ivy_alloc(i64 %n) {");
-        emitLine("  %p = call ptr @malloc(i64 %n)");
-        emitLine("  ret ptr %p");
-        emitLine("}");
-        emitLine("");
-    }
-    if (usesIvyFree_) {
-        emitLine("; C2: Ivy-safe deallocator — wraps libc free (null-safe)");
-        emitLine("define void @__ivy_free(ptr %p) {");
-        emitLine("  %isnull = icmp eq ptr %p, null");
-        emitLine("  br i1 %isnull, label %skip, label %do_free");
-        emitLine("do_free:");
-        emitLine("  call void @free(ptr %p)");
-        emitLine("  br label %skip");
-        emitLine("skip:");
-        emitLine("  ret void");
-        emitLine("}");
-        emitLine("");
-    }
+    // C5: Implementations moved to libivyrt (lib/ivyrt.c).
+    // Emit `declare` so the IR can reference the symbols; the static
+    // archive provides the bodies at link time.
+    if (usesIvyAlloc_ && !declaredC_.contains("__ivy_alloc"))
+        emitLine("declare ptr @__ivy_alloc(i64)");
+    if (usesIvyFree_ && !declaredC_.contains("__ivy_free"))
+        emitLine("declare void @__ivy_free(ptr)");
 }
 
 // C3: Emit inline runtime for io::print/println/eprint/eprintln.
@@ -752,97 +734,22 @@ void CodeGen::emitIvyAllocators() {
 // which splits the format string and calls __ivy_write_str / __ivy_fmt_int
 // in sequence. This keeps the runtime minimal.
 void CodeGen::emitIoPrintRuntime() {
+    // C5: Implementations moved to libivyrt (lib/ivyrt.c).
+    // Emit `declare` so the IR can reference the symbols; the static
+    // archive provides the bodies at link time.
     if (!usesIoPrint_) return;
-    // Declare CRT functions needed.
-    if (!declaredC_.contains("_write"))
-        emitLine("declare i32 @_write(i32, ptr, i32)");
-    if (!declaredC_.contains("strlen"))
-        emitLine("declare i64 @strlen(ptr)");
-    if (!declaredC_.contains("snprintf"))
-        emitLine("declare i32 @snprintf(ptr, i64, ptr, ...)");
-    // _gcvt(double, int digits, ptr buf) — non-varargs CRT helper that
-    // converts a double to a decimal string.  Used instead of snprintf("%g")
-    // because snprintf is variadic and LLVM's LLJIT on Windows x64 drops
-    // double varargs.  _gcvt has a fixed arity so the calling convention
-    // passes the double through XMM0 correctly.
-    if (!declaredC_.contains("_gcvt"))
-        emitLine("declare ptr @_gcvt(double, i32, ptr)");
-    emitLine("");
-
-    // Static format strings for scalar types.
-    emitLine("@.fmt_int = private unnamed_addr constant [5 x i8] c\"%lld\\00\"");
-    emitLine("@.fmt_float_g = private unnamed_addr constant [5 x i8] c\"%.6f\\00\"");
-    emitLine("@.fmt_true = private unnamed_addr constant [5 x i8] c\"true\\00\"");
-    emitLine("@.fmt_false = private unnamed_addr constant [6 x i8] c\"false\\00\"");
-    // Static scratch buffers for formatting (NOT stack alloca — that would
-    // dangle after return). Each formatter writes into these global buffers.
-    emitLine("@.fmt_int_buf = private global [32 x i8] zeroinitializer");
-    emitLine("@.fmt_float_buf = private global [64 x i8] zeroinitializer");
-    emitLine("");
-
-    // __ivy_write_str(fd, ptr) — write a C string to fd via _write.
-    emitLine("; C3: Write a C string to file descriptor (via CRT _write)");
-    emitLine("define void @__ivy_write_str(i32 %fd, ptr %s) {");
-    emitLine("  %len = call i64 @strlen(ptr %s)");
-    emitLine("  %len32 = trunc i64 %len to i32");
-    emitLine("  call i32 @_write(i32 %fd, ptr %s, i32 %len32)");
-    emitLine("  ret void");
-    emitLine("}");
-    emitLine("");
-
-    // __ivy_write_char(fd, ch) — write a single char byte.
-    emitLine("; C3: Write a single character byte to fd");
-    emitLine("define void @__ivy_write_char(i32 %fd, i8 %ch) {");
-    emitLine("  %slot = alloca i8");
-    emitLine("  store i8 %ch, ptr %slot");
-    emitLine("  call i32 @_write(i32 %fd, ptr %slot, i32 1)");
-    emitLine("  ret void");
-    emitLine("}");
-    emitLine("");
-
-    // __ivy_fmt_int(v) → ptr — format int64 to decimal string.
-    emitLine("; C3: Format int64 into a static buffer, return ptr");
-    emitLine("define ptr @__ivy_fmt_int(i64 %v) {");
-    emitLine("  %p = getelementptr [32 x i8], ptr @.fmt_int_buf, i64 0, i64 0");
-    emitLine("  %fmt = getelementptr [5 x i8], ptr @.fmt_int, i64 0, i64 0");
-    emitLine("  call i32 @snprintf(ptr %p, i64 32, ptr %fmt, i64 %v)");
-    emitLine("  ret ptr %p");
-    emitLine("}");
-    emitLine("");
-
-    // __ivy_fmt_float(v) → ptr — format double via _gcvt (non-varargs).
-    // _gcvt writes up to `digits` significant digits into the buffer and
-    // returns buf.  We use 15 digits for double precision.
-    emitLine("; C3: Format double into a static buffer, return ptr");
-    emitLine("define ptr @__ivy_fmt_float(double %v) {");
-    emitLine("  %p = getelementptr [64 x i8], ptr @.fmt_float_buf, i64 0, i64 0");
-    emitLine("  call ptr @_gcvt(double %v, i32 15, ptr %p)");
-    emitLine("  ret ptr %p");
-    emitLine("}");
-    emitLine("");
-
-    // __ivy_fmt_bool(b) → ptr — format bool to "true"/"false".
-    emitLine("; C3: Format bool into \"true\"/\"false\", return ptr");
-    emitLine("define ptr @__ivy_fmt_bool(i1 %b) {");
-    emitLine("  br i1 %b, label %is_true, label %is_false");
-    emitLine("is_true:");
-    emitLine("  %t = getelementptr [5 x i8], ptr @.fmt_true, i64 0, i64 0");
-    emitLine("  ret ptr %t");
-    emitLine("is_false:");
-    emitLine("  %f = getelementptr [6 x i8], ptr @.fmt_false, i64 0, i64 0");
-    emitLine("  ret ptr %f");
-    emitLine("}");
-    emitLine("");
-
-    // __ivy_write_newline(fd) — write a newline character.
-    emitLine("; C3: Write a newline to fd");
-    emitLine("define void @__ivy_write_newline(i32 %fd) {");
-    emitLine("  call i32 @_write(i32 %fd, ptr @.newline, i32 1)");
-    emitLine("  ret void");
-    emitLine("}");
-    // Newline constant (1 byte + NUL is not needed for _write).
-    emitLine("@.newline = private unnamed_addr constant [1 x i8] c\"\\0A\"");
-    emitLine("");
+    if (!declaredC_.contains("__ivy_write_str"))
+        emitLine("declare void @__ivy_write_str(i32, ptr)");
+    if (!declaredC_.contains("__ivy_write_char"))
+        emitLine("declare void @__ivy_write_char(i32, i8)");
+    if (!declaredC_.contains("__ivy_fmt_int"))
+        emitLine("declare ptr @__ivy_fmt_int(i64)");
+    if (!declaredC_.contains("__ivy_fmt_float"))
+        emitLine("declare ptr @__ivy_fmt_float(double)");
+    if (!declaredC_.contains("__ivy_fmt_bool"))
+        emitLine("declare ptr @__ivy_fmt_bool(i1)");
+    if (!declaredC_.contains("__ivy_write_newline"))
+        emitLine("declare void @__ivy_write_newline(i32)");
 }
 
 // C3: Helper — intern a C string constant and return a gep ptr to it.
@@ -2502,24 +2409,11 @@ bool CodeGen::generate(std::ostream& out) {
     // afterwards to ensure they exist at module level.
     emitStringConstants();
     if (declaredIvyPanic_) {
-        // 8.2: Emit a definition for __ivy_panic at module level. It
-        // prints the message and aborts. We define it here (rather
-        // than `declare`) so the linker doesn't need an external Ivy
-        // runtime library.
-        // We use `puts` (stdout) rather than `fputs(..., stderr)` to
-        // avoid the portability headache of resolving the `stderr`
-        // FILE* across C runtimes (MSVC's stderr is a macro, not a
-        // global symbol). The message already includes the source
-        // line number (see emitBoundsCheck).
-        if (!declaredC_.contains("puts")) emitLine("declare i32 @puts(ptr)");
-        if (!declaredC_.contains("abort")) emitLine("declare void @abort()");
-        emitLine("");
-        emitLine("define void @__ivy_panic(ptr %msg, i32 %line) {");
-        emitLine("entry:");
-        emitLine("  call i32 @puts(ptr %msg)");
-        emitLine("  call void @abort()");
-        emitLine("  unreachable");
-        emitLine("}");
+        // C5: __ivy_panic implementation moved to libivyrt (lib/ivyrt.c).
+        // Emit `declare` so the IR can reference it; the static archive
+        // provides the body (puts + abort) at link time.
+        if (!declaredC_.contains("__ivy_panic"))
+            emitLine("declare void @__ivy_panic(ptr, i32)");
     }
     return !failed_;
 }
@@ -2785,6 +2679,17 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
 #endif
     }
 
+    // C5: Path to the precompiled libivyrt static archive.  The CMake
+    // build bakes the absolute path into ivyc via IVYRT_LIB_PATH so we
+    // don't need to search at runtime.  The archive provides the
+    // __ivy_* runtime symbols (allocator, I/O, panic); the linker
+    // drops unused members automatically.
+#ifdef IVYRT_LIB_PATH
+    const std::string ivyrtLib = IVYRT_LIB_PATH;
+#else
+    const std::string ivyrtLib = "";  // fallback: no runtime lib
+#endif
+
     std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\"";
     for (const std::string& cppObj : cppObjPaths) {
         cmd += " \"" + cppObj + "\"";
@@ -2794,6 +2699,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     }
     cmd += " -o \"" + exePath + "\"";
     cmd += crtFlags;
+    if (!ivyrtLib.empty()) cmd += " \"" + ivyrtLib + "\"";
 
     // 5) Run the linker and capture exit code.
 #ifdef _WIN32
@@ -2806,6 +2712,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     }
     cmdline += " -o \"" + exePath + "\"";
     cmdline += crtFlags;
+    if (!ivyrtLib.empty()) cmdline += " \"" + ivyrtLib + "\"";
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};

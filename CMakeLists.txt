@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(ivyc LANGUAGES CXX)
+project(ivyc LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # 8.1: Find LLVM for native object file emission.
 find_package(LLVM REQUIRED CONFIG)
@@ -16,6 +18,23 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 # VS2019 Professional copy, which is a corrupt 140-byte placeholder.
 # We patched LLVMExports.cmake directly to point at the VS18 copy
 # (2.3 MB, valid). See git history / session notes for details.
+
+# C5: Ivy runtime static library (libivyrt).
+# Written in C (bootstrap).  Contains the __ivy_* runtime symbols
+# (allocator, I/O, panic).  Linked by default into every Ivy
+# executable; the linker drops unused symbols from the archive.
+add_library(ivyrt STATIC lib/ivyrt.c)
+target_include_directories(ivyrt PUBLIC lib)
+if(MSVC)
+    target_compile_options(ivyrt PRIVATE /W4)
+else()
+    target_compile_options(ivyrt PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+# Expose the built archive path to ivyc via a compile definition so
+# linkExecutable() can find libivyrt.lib / libivyrt.a at runtime.
+# The generator expression $<TARGET_FILE:ivyrt> is evaluated by the
+# build system at compile time of ivyc, baking the absolute path.
+# (Applied after add_executable below — target must exist first.)
 
 add_executable(ivyc
     src/app/main.cpp
@@ -30,6 +49,10 @@ add_executable(ivyc
 )
 
 target_include_directories(ivyc PRIVATE src ${LLVM_INCLUDE_DIRS})
+
+# C5: Bake the absolute path to the built libivyrt archive into ivyc.
+target_compile_definitions(ivyc PRIVATE
+    IVYRT_LIB_PATH="$<TARGET_FILE:ivyrt>")
 
 # Suppress LLVM's C-style warnings when compiling our code.
 target_compile_definitions(ivyc PRIVATE ${LLVM_DEFINITIONS})

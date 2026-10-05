@@ -1,0 +1,27 @@
+// C5 test: libivyrt static library
+//
+// Verifies that the Ivy runtime (allocator, I/O, panic) is correctly
+// provided by libivyrt — the precompiled static library built from
+// lib/ivyrt.c.  The codegen emits `declare` for the __ivy_* symbols
+// and linkExecutable() adds libivyrt.lib to the clang++ link line.
+//
+// Run: ivyc test_c5_libivyrt.ivy -o test_c5.exe && ./test_c5.exe
+// Expected: exercises io::println (libivyrt I/O) and new/delete
+//           (libivyrt allocator).  All output must be correct.
+
+#pragma ivy cnumber
+
+int main() {
+    // Exercise libivyrt I/O (io::println -> __ivy_write_str)
+    io::println("C5 libivyrt: I/O works");
+
+    // Exercise libivyrt allocator (new -> __ivy_alloc, delete -> __ivy_free)
+    unsafe {
+        int* p = new int(123);
+        io::println("new int(123) = {}", *p);
+        delete p;
+    }
+
+    io::println("C5 libivyrt tests passed");
+    return 0;
+}
