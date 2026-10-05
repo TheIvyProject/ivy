@@ -44,6 +44,10 @@ void printUsage() {
                  "  --run      interpret the program via IvyInterpret v0.2 (MIR-based)\n"
                  "  -c         compile to native object file (.o / .obj), no linking\n"
                  "  (default)  compile and link to a native executable\n"
+                 "  --crt-static  link the C runtime statically (like Rust crt-static)\n"
+                 "               Windows: libcmt instead of msvcrt/ucrt\n"
+                 "               POSIX:   libc.a  instead of libc.so\n"
+                 "               (default: dynamic CRT linking)\n"
                  "  --target <abi>  set the C++ ABI for name mangling:\n"
                  "               itanium (POSIX) or msvc (Windows)\n"
                  "               (default: auto-detect from host)\n"
@@ -817,6 +821,7 @@ bool hasExtension(const std::string& path, std::string_view ext) {
 
 int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool showHir,
         bool showMir, bool showLlvm, bool doRun, bool compileOnly, bool linkMode,
+        bool crtStatic,
         const std::string& outPath,
         const std::vector<std::filesystem::path>& includePaths,
         std::optional<ivy::CodeGen::Platform> targetPlatform) {
@@ -1158,6 +1163,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         if (targetPlatform) cg.setPlatform(*targetPlatform);
         cg.setCppHeaders(cppHeaders);  // A7
         cg.setCHeaders(cHeaders);      // C interop
+        cg.setCrtStatic(crtStatic);    // C4: static CRT linking
         bool ok = cg.linkExecutable(exePath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message
@@ -1215,6 +1221,7 @@ int main(int argc, char** argv) {
     bool showLlvm = false;
     bool doRun = false;
     bool compileOnly = false;
+    bool crtStatic = false;
     std::string outPath;
     std::vector<std::filesystem::path> includePaths;
     std::optional<ivy::CodeGen::Platform> targetPlatform;
@@ -1235,6 +1242,8 @@ int main(int argc, char** argv) {
             doRun = true;
         } else if (arg == "-c") {
             compileOnly = true;
+        } else if (arg == "--crt-static") {
+            crtStatic = true;
         } else if (arg == "--target") {
             if (i + 1 >= argc) {
                 std::cerr << "ivyc: error: option '--target' requires an ABI name\n";
@@ -1336,5 +1345,5 @@ int main(int argc, char** argv) {
                       !hasExtension(outPath, "ii")));
 
     return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun,
-               compileOnly, linkMode, outPath, includePaths, targetPlatform);
+               compileOnly, linkMode, crtStatic, outPath, includePaths, targetPlatform);
 }

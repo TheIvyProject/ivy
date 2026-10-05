@@ -66,6 +66,18 @@ public:
     void setPlatform(Platform p) { platform_ = p; }
     Platform platform() const { return platform_; }
 
+    // C4: Static CRT linking (like Rust's crt-static feature).
+    // When true, linkExecutable() passes flags to clang++ so the C runtime
+    // is linked statically instead of dynamically:
+    //   Windows (MSVC ABI, clang++ GNU driver):
+    //     -Xclang --dependent-lib=libcmt  → libcmt.lib  (static)
+    //     default                          → msvcrt.lib  (dynamic)
+    //   POSIX:
+    //     -static                          → libc.a      (static)
+    //     default                          → libc.so     (dynamic)
+    void setCrtStatic(bool v) { crtStatic_ = v; }
+    bool crtStatic() const { return crtStatic_; }
+
 private:
     const mir::TranslationUnit& mir_;
     std::vector<Diagnostic> diagnostics_;
@@ -143,6 +155,7 @@ private:
     // symbol names match the host platform's C++ ABI. Can be
     // overridden via setPlatform() for cross-compilation.
     Platform platform_;
+    bool crtStatic_ = false;  // C4: --crt-static flag
 
     // Reports a diagnostic and marks the pass as failed.
     void error(SourceLoc loc, std::string message);

@@ -1,0 +1,15 @@
+// C4 test: --crt-static flag
+// This test verifies the --crt-static flag produces a working executable.
+// On Windows with clang++ (MSVC ABI target), the flag passes
+// -Xclang --dependent-lib=libcmt to select static CRT (libcmt.lib).
+// On POSIX, it passes -static to select libc.a.
+//
+// Run: ivyc --crt-static test_c4_crt_static.ivy -o test_c4.exe && ./test_c4.exe
+// Expected output: "C4 static CRT test passed"
+
+#pragma ivy cnumber
+
+int main() {
+    io::println("C4 static CRT test passed");
+    return 0;
+}

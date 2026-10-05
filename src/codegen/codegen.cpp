@@ -2757,6 +2757,34 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     }
 
     // 4) Build the linker command line: clang++ <ivy.o> <cpp0.o> ... <c0.o> ... -o exe
+    //
+    // C4: --crt-static appends platform-specific flags so the C runtime is
+    // linked statically instead of dynamically (like Rust's crt-static):
+    //   Windows (MSVC ABI, clang++ GNU driver):
+    //     -Xclang --dependent-lib=libcmt  → libcmt.lib  (static)  vs default msvcrt
+    //   POSIX:              -static       → libc.a      (static)  vs libc.so
+    //
+    // On Windows, clang++ (GNU driver, target *-pc-windows-msvc) does NOT
+    // accept MSVC-style /MT directly.  Instead we pass -Xclang
+    // --dependent-lib=libcmt which tells clang to emit a /DEFAULTLIB:libcmt
+    // directive in the object file, causing link.exe to select the static
+    // CRT (libcmt.lib) instead of the default dynamic CRT (msvcrt.lib).
+    // On POSIX, -static tells the system linker to prefer libc.a over libc.so.
+    std::string crtFlags;
+    if (crtStatic_) {
+#if defined(_WIN32) || defined(__CYGWIN__)
+        // clang++ GNU driver targeting MSVC ABI: emit /DEFAULTLIB:libcmt
+        // directive via -Xclang --dependent-lib=.  This selects the static
+        // multi-threaded CRT (libcmt.lib) instead of msvcrt.lib.
+        crtFlags = " -Xclang --dependent-lib=libcmt";
+#else
+        // -static: fully static link (libc + gcc runtime). This is the
+        // closest equivalent to Rust's crt-static on glibc targets.
+        // -static-libgcc: link libgcc statically (needed for some intrinsics).
+        crtFlags = " -static -static-libgcc";
+#endif
+    }
+
     std::string cmd = "\"" + linkerPath + "\" \"" + objPath + "\"";
     for (const std::string& cppObj : cppObjPaths) {
         cmd += " \"" + cppObj + "\"";
@@ -2765,6 +2793,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         cmd += " \"" + cObj + "\"";
     }
     cmd += " -o \"" + exePath + "\"";
+    cmd += crtFlags;
 
     // 5) Run the linker and capture exit code.
 #ifdef _WIN32
@@ -2776,6 +2805,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         cmdline += " \"" + cObj + "\"";
     }
     cmdline += " -o \"" + exePath + "\"";
+    cmdline += crtFlags;
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
