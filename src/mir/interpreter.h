@@ -52,6 +52,8 @@ public:
     const std::vector<InterpDiag>& diagnostics() const { return diags_; }
     bool failed() const { return failed_; }
     void setOutput(std::ostream& os) { out_ = &os; }
+    // C3: Set stderr output stream for io::eprint/eprintln.
+    void setErrorOutput(std::ostream& os) { errOut_ = &os; }
 
 private:
     using Frame = std::unordered_map<std::string, Cell>;
@@ -72,6 +74,8 @@ private:
     std::vector<InterpDiag> diags_;
     bool failed_ = false;
     std::ostream* out_;
+    // C3: stderr output stream for io::eprint/eprintln.
+    std::ostream* errOut_;
 
     // C2: monotonic heap-allocation ID for __ivy_alloc provenance tracking.
     std::uint32_t nextHeapAllocId_ = 0;
@@ -104,6 +108,8 @@ private:
 
     // 8.5: Print a Value with type-aware formatting.
     void printValue(const Value& v, const mir::Type& t);
+    // C3: Print a Value to a specific stream (for io::eprint/eprintln).
+    void printValueTo(std::ostream& out, const Value& v, const mir::Type& t);
 };
 
 }  // namespace mir

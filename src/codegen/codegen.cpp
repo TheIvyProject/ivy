@@ -59,6 +59,12 @@ bool isCodegenBuiltin(std::string_view name) {
         name == "ivy::println_int" || name == "ivy::println_float" ||
         name == "ivy::println_str" || name == "ivy::println_char")
         return true;
+    // C3: io::print / io::println / io::eprint / io::eprintln —
+    // type-safe print with {} format string support.
+    // Routed through __ivy_write (CRT _write) instead of printf.
+    if (name == "io::print" || name == "io::println" ||
+        name == "io::eprint" || name == "io::eprintln")
+        return true;
     return false;
 }
 
@@ -536,6 +542,10 @@ void CodeGen::collectExpr(const mir::Expr& e) {
         if (isCodegenBuiltin(c.callee) &&
             (c.callee.rfind("ivy::", 0) == 0))
             usesIvyPrint_ = true;
+        // C3: Track io::print/println/eprint/eprintln usage.
+        if (c.callee == "io::print" || c.callee == "io::println" ||
+            c.callee == "io::eprint" || c.callee == "io::eprintln")
+            usesIoPrint_ = true;
         for (const auto& a : c.args) collectExpr(*a);
     } else if (std::holds_alternative<M::Index>(n)) {
         const M::Index& v = std::get<M::Index>(n);
@@ -709,7 +719,310 @@ void CodeGen::emitIvyAllocators() {
     }
 }
 
-// --- expressions ---
+// C3: Emit inline runtime for io::print/println/eprint/eprintln.
+//
+// Strategy: use CRT _write(fd, buf, len) for raw output (no printf).
+// For formatting, we use snprintf into a static buffer per type.
+//
+//   declare i32 @_write(i32, ptr, i32)        ; CRT _write
+//   declare i32 @strlen(ptr)                  ; libc strlen
+//   declare i32 @snprintf(ptr, i32, ptr, ...) ; libc snprintf
+//
+//   define void @__ivy_write_str(i32 %fd, ptr %s) {
+//     %len = call i32 @strlen(ptr %s)
+//     call i32 @_write(i32 %fd, ptr %s, i32 %len)
+//     ret void
+//   }
+//   define ptr @__ivy_fmt_int(i64 %v) {
+//     %buf = alloca [32 x i8]
+//     %p = getelementptr [32 x i8], ptr %buf, i64 0, i64 0
+//     call i32 @snprintf(ptr %p, i32 32, ptr @.fmt_int, i64 %v)
+//     ret ptr %p
+//   }
+//   define ptr @__ivy_fmt_float(double %v) { ... similar ... }
+//   define ptr @__ivy_fmt_bool(i1 %v) { ... }
+//
+// Static format strings:
+//   @.fmt_int = private constant [5 x i8] c"%lld\00"
+//   @.fmt_float = private constant [5 x i8] c"%g\00\00"  (padded)
+//   @.fmt_true = private constant [5 x i8] c"true\00"
+//   @.fmt_false = private constant [6 x i8] c"false\00"
+//
+// Note: The format {} logic is at the CALL SITE (lowerExpr for Call),
+// which splits the format string and calls __ivy_write_str / __ivy_fmt_int
+// in sequence. This keeps the runtime minimal.
+void CodeGen::emitIoPrintRuntime() {
+    if (!usesIoPrint_) return;
+    // Declare CRT functions needed.
+    if (!declaredC_.contains("_write"))
+        emitLine("declare i32 @_write(i32, ptr, i32)");
+    if (!declaredC_.contains("strlen"))
+        emitLine("declare i64 @strlen(ptr)");
+    if (!declaredC_.contains("snprintf"))
+        emitLine("declare i32 @snprintf(ptr, i64, ptr, ...)");
+    // _gcvt(double, int digits, ptr buf) — non-varargs CRT helper that
+    // converts a double to a decimal string.  Used instead of snprintf("%g")
+    // because snprintf is variadic and LLVM's LLJIT on Windows x64 drops
+    // double varargs.  _gcvt has a fixed arity so the calling convention
+    // passes the double through XMM0 correctly.
+    if (!declaredC_.contains("_gcvt"))
+        emitLine("declare ptr @_gcvt(double, i32, ptr)");
+    emitLine("");
+
+    // Static format strings for scalar types.
+    emitLine("@.fmt_int = private unnamed_addr constant [5 x i8] c\"%lld\\00\"");
+    emitLine("@.fmt_float_g = private unnamed_addr constant [5 x i8] c\"%.6f\\00\"");
+    emitLine("@.fmt_true = private unnamed_addr constant [5 x i8] c\"true\\00\"");
+    emitLine("@.fmt_false = private unnamed_addr constant [6 x i8] c\"false\\00\"");
+    // Static scratch buffers for formatting (NOT stack alloca — that would
+    // dangle after return). Each formatter writes into these global buffers.
+    emitLine("@.fmt_int_buf = private global [32 x i8] zeroinitializer");
+    emitLine("@.fmt_float_buf = private global [64 x i8] zeroinitializer");
+    emitLine("");
+
+    // __ivy_write_str(fd, ptr) — write a C string to fd via _write.
+    emitLine("; C3: Write a C string to file descriptor (via CRT _write)");
+    emitLine("define void @__ivy_write_str(i32 %fd, ptr %s) {");
+    emitLine("  %len = call i64 @strlen(ptr %s)");
+    emitLine("  %len32 = trunc i64 %len to i32");
+    emitLine("  call i32 @_write(i32 %fd, ptr %s, i32 %len32)");
+    emitLine("  ret void");
+    emitLine("}");
+    emitLine("");
+
+    // __ivy_write_char(fd, ch) — write a single char byte.
+    emitLine("; C3: Write a single character byte to fd");
+    emitLine("define void @__ivy_write_char(i32 %fd, i8 %ch) {");
+    emitLine("  %slot = alloca i8");
+    emitLine("  store i8 %ch, ptr %slot");
+    emitLine("  call i32 @_write(i32 %fd, ptr %slot, i32 1)");
+    emitLine("  ret void");
+    emitLine("}");
+    emitLine("");
+
+    // __ivy_fmt_int(v) → ptr — format int64 to decimal string.
+    emitLine("; C3: Format int64 into a static buffer, return ptr");
+    emitLine("define ptr @__ivy_fmt_int(i64 %v) {");
+    emitLine("  %p = getelementptr [32 x i8], ptr @.fmt_int_buf, i64 0, i64 0");
+    emitLine("  %fmt = getelementptr [5 x i8], ptr @.fmt_int, i64 0, i64 0");
+    emitLine("  call i32 @snprintf(ptr %p, i64 32, ptr %fmt, i64 %v)");
+    emitLine("  ret ptr %p");
+    emitLine("}");
+    emitLine("");
+
+    // __ivy_fmt_float(v) → ptr — format double via _gcvt (non-varargs).
+    // _gcvt writes up to `digits` significant digits into the buffer and
+    // returns buf.  We use 15 digits for double precision.
+    emitLine("; C3: Format double into a static buffer, return ptr");
+    emitLine("define ptr @__ivy_fmt_float(double %v) {");
+    emitLine("  %p = getelementptr [64 x i8], ptr @.fmt_float_buf, i64 0, i64 0");
+    emitLine("  call ptr @_gcvt(double %v, i32 15, ptr %p)");
+    emitLine("  ret ptr %p");
+    emitLine("}");
+    emitLine("");
+
+    // __ivy_fmt_bool(b) → ptr — format bool to "true"/"false".
+    emitLine("; C3: Format bool into \"true\"/\"false\", return ptr");
+    emitLine("define ptr @__ivy_fmt_bool(i1 %b) {");
+    emitLine("  br i1 %b, label %is_true, label %is_false");
+    emitLine("is_true:");
+    emitLine("  %t = getelementptr [5 x i8], ptr @.fmt_true, i64 0, i64 0");
+    emitLine("  ret ptr %t");
+    emitLine("is_false:");
+    emitLine("  %f = getelementptr [6 x i8], ptr @.fmt_false, i64 0, i64 0");
+    emitLine("  ret ptr %f");
+    emitLine("}");
+    emitLine("");
+
+    // __ivy_write_newline(fd) — write a newline character.
+    emitLine("; C3: Write a newline to fd");
+    emitLine("define void @__ivy_write_newline(i32 %fd) {");
+    emitLine("  call i32 @_write(i32 %fd, ptr @.newline, i32 1)");
+    emitLine("  ret void");
+    emitLine("}");
+    // Newline constant (1 byte + NUL is not needed for _write).
+    emitLine("@.newline = private unnamed_addr constant [1 x i8] c\"\\0A\"");
+    emitLine("");
+}
+
+// C3: Helper — intern a C string constant and return a gep ptr to it.
+std::string CodeGen::internCString(const std::string& bytes) {
+    auto it = strings_.find(bytes);
+    if (it == strings_.end()) {
+        const std::string gname = "@.str." + std::to_string(stringList_.size());
+        strings_.emplace(bytes, gname);
+        stringList_.emplace_back(gname, StringEntry{bytes, 1});
+        it = strings_.find(bytes);
+    }
+    const std::string t = newTemp();
+    emitLine(t + " = getelementptr i8, ptr " + it->second + ", i64 0");
+    return t;
+}
+
+// C3: Lower io::print/println/eprint/eprintln call.
+//
+// The first arg (if it is a string literal) is treated as a format string
+// with {} placeholders. Each {} is replaced by the corresponding argument
+// formatted according to its type. If there is only one arg, or the first
+// arg is not a string literal, all args are printed in sequence.
+//
+// fd: 1=stdout, 2=stderr. isLn: append newline at end.
+std::string CodeGen::lowerIoPrint(const mir::Expr::Call& c,
+                                   int fd, bool isLn, SourceLoc loc) {
+    const auto& args = c.args;
+
+    // Determine if the first arg is a string literal (format string).
+    bool hasFmt = false;
+    std::string fmtBytes;
+    if (!args.empty() && args[0] &&
+        std::holds_alternative<mir::Expr::StringLit>(args[0]->node)) {
+        int width = 1;
+        if (decodeStringTyped(std::get<mir::Expr::StringLit>(args[0]->node).raw,
+                              fmtBytes, width)) {
+            hasFmt = true;
+        }
+    }
+
+    if (hasFmt) {
+        // Split the format string at {} placeholders.
+        // Emit literal segments via __ivy_write_str, and for each {},
+        // emit a formatted arg.
+        std::size_t argIdx = 1;  // args[0] is the format string
+        std::size_t i = 0;
+        std::string seg;
+        while (i < fmtBytes.size()) {
+            if (i + 1 < fmtBytes.size() && fmtBytes[i] == '{' && fmtBytes[i+1] == '}') {
+                // Flush literal segment.
+                if (!seg.empty()) {
+                    std::string p = internCString(seg);
+                    emitLine("call void @__ivy_write_str(i32 " + std::to_string(fd) +
+                             ", ptr " + p + ")");
+                    seg.clear();
+                }
+                // Emit the corresponding arg.
+                if (argIdx < args.size() && args[argIdx]) {
+                    const mir::Expr& a = *args[argIdx];
+                    const mir::Type& at = a.type;
+                    if (at.pointerDepth > 0) {
+                        // String or pointer — treat as C string.
+                        std::string v = lowerExpr(a);
+                        emitLine("call void @__ivy_write_str(i32 " +
+                                 std::to_string(fd) + ", ptr " + v + ")");
+                    } else if (at.base == "char" || at.base == "int8_t" ||
+                               at.base == "uint8_t") {
+                        std::string v = lowerExpr(a);
+                        emitLine("call void @__ivy_write_char(i32 " +
+                                 std::to_string(fd) + ", i8 " + v + ")");
+                    } else if (at.base == "bool") {
+                        std::string v = lowerExpr(a);
+                        // bool is i1 in LLVM IR.
+                        std::string p = newTemp();
+                        emitLine(p + " = call ptr @__ivy_fmt_bool(i1 " + v + ")");
+                        emitLine("call void @__ivy_write_str(i32 " +
+                                 std::to_string(fd) + ", ptr " + p + ")");
+                    } else if (isFloatType(at)) {
+                        std::string v = lowerExpr(a);
+                        std::string ty = llvmType(at);
+                        std::string extV = v;
+                        if (ty != "double") {
+                            extV = newTemp();
+                            emitLine(extV + " = fpext " + ty + " " + v +
+                                     " to double");
+                        }
+                        std::string p = newTemp();
+                        emitLine(p + " = call ptr @__ivy_fmt_float(double " + extV + ")");
+                        emitLine("call void @__ivy_write_str(i32 " +
+                                 std::to_string(fd) + ", ptr " + p + ")");
+                    } else {
+                        // Integer types — sign/zero-extend to i64 for __ivy_fmt_int.
+                        std::string v = lowerExpr(a);
+                        std::string ty = llvmType(at);
+                        std::string extV = v;
+                        if (ty != "i64") {
+                            extV = newTemp();
+                            const bool isUnsigned = at.isUnsigned;
+                            const std::string extOp = isUnsigned ? "zext" : "sext";
+                            emitLine(extV + " = " + extOp + " " + ty + " " + v +
+                                     " to i64");
+                        }
+                        std::string p = newTemp();
+                        emitLine(p + " = call ptr @__ivy_fmt_int(i64 " + extV + ")");
+                        emitLine("call void @__ivy_write_str(i32 " +
+                                 std::to_string(fd) + ", ptr " + p + ")");
+                    }
+                    ++argIdx;
+                }
+                i += 2;  // skip "{}"
+            } else {
+                seg += fmtBytes[i];
+                ++i;
+            }
+        }
+        // Flush trailing literal segment.
+        if (!seg.empty()) {
+            std::string p = internCString(seg);
+            emitLine("call void @__ivy_write_str(i32 " + std::to_string(fd) +
+                     ", ptr " + p + ")");
+        }
+    } else {
+        // No format string — print all args in sequence.
+        for (std::size_t ai = 0; ai < args.size(); ++ai) {
+            if (!args[ai]) continue;
+            const mir::Expr& a = *args[ai];
+            const mir::Type& at = a.type;
+            if (at.pointerDepth > 0) {
+                std::string v = lowerExpr(a);
+                emitLine("call void @__ivy_write_str(i32 " +
+                         std::to_string(fd) + ", ptr " + v + ")");
+            } else if (at.base == "char" || at.base == "int8_t" ||
+                       at.base == "uint8_t") {
+                std::string v = lowerExpr(a);
+                emitLine("call void @__ivy_write_char(i32 " +
+                         std::to_string(fd) + ", i8 " + v + ")");
+            } else if (at.base == "bool") {
+                std::string v = lowerExpr(a);
+                std::string p = newTemp();
+                emitLine(p + " = call ptr @__ivy_fmt_bool(i1 " + v + ")");
+                emitLine("call void @__ivy_write_str(i32 " +
+                         std::to_string(fd) + ", ptr " + p + ")");
+            } else if (isFloatType(at)) {
+                std::string v = lowerExpr(a);
+                std::string ty = llvmType(at);
+                std::string extV = v;
+                if (ty != "double") {
+                    extV = newTemp();
+                    emitLine(extV + " = fpext " + ty + " " + v +
+                             " to double");
+                }
+                std::string p = newTemp();
+                emitLine(p + " = call ptr @__ivy_fmt_float(double " + extV + ")");
+                emitLine("call void @__ivy_write_str(i32 " +
+                         std::to_string(fd) + ", ptr " + p + ")");
+            } else {
+                // Integer types — sign/zero-extend to i64 for __ivy_fmt_int.
+                std::string v = lowerExpr(a);
+                std::string ty = llvmType(at);
+                std::string extV = v;
+                if (ty != "i64") {
+                    extV = newTemp();
+                    const bool isUnsigned = at.isUnsigned;
+                    const std::string extOp = isUnsigned ? "zext" : "sext";
+                    emitLine(extV + " = " + extOp + " " + ty + " " + v +
+                             " to i64");
+                }
+                std::string p = newTemp();
+                emitLine(p + " = call ptr @__ivy_fmt_int(i64 " + extV + ")");
+                emitLine("call void @__ivy_write_str(i32 " +
+                         std::to_string(fd) + ", ptr " + p + ")");
+            }
+        }
+    }
+
+    if (isLn) {
+        emitLine("call void @__ivy_write_newline(i32 " + std::to_string(fd) + ")");
+    }
+    return "";
+}
 
 std::string CodeGen::valueName(std::string_view name) {
     const std::string base = name.empty() ? "arg" : std::string(name);
@@ -1205,6 +1518,19 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 emitLine("call void @" + sym + "(" + ty + " " + val + ")");
             }
             return "";
+        }
+
+        // C3: io::print/println/eprint/eprintln — type-safe print with
+        // {} format string support, using CRT _write (no printf).
+        if (isBuiltinCall &&
+            (v.callee == "io::print" || v.callee == "io::println" ||
+             v.callee == "io::eprint" || v.callee == "io::eprintln")) {
+            const bool isLn = (v.callee == "io::println" ||
+                               v.callee == "io::eprintln");
+            const bool isErr = (v.callee == "io::eprint" ||
+                                v.callee == "io::eprintln");
+            const int fd = isErr ? 2 : 1;  // 1=stdout, 2=stderr
+            return lowerIoPrint(v, fd, isLn, e.loc);
         }
 
         std::string args;
@@ -2119,6 +2445,13 @@ bool CodeGen::generate(std::ostream& out) {
             for (const mir::Param& p : fn->params) {
                 sig += (sig.empty() ? "" : ", ") + llvmType(p.type);
             }
+            // C-style varargs (e.g. printf(fmt, ...)) — emit `...` so LLVM
+            // knows the function accepts additional variadic arguments and
+            // passes them through the platform varargs ABI.  Without this,
+            // calls like printf("%f", 3.14) silently drop the double arg.
+            if (fn->isVariadic) {
+                sig += (sig.empty() ? std::string("") : std::string(", ")) + "...";
+            }
             emitLine("declare " + llvmType(fn->returnType) + " @" + llvmGlobalName(fn->name) +
                      "(" + sig + ")");
         }
@@ -2159,6 +2492,9 @@ bool CodeGen::generate(std::ostream& out) {
     // C2: Emit Ivy-safe allocator wrappers (__ivy_alloc/__ivy_free).
     // Must come after function lowering so we know if new/delete were used.
     emitIvyAllocators();
+    // C3: Emit io::print runtime (_write-based, no printf).
+    // Must come after function lowering so we know if io::print was used.
+    emitIoPrintRuntime();
     // 8.2: Emit string constants and the __ivy_panic declaration AFTER
     // function lowering. emitBoundsCheck() (called from lowerFunction())
     // adds new panic-message strings to stringList_ and sets

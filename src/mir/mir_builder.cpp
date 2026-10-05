@@ -1205,6 +1205,7 @@ std::unique_ptr<mir::TranslationUnit> MirBuilder::build() {
         }
         fn->isExternC = hf->isExternC;
         fn->hasBody = hf->body != nullptr;
+        fn->isVariadic = hf->isVariadic;
         fn->isConstexpr = hf->isConstexpr;
         fn->isConsteval = hf->isConsteval;
         fn->isCtor = hf->isCtor;

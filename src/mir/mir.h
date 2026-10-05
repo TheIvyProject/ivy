@@ -141,6 +141,7 @@ struct Function {
     std::vector<std::unique_ptr<Block>> blocks;
     bool isExternC = false;
     bool hasBody = false;  // false = declaration only (extern "C" prototype)
+    bool isVariadic = false;  // true = C-style varargs (e.g. printf(fmt, ...))
     bool isConstexpr = false;
     bool isConsteval = false;
     bool isCtor = false;  // constructor

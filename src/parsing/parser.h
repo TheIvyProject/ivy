@@ -162,7 +162,7 @@ private:
                                bool isExternC, bool isConstexpr = false, bool isConsteval = false,
                                std::vector<TemplateParam> tplParams = {},
                                std::vector<std::string_view> declaredLifetimes = {});
-    std::vector<Param> parseParams();
+    std::vector<Param> parseParams(bool* isVariadic = nullptr);
     // Parse an operator name (after `operator` keyword): returns the
     // operator symbol string (e.g. "+", "==", "[]", "()", "++", "->").
     // Consumes the operator tokens.  Returns "" on error.

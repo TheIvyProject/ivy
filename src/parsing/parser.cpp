@@ -2004,7 +2004,8 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     const std::string_view name = qualifyName(next().lexeme);
 
     expect(TokenKind::LParen, "expected '(' after function name '" + std::string(name) + "'");
-    std::vector<Param> params = parseParams();
+    bool isVariadic = false;
+    std::vector<Param> params = parseParams(&isVariadic);
     expect(TokenKind::RParen, "expected ')' to close parameter list");
 
     Function fn;
@@ -2017,6 +2018,7 @@ void Parser::parseFunction(TranslationUnit& tu, SourceLoc loc, std::vector<Attri
     fn.declaredLifetimes = std::move(declaredLifetimes);
     fn.returnLifetime = retLifetime;
     fn.isExternC = isExternC;
+    fn.isVariadic = isVariadic;
     fn.isConstexpr = isConstexpr;
     fn.isConsteval = isConsteval;
     fn.loc = loc;
@@ -2048,7 +2050,8 @@ void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
     const std::string_view name = qualifyName(next().lexeme);
 
     expect(TokenKind::LParen, "expected '(' after function name '" + std::string(name) + "'");
-    std::vector<Param> params = parseParams();
+    bool isVariadic = false;
+    std::vector<Param> params = parseParams(&isVariadic);
     expect(TokenKind::RParen, "expected ')' to close parameter list");
 
     // Trailing return type: `-> Type`
@@ -2087,6 +2090,7 @@ void Parser::parseFunctionTrailing(TranslationUnit& tu, SourceLoc loc,
     fn.declaredLifetimes = std::move(declaredLifetimes);
     fn.returnLifetime = retLifetime;
     fn.isExternC = isExternC;
+    fn.isVariadic = isVariadic;
     fn.isConstexpr = isConstexpr;
     fn.isConsteval = isConsteval;
     fn.loc = loc;
@@ -2160,15 +2164,16 @@ std::string Parser::parseOperatorName() {
     return std::string(sym);
 }
 
-std::vector<Param> Parser::parseParams() {
+std::vector<Param> Parser::parseParams(bool* isVariadic) {
     std::vector<Param> params;
     while (!at(TokenKind::RParen) && !at(TokenKind::EndOfFile)) {
         // Variadic `...` — only valid in extern "C" declarations (e.g. printf).
         if (at(TokenKind::Ellipsis)) {
             next();  // consume `...`
             // The variadic arg doesn't produce a Param — it's metadata
-            // for codegen (which currently ignores it and just uses the
-            // fixed params).  We skip it here.
+            // for codegen. Set the flag so the caller can mark the function
+            // as variadic, so codegen emits `...` in the LLVM declare.
+            if (isVariadic) *isVariadic = true;
             break;
         }
         Param p;

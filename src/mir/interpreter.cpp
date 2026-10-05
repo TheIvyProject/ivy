@@ -34,7 +34,8 @@ static bool isIntegerBase(std::string_view b) {
 Interpreter::Interpreter(const TranslationUnit& tu, Machine* machine)
     : tu_(tu),
       machine_(machine ? machine : new NoOpMachine()),
-      out_(&std::cout) {}
+      out_(&std::cout),
+      errOut_(&std::cerr) {}
 
 // ============================================================
 // Public entry points
@@ -909,6 +910,57 @@ Value Interpreter::evalCall(const Expr::Call& c, const Expr& e) {
         args.push_back(a ? evalExpr(*a) : Value{});
     }
 
+    // C3: io::print/println/eprint/eprintln — type-safe print with
+    // {} format string support. Handle here (not in callBuiltin)
+    // because we need Expr type info to format args.
+    if (c.callee == "io::print" || c.callee == "io::println" ||
+        c.callee == "io::eprint" || c.callee == "io::eprintln") {
+        const bool isLn = (c.callee == "io::println" ||
+                            c.callee == "io::eprintln");
+        const bool isErr = (c.callee == "io::eprint" ||
+                            c.callee == "io::eprintln");
+        std::ostream& out = isErr ? *errOut_ : *out_;
+
+        // Determine if the first arg is a string literal (format string).
+        bool hasFmt = false;
+        std::string fmtBytes;
+        if (!args.empty() && c.args[0] &&
+            std::holds_alternative<mir::Expr::StringLit>(c.args[0]->node)) {
+            fmtBytes = args[0].asStr();
+            hasFmt = true;
+        }
+
+        if (hasFmt) {
+            // Split format string at {} and substitute args.
+            std::size_t argIdx = 1;
+            std::size_t i = 0;
+            while (i < fmtBytes.size()) {
+                if (i + 1 < fmtBytes.size() &&
+                    fmtBytes[i] == '{' && fmtBytes[i+1] == '}') {
+                    if (argIdx < args.size()) {
+                        const mir::Type& at = c.args[argIdx]
+                            ? c.args[argIdx]->type : mir::Type{};
+                        printValueTo(out, args[argIdx], at);
+                        ++argIdx;
+                    }
+                    i += 2;
+                } else {
+                    out << fmtBytes[i];
+                    ++i;
+                }
+            }
+        } else {
+            // No format string — print all args in sequence.
+            for (std::size_t ai = 0; ai < args.size(); ++ai) {
+                const mir::Type& at = c.args[ai]
+                    ? c.args[ai]->type : mir::Type{};
+                printValueTo(out, args[ai], at);
+            }
+        }
+        if (isLn) out << "\n";
+        return makeVoid();
+    }
+
     // 8.5: ivy::print / ivy::println need type info from the Expr to
     // distinguish char from int. Handle them here instead of in
     // callBuiltin, since we have access to the arg expressions.
@@ -1014,7 +1066,11 @@ bool Interpreter::isBuiltin(std::string_view name) const {
            // malloc/free are accepted as aliases forwarding to __ivy_alloc/__ivy_free
            // so existing unsafe code keeps working under the interpreter.
            name == "__ivy_alloc" || name == "__ivy_free" ||
-           name == "malloc" || name == "free";
+           name == "malloc" || name == "free" ||
+           // C3: io::print/println/eprint/eprintln — type-safe print
+           // with {} format string support.
+           name == "io::print" || name == "io::println" ||
+           name == "io::eprint" || name == "io::eprintln";
 }
 
 namespace {
@@ -1039,28 +1095,37 @@ std::string formatFloat(double d) {
 
 }  // namespace
 
-// 8.5: Print a Value to the output stream, using type info from the
-// MIR expression to distinguish char from int. Must be a member function
-// to access out_.
-void Interpreter::printValue(const Value& v, const mir::Type& t) {
+// 8.5: Print a Value to the given output stream, using type info
+// from the MIR expression to distinguish char from int.
+// C3: Generalized from printValue() so io::eprint/eprintln can target
+// a different stream (stderr) than the default stdout.
+void Interpreter::printValueTo(std::ostream& out,
+                                const Value& v, const mir::Type& t) {
     if (v.isInt()) {
         // If the type is char (or char-based), print as character.
         if (t.base == "char" || t.base == "int8_t" || t.base == "uint8_t")
-            *out_ << (char)v.asInt();
+            out << (char)v.asInt();
+        else if (t.base == "bool")
+            out << (v.asInt() != 0 ? "true" : "false");
         else
-            *out_ << v.asInt();
+            out << v.asInt();
     } else if (v.isFloat()) {
-        *out_ << formatFloat(v.asFloat());
+        out << formatFloat(v.asFloat());
     } else if (v.isStr()) {
-        *out_ << v.asStr();
+        out << v.asStr();
     } else if (v.isPtr()) {
-        if (v.ptr.isNull) *out_ << "nullptr";
-        else *out_ << "(ptr)";
+        if (v.ptr.isNull) out << "nullptr";
+        else out << "(ptr)";
     } else if (v.isStruct()) {
-        *out_ << "{" << v.strct.typeName << "}";
+        out << "{" << v.strct.typeName << "}";
     } else if (v.isVoid()) {
-        *out_ << "void";
+        out << "void";
     }
+}
+
+// 8.5: Print a Value to the default output stream (stdout).
+void Interpreter::printValue(const Value& v, const mir::Type& t) {
+    printValueTo(*out_, v, t);
 }
 
 Value Interpreter::callBuiltin(std::string_view name,

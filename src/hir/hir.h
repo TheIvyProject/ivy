@@ -257,6 +257,7 @@ struct Function {
     std::string_view returnLifetime;  // lowered [[ivy::lt_ret(a)]]
     std::unique_ptr<Stmt::Compound> body;  // null => declaration only
     bool isExternC = false;
+    bool isVariadic = false;   // C-style varargs: `...` in param list (e.g. printf)
     bool isConstexpr = false;
     bool isConsteval = false;
     bool isTemplate = false;       // true => template function (not instantiated)

@@ -96,6 +96,11 @@ bool isBuiltinFn(std::string_view name) {
         name == "ivy::println_int" || name == "ivy::println_float" ||
         name == "ivy::println_str" || name == "ivy::println_char")
         return true;
+    // C3: io::print/println/eprint/eprintln — type-safe print with
+    // {} format string support.
+    if (name == "io::print" || name == "io::println" ||
+        name == "io::eprint" || name == "io::eprintln")
+        return true;
     return false;
 }
 
@@ -804,6 +809,7 @@ void HirBuilder::buildSignature(const Function& af) {
     fn->namespacePrefix = af.namespacePrefix;
     fn->returnType = resolveTemplateStructType(resolveTypeAlias(af.returnType), af.loc);
     fn->isExternC = af.isExternC;
+    fn->isVariadic = af.isVariadic;
     fn->isConstexpr = af.isConstexpr;
     fn->isConsteval = af.isConsteval;
     fn->loc = af.loc;

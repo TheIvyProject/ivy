@@ -423,6 +423,7 @@ struct Function {
     // When non-empty, takes precedence over legacy `[[ivy::lt_ret]]`.
     std::string_view returnLifetime;
     bool isExternC = false;
+    bool isVariadic = false;   // C-style varargs: `...` in param list (e.g. printf)
     bool isConstexpr = false;   // `constexpr` function / variable
     bool isConsteval = false;   // `consteval` function (implies constexpr)
     bool isCtor = false;        // constructor (name == struct name)

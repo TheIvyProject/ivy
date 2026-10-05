@@ -1,0 +1,23 @@
+// std/io.ivy — Ivy I/O module (C3)
+//
+// Provides type-safe print/println/eprint/eprintln with {} format string
+// support. Uses CRT _write() for raw I/O (no printf).
+//
+// In interpreter mode (--run), these are handled as builtins.
+// In codegen mode, the compiler emits inline IR that calls __ivy_write_str
+// / __ivy_fmt_int / __ivy_fmt_float / __ivy_fmt_bool / __ivy_write_char.
+//
+// See docs/Standard_Modules/IO.md for full specification.
+
+export module io;
+
+// C3: io::print / println / eprint / eprintln are compiler builtins.
+// They are not declared here as extern "C" — the compiler recognizes
+// them by name and emits inline IR at each call site.
+//
+// Usage:
+//   io::print("Hello");                    // Hello
+//   io::println("Hello, Ivy!");            // Hello, Ivy!\n
+//   io::println("x = {}", 42);             // x = 42
+//   io::println("{} + {} = {}", 1, 2, 3);  // 1 + 2 = 3
+//   io::eprintln("Error: not found");      // → stderr

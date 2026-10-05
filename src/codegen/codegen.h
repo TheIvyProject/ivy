@@ -91,6 +91,7 @@ private:
     bool usesIvyAlloc_ = false;
     bool usesIvyFree_ = false;
     bool usesIvyPrint_ = false;  // 8.5: ivy::print/println builtins used
+    bool usesIoPrint_ = false;  // C3: io::print/println/eprint/eprintln used
 
     // A7: C++ headers from `import cpp <header>` / `import cpp "file"`.
     // Passed to clang++ during linking so it compiles and links them.
@@ -260,6 +261,18 @@ private:
     // (thin wrappers over libc malloc/free).  Called when new/delete
     // are used, so the linker doesn't need an external libivyrt.
     void emitIvyAllocators();
+    // C3: Emits inline runtime for io::print/println/eprint/eprintln.
+    // Uses CRT _write() for raw I/O (no printf). Format {} logic
+    // is emitted inline per call site.
+    void emitIoPrintRuntime();
+    // C3: Lower an io::print/println/eprint/eprintln call.
+    // Handles {} format string: splits the format string at compile-time
+    // and emits a sequence of __ivy_write_str / __ivy_fmt_int / etc calls.
+    // fd: 1=stdout, 2=stderr. isLn: append newline at end.
+    std::string lowerIoPrint(const mir::Expr::Call& c,
+                              int fd, bool isLn, SourceLoc loc);
+    // C3: Intern a C string constant and return a gep ptr to it.
+    std::string internCString(const std::string& bytes);
 
     // Returns the alloca slot name for a variable (unique per function).
     std::string valueName(std::string_view name);

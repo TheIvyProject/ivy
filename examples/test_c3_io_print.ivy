@@ -1,0 +1,57 @@
+// C3 test: io::print/println/eprint/eprintln with {} format string
+// Tests:
+//   1. Basic println with string literal
+//   2. Format string with {} placeholder (int, float, string, char)
+//   3. Multiple {} placeholders
+//   4. eprint/eprintln to stderr
+//   5. print without newline
+//   6. No-format mode (multiple args without {})
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // --- C3: basic println ---
+    io::println("Hello, Ivy!");
+
+    // --- C3: print without newline ---
+    io::print("No newline here");
+    io::println(" <- appended");
+
+    // --- C3: format string with {} — int ---
+    int32 x = 42;
+    io::println("x = {}", x);
+
+    // --- C3: format string with {} — float ---
+    float64 pi = 3.14;
+    io::println("pi = {}", pi);
+
+    // --- C3: format string with {} — string ---
+    io::println("name = {}", "Ivy");
+
+    // --- C3: format string with {} — char ---
+    char c = 'A';
+    io::println("c = {}", c);
+
+    // --- C3: multiple {} placeholders ---
+    io::println("{} + {} = {}", 1, 2, 3);
+
+    // --- C3: eprintln to stderr ---
+    io::eprintln("Error: file not found");
+
+    // --- C3: eprint (no newline) ---
+    io::eprint("warning: ");
+    io::eprintln("deprecated function");
+
+    // --- C3: println with no args (just newline) ---
+    io::println();
+
+    // --- C3: print multiple values (using {} format) ---
+    io::print("{}{}{}", "a", "b", "c");
+    io::println();
+
+    printf("C3 io::print tests passed\n");
+    return 0;
+}
