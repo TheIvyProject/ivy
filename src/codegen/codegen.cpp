@@ -315,6 +315,19 @@ std::string CodeGen::emitCast(const std::string& value, const std::string& from,
     if (value == "null" && to == "ptr") return "null";
     const std::string t = newTemp();
 
+    // D1: int → ptr (inttoptr). Must be checked BEFORE the int→int
+    // zext/trunc path below, because intBits("ptr") returns 64 and
+    // would otherwise emit an invalid `zext iN X to ptr`.
+    if (to == "ptr" && from != "ptr" && intBits(from) > 0) {
+        emitLine(t + " = inttoptr " + from + " " + value + " to ptr");
+        return t;
+    }
+    // ptr → int (ptrtoint).
+    if (from == "ptr" && to != "ptr" && intBits(to) > 0) {
+        emitLine(t + " = ptrtoint ptr " + value + " to " + to);
+        return t;
+    }
+
     // int -> int (zext / trunc / bitcast)
     const int fb = intBits(from), tb = intBits(to);
     if (fb > 0 && tb > 0) {
@@ -352,15 +365,7 @@ std::string CodeGen::emitCast(const std::string& value, const std::string& from,
         emitLine(t + " = fptosi " + from + " " + value + " to " + to);
         return t;
     }
-    // ptr -> int / int -> ptr
-    if (from == "ptr" && tb > 0) {
-        emitLine(t + " = ptrtoint ptr " + value + " to " + to);
-        return t;
-    }
-    if (fb > 0 && to == "ptr") {
-        emitLine(t + " = inttoptr " + from + " " + value + " to ptr");
-        return t;
-    }
+    // ptr -> int / int -> ptr (handled above before the int→int path)
     error(loc, "implicit cast from " + from + " to " + to + " is not supported");
     return value;
 }
@@ -943,13 +948,40 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
     // already an address (reference), so lower it as an expression.
     // This handles `const T& r = func(...)` where func returns `const T&`.
     if (std::holds_alternative<M::Call>(n)) {
-        return lowerExpr(e);
+        // D1: Temporary materialization.  When a call returns a struct
+        // *by value* (e.g. `a + b` where operator+ returns `string`),
+        // and the result is used as the receiver of another method call
+        // (e.g. `(a + b).cstr()`), we need an address for `this`.
+        // Allocate a temporary slot, store the call result, and return
+        // the slot address.
+        if (e.type.isReference) {
+            return lowerExpr(e);
+        }
+        const std::string rt = llvmType(e.type);
+        if (rt == "void") {
+            return lowerExpr(e);  // unreachable — void can't be an lvalue
+        }
+        // Only materialize for aggregate (struct) return types; scalar
+        // temporaries don't need an address (they're passed by value).
+        if (!structTypes_.contains(e.type.base)) {
+            return lowerExpr(e);
+        }
+        const std::string val = lowerExpr(e);
+        const std::string slot = newTemp();
+        emitLine(slot + " = alloca " + rt);
+        emitLine("store " + rt + " " + val + ", ptr " + slot);
+        return slot;
     }
     if (std::holds_alternative<M::This>(n)) {
         // `this` — same semantics as IdentRef{name="this"}.
         const auto it = vars_.find("this");
         if (it == vars_.end()) return "ptr null";
-        if (e.type.isReference) {
+        // D1: `this` param is always a pointer to the struct (passed
+        // by reference).  The slot (`%this.0 = alloca ptr`) holds the
+        // struct address, so load it to get the struct address.
+        const auto rit = varIsRef_.find("this");
+        const bool isRefVar = (rit != varIsRef_.end()) ? rit->second : false;
+        if (isRefVar || e.type.isReference) {
             std::string t = newTemp();
             emitLine(t + " = load ptr, ptr " + it->second);
             return t;
@@ -960,8 +992,14 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
         const std::string_view name = std::get<M::IdentRef>(n).name;
         const auto it = vars_.find(name);
         if (it == vars_.end()) return "ptr null";  // unreachable: HIR rejected it
-        if (e.type.isReference) {
-            // Reference: slot holds an address — load it.
+        // D1: Distinguish reference variables (slot holds an address)
+        // from value variables (slot IS the address).  `e.type.isReference`
+        // alone is insufficient because a value variable passed as `this`
+        // also has `isReference=true` on the expression type.
+        const auto rit = varIsRef_.find(name);
+        const bool isRefVar = (rit != varIsRef_.end()) ? rit->second : false;
+        if (isRefVar) {
+            // Reference variable: slot holds an address — load it.
             std::string t = newTemp();
             emitLine(t + " = load ptr, ptr " + it->second);
             return t;
@@ -1026,7 +1064,17 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
                  ", i32 0, i32 " + std::to_string(fieldIdx));
         return gep;
     }
-    error(e.loc, "expression is not assignable");
+    // D1-debug: identify which node type falls through to the error.
+    {
+        std::string dbg = "expression is not assignable [nodeIdx=";
+        dbg += std::to_string(e.node.index());
+        dbg += " type.base=";
+        dbg += e.type.base;
+        dbg += " isRef=";
+        dbg += std::to_string(e.type.isReference);
+        dbg += "]";
+        error(e.loc, std::move(dbg));
+    }
     return "null";
 }
 
@@ -1361,16 +1409,34 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         }
         // Look up the callee's parameter types (to handle reference params
         // and overload resolution — match by name + param signature).
+        // D1: ctor calls come in two forms:
+        //  (a) `T x(args)` in buildDecl — `this` is already in args
+        //      (args = [this, userArgs...], na == np).
+        //  (b) `T(args)` as a bare expression — `this` is implicit
+        //      (args = [userArgs...], na == np - 1); codegen must
+        //      materialize a temp slot for `this`.
         const mir::Function* callee = nullptr;
         for (const auto& f : mir_.functions) {
             if (f->name != v.callee) continue;
             const std::size_t np = f->params.size();
             const std::size_t na = v.args.size();
-            if (np > na) continue;
-            if (!f->isExternC && np != na) continue;
+            if (f->isCtor) {
+                // Ctor: params[0] is `this`.  Two valid shapes:
+                //   na == np     → `this` already in args (decl form)
+                //   na == np - 1 → `this` implicit (bare expr form)
+                if (np < 1) continue;
+                if (na != np && na != np - 1) continue;
+            } else {
+                if (np > na) continue;
+                if (!f->isExternC && np != na) continue;
+            }
+            // For ctor bare-expr form, args[i] ↔ params[i+1] (skip this).
+            const bool ctorBareForm = f->isCtor && na == np - 1;
+            const std::size_t pi0 = ctorBareForm ? 1 : 0;
+            const std::size_t cmpCount = ctorBareForm ? na : std::min(np, na);
             bool sigMatch = true;
-            for (std::size_t i = 0; i < np && sigMatch; ++i) {
-                mir::Type p = f->params[i].type; p.isReference = false;
+            for (std::size_t i = 0; i < cmpCount && sigMatch; ++i) {
+                mir::Type p = f->params[pi0 + i].type; p.isReference = false;
                 mir::Type a = v.args[i] ? v.args[i]->type : mir::Type{};
                 a.isReference = false;
                 if (!(p == a)) sigMatch = false;
@@ -1441,12 +1507,24 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         }
 
         std::string args;
+        // D1: ctor calls come in two shapes (see resolve logic above):
+        //  (a) decl form: args = [this, userArgs...], na == np.
+        //  (b) bare-expr form: args = [userArgs...], na == np - 1.
+        // For (b), we must materialize a temp `this` slot and prepend it.
+        const bool isCtorBareForm =
+            callee && callee->isCtor &&
+            v.args.size() == callee->params.size() - 1;
+        const bool isCtorDeclForm =
+            callee && callee->isCtor && !isCtorBareForm;
+        // param offset: bare form skips `this` (params[0]).
+        const std::size_t pi0 = isCtorBareForm ? 1 : 0;
         for (std::size_t i = 0; i < v.args.size(); ++i) {
             const auto& a = v.args[i];
             std::string val;
             std::string ty;
-            if (callee && i < callee->params.size() &&
-                callee->params[i].type.isReference) {
+            const std::size_t pi = pi0 + i;  // param index
+            if (callee && pi < callee->params.size() &&
+                callee->params[pi].type.isReference) {
                 // Pass by reference: emit the address of the lvalue.
                 val = lowerLValue(*a);
                 ty = "ptr";
@@ -1455,6 +1533,29 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 ty = valueLlvmType(a->type);
             }
             args += (args.empty() ? "" : ", ") + ty + " " + val;
+        }
+        // D1: For bare-expr ctor calls, prepend the materialized `this`
+        // slot.  The ctor returns void; we return the *loaded* struct
+        // value (so the expression can be used in phi/store/return).
+        // Callers needing an address (e.g. method `this`) go through
+        // lowerLValue which materializes a fresh slot.
+        if (isCtorBareForm) {
+            if (e.type.base.empty() || e.type.base == "void") {
+                error(e.loc, "internal: ctor call expression has void/empty type");
+                return "null";
+            }
+            const std::string rt2 = llvmType(e.type);
+            const std::string slot = newTemp();
+            emitLine(slot + " = alloca " + rt2);
+            std::string fullArgs = "ptr " + slot;
+            if (!args.empty()) fullArgs += ", " + args;
+            emitLine("call void @" +
+                     llvmGlobalName(mangleFunction(v.callee, callee)) +
+                     "(" + fullArgs + ")");
+            // Load the constructed value for use as an rvalue.
+            const std::string loaded = newTemp();
+            emitLine(loaded + " = load " + rt2 + ", ptr " + slot);
+            return loaded;
         }
         const std::string rt = llvmType(e.type);
         const bool isExternC = (callee && callee->isExternC) || isBuiltinCall;
@@ -1776,6 +1877,7 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
             // Reference: no new alloca — alias the referenced variable's slot.
             // init is guaranteed by HIR to be an lvalue (IdentRef or Deref).
             vars_[a.var] = slot;  // placeholder
+            varIsRef_[a.var] = true;  // D1: track reference variables
             emitLine(slot + " = alloca ptr");  // storage for the address
             if (a.init) {
                 // Get the address of the referenced object (lowerLValue).
@@ -1786,6 +1888,7 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
         }
         emitLine(slot + " = alloca " + slotTy);
         vars_[a.var] = slot;
+        varIsRef_[a.var] = false;  // D1: value variable
         if (a.init) {
             if (std::holds_alternative<mir::Expr::InitList>(a.init->node)) {
                 // Aggregate init: GEP + store each element into the slot.
@@ -2235,6 +2338,7 @@ void CodeGen::lowerFunction(const mir::Function& fn) {
         emitLine("store " + llvmType(p.type) + " %arg" + std::to_string(i) + ", ptr " +
                  slot);
         vars_[p.name] = slot;
+        varIsRef_[p.name] = p.type.isReference;  // D1
     }
 
     const bool isVoidRet = llvmType(fn.returnType) == "void";
@@ -2697,6 +2801,10 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     for (const std::string& cObj : cObjPaths) {
         cmd += " \"" + cObj + "\"";
     }
+    // D1: Link imported module object files (e.g. std/string.obj).
+    for (const std::string& modObj : moduleObjPaths_) {
+        cmd += " \"" + modObj + "\"";
+    }
     cmd += " -o \"" + exePath + "\"";
     cmd += crtFlags;
     if (!ivyrtLib.empty()) cmd += " \"" + ivyrtLib + "\"";
@@ -2709,6 +2817,10 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     }
     for (const std::string& cObj : cObjPaths) {
         cmdline += " \"" + cObj + "\"";
+    }
+    // D1: Link imported module object files (e.g. std/string.obj).
+    for (const std::string& modObj : moduleObjPaths_) {
+        cmdline += " \"" + modObj + "\"";
     }
     cmdline += " -o \"" + exePath + "\"";
     cmdline += crtFlags;

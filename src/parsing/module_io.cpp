@@ -164,6 +164,23 @@ bool writeModuleInterface(const TranslationUnit& tu,
                 << ' ' << (tp.isTypename ? 1 : 0)
                 << ' ' << (tp.isVariadic ? 1 : 0);
         }
+        // D1: Serialize struct methods (signatures only — bodies are
+        // emitted into the module's .obj and resolved at link time).
+        // Format: ` methods_count [name returnType paramCount params... isCtor isDtor isOperator [operatorSymbol]]`
+        out << ' ' << sd.methods.size();
+        for (const Function& m : sd.methods) {
+            out << ' ' << escape(std::string(m.name));
+            out << ' ' << escape(serializeType(m.returnType));
+            out << ' ' << m.params.size();
+            for (const auto& p : m.params) {
+                out << ' ' << escape(serializeType(p.type))
+                    << ':' << escape(std::string(p.name));
+            }
+            out << ' ' << (m.isCtor ? 1 : 0);
+            out << ' ' << (m.isDtor ? 1 : 0);
+            out << ' ' << (m.isOperator ? 1 : 0);
+            if (m.isOperator) out << ' ' << escape(m.operatorSymbol);
+        }
         out << '\n';
     }
 
@@ -254,7 +271,9 @@ bool readModuleInterface(TranslationUnit& tu,
                 ls >> paramStr;
                 paramStr = unescape(paramStr);
                 Param p;
-                auto colon = paramStr.find(':');
+                // D1: Use rfind(':') so types containing ':' (e.g.
+                // `char:const:ptr1`) are parsed correctly.
+                auto colon = paramStr.rfind(':');
                 if (colon != std::string::npos) {
                     p.type = deserializeType(paramStr.substr(0, colon));
                     p.name = intern(paramStr.substr(colon + 1));
@@ -288,7 +307,8 @@ bool readModuleInterface(TranslationUnit& tu,
                 ls >> fieldStr;
                 fieldStr = unescape(fieldStr);
                 Field field;
-                auto colon = fieldStr.find(':');
+                // D1: Use rfind(':') so types containing ':' are parsed correctly.
+                auto colon = fieldStr.rfind(':');
                 if (colon != std::string::npos) {
                     field.type = deserializeType(fieldStr.substr(0, colon));
                     field.name = intern(fieldStr.substr(colon + 1));
@@ -323,6 +343,63 @@ bool readModuleInterface(TranslationUnit& tu,
                 tp.isTypename = isTypename != 0;
                 tp.isVariadic = isVariadic != 0;
                 sd.tplParams.push_back(std::move(tp));
+            }
+            // D1: Deserialize struct methods (signatures only).
+            std::size_t methodCount;
+            ls >> methodCount;
+            for (std::size_t i = 0; i < methodCount; ++i) {
+                Function m;
+                m.body = nullptr;  // declaration only (body in .obj)
+                m.isExported = true;
+                std::string mName;
+                ls >> mName;
+                mName = unescape(mName);
+                std::string retTypeStr;
+                ls >> retTypeStr;
+                m.returnType = deserializeType(unescape(retTypeStr));
+                std::size_t paramCount;
+                ls >> paramCount;
+                for (std::size_t j = 0; j < paramCount; ++j) {
+                    std::string paramStr;
+                    ls >> paramStr;
+                    paramStr = unescape(paramStr);
+                    Param p;
+                    // D1: The format is `<serialized-type>:<param-name>`,
+                    // but the serialized type itself contains ':'
+                    // (e.g. `char:const:ptr1`).  The param name is the
+                    // last `:`-delimited token and contains no ':'.
+                    auto colon = paramStr.rfind(':');
+                    if (colon != std::string::npos) {
+                        p.type = deserializeType(paramStr.substr(0, colon));
+                        p.name = intern(paramStr.substr(colon + 1));
+                    } else {
+                        p.type = deserializeType(paramStr);
+                    }
+                    m.params.push_back(std::move(p));
+                }
+                int isCtor, isDtor, isOperator;
+                ls >> isCtor >> isDtor >> isOperator;
+                m.isCtor = isCtor != 0;
+                m.isDtor = isDtor != 0;
+                m.isOperator = isOperator != 0;
+                if (m.isOperator) {
+                    std::string sym;
+                    ls >> sym;
+                    m.operatorSymbol = unescape(sym);
+                }
+                // Qualify the method name: "string::len"
+                // D1: the writer serializes the fully-qualified method
+                // name (e.g. "string::len"), so we must NOT prepend the
+                // struct name again — otherwise we'd get "string::string::len".
+                std::string qual;
+                if (mName.find("::") != std::string::npos) {
+                    qual = mName;  // already qualified
+                } else {
+                    qual = std::string(sd.name) + "::" + mName;
+                }
+                m.name = intern(qual);
+                m.namespacePrefix = std::string_view();  // methods are not namespaced
+                sd.methods.push_back(std::move(m));
             }
             tu.structs.push_back(std::move(sd));
         } else if (kind == "enum") {

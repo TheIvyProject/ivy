@@ -93,3 +93,41 @@ void __ivy_panic(const char* msg, int line) {
     (void)line;                 /* reserved for future diagnostics */
     abort();
 }
+
+/* ── String operations ─────────────────────────────────────────── */
+
+unsigned long long __ivy_strlen(const char* s) {
+    if (!s) return 0;
+    return strlen(s);
+}
+
+void __ivy_memcpy(void* dst, const void* src, unsigned long long n) {
+    /* We use a simple byte loop rather than calling libc memcpy to
+     * keep the dependency surface minimal.  The optimiser will
+     * vectorise this for large `n`. */
+    char* d = (char*)dst;
+    const char* s = (const char*)src;
+    for (unsigned long long i = 0; i < n; ++i) {
+        d[i] = s[i];
+    }
+}
+
+int __ivy_strcmp(const char* a, const char* b) {
+    if (!a) a = "";
+    if (!b) b = "";
+    /* libc strcmp semantics */
+    while (*a && (*a == *b)) {
+        ++a;
+        ++b;
+    }
+    return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
+char* __ivy_strdup(const char* s) {
+    if (!s) return 0;
+    unsigned long long len = strlen(s);
+    char* buf = (char*)__ivy_alloc(len + 1);
+    if (!buf) return 0;
+    __ivy_memcpy(buf, s, len + 1);   /* include NUL */
+    return buf;
+}

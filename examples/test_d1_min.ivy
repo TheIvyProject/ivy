@@ -1,0 +1,45 @@
+// D1 minimal test — isolate the failing pattern.
+#pragma ivy cnumber
+import string;
+
+int main() {
+    // A: simple ctor call (no chain).
+    string s1 = string("hello");
+    io::println("s1 len: {}", s1.len());
+
+    // B: operator+ (binary, returns string by value).
+    string a = string("a");
+    string b = string("b");
+    string c = a + b;
+    io::println("c: {}", c.cstr());
+
+    // C: chained operator+ (temporary used as this).
+    string d = a + b + a;
+    io::println("d: {}", d.cstr());
+
+    // D: method call on temporary.
+    io::println("temp: {}", (a + b).cstr());
+
+    // E: append (mutating).
+    string e = string("foo");
+    string f = e.append(string("bar"));
+    io::println("f: {}", f.cstr());
+
+    // F: equality.
+    bool eq = string("abc") == string("abc");
+    io::println("eq: {}", eq ? "true" : "false");
+
+    // G: substr.
+    string g = string("hello world").substr(0, 5);
+    io::println("g: {}", g.cstr());
+
+    // H: empty.
+    bool em = string("").empty();
+    io::println("em: {}", em ? "true" : "false");
+
+    // I: chained operator+ with 4 operands.
+    string h = a + b + a + b;
+    io::println("h: {}", h.cstr());
+
+    return 0;
+}

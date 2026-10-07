@@ -57,6 +57,13 @@ public:
         cHeaders_ = headers;
     }
 
+    // D1: Set object file paths for imported modules (e.g. "std/string.obj").
+    // These are passed to the linker so definitions from imported modules
+    // (struct methods, etc.) are resolved at link time.
+    void setModuleObjects(const std::vector<std::string>& paths) {
+        moduleObjPaths_ = paths;
+    }
+
     const std::vector<Diagnostic>& diagnostics() const { return diagnostics_; }
 
     // Overrides the ABI platform (default is auto-detected from the
@@ -113,8 +120,15 @@ private:
     // Compiled with `clang -x c -c` and linked with the Ivy object.
     std::vector<std::string> cHeaders_;
 
+    // D1: Object file paths for imported modules.
+    std::vector<std::string> moduleObjPaths_;
+
     // per-function
     std::unordered_map<std::string_view, std::string> vars_;  // var name -> llvm value
+    // D1: Track which variables are references (slot holds an address)
+    // vs values (slot IS the address).  Used by lowerLValue to decide
+    // whether to load from the slot.
+    std::unordered_map<std::string_view, bool> varIsRef_;
     std::unordered_map<const mir::Block*, std::string> blockNames_;  // block -> "bb<i>"
     std::string curBlock_;
     int temp_ = 0;

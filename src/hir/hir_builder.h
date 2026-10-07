@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/diagnostic.h"
@@ -55,6 +56,10 @@ private:
     // popped together.  Each entry is the variable name; the dtor is
     // looked up via `structs_[type.base].dtor`.
     std::vector<std::vector<std::string_view>> dtorStacks_;
+    // D1: Locals returned via `return <local>` — their ownership is
+    // transferred to the caller (NRVO/copy elision), so emitDtorCalls
+    // must skip them (otherwise the caller receives a dangling pointer).
+    std::unordered_set<std::string_view> returnedLocals_;
     int unsafeDepth_ = 0;
     // A4: When true, use-after-move check is bypassed for IdentRef
     // (used when building the lhs of an assignment — re-assignment
@@ -265,6 +270,12 @@ private:
         std::unique_ptr<hir::Expr> value,
         const hir::Type& optionalType,
         bool hasValue, SourceLoc loc);
+
+    // D1: Wrap a const char* into a string(const char*) constructor
+    // call for implicit conversion from string literals.
+    std::unique_ptr<hir::Expr> wrapStringFromCStr(
+        std::unique_ptr<hir::Expr> value,
+        const hir::Type& stringType, SourceLoc loc);
 
     void requireUnsafe(SourceLoc loc, std::string_view what);
     void checkCall(hir::Expr::Call& call, SourceLoc loc);

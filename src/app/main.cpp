@@ -905,6 +905,9 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     // exported names in the parser. After parsing, the imported
     // declarations are merged into the main TU for HIR/codegen.
     std::vector<std::pair<std::string, ivy::TranslationUnit>> importedModules;
+    // D1: Collect .obj paths for imported modules so the linker can
+    // resolve definitions (struct methods, etc.) at link time.
+    std::vector<std::string> moduleObjPaths;
     {
         for (std::size_t i = 0; i + 2 < tokens.size(); ++i) {
             // Look for: Keyword("import") Identifier(name) Semi
@@ -944,6 +947,20 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                 }
                 parser.predeclareModuleImports(impTu);
                 importedModules.emplace_back(std::move(modName), std::move(impTu));
+                // D1: Record the module's .obj path (same dir, swap extension).
+                {
+                    auto objPath = ivmPath;
+                    objPath.replace_extension(
+#ifdef _WIN32
+                        ".obj"
+#else
+                        ".o"
+#endif
+                    );
+                    if (std::filesystem::exists(objPath)) {
+                        moduleObjPaths.push_back(objPath.string());
+                    }
+                }
                 continue;
             }
             if (i + 1 >= tokens.size() ||
@@ -964,6 +981,20 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             }
             parser.predeclareModuleImports(impTu);
             importedModules.emplace_back(std::move(modName), std::move(impTu));
+            // D1: Record the module's .obj path (same dir, swap extension).
+            {
+                auto objPath = ivmPath;
+                objPath.replace_extension(
+#ifdef _WIN32
+                    ".obj"
+#else
+                    ".o"
+#endif
+                );
+                if (std::filesystem::exists(objPath)) {
+                    moduleObjPaths.push_back(objPath.string());
+                }
+            }
         }
         if (failed) return 1;
     }
@@ -1148,6 +1179,37 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     }
 
     if (linkMode && mir) {
+        // D1: Module interface units (no `main`) should not be linked
+        // into an executable — only the .ivm + .obj are needed.  Fall
+        // back to emitting an object file instead of failing with
+        // LNK1561 (entry point must be defined).
+        if (!mir->hasMain()) {
+            std::string objPath = outPath;
+            if (objPath.empty()) {
+                std::string stem = path.stem().string();
+#ifdef _WIN32
+                objPath = (path.parent_path() / (stem + ".obj")).string();
+#else
+                objPath = (path.parent_path() / (stem + ".o")).string();
+#endif
+            }
+            ivy::CodeGen cg(*mir);
+            if (targetPlatform) cg.setPlatform(*targetPlatform);
+            cg.setCppHeaders(cppHeaders);  // A7
+            cg.setCHeaders(cHeaders);      // C interop
+            cg.setCrtStatic(crtStatic);    // C4: static CRT linking
+            cg.setModuleObjects(moduleObjPaths);  // D1
+            bool ok = cg.emitObject(objPath);
+            for (const ivy::Diagnostic& d : cg.diagnostics()) {
+                std::cerr << diagFile << ":" << d.line << ":" << d.col
+                          << ": error: " << d.message << "\n";
+            }
+            if (ok) {
+                std::cerr << "ivyc: '" << objPath << "' generated\n";
+            }
+            return ok ? 0 : 1;
+        }
+
         // 8.2: Compile and link to a native executable.
         std::string exePath = outPath;
         if (exePath.empty()) {
@@ -1164,6 +1226,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         cg.setCppHeaders(cppHeaders);  // A7
         cg.setCHeaders(cHeaders);      // C interop
         cg.setCrtStatic(crtStatic);    // C4: static CRT linking
+        cg.setModuleObjects(moduleObjPaths);  // D1
         bool ok = cg.linkExecutable(exePath);
         for (const ivy::Diagnostic& d : cg.diagnostics()) {
             std::cerr << diagFile << ":" << d.line << ":" << d.col << ": error: " << d.message

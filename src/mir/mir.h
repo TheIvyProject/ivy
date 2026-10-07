@@ -196,6 +196,19 @@ struct TranslationUnit {
     std::vector<std::unique_ptr<Function>> functions;
     std::vector<EnumInfo> enums;  // for codegen type resolution
     std::vector<StructInfo> structs;  // for codegen type + layout resolution
+
+    // D1: True if this TU defines a `main` entry point (top-level,
+    // non-extern-C).  Module interface units (e.g. `export module string;`)
+    // have no main, so the driver should skip linking an executable.
+    bool hasMain() const {
+        for (const auto& f : functions) {
+            if (f->name == "main" && f->namespacePrefix.empty() &&
+                !f->isExternC && f->hasBody) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 }  // namespace mir

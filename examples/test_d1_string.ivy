@@ -1,0 +1,66 @@
+// D1 test: ivy::string
+//
+// Tests the owned string type with RAII, methods, and operators.
+//
+// Run: ivyc test_d1_string.ivy -o test_d1.exe && ./test_d1.exe
+
+#pragma ivy cnumber
+import string;
+
+int main() {
+    // 1. Default constructor + empty()
+    string s1;
+    if (!s1.empty()) {
+        io::eprintln("FAIL: s1 should be empty");
+        return 1;
+    }
+
+    // 2. Explicit construction from C string literal
+    string s2 = string("Hello");
+    if (s2.len() != 5) {
+        io::eprintln("FAIL: s2.len() should be 5");
+        return 1;
+    }
+
+    // 3. Another explicit construction
+    string s3 = string("World");
+    if (s3.len() != 5) {
+        io::eprintln("FAIL: s3.len() should be 5");
+        return 1;
+    }
+
+    // 4. Concatenation with +
+    string s4 = s2 + string(", ") + s3 + string("!");
+    io::println("Concatenation: {}", s4.cstr());
+
+    // 5. Equality
+    string a = string("Ivy");
+    string b = string("Ivy");
+    if (!(a == b)) {
+        io::eprintln("FAIL: a == b should be true");
+        return 1;
+    }
+
+    // 6. Inequality
+    string c = string("Rust");
+    if (!(a != c)) {
+        io::eprintln("FAIL: a != c should be true");
+        return 1;
+    }
+
+    // 7. Substring
+    string s5 = string("Hello, World!");
+    string sub = s5.substr(7, 5);
+    io::println("Substring: {}", sub.cstr());
+
+    // 8. Append method
+    string s6 = string("foo");
+    string s7 = s6.append(string("bar"));
+    io::println("Append: {}", s7.cstr());
+
+    // 9. cstr() for io::print
+    io::println("Direct: {}", string("direct print").cstr());
+
+    io::println("D1 ivy::string tests passed");
+    return 0;
+}

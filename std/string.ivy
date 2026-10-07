@@ -1,0 +1,166 @@
+// Ivy Standard Library — string module (D1)
+//
+// Owned UTF-8 string with RAII (auto free) and value semantics.
+//
+// The struct holds a heap-allocated buffer (`data_`) plus length and
+// capacity.  Constructors allocate/copy; the destructor frees.  All
+// libc access goes through the __ivy_* runtime symbols so user Ivy
+// code never touches libc directly.
+
+#pragma ivy cnumber
+export module string;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void   __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" int    __ivy_strcmp(const char* a, const char* b);
+
+export struct string {
+    char*  data_;
+    uint64 len_;
+    uint64 cap_;
+
+    // Default constructor — empty string.
+    string() {
+        unsafe {
+            this.data_ = (char*)0;
+        }
+        this.len_ = 0;
+        this.cap_ = 0;
+    }
+
+    // Construct from a C string literal (copies the bytes).
+    string(const char* s) {
+        unsafe {
+            this.data_ = (char*)0;
+            uint64 n = __ivy_strlen(s);
+            if (n > 0) {
+                char* buf = (char*)__ivy_alloc(n + 1);
+                __ivy_memcpy(buf, s, n + 1);
+                this.data_ = buf;
+                this.len_ = n;
+                this.cap_ = n + 1;
+            } else {
+                this.len_ = 0;
+                this.cap_ = 0;
+            }
+        }
+    }
+
+    // Copy constructor — deep copy of the buffer.
+    string(string other) {
+        unsafe {
+            this.data_ = (char*)0;
+            if (other.data_ != (char*)0) {
+                uint64 n = other.len_;
+                char* buf = (char*)__ivy_alloc(n + 1);
+                __ivy_memcpy(buf, other.data_, n + 1);
+                this.data_ = buf;
+                this.len_ = n;
+                this.cap_ = n + 1;
+            } else {
+                this.len_ = 0;
+                this.cap_ = 0;
+            }
+        }
+    }
+
+    // Destructor — release the buffer.
+    ~string() {
+        unsafe {
+            __ivy_free(this.data_);
+            this.data_ = (char*)0;
+            this.len_ = 0;
+            this.cap_ = 0;
+        }
+    }
+
+    // Length in bytes (UTF-8 code units).
+    uint64 len() {
+        return this.len_;
+    }
+
+    // True if the string is empty.
+    bool empty() {
+        return this.len_ == 0;
+    }
+
+    // Raw C pointer (read-only view; ownership stays with `this`).
+    const char* cstr() {
+        return this.data_;
+    }
+
+    // Append `other` to the end of this string, returning a new string.
+    string append(string other) {
+        uint64 total = this.len_ + other.len_;
+        unsafe {
+            char* buf = (char*)__ivy_alloc(total + 1);
+            if (this.data_ != (char*)0) {
+                __ivy_memcpy(buf, this.data_, this.len_);
+            }
+            if (other.data_ != (char*)0) {
+                __ivy_memcpy(buf + this.len_, other.data_, other.len_);
+            }
+            // NUL-terminate
+            char zero = 0;
+            __ivy_memcpy(buf + total, &zero, 1);
+            string result;
+            result.data_ = buf;
+            result.len_ = total;
+            result.cap_ = total + 1;
+            return result;
+        }
+        return string();
+    }
+
+    // Substring of `count` bytes starting at `start`.
+    string substr(uint64 start, uint64 count) {
+        if (start >= this.len_) {
+            return string();
+        }
+        uint64 avail = this.len_ - start;
+        if (count > avail) {
+            count = avail;
+        }
+        unsafe {
+            char* buf = (char*)__ivy_alloc(count + 1);
+            __ivy_memcpy(buf, this.data_ + start, count);
+            // NUL-terminate
+            char zero = 0;
+            __ivy_memcpy(buf + count, &zero, 1);
+            string result;
+            result.data_ = buf;
+            result.len_ = count;
+            result.cap_ = count + 1;
+            return result;
+        }
+        return string();
+    }
+
+    // Equality — lexicographic compare.
+    bool operator==(string other) {
+        if (this.len_ != other.len_) {
+            return false;
+        }
+        unsafe {
+            if (this.data_ == other.data_) {
+                return true;
+            }
+            if (this.data_ == (char*)0 || other.data_ == (char*)0) {
+                return false;
+            }
+            return __ivy_strcmp(this.data_, other.data_) == 0;
+        }
+    }
+
+    // Inequality — the negation of ==.
+    bool operator!=(string other) {
+        return !(this == other);
+    }
+
+    // Concatenation — `a + b` returns a new string.
+    string operator+(string other) {
+        return this.append(other);
+    }
+};

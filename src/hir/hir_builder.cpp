@@ -938,6 +938,9 @@ void HirBuilder::emitDtorCalls(std::size_t uptoScope, SourceLoc loc,
     for (std::size_t i = dtorStacks_.size(); i-- > uptoScope;) {
         const auto& names = dtorStacks_[i];
         for (auto it = names.rbegin(); it != names.rend(); ++it) {
+            // D1: NRVO — skip locals returned via `return <local>`
+            // (their ownership has been transferred to the caller).
+            if (returnedLocals_.count(*it)) continue;
             // Look up the variable's type to find its dtor.
             hir::Type varType;
             for (auto sc = scopes_.rbegin(); sc != scopes_.rend(); ++sc) {
@@ -1059,6 +1062,19 @@ bool HirBuilder::isAssignable(const hir::Type& to, const hir::Type& from) const 
         return isNumeric(to) && isNumeric(from);
     }
     if (to.pointerDepth != from.pointerDepth) return false;
+    // D1: T* → void* (and const T* → const void*).  C/C++ allows
+    // implicit conversion from any object pointer to void*.  This is
+    // needed so Ivy code can call __ivy_memcpy/__ivy_free with `char*`.
+    if (to.pointerDepth > 0 && to.base == "void") {
+        // const T* → const void*  : const qualifier must be compatible.
+        // T*       → void*        : ok (writing through non-const void*
+        //                            would require unsafe, but the
+        //                            pointer conversion itself is safe).
+        // T*       → const void*  : ok (adding const is always allowed).
+        if (to.isConst || !from.isConst) return true;
+        // T* → void* (non-const) — allowed.
+        return true;
+    }
     if (to.base != from.base) return false;
     if (!to.isConst && from.isConst) return false;
     return true;
@@ -1153,6 +1169,21 @@ std::unique_ptr<hir::Expr> HirBuilder::wrapOptionalValue(
         il.elements[1] = std::move(value);
     }
     out->type = optionalType;
+    return out;
+}
+
+// D1: Wrap a const char* into a string(const char*) constructor call.
+// This allows implicit conversion from string literals to ivy::string:
+//   string s = "Hello";   // → string s = string("Hello");
+std::unique_ptr<hir::Expr> HirBuilder::wrapStringFromCStr(
+    std::unique_ptr<hir::Expr> value,
+    const hir::Type& stringType, SourceLoc loc) {
+    auto out = std::make_unique<hir::Expr>();
+    out->loc = loc;
+    auto& call = out->node.emplace<hir::Expr::Call>();
+    call.callee = "string";
+    call.args.push_back(std::move(value));
+    out->type = stringType;
     return out;
 }
 
@@ -1296,6 +1327,17 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildDeclaration(const Stmt::Decl& d, Sou
                             decl.init = wrapOptionalValue(std::move(decl.init), decl.type, true, loc);
                         }
                     }
+                }
+                // D1: Auto-wrap const char* → string (implicit conversion
+                // from string literals to ivy::string).  When the variable
+                // is of type `string` and the initializer is a const char*
+                // (e.g. a string literal), wrap it in a Call to the
+                // string(const char*) constructor.
+                if (decl.type.base == "string" &&
+                    decl.init->type.base == "char" &&
+                    decl.init->type.isConst &&
+                    decl.init->type.pointerDepth == 1) {
+                    decl.init = wrapStringFromCStr(std::move(decl.init), decl.type, loc);
                 }
             }
         }
@@ -1623,6 +1665,23 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
         error(loc, "function '" + std::string(current_->name) +
                        "' must return a value of type '" +
                        typeToString(current_->returnType) + "'");
+    }
+    // D1: NRVO / copy elision for `return <local>` of an owning struct.
+    // When the returned value is a local variable of the same type as
+    // the function's return type, the local's ownership is transferred
+    // to the caller — the dtor must NOT run for it (otherwise the
+    // caller receives a dangling pointer).  We mark the variable as
+    // "returned" so emitDtorCalls skips it.  This mirrors C++17's
+    // guaranteed copy elision for `return T(name)`.
+    if (ret.value) {
+        const hir::Type& rt2 = current_->returnType;
+        if (!rt2.isReference && rt2.pointerDepth == 0 &&
+            std::holds_alternative<hir::Expr::IdentRef>(ret.value->node)) {
+            const auto& ir = std::get<hir::Expr::IdentRef>(ret.value->node);
+            if (ret.value->type.base == rt2.base && !ret.value->type.isReference) {
+                returnedLocals_.insert(ir.name);  // D1: NRVO — skip dtor
+            }
+        }
     }
     // RAII: before returning, run destructors for all live locals in
     // every enclosing scope (innermost first).  This mirrors C++ where
@@ -2755,9 +2814,18 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             }
             // Only attempt if `bareName` is NOT a known function/template
             // (otherwise `a()` for a function `a` would be misread).
+            // D1: Also skip if `bareName` is a struct with constructors —
+            // `Type(args)` is a constructor call, handled below.
             bool isFunc = !resolveOverloads(bareName).empty() ||
                           lookupTemplate(bareName) != nullptr;
+            bool isStructCtor = false;
             if (!isFunc) {
+                auto sit = structs_.find(bareName);
+                if (sit != structs_.end() && !sit->second.ctors.empty()) {
+                    isStructCtor = true;
+                }
+            }
+            if (!isFunc && !isStructCtor) {
                 // Build the callee as an expression to discover its type.
                 auto calleeExpr = buildExpr(*callee);
                 if (calleeExpr && structs_.contains(calleeExpr->type.base)) {

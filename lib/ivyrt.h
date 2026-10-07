@@ -64,6 +64,25 @@ char* __ivy_fmt_bool(_Bool b);
  * for future source-location diagnostics. */
 void __ivy_panic(const char* msg, int line);
 
+/* ── String operations ─────────────────────────────────────────── */
+/* Thin wrappers over libc string functions, exposed to Ivy code
+ * (std/string.ivy) so user code never calls libc directly.        */
+
+/* Length of a NUL-terminated C string. */
+unsigned long long __ivy_strlen(const char* s);
+
+/* Copy `n` bytes from `src` to `dst`.  The buffers must not overlap. */
+void __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+
+/* Compare two NUL-terminated C strings.  Returns 0 if equal, <0 if
+ * a < b, >0 if a > b (lexicographic, like libc strcmp). */
+int __ivy_strcmp(const char* a, const char* b);
+
+/* Duplicate a NUL-terminated string: allocate `len+1` bytes via
+ * __ivy_alloc, copy `s` into it, return the new buffer.  Returns
+ * null if `s` is null or allocation fails. */
+char* __ivy_strdup(const char* s);
+
 #ifdef __cplusplus
 }
 #endif

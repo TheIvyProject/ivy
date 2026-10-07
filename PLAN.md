@@ -148,7 +148,7 @@ Stdlib viết bằng Ivy, đủ để viết app thực dụng.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| D1 | **`ivy::string`** | ★★★ | Owned string, UTF-8. Methods: `len()`, `empty()`, `append()`, `concat()`, `substr()`, `==`/`!=`. RAII (auto free). Move semantics. Theo OLD_PLAN.md §10.4 |
+| D1 ✅ | **`ivy::string`** | ★★★ | Owned string, UTF-8. Methods: `len()`, `empty()`, `append()`, `concat()`, `substr()`, `==`/`!=`. RAII (auto free). Move semantics. Theo OLD_PLAN.md §10.4 |
 | D2 | **`ivy::vector<T>`** | ★★★ | Dynamic array. Methods: `push()`, `pop()`, `len()`, `[]` (bounds-checked), `iter()`. RAII. Move semantics. Bounds check inline → `__ivy_panic` nếu out-of-range (skip trong unsafe) |
 | D3 | **`ivy::slice<T>`** | ★★ | View vào array/vector, không own. Bounds-checked. Thay raw pointer + length. `T[N]` array → `slice<T>` khi pass to function |
 | D4 | **`ivy::unique_ptr<T>`** | ★★★ | RAII smart pointer. Move-only (không copy). `*` deref (chỉ unsafe hoặc qua safe accessor). Auto free tại scope-exit. Dựa trên B3 move semantics |
