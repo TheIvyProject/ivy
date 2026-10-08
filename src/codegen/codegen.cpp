@@ -945,8 +945,9 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
     const auto& n = e.node;
     using M = mir::Expr;
     // A5: Reference return from a function call — the call result is
-    // already an address (reference), so lower it as an expression.
-    // This handles `const T& r = func(...)` where func returns `const T&`.
+    // already an address (reference), so we emit the call directly
+    // and return the pointer (no load).  This handles `v[i] = val`
+    // where operator[](i) returns T&, and `const T& r = func(...)`.
     if (std::holds_alternative<M::Call>(n)) {
         // D1: Temporary materialization.  When a call returns a struct
         // *by value* (e.g. `a + b` where operator+ returns `string`),
@@ -955,7 +956,10 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
         // Allocate a temporary slot, store the call result, and return
         // the slot address.
         if (e.type.isReference) {
-            return lowerExpr(e);
+            // D2: Emit the call directly here (not via lowerExpr, which
+            // would load the value).  The result is a pointer to the
+            // referenced object — that's the lvalue address we need.
+            return lowerCallPtr(e);
         }
         const std::string rt = llvmType(e.type);
         if (rt == "void") {
@@ -1076,6 +1080,16 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
         error(e.loc, std::move(dbg));
     }
     return "null";
+}
+
+std::string CodeGen::lowerCallPtr(const mir::Expr& e) {
+    // D2: Lower a reference-returning call and return the raw pointer
+    // (no auto-load).  Set suppressRefLoad_ so lowerExpr's Call handler
+    // returns the `call ptr @fn(...)` result directly.
+    suppressRefLoad_ = true;
+    std::string ptr = lowerExpr(e);
+    suppressRefLoad_ = false;
+    return ptr;
 }
 
 std::string CodeGen::lowerExpr(const mir::Expr& e) {
@@ -1405,6 +1419,13 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             }
             std::string t = newTemp();
             emitLine(t + " = call " + rt + " " + fnPtr + "(" + args + ")");
+            // D2: Load value from reference return (same as non-virtual).
+            if (e.type.isReference && !suppressRefLoad_) {
+                const std::string valTy = valueLlvmType(e.type);
+                std::string loaded = newTemp();
+                emitLine(loaded + " = load " + valTy + ", ptr " + t);
+                return loaded;
+            }
             return t;
         }
         // Look up the callee's parameter types (to handle reference params
@@ -1576,6 +1597,16 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         }
         std::string t = newTemp();
         emitLine(t + " = call " + rt + " @" + sym + "(" + args + ")");
+        // D2: If the function returns a reference (T&), the call result
+        // is a pointer.  Load the value so the expression can be used
+        // as an rvalue (e.g. `v[i] != 10`).  LHS of assignment goes
+        // through lowerLValue/lowerCallPtr which suppresses this load.
+        if (e.type.isReference && !suppressRefLoad_) {
+            const std::string valTy = valueLlvmType(e.type);
+            std::string loaded = newTemp();
+            emitLine(loaded + " = load " + valTy + ", ptr " + t);
+            return loaded;
+        }
         return t;
     }
     if (std::holds_alternative<M::Index>(n)) {

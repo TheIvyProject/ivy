@@ -138,6 +138,9 @@ private:
     // true when the current instruction is inside an [[ivy::unsafe]] block;
     // array bounds checks are suppressed in this mode.
     bool inUnsafe_ = false;
+    // D2: When true, lowerExpr suppresses the auto-load for reference-
+    // returning calls.  Used by lowerCallPtr to get the raw pointer.
+    bool suppressRefLoad_ = false;
     // true when the __ivy_panic function declaration has been emitted.
     bool declaredIvyPanic_ = false;
 
@@ -328,6 +331,10 @@ private:
     // Lowers an expression to its address (an SSA name pointing to the
     // storage). Used for lvalues in assignment / member access context.
     std::string lowerLValue(const mir::Expr& e);
+    // D2: Lower a Call expression that returns a reference (T&).
+    // Emits the call and returns the raw pointer (no load).  Used by
+    // lowerLValue so `v[i] = val` stores through the reference address.
+    std::string lowerCallPtr(const mir::Expr& e);
     // Lower a struct aggregate initializer into the given storage slot.
     // Emits a `store ... zeroinitializer` first (so unspecified trailing
     // fields are zero), then GEP + store for each provided element.

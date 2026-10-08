@@ -1,0 +1,109 @@
+// Ivy Standard Library — vector<T> module (D2)
+//
+// Dynamic array with RAII (auto free) and value semantics.
+//
+// The struct holds a heap-allocated buffer (`data_`) plus length and
+// capacity.  push() grows geometrically (2x) when full.  pop() shrinks
+// length by one (no realloc).  operator[] is bounds-checked and calls
+// __ivy_panic on out-of-range (skipped inside `unsafe` blocks).
+//
+// All libc access goes through the __ivy_* runtime symbols so user
+// Ivy code never touches libc directly.
+
+#pragma ivy cnumber
+export module vector;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" void   __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" void   __ivy_panic(const char* msg, int line);
+
+export template <typename T>
+struct vector {
+    T*     data_;
+    uint64 len_;
+    uint64 cap_;
+
+    // Default constructor — empty vector.
+    vector() {
+        unsafe {
+            this.data_ = (T*)0;
+        }
+        this.len_ = 0;
+        this.cap_ = 0;
+    }
+
+    // Copy constructor — deep copy of the buffer.
+    vector(vector other) {
+        unsafe {
+            this.data_ = (T*)0;
+            this.len_ = other.len_;
+            this.cap_ = other.cap_;
+            if (other.cap_ > 0) {
+                this.data_ = (T*)__ivy_alloc(other.cap_ * sizeof(T));
+                __ivy_memcpy(this.data_, other.data_, other.len_ * sizeof(T));
+            }
+        }
+    }
+
+    // Destructor — release the buffer.
+    ~vector() {
+        unsafe {
+            __ivy_free(this.data_);
+            this.data_ = (T*)0;
+            this.len_ = 0;
+            this.cap_ = 0;
+        }
+    }
+
+    // Number of elements.
+    uint64 len() {
+        return this.len_;
+    }
+
+    // Push an element to the end.  Grows capacity geometrically (2x)
+    // when the buffer is full.
+    void push(T value) {
+        unsafe {
+            if (this.len_ >= this.cap_) {
+                uint64 newCap = this.cap_ * 2;
+                if (newCap == 0) {
+                    newCap = 4;
+                }
+                T* buf = (T*)__ivy_alloc(newCap * sizeof(T));
+                if (this.data_ != (T*)0) {
+                    __ivy_memcpy(buf, this.data_, this.len_ * sizeof(T));
+                }
+                __ivy_free(this.data_);
+                this.data_ = buf;
+                this.cap_ = newCap;
+            }
+            // Store the value at the next slot.
+            // We need a pointer to data_[len_] and assign to it.
+            char* slot = (char*)this.data_ + this.len_ * sizeof(T);
+            // Copy the value bytes into the slot.
+            __ivy_memcpy(slot, &value, sizeof(T));
+            this.len_ = this.len_ + 1;
+        }
+    }
+
+    // Remove the last element.  No capacity shrink.
+    void pop() {
+        if (this.len_ > 0) {
+            this.len_ = this.len_ - 1;
+        }
+    }
+
+    // Bounds-checked element access.  Returns a reference to the
+    // element at index `i`.  Calls __ivy_panic if out of range.
+    // The bounds check is skipped inside an `unsafe` block.
+    T& operator[](uint64 i) {
+        if (this.len_ == 0 || i >= this.len_) {
+            __ivy_panic("vector index out of range", 0);
+        }
+        unsafe {
+            char* slot = (char*)this.data_ + i * sizeof(T);
+            return *(T*)slot;
+        }
+    }
+};

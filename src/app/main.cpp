@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -1016,6 +1017,122 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         for (auto& e : impTu.enums) tu->enums.push_back(std::move(e));
         for (auto& u : impTu.usingDecls) tu->usingDecls.push_back(std::move(u));
         for (auto& c : impTu.concepts) tu->concepts.push_back(std::move(c));
+    }
+
+    // D2: For template structs imported from modules, the .ivm file
+    // contains only method signatures (no bodies).  When the consumer
+    // instantiates a template (e.g. `vector<int32_t>`), the HIR builder
+    // needs the AST method bodies to generate code.  We locate the
+    // module's .ivy source (same directory as the .ivm), parse it, and
+    // splice the method bodies into the corresponding template struct
+    // declarations in the main TU.
+    {
+        // Collect template struct names that need bodies.
+        std::unordered_map<std::string, ivy::StructDecl*> tplStructs;
+        for (auto& s : tu->structs) {
+            if (!s.tplParams.empty() && s.isExported) {
+                bool needsBodies = false;
+                for (const auto& m : s.methods) {
+                    if (!m.body) { needsBodies = true; break; }
+                }
+                if (needsBodies) {
+                    tplStructs[std::string(s.name)] = &s;
+                }
+            }
+        }
+        if (!tplStructs.empty()) {
+            // For each imported module, try to load .ivy source.
+            // Search: include paths, std/ dir, current dir.
+            std::vector<std::filesystem::path> srcDirs = includePaths;
+            srcDirs.push_back(std::filesystem::current_path() / "std");
+            srcDirs.push_back(std::filesystem::current_path());
+            for (const auto& [modName, _] : importedModules) {
+                // Find .ivy source.
+                bool found = false;
+                for (const auto& dir : srcDirs) {
+                    auto srcPath = dir / (modName + ".ivy");
+                    if (!std::filesystem::exists(srcPath)) continue;
+                    // Parse the source file (lex → preprocess → parse).
+                    std::ifstream srcIn(srcPath);
+                    if (!srcIn) break;
+                    std::string srcText((std::istreambuf_iterator<char>(srcIn)),
+                                         std::istreambuf_iterator<char>());
+                    ivy::Lexer srcLexer(srcText);
+                    std::vector<ivy::Token> srcTokens = srcLexer.tokenize();
+                    ivy::Preprocessor pp2(std::move(srcTokens), srcPath, includePaths);
+                    srcTokens = pp2.run();
+                    ivy::Parser srcParser(srcTokens, pp2.cnumberEnabled());
+                    auto srcTu = srcParser.parse();
+                    if (!srcTu) break;
+                    // Splice method bodies from source structs into
+                    // the imported template structs.
+                    for (auto& srcS : srcTu->structs) {
+                        auto it = tplStructs.find(std::string(srcS.name));
+                        if (it == tplStructs.end()) continue;
+                        auto* dst = it->second;
+                        for (auto& srcM : srcS.methods) {
+                            for (auto& dstM : dst->methods) {
+                                // Match by qualified name suffix.
+                                auto dstBare = dstM.name.substr(
+                                    dstM.name.rfind("::") + 2);
+                                auto srcBare = srcM.name.substr(
+                                    srcM.name.rfind("::") + 2);
+                                if (dstBare == srcBare &&
+                                    dstM.params.size() == srcM.params.size() &&
+                                    !dstM.body && srcM.body) {
+                                    // Body is unique_ptr<Stmt::Compound> —
+                                    // deep-copy by cloning each statement.
+                                    dstM.body = std::make_unique<ivy::Stmt::Compound>();
+                                    for (const auto& st : srcM.body->stmts) {
+                                        if (st) dstM.body->stmts.push_back(
+                                            ivy::cloneStmt(*st));
+                                    }
+                                    // Also copy member inits for constructors.
+                                    if (srcM.isCtor) {
+                                        for (const auto& mi : srcM.memberInits) {
+                                            ivy::Function::MemberInit nmi;
+                                            nmi.name = mi.name;
+                                            if (mi.arg) nmi.arg = ivy::cloneExpr(*mi.arg);
+                                            dstM.memberInits.push_back(std::move(nmi));
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // D2: Also splice extern "C" function declarations
+                    // (e.g. __ivy_alloc, __ivy_free) from the source
+                    // so HIR can resolve calls inside template bodies.
+                    for (auto& srcF : srcTu->functions) {
+                        if (!srcF.isExternC) continue;
+                        // Skip if already declared in the main TU.
+                        bool dup = false;
+                        for (const auto& dstF : tu->functions) {
+                            if (dstF.name == srcF.name) { dup = true; break; }
+                        }
+                        if (!dup) {
+                            // Clone the declaration (no body for extern).
+                            ivy::Function decl;
+                            decl.name = srcF.name;
+                            decl.returnType = srcF.returnType;
+                            for (const auto& p : srcF.params) {
+                                ivy::Param np;
+                                np.type = p.type;
+                                np.name = p.name;
+                                np.loc = p.loc;
+                                decl.params.push_back(std::move(np));
+                            }
+                            decl.isExternC = true;
+                            decl.isExported = false;
+                            decl.loc = srcF.loc;
+                            tu->functions.push_back(std::move(decl));
+                        }
+                    }
+                    break;  // Found source for this module.
+                }
+            }
+        }
     }
 
     // A7: Collect C++ headers from `import cpp <header>` declarations.

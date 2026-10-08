@@ -86,6 +86,11 @@ private:
         std::vector<std::string> paramNames;  // per-element param names
     };
     std::unordered_map<std::string_view, PackInfo> currentPackMapping_;
+    // D2: When building a template method body, this maps template
+    // parameter names (e.g. "T") to their concrete instantiated types
+    // (e.g. "int32_t").  resolveTypeAlias consults this so that `(T*)0`
+    // in a method body resolves to the substituted type.
+    std::unordered_map<std::string_view, hir::Type> currentTypeMapping_;
 
     // Enum registry. Maps enum type name → EnumDef (underlying type +
     // constant value map). For unscoped enums, constants are also

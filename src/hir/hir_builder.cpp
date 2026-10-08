@@ -490,10 +490,25 @@ void HirBuilder::buildUsing(const UsingDecl& ud) {
 }
 
 hir::Type HirBuilder::resolveTypeAlias(const hir::Type& type) const {
+    // If type.base is empty, nothing to do.
+    if (type.base.empty()) return type;
+    // D2: If we're inside a template method body, substitute template
+    // type parameters (e.g. T → int32_t) before resolving aliases.
+    if (!currentTypeMapping_.empty()) {
+        auto it = currentTypeMapping_.find(type.base);
+        if (it != currentTypeMapping_.end()) {
+            hir::Type subst = it->second;
+            // Preserve qualifiers from the usage site.
+            if (type.isConst) subst.isConst = true;
+            if (type.isReference) subst.isReference = true;
+            subst.pointerDepth += type.pointerDepth;
+            // Recurse in case the substituted type is also an alias.
+            return resolveTypeAlias(subst);
+        }
+    }
     // If type.base is a registered alias, replace it with the aliased
     // type.  Preserve const/ref/pointer qualifiers from the *usage*
     // (e.g. `const Int&` → `const int32_t&`).  Recurse for alias chains.
-    if (type.base.empty()) return type;
     auto it = typeAliases_.find(type.base);
     if (it == typeAliases_.end()) return type;
     hir::Type expanded = it->second;
@@ -3399,7 +3414,15 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                     return u->isPrefix && u->op == "*";
                 return false;
             }();
-            if (!lhsIsVar && !lhsIsIdx && !lhsIsMem && !lhsIsDeref) {
+            // D2: Allow operator[] call returning T& as assignable lhs.
+            // This handles `v[i] = val` when v.operator[](i) returns T&.
+            const bool lhsIsCallRef = [&] {
+                if (auto* c = std::get_if<hir::Expr::Call>(&as.lhs->node))
+                    return as.lhs->type.isReference;
+                return false;
+            }();
+            if (!lhsIsVar && !lhsIsIdx && !lhsIsMem && !lhsIsDeref &&
+                !lhsIsCallRef) {
                 error(e.loc, "left-hand side of assignment is not assignable");
             } else if (as.op == "=") {
                 if (as.lhs->type.isConst && as.lhs->type.pointerDepth == 0) {
@@ -5179,6 +5202,12 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     stringStorage_.push_back(std::move(mangled));
     cloned.name = stringStorage_.back();
 
+    // D2: Also map the template struct name itself (e.g. "vector") to
+    // the mangled specialization name (e.g. "vector_int32_t_") so that
+    // method params like `vector other` (copy ctor) get substituted.
+    mapping[tplName] = hir::Type{};
+    mapping[tplName].base = cloned.name;
+
     // Substitute field types.
     for (const Field& f : tplStruct.fields) {
         Field cf;
@@ -5240,6 +5269,12 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     // only walks `ast_.structs` — cloned structs are not in the AST).
     // We resolve each cloned method's HIR function by name and build
     // its body now, while `currentNsPrefix_` is set correctly.
+    //
+    // D2: Set `currentTypeMapping_` so that `resolveTypeAlias` can
+    // substitute template type parameters (e.g. T → int32_t) inside
+    // method bodies (cast expressions, local declarations, etc.).
+    decltype(currentTypeMapping_) savedMapping = std::move(currentTypeMapping_);
+    currentTypeMapping_ = mapping;
     for (const Function& mf : cloned.methods) {
         if (!mf.body) continue;
         hir::Function* fn = nullptr;
@@ -5288,6 +5323,7 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
             }
         }
     }
+    currentTypeMapping_ = std::move(savedMapping);
     currentNsPrefix_ = savedNs;
     current_ = savedCurrent;
     hasReturnInBody_ = savedHasReturn;

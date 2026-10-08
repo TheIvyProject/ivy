@@ -3026,21 +3026,39 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
     if (at(TokenKind::LParen)) {
         // 8.4: C-style cast `(type)expr` — only valid inside
         // [[ivy::unsafe]] blocks (checked at HIR build time).
-        // Detect: `(` followed by a type keyword (built-in types only;
-        // user-defined struct/enum casts use static_cast instead).
+        // Detect: `(` followed by a type (built-in keyword type OR
+        // user-defined identifier type: struct, enum, alias, or
+        // template type parameter like `T`).
         // We must check this BEFORE fold-expression detection so that
-        // `(int)x` is parsed as a cast, not a parenthesized expression.
-        if (peek(1).kind == TokenKind::Keyword &&
-            (isCStyleTypeKeyword(peek(1).lexeme) ||
-             peek(1).lexeme == "bool" || peek(1).lexeme == "void" ||
-             peek(1).lexeme.rfind("int", 0) == 0 ||
-             peek(1).lexeme.rfind("uint", 0) == 0 ||
-             peek(1).lexeme.rfind("float", 0) == 0 ||
-             peek(1).lexeme == "bfloat16" || peek(1).lexeme == "bfloat16_t" ||
-             peek(1).lexeme == "size" || peek(1).lexeme == "size_t" ||
-             peek(1).lexeme == "ptrdiff_t" || peek(1).lexeme == "iptr" ||
-             peek(1).lexeme == "uptr" || peek(1).lexeme == "nullptr_t" ||
-             peek(1).lexeme == "max_align_t")) {
+        // `(int)x` or `(T*)0` is parsed as a cast, not a paren expr.
+        auto isIdentTypeName = [&](std::string_view id) -> bool {
+            for (const auto& sn : structNames_)
+                if (sn == id) return true;
+            for (const auto& en : enumNames_)
+                if (en == id) return true;
+            for (const auto& tn : typeAliases_)
+                if (tn == id) return true;
+            for (const auto& tn : templateParamNames_)
+                if (tn == id) return true;
+            return false;
+        };
+        bool isCastType =
+            // Built-in keyword types
+            (peek(1).kind == TokenKind::Keyword &&
+             (isCStyleTypeKeyword(peek(1).lexeme) ||
+              peek(1).lexeme == "bool" || peek(1).lexeme == "void" ||
+              peek(1).lexeme.rfind("int", 0) == 0 ||
+              peek(1).lexeme.rfind("uint", 0) == 0 ||
+              peek(1).lexeme.rfind("float", 0) == 0 ||
+              peek(1).lexeme == "bfloat16" || peek(1).lexeme == "bfloat16_t" ||
+              peek(1).lexeme == "size" || peek(1).lexeme == "size_t" ||
+              peek(1).lexeme == "ptrdiff_t" || peek(1).lexeme == "iptr" ||
+              peek(1).lexeme == "uptr" || peek(1).lexeme == "nullptr_t" ||
+              peek(1).lexeme == "max_align_t")) ||
+            // User-defined identifier types (template params, structs, etc.)
+            (peek(1).kind == TokenKind::Identifier &&
+             isIdentTypeName(peek(1).lexeme));
+        if (isCastType) {
             next();  // consume '('
             Type targetType = parseType();
             expect(TokenKind::RParen, "expected ')' after C-style cast type");
