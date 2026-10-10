@@ -1,0 +1,132 @@
+// D3 test: ivy::slice<T>
+//
+// Tests the non-owning view type with bounds-checked access.
+//
+// Run: ivyc test_d3_slice.ivy -o test_d3_slice.exe && ./test_d3_slice.exe
+
+#pragma ivy cnumber
+import slice;
+import vector;
+
+// Function taking a slice — array decays to slice when passed.
+int32_t sumSlice(slice<int32_t> s) {
+    int32_t total = 0;
+    for (int32_t x : s) {
+        total = total + x;
+    }
+    return total;
+}
+
+int main() {
+    // 1. Default constructor
+    slice<int32_t> s1;
+    if (s1.len() != 0) {
+        io::println("FAIL: s1.len() should be 0");
+        return 1;
+    }
+
+    // 2. Construct from raw pointer + length (using a fixed-size array)
+    int32_t arr[5];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+
+    unsafe {
+        slice<int32_t> s2 = slice<int32_t>(arr, 5);
+        if (s2.len() != 5) {
+            io::println("FAIL: s2.len() should be 5");
+            return 1;
+        }
+
+        // 3. Element access via operator[]
+        if (s2[0] != 1) {
+            io::println("FAIL: s2[0] should be 1");
+            return 1;
+        }
+        if (s2[4] != 5) {
+            io::println("FAIL: s2[4] should be 5");
+            return 1;
+        }
+
+        // 4. Modify via operator[] (reference)
+        s2[2] = 99;
+        if (s2[2] != 99) {
+            io::println("FAIL: s2[2] should be 99 after modify");
+            return 1;
+        }
+        if (arr[2] != 99) {
+            io::println("FAIL: arr[2] should be 99 (slice modifies underlying array)");
+            return 1;
+        }
+
+        // 5. Sub-slice
+        slice<int32_t> s3 = s2.subslice(1, 4);
+        if (s3.len() != 3) {
+            io::println("FAIL: s3.len() should be 3");
+            return 1;
+        }
+        if (s3[0] != 2) {
+            io::println("FAIL: s3[0] should be 2");
+            return 1;
+        }
+        if (s3[2] != 4) {
+            io::println("FAIL: s3[2] should be 4");
+            return 1;
+        }
+
+        // 6. Range-based for over slice
+        int32_t sum = 0;
+        for (int32_t x : s2) {
+            sum = sum + x;
+        }
+        // arr is {1, 2, 99, 4, 5} → sum = 111
+        if (sum != 111) {
+            io::println("FAIL: range-for sum should be 111");
+            return 1;
+        }
+
+        // 7. Pass slice to function
+        int32_t total = sumSlice(s2);
+        if (total != 111) {
+            io::println("FAIL: sumSlice should be 111");
+            return 1;
+        }
+
+        // 8. Slice from vector data
+        vector<int32_t> v;
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        slice<int32_t> sv = slice<int32_t>(v.data_, v.len());
+        if (sv.len() != 3) {
+            io::println("FAIL: sv.len() should be 3");
+            return 1;
+        }
+        if (sv[0] != 10 || sv[1] != 20 || sv[2] != 30) {
+            io::println("FAIL: slice from vector data mismatch");
+            return 1;
+        }
+        // Modify through slice affects vector
+        sv[1] = 999;
+        if (v[1] != 999) {
+            io::println("FAIL: vector[1] should be 999 after slice modify");
+            return 1;
+        }
+
+        // 9. Sub-slice of sub-slice
+        slice<int32_t> s4 = s2.subslice(0, 3).subslice(1, 3);
+        if (s4.len() != 2) {
+            io::println("FAIL: s4.len() should be 2");
+            return 1;
+        }
+        if (s4[0] != 2) {
+            io::println("FAIL: s4[0] should be 2");
+            return 1;
+        }
+    }
+
+    io::println("D3 ivy::slice tests passed");
+    return 0;
+}

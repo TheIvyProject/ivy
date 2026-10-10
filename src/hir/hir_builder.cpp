@@ -1504,13 +1504,35 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildRangeFor(const Stmt::RangeFor& rf, S
 
     const hir::Type& rangeType = rangeExpr->type;
     const bool isArray = (rangeType.arraySize > 0);
+
+    // D2-iter: For non-array types (e.g. vector<T>), check if the type
+    // has a `len()` method and `operator[]`.  If so, desugar into an
+    // index-based loop using `range.len()` as the bound and
+    // `range[__rfiN]` as the element access.
     if (!isArray) {
-        error(loc, "range-based for currently supports only fixed-size arrays "
-                    "(T[N]); got non-array range expression");
-        auto err = std::make_unique<hir::Stmt>();
-        err->loc = loc;
-        err->node = hir::Stmt::Null{};
-        return err;
+        // Check if rangeType is a struct with len() and operator[].
+        auto sit = structs_.find(rangeType.base);
+        const StructDef* sd = (sit != structs_.end()) ? &sit->second : nullptr;
+        if (!sd) {
+            error(loc, "range-based for requires a fixed-size array (T[N]) "
+                        "or a struct with len() and operator[] methods");
+            auto err = std::make_unique<hir::Stmt>();
+            err->loc = loc;
+            err->node = hir::Stmt::Null{};
+            return err;
+        }
+        bool hasLen = sd->methods.count("len") > 0;
+        bool hasIndex = sd->methods.count("operator[]") > 0;
+        if (!hasLen || !hasIndex) {
+            error(loc, "range-based for requires len() and operator[] "
+                        "methods on the range type");
+            auto err = std::make_unique<hir::Stmt>();
+            err->loc = loc;
+            err->node = hir::Stmt::Null{};
+            return err;
+        }
+        // Fall through with hasLen + hasIndex — build using range.len()
+        // as the bound instead of arraySize.
     }
 
     // Generate unique temp names.
@@ -1537,7 +1559,7 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildRangeFor(const Stmt::RangeFor& rf, S
         d.init = std::move(zero);
     }
 
-    // cond: __rfiN < N
+    // cond: __rfiN < N  (or __rfiN < range.len() for non-arrays)
     auto condExpr = std::make_unique<ivy::Expr>();
     condExpr->loc = loc;
     {
@@ -1547,11 +1569,26 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildRangeFor(const Stmt::RangeFor& rf, S
         bin.lhs->loc = loc;
         bin.lhs->node = ivy::Expr::IdentRef{
             std::get<ivy::Stmt::Decl>(initStmt->node).name};
-        auto rhs = std::make_unique<ivy::Expr>();
-        rhs->loc = loc;
-        rhs->node = ivy::Expr::IntegerLit{
-            static_cast<long long>(rangeType.arraySize)};
-        bin.rhs = std::move(rhs);
+        if (isArray) {
+            auto rhs = std::make_unique<ivy::Expr>();
+            rhs->loc = loc;
+            rhs->node = ivy::Expr::IntegerLit{
+                static_cast<long long>(rangeType.arraySize)};
+            bin.rhs = std::move(rhs);
+        } else {
+            // range.len()  →  Call(Member(range, "len"), [])
+            auto call = std::make_unique<ivy::Expr>();
+            call->loc = loc;
+            auto& ce = call->node.emplace<ivy::Expr::Call>();
+            auto member = std::make_unique<ivy::Expr>();
+            member->loc = loc;
+            auto& me = member->node.emplace<ivy::Expr::Member>();
+            me.base = cloneExpr(*rf.range);
+            me.name = "len";
+            me.isArrow = false;
+            ce.callee = std::move(member);
+            bin.rhs = std::move(call);
+        }
     }
 
     // incr: ++__rfiN
@@ -2092,6 +2129,13 @@ hir::Function* HirBuilder::resolveOverload(
             // to lvalues, but the type is the same).
             hir::Type p = pt; p.isReference = false;
             hir::Type a = at; a.isReference = false;
+            // D3: Array-to-pointer decay: if the argument is an array
+            // (T[N]) and the param is a pointer (T*), decay the array
+            // so the types match.
+            if (a.arraySize > 0 && p.pointerDepth > 0 && p.arraySize == 0) {
+                a.pointerDepth = 1;
+                a.arraySize = 0;
+            }
             if (p == a) {
                 score += 100;  // exact match
             } else if (isNumeric(p) && isNumeric(a)) {
@@ -2183,6 +2227,11 @@ hir::Function* HirBuilder::resolveCtorOverload(
             const hir::Type& at = args[i];
             hir::Type p = pt; p.isReference = false;
             hir::Type a = at; a.isReference = false;
+            // D3: Array-to-pointer decay (same as overload resolution).
+            if (a.arraySize > 0 && p.pointerDepth > 0 && p.arraySize == 0) {
+                a.pointerDepth = 1;
+                a.arraySize = 0;
+            }
             if (p == a) {
                 score += 100;
             } else if (isNumeric(p) && isNumeric(a)) {
@@ -2839,6 +2888,10 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 if (sit != structs_.end() && !sit->second.ctors.empty()) {
                     isStructCtor = true;
                 }
+                // D3: Also check struct templates (e.g. `slice<int32_t>(...)`).
+                if (!isStructCtor && lookupStructTemplate(bareName) != nullptr) {
+                    isStructCtor = true;
+                }
             }
             if (!isFunc && !isStructCtor) {
                 // Build the callee as an expression to discover its type.
@@ -2903,6 +2956,43 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             const std::string_view bareName = std::get<A::IdentRef>(callee->node).name;
             // Template-id call: `func<T>(args)` — instantiate template.
             if (!call.tplArgs.empty()) {
+                // D3: Substitute template type parameters in tplArgs
+                // (e.g. T → int32_t) when inside a template method body.
+                if (!currentTypeMapping_.empty()) {
+                    for (auto& ta : call.tplArgs) {
+                        ta = substituteType(ta, currentTypeMapping_);
+                    }
+                }
+                // D3: Check for struct template constructor call:
+                // `slice<T>(ptr, n)` inside a template method body.
+                // The struct name may be in currentTypeMapping_
+                // (mapped to the mangled name), or it may be a
+                // struct template that needs instantiation.
+                const StructDecl* tplStruct = lookupStructTemplate(bareName);
+                if (tplStruct) {
+                    std::string_view specName = instantiateStructTemplate(
+                        *tplStruct, bareName, call.tplArgs, e.loc);
+                    // Resolve constructor on the specialization.
+                    auto sit = structs_.find(specName);
+                    if (sit != structs_.end() && !sit->second.ctors.empty()) {
+                        std::vector<hir::Type> argTypes;
+                        argTypes.reserve(call.args.size());
+                        for (const auto& a : call.args) {
+                            argTypes.push_back(a ? a->type : dummyType());
+                        }
+                        call.target = resolveCtorOverload(sit->second.ctors, argTypes, e.loc);
+                        if (call.target) {
+                            call.callee = call.target->name;
+                            out->type.base = specName;
+                            return out;
+                        } else {
+                            call.callee = bareName;
+                            // resolveCtorOverload already reported the error.
+                        }
+                    }
+                    call.callee = bareName;
+                    // resolveCtorOverload already reported the error.
+                } else {
                 const Function* tplFunc = lookupTemplate(bareName);
                 if (tplFunc) {
                     call.target = instantiateTemplate(*tplFunc, bareName,
@@ -2916,6 +3006,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                 } else {
                     call.callee = bareName;
                     error(e.loc, "'" + std::string(bareName) + "' is not a template");
+                }
                 }
             } else {
                 // Constructor call: `Type(args)` where Type is a struct
@@ -4139,7 +4230,16 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
     // Register structs (pass 1b) so struct types are usable as types and
     // field layout is available for Member resolution in function bodies.
     for (const StructDecl& sd : ast_.structs) buildStruct(sd);
-    for (const Function& af : ast_.functions) buildSignature(af);
+    // D3: Build extern "C" function signatures first so that template
+    // method bodies (which may call extern functions like __ivy_panic)
+    // can resolve them during template instantiation triggered by
+    // buildSignature of user functions with template-type parameters.
+    for (const Function& af : ast_.functions) {
+        if (af.isExternC) buildSignature(af);
+    }
+    for (const Function& af : ast_.functions) {
+        if (!af.isExternC) buildSignature(af);
+    }
     for (const Function& af : ast_.functions) {
         if (af.body && af.tplParams.empty()) {
             // Find the matching HIR function in the overload set.
@@ -4152,10 +4252,12 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
                     bool match = true;
                     for (std::size_t i = 0; i < af.params.size() && match; ++i) {
                         hir::Type a = cand->params[i].type; a.isReference = false;
-                        // Expand `using` aliases on the AST side so the
-                        // comparison sees the real underlying type (the
-                        // HIR side was already resolved in buildSignature).
-                        hir::Type b = resolveTypeAlias(af.params[i].type);
+                        // Expand `using` aliases + resolve template-id struct
+                        // types on the AST side so the comparison sees the
+                        // real underlying type (the HIR side was already
+                        // resolved in buildSignature via the same chain).
+                        hir::Type b = resolveTemplateStructType(
+                            resolveTypeAlias(af.params[i].type), af.params[i].loc);
                         b.isReference = false;
                         if (!(a == b)) match = false;
                     }
@@ -4186,10 +4288,12 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
                     bool match = true;
                     for (std::size_t i = 0; i < mf.params.size() && match; ++i) {
                         hir::Type a = cand->params[i + 1].type; a.isReference = false;
-                        // Expand `using` aliases on the AST side so the
-                        // comparison sees the real underlying type (the
-                        // HIR side was already resolved in buildStruct).
-                        hir::Type b = resolveTypeAlias(mf.params[i].type);
+                        // Expand `using` aliases + resolve template-id struct
+                        // types on the AST side so the comparison sees the
+                        // real underlying type (the HIR side was already
+                        // resolved in buildStruct via the same chain).
+                        hir::Type b = resolveTemplateStructType(
+                            resolveTypeAlias(mf.params[i].type), mf.params[i].loc);
                         b.isReference = false;
                         if (!(a == b)) match = false;
                     }
@@ -4735,16 +4839,26 @@ const Function* HirBuilder::lookupTemplate(std::string_view name) const {
 
 hir::Type HirBuilder::substituteType(const hir::Type& t,
     const std::unordered_map<std::string_view, hir::Type>& mapping) const {
-    auto it = mapping.find(t.base);
+    hir::Type result = t;
+    // Substitute template arguments recursively (e.g. slice<T> → slice<int32_t>).
+    if (!result.tplArgs.empty()) {
+        for (auto& arg : result.tplArgs) {
+            arg = substituteType(arg, mapping);
+        }
+    }
+    // If the base type name is a template parameter, replace it.
+    auto it = mapping.find(result.base);
     if (it != mapping.end()) {
         hir::Type sub = it->second;
         // Preserve pointer/reference modifiers from the original type.
-        sub.pointerDepth = t.pointerDepth;
-        sub.isReference = t.isReference;
-        sub.isConst = t.isConst;
+        sub.pointerDepth = result.pointerDepth;
+        sub.isReference = result.isReference;
+        sub.isConst = result.isConst;
+        // The substituted type is concrete (e.g. slice → slice_int32_t_);
+        // do not carry over template args from the original.
         return sub;
     }
-    return t;
+    return result;
 }
 
 hir::Function* HirBuilder::instantiateTemplate(const Function& tplFunc,
@@ -5263,6 +5377,12 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     currentNsPrefix_ = cloned.namespacePrefix;
     buildStruct(cloned);
 
+    // D3: Record in cache BEFORE building method bodies, so that
+    // recursive references to the same specialization (e.g. slice<T>
+    // calling slice<T>(ptr, n) inside subslice()) are served from
+    // cache instead of re-entering instantiateStructTemplate.
+    instantiatedStructs_[cloned.name] = cloned.name;
+
     // Build method bodies for the cloned methods.  `buildStruct`
     // registered them in `functions_` under "SpecName::method" but
     // did not build their bodies (bodies are built in pass 2b, which
@@ -5328,8 +5448,7 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     current_ = savedCurrent;
     hasReturnInBody_ = savedHasReturn;
 
-    // Record in cache.
-    instantiatedStructs_[cloned.name] = cloned.name;
+    // Cache was recorded earlier (before building method bodies).
     return cloned.name;
 }
 

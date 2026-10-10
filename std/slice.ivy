@@ -1,0 +1,77 @@
+#pragma ivy cnumber
+export module slice;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" void   __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" void   __ivy_panic(const char* msg, int line);
+
+// ivy::slice<T> — a non-owning view into a contiguous sequence of T.
+//
+// A slice holds a raw pointer and a length.  It does not own the
+// underlying memory — the caller is responsible for keeping the
+// referenced data alive for the duration of the slice's use.
+//
+// Primary use cases:
+//   • Pass `T[N]` arrays to functions without copying.
+//   • View a sub-range of a vector<T>.
+//
+// Bounds-checked element access via operator[]; out-of-range access
+// calls __ivy_panic.
+
+export template <typename T>
+struct slice {
+    T*     data_;
+    uint64 len_;
+
+    // Default constructor — empty slice.
+    slice() {
+        unsafe {
+            this.data_ = (T*)0;
+        }
+        this.len_ = 0;
+    }
+
+    // Construct from raw pointer + length.
+    slice(T* ptr, uint64 n) {
+        this.data_ = ptr;
+        this.len_ = n;
+    }
+
+    // Copy constructor — shallow copy (non-owning view).
+    slice(slice<T> other) {
+        this.data_ = other.data_;
+        this.len_ = other.len_;
+    }
+
+    // Number of elements.
+    uint64 len() {
+        return this.len_;
+    }
+
+    // Bounds-checked element access.  Returns a reference to the
+    // element at index `i`.  Calls __ivy_panic if out of range.
+    T& operator[](uint64 i) {
+        if (this.len_ == 0 || i >= this.len_) {
+            __ivy_panic("slice index out of range", 0);
+        }
+        unsafe {
+            char* slot = (char*)this.data_ + i * sizeof(T);
+            return *(T*)slot;
+        }
+    }
+
+    // Sub-slice: returns a view of elements [start, end).
+    // Calls __ivy_panic if the range is invalid.
+    slice<T> subslice(uint64 start, uint64 end) {
+        if (start > end || end > this.len_) {
+            __ivy_panic("slice subslice range out of range", 0);
+        }
+        unsafe {
+            char* slot = (char*)this.data_ + start * sizeof(T);
+            T* subPtr = (T*)slot;
+            uint64 subLen = end - start;
+            return slice<T>(subPtr, subLen);
+        }
+    }
+};

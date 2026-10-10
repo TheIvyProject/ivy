@@ -291,15 +291,16 @@ std::string CodeGen::sizeofType(const mir::Type& t) const {
 void CodeGen::emitLine(const std::string& line) { *out_ << line << "\n"; }
 
 // Returns the bit-width of an integer LLVM type ("i8"->8, "i1"->1, "ptr"->64).
+// D3: Also handles Ivy uint types ("uint32_t"->32, "uint64_t"->64).
+// D3: Also handles Ivy native types ("int"->32, "long"->64, "char"->8).
 static int intBits(const std::string& s) {
     if (s == "ptr") return 64;
-    if (s.size() > 1 && s[0] == 'i') {
-        int n = 0;
-        for (size_t i = 1; i < s.size(); ++i)
-            if (s[i] >= '0' && s[i] <= '9') n = n * 10 + (s[i] - '0');
-            else return -1;
-        return n;
-    }
+    if (s == "i1" || s == "bool") return 1;
+    if (s == "i8" || s == "char" || s == "int8_t" || s == "uint8_t") return 8;
+    if (s == "i16" || s == "short" || s == "int16_t" || s == "uint16_t") return 16;
+    if (s == "i32" || s == "int" || s == "int32_t" || s == "uint32_t") return 32;
+    if (s == "i64" || s == "long" || s == "long long" || s == "int64_t" || s == "uint64_t" || s == "size_t" || s == "ptrdiff_t") return 64;
+    if (s == "i128" || s == "int128_t" || s == "uint128_t") return 128;
     return -1;
 }
 
@@ -1460,7 +1461,25 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 mir::Type p = f->params[pi0 + i].type; p.isReference = false;
                 mir::Type a = v.args[i] ? v.args[i]->type : mir::Type{};
                 a.isReference = false;
-                if (!(p == a)) sigMatch = false;
+                // D3: Array-to-pointer decay in signature matching.
+                if (a.arraySize > 0 && p.pointerDepth > 0 && p.arraySize == 0) {
+                    a.pointerDepth = 1;
+                    a.arraySize = 0;
+                }
+                // D3: Numeric widening (e.g. int32_t → uint64_t).
+                if (p != a) {
+                    const int fb = intBits(std::string(a.base));
+                    const int tb = intBits(std::string(p.base));
+                    const bool aFloat = isFpType(std::string(a.base));
+                    const bool pFloat = isFpType(std::string(p.base));
+                    if (fb > 0 && tb > 0) {
+                        // int → int: compatible (zext/sext at call site)
+                    } else if (aFloat && pFloat) {
+                        // float → float: compatible (fpext/fptrunc)
+                    } else {
+                        sigMatch = false;
+                    }
+                }
             }
             if (sigMatch) { callee = f.get(); break; }
         }
@@ -1549,9 +1568,31 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 // Pass by reference: emit the address of the lvalue.
                 val = lowerLValue(*a);
                 ty = "ptr";
+            } else if (a->type.arraySize > 0 &&
+                       callee && pi < callee->params.size() &&
+                       callee->params[pi].type.pointerDepth > 0) {
+                // D3: Array-to-pointer decay: arg is T[N], param is T*.
+                // Emit the address of the array (which is the address
+                // of the first element).
+                val = lowerLValue(*a);
+                ty = "ptr";
+            } else if (a->type.arraySize > 0) {
+                // D3: Array-to-pointer decay fallback (no callee info):
+                // if the arg is an array, decay to pointer.
+                val = lowerLValue(*a);
+                ty = "ptr";
             } else {
                 val = lowerExpr(*a);
                 ty = valueLlvmType(a->type);
+                // D3: Convert argument to param type if they differ
+                // (e.g. int32_t → uint64_t widening).
+                if (callee && pi < callee->params.size()) {
+                    const std::string paramTy = valueLlvmType(callee->params[pi].type);
+                    if (paramTy != ty && paramTy != "void") {
+                        val = emitCast(val, ty, paramTy, e.loc);
+                        ty = paramTy;
+                    }
+                }
             }
             args += (args.empty() ? "" : ", ") + ty + " " + val;
         }
