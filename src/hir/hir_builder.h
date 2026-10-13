@@ -56,6 +56,12 @@ private:
     // popped together.  Each entry is the variable name; the dtor is
     // looked up via `structs_[type.base].dtor`.
     std::vector<std::vector<std::string_view>> dtorStacks_;
+    // D4: Baseline scope index for dtor emission.  When building a
+    // function/method body (via buildBody), we save the current
+    // dtorStacks_.size() so that `return`-triggered dtor emission
+    // only runs for locals declared inside the current function —
+    // not for locals in the caller's scope (which are still alive).
+    std::size_t dtorBaseline_ = 0;
     // D1: Locals returned via `return <local>` — their ownership is
     // transferred to the caller (NRVO/copy elision), so emitDtorCalls
     // must skip them (otherwise the caller receives a dangling pointer).

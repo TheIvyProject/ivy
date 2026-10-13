@@ -996,7 +996,7 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
     if (std::holds_alternative<M::IdentRef>(n)) {
         const std::string_view name = std::get<M::IdentRef>(n).name;
         const auto it = vars_.find(name);
-        if (it == vars_.end()) return "ptr null";  // unreachable: HIR rejected it
+        if (it == vars_.end()) return "null";  // unreachable: HIR rejected it
         // D1: Distinguish reference variables (slot holds an address)
         // from value variables (slot IS the address).  `e.type.isReference`
         // alone is insufficient because a value variable passed as `this`

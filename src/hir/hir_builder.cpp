@@ -897,11 +897,16 @@ void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
     // not clobber the caller's current_ context.
     hir::Function* savedCurrent = current_;
     bool savedHasReturn = hasReturnInBody_;
+    // D4: Save dtorBaseline_ so return-triggered dtor emission only
+    // covers locals declared inside this function body — not locals
+    // from the caller's scope that are still on dtorStacks_.
+    std::size_t savedDtorBaseline = dtorBaseline_;
     current_ = &fn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
     moveStates_.push_back({});
     dtorStacks_.push_back({});
+    dtorBaseline_ = dtorStacks_.size();  // D4: baseline = param scope
     for (const hir::Param& p : fn.params) {
         if (!p.name.empty()) declare(p.name, p.type, p.loc);
     }
@@ -909,6 +914,7 @@ void HirBuilder::buildBody(hir::Function& fn, const Stmt::Compound& body) {
     scopes_.pop_back();
     moveStates_.pop_back();
     dtorStacks_.pop_back();
+    dtorBaseline_ = savedDtorBaseline;  // D4: restore
     if (c) {
         fn.body = std::make_unique<hir::Stmt::Compound>(
             std::move(std::get<hir::Stmt::Compound>(c->node)));
@@ -1747,7 +1753,10 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
     // still sees `Return` rather than a wrapping Compound).
     if (!dtorStacks_.empty()) {
         std::vector<std::unique_ptr<hir::Stmt>> dtorStmts;
-        emitDtorCalls(0, loc, dtorStmts);  // probe: all scopes, innermost first
+        // D4: Only emit dtors for locals declared inside the current
+        // function body (dtorBaseline_ and above), not for locals from
+        // the caller's scope that are still on dtorStacks_.
+        emitDtorCalls(dtorBaseline_, loc, dtorStmts);
         if (!dtorStmts.empty()) {
             auto wrap = std::make_unique<hir::Stmt>();
             wrap->loc = loc;
@@ -2351,6 +2360,8 @@ std::unique_ptr<hir::Expr> HirBuilder::tryOperatorOverload(
     if (!base) return nullptr;
     hir::Type baseType = base->type;
     if (baseType.isReference) baseType.isReference = false;
+    // D4: Don't try operator overload on pointers-to-struct.
+    if (baseType.pointerDepth > 0) return nullptr;
     auto sIt = structs_.find(baseType.base);
     if (sIt == structs_.end()) return nullptr;
     // Build the method key: "operator" + symbol (e.g. "operator+").
@@ -2618,7 +2629,8 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
 
         // Operator overloading (7.4): if the operand is a struct type,
         // try to rewrite `op a` / `a op` as `a.operator op()`.
-        if (structs_.contains(ot.base)) {
+        // D4: Only for actual struct values (pointerDepth == 0).
+        if (ot.pointerDepth == 0 && structs_.contains(ot.base)) {
             auto call = tryOperatorOverload(std::move(un.operand), v.op,
                                             nullptr, e.loc);
             if (call) return call;
@@ -2700,7 +2712,10 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
         // operators take priority over built-in handling — if a
         // matching operator method exists, we use it; otherwise we
         // fall through to the built-in type checks below.
-        if (structs_.contains(lt.base)) {
+        // D4: Only do this for actual struct values (pointerDepth == 0),
+        // not pointers-to-struct (e.g. `Point*` should use built-in
+        // pointer comparison, not struct operator overload).
+        if (lt.pointerDepth == 0 && structs_.contains(lt.base)) {
             auto call = tryOperatorOverload(std::move(bin.lhs), v.op,
                                             std::move(bin.rhs), e.loc);
             if (call) return call;
@@ -4083,12 +4098,15 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
     hir::Function* savedCurrent = current_;
     bool savedHasReturn = hasReturnInBody_;
     std::string_view savedNs = currentNsPrefix_;
+    // D4: Save dtorBaseline_ for return-triggered dtor scoping.
+    std::size_t savedDtorBaseline = dtorBaseline_;
 
     current_ = rawFn;
     hasReturnInBody_ = false;
     scopes_.push_back({});
     moveStates_.push_back({});
     dtorStacks_.push_back({});  // parameter scope (RAII)
+    dtorBaseline_ = dtorStacks_.size();  // D4: baseline = param scope
     // Declare the closure pointer parameter.
     declare("__closure", hir::Type{closureTypeSv, false, false, false, 1}, loc);
     // Declare user parameters.
@@ -4191,6 +4209,7 @@ std::unique_ptr<hir::Expr> HirBuilder::buildLambda(const Expr::Lambda& lam, Sour
     scopes_.pop_back();
     moveStates_.pop_back();
     dtorStacks_.pop_back();
+    dtorBaseline_ = savedDtorBaseline;  // D4: restore
     // Check for missing return (unless void).
     if (!rawFn->returnType.isConst && rawFn->returnType.pointerDepth == 0 &&
         rawFn->returnType.base != "void" && !hasReturnInBody_) {
@@ -5322,6 +5341,13 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     mapping[tplName] = hir::Type{};
     mapping[tplName].base = cloned.name;
 
+    // D4: Set currentTypeMapping_ BEFORE substituting field/method types,
+    // so that resolveTypeAlias() (called by substituteType) uses the
+    // correct mapping for this specialization rather than any stale
+    // mapping from the caller's context.
+    decltype(currentTypeMapping_) savedMappingForTypes = std::move(currentTypeMapping_);
+    currentTypeMapping_ = mapping;
+
     // Substitute field types.
     for (const Field& f : tplStruct.fields) {
         Field cf;
@@ -5390,11 +5416,8 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
     // We resolve each cloned method's HIR function by name and build
     // its body now, while `currentNsPrefix_` is set correctly.
     //
-    // D2: Set `currentTypeMapping_` so that `resolveTypeAlias` can
-    // substitute template type parameters (e.g. T → int32_t) inside
-    // method bodies (cast expressions, local declarations, etc.).
-    decltype(currentTypeMapping_) savedMapping = std::move(currentTypeMapping_);
-    currentTypeMapping_ = mapping;
+    // D4: currentTypeMapping_ was already set above (before field/method
+    // type substitution). It remains active for method body building.
     for (const Function& mf : cloned.methods) {
         if (!mf.body) continue;
         hir::Function* fn = nullptr;
@@ -5443,7 +5466,7 @@ std::string_view HirBuilder::instantiateStructTemplate(const StructDecl& tplStru
             }
         }
     }
-    currentTypeMapping_ = std::move(savedMapping);
+    currentTypeMapping_ = std::move(savedMappingForTypes);
     currentNsPrefix_ = savedNs;
     current_ = savedCurrent;
     hasReturnInBody_ = savedHasReturn;

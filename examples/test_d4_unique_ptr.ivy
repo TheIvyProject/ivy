@@ -1,0 +1,82 @@
+// D4 test: ivy::unique_ptr<T> — RAII smart pointer, move-only ownership.
+#pragma ivy cnumber
+import unique_ptr;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" int   printf(const char* fmt, ...);
+
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+int32_t main() {
+    // 1. Default constructor — null pointer
+    unique_ptr<int32_t> p1;
+    unsafe {
+        if (p1.get() != (int32_t*)0) { printf("FAIL: p1 should be null\n"); return 1; }
+    }
+
+    // 2. Construct from allocated pointer + deref
+    unsafe {
+        int32_t* mem = (int32_t*)__ivy_alloc(4);
+        *mem = 42;
+        unique_ptr<int32_t> p3 = unique_ptr<int32_t>(mem);
+        int32_t val = *p3;
+        if (val != 42) { printf("FAIL: *p3 should be 42\n"); return 1; }
+    }
+    // p3 destructor freed mem here
+
+    // 3. Move semantics — steal ownership, null source
+    unsafe {
+        int32_t* mem = (int32_t*)__ivy_alloc(4);
+        *mem = 100;
+        unique_ptr<int32_t> a = unique_ptr<int32_t>(mem);
+        unique_ptr<int32_t> b = a;
+        if (a.get() != (int32_t*)0) { printf("FAIL: a should be null after move\n"); return 1; }
+        int32_t val = *b;
+        if (val != 100) { printf("FAIL: *b should be 100\n"); return 1; }
+    }
+    // b destructor freed mem here
+
+    // 4. release() — hand ownership to caller
+    unsafe {
+        int32_t* mem = (int32_t*)__ivy_alloc(4);
+        *mem = 7;
+        unique_ptr<int32_t> p = unique_ptr<int32_t>(mem);
+        int32_t* raw = p.release();
+        __ivy_free(raw);
+    }
+
+    // 5. reset() — free old, adopt new
+    unsafe {
+        int32_t* mem1 = (int32_t*)__ivy_alloc(4);
+        *mem1 = 1;
+        int32_t* mem2 = (int32_t*)__ivy_alloc(4);
+        *mem2 = 2;
+        unique_ptr<int32_t> p = unique_ptr<int32_t>(mem1);
+        p.reset(mem2);
+        int32_t val = *p;
+        if (val != 2) { printf("FAIL: *p should be 2 after reset\n"); return 1; }
+    }
+
+    // 6. Struct deref
+    unsafe {
+        Point* pmem = (Point*)__ivy_alloc(8);
+        pmem->x = 10;
+        pmem->y = 20;
+        unique_ptr<Point> pp = unique_ptr<Point>(pmem);
+        Point pt = *pp;
+        if (pt.x != 10 || pt.y != 20) { printf("FAIL: struct deref wrong\n"); return 1; }
+    }
+
+    // 7. Null ptr — verify get() returns null without deref
+    unique_ptr<int32_t> null_p;
+    unsafe {
+        if (null_p.get() != (int32_t*)0) { printf("FAIL: null_p should be null\n"); return 1; }
+    }
+
+    printf("D4 ivy::unique_ptr tests passed\n");
+    return 0;
+}

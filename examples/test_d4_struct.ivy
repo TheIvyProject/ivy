@@ -1,0 +1,24 @@
+// D4 debug: unique_ptr<Point> struct deref
+#pragma ivy cnumber
+import unique_ptr;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" int   printf(const char* fmt, ...);
+
+struct Point {
+    int32_t x;
+    int32_t y;
+};
+
+int32_t main() {
+    unsafe {
+        Point* pmem = (Point*)__ivy_alloc(8);
+        pmem->x = 10;
+        pmem->y = 20;
+        unique_ptr<Point> pp = unique_ptr<Point>(pmem);
+        Point pt = *pp;
+        printf("x=%d y=%d\n", pt.x, pt.y);
+    }
+    return 0;
+}

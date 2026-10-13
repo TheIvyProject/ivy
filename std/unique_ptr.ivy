@@ -1,0 +1,88 @@
+#pragma ivy cnumber
+export module unique_ptr;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" void   __ivy_panic(const char* msg, int line);
+
+// ivy::unique_ptr<T> — RAII smart pointer, move-only ownership.
+//
+// Holds a heap-allocated T*.  Frees the pointee on destruction
+// (scope-exit, return, break, continue).  Move semantics via the
+// copy constructor (steals ownership + nulls the source).
+//
+// Access:
+//   • operator*  — dereference, returns T& (requires unsafe context)
+//   • get()      — raw pointer access (unsafe)
+//   • release()  — hand ownership to caller, internal ptr nulled (unsafe)
+//   • reset(p)  — free old pointee, adopt new pointer (unsafe)
+
+export template <typename T>
+struct unique_ptr {
+    T* raw_;
+
+    // Default constructor — null pointer.
+    unique_ptr() {
+        unsafe {
+            this.raw_ = (T*)0;
+        }
+    }
+
+    // Construct from raw pointer — take ownership.
+    unique_ptr(T* p) {
+        this.raw_ = p;
+    }
+
+    // Move constructor (steal ownership, null the source).
+    // Takes a reference to the source so we can null its raw_ field.
+    unique_ptr(unique_ptr<T>& other) {
+        this.raw_ = other.raw_;
+        unsafe {
+            other.raw_ = (T*)0;
+        }
+    }
+
+    // Destructor — free the pointee (if any).
+    ~unique_ptr() {
+        unsafe {
+            if (this.raw_ != (T*)0) {
+                __ivy_free(this.raw_);
+                this.raw_ = (T*)0;
+            }
+        }
+    }
+
+    // Raw pointer access (unsafe).
+    T* get() {
+        return this.raw_;
+    }
+
+    // Release ownership — return raw ptr, null internal.
+    T* release() {
+        unsafe {
+            T* p = this.raw_;
+            this.raw_ = (T*)0;
+            return p;
+        }
+    }
+
+    // Reset — free old pointee, adopt new pointer.
+    void reset(T* p) {
+        unsafe {
+            if (this.raw_ != (T*)0) {
+                __ivy_free(this.raw_);
+            }
+            this.raw_ = p;
+        }
+    }
+
+    // Dereference — returns T& (requires unsafe context).
+    T& operator*() {
+        unsafe {
+            if (this.raw_ == (T*)0) {
+                __ivy_panic("unique_ptr dereference of null", 0);
+            }
+            return *(T*)this.raw_;
+        }
+    }
+};

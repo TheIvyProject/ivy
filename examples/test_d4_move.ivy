@@ -1,0 +1,22 @@
+// D4 debug: unique_ptr move + deref
+#pragma ivy cnumber
+import unique_ptr;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" int   printf(const char* fmt, ...);
+
+int32_t main() {
+    // Test: move semantics + deref
+    unsafe {
+        int32_t* mem = (int32_t*)__ivy_alloc(4);
+        *mem = 100;
+        unique_ptr<int32_t> a = unique_ptr<int32_t>(mem);
+        // Copy ctor steals ownership
+        unique_ptr<int32_t> b = a;
+        // b should own mem, a should be null
+        int32_t val = *b;
+        printf("val = %d\n", val);
+    }
+    return 0;
+}

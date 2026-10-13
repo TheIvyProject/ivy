@@ -407,7 +407,7 @@ void dumpHirExpr(const ivy::hir::Expr& e, std::ostream& os, int depth) {
                                          v.isVirtual ? std::string("virtual_call '") +
                                                        std::string(v.methodName) +
                                                        "' slot=" + std::to_string(v.vtableSlot)
-                                                     : std::string("call"));
+                                                     : std::string("call '") + std::string(v.callee) + "'");
                        for (const auto& a : v.args) dumpHirExpr(*a, os, depth + 1);
                    },
                    [&](const ivy::hir::Expr::Index& v) {
@@ -1072,7 +1072,11 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                         auto* dst = it->second;
                         for (auto& srcM : srcS.methods) {
                             for (auto& dstM : dst->methods) {
-                                // Match by qualified name suffix.
+                                // Match by qualified name suffix + param count
+                                // + param type signature, so that overloaded
+                                // methods (e.g. unique_ptr() vs unique_ptr(T*)
+                                // vs unique_ptr(unique_ptr<T>&)) get the
+                                // correct body spliced.
                                 auto dstBare = dstM.name.substr(
                                     dstM.name.rfind("::") + 2);
                                 auto srcBare = srcM.name.substr(
@@ -1080,6 +1084,27 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                                 if (dstBare == srcBare &&
                                     dstM.params.size() == srcM.params.size() &&
                                     !dstM.body && srcM.body) {
+                                    // D4: Also compare param type signatures
+                                    // to disambiguate overloads with the same
+                                    // param count (e.g. T* vs unique_ptr<T>&).
+                                    bool typeMatch = true;
+                                    for (std::size_t pi = 0;
+                                         pi < dstM.params.size() && typeMatch;
+                                         ++pi) {
+                                        std::string dstSig, srcSig;
+                                        auto buildSig = [](const ivy::Type& t) {
+                                            std::string s;
+                                            s += t.base;
+                                            if (t.isConst) s += " const";
+                                            for (std::size_t d = 0; d < t.pointerDepth; ++d) s += "*";
+                                            if (t.isReference) s += "&";
+                                            return s;
+                                        };
+                                        dstSig = buildSig(dstM.params[pi].type);
+                                        srcSig = buildSig(srcM.params[pi].type);
+                                        if (dstSig != srcSig) typeMatch = false;
+                                    }
+                                    if (!typeMatch) continue;
                                     // Body is unique_ptr<Stmt::Compound> —
                                     // deep-copy by cloning each statement.
                                     dstM.body = std::make_unique<ivy::Stmt::Compound>();
