@@ -1,0 +1,117 @@
+// test_d6_io.ivy — D6: ivy::io module tests
+//
+// Tests io::read_line(), io::read_file(), io::write_file().
+// Also verifies io::print/println still work (regression).
+//
+// Note: io::print/println/eprint/eprintln/io::read_line/io::read_file/
+// io::write_file are compiler builtins — no import needed.
+
+#pragma ivy cnumber
+
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+int main() {
+    // ── Test 1: io::println regression ──────────────────────────
+    io::println("D6: io module tests");
+    io::println("Test 1: io::println works");
+
+    // ── Test 2: io::print with {} format ────────────────────────
+    io::println("Test 2: {} + {} = {}", 2, 3, 5);
+
+    // ── Test 3: io::write_file + read_file ──────────────────────
+    unsafe {
+        const char* testData = "Hello from D6!\nLine 2\nLine 3";
+        unsigned long long testLen = __ivy_strlen(testData);
+        int rc = io::write_file("d6_test.txt", testData, testLen);
+        if (rc != 0) {
+            io::eprintln("Test 3 FAILED: write_file returned {}", rc);
+            return 1;
+        }
+        io::println("Test 3: write_file OK");
+
+        // ── Test 4: io::read_file ───────────────────────────────
+        char* fileData = io::read_file("d6_test.txt");
+        if (fileData == (char*)0) {
+            io::eprintln("Test 4 FAILED: read_file returned null");
+            return 1;
+        }
+
+        unsigned long long dataLen = __ivy_strlen(fileData);
+        if (dataLen != testLen) {
+            io::eprintln("Test 4 FAILED: length mismatch: {} vs {}", dataLen, testLen);
+            __ivy_free(fileData);
+            return 1;
+        }
+
+        bool match = true;
+        for (unsigned long long i = 0; i < testLen; ++i) {
+            if (fileData[i] != testData[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match) {
+            io::eprintln("Test 4 FAILED: content mismatch");
+            __ivy_free(fileData);
+            return 1;
+        }
+
+        io::println("Test 4: read_file OK, content: {}", fileData);
+        __ivy_free(fileData);
+    }
+
+    // ── Test 5: io::read_file on non-existent file ──────────────
+    unsafe {
+        char* noFile = io::read_file("nonexistent_d6_file.txt");
+        if (noFile != (char*)0) {
+            io::eprintln("Test 5 FAILED: expected null for non-existent file");
+            __ivy_free(noFile);
+            return 1;
+        }
+    }
+    io::println("Test 5: read_file non-existent returns null OK");
+
+    // ── Test 6: io::write_file + overwrite ──────────────────────
+    unsafe {
+        const char* testData2 = "Overwritten!";
+        unsigned long long testLen2 = __ivy_strlen(testData2);
+        io::write_file("d6_overwrite.txt", testData2, testLen2);
+
+        char* overData = io::read_file("d6_overwrite.txt");
+        if (overData == (char*)0) {
+            io::eprintln("Test 6 FAILED: read after overwrite returned null");
+            return 1;
+        }
+        unsigned long long overLen = __ivy_strlen(overData);
+        if (overLen != testLen2) {
+            io::eprintln("Test 6 FAILED: length mismatch after overwrite: {} vs {}", overLen, testLen2);
+            __ivy_free(overData);
+            return 1;
+        }
+        io::println("Test 6: overwrite OK, content: {}", overData);
+        __ivy_free(overData);
+    }
+
+    // ── Test 7: io::eprint / eprintln regression ────────────────
+    io::eprintln("Test 7: stderr output works");
+
+    // ── Test 8: io::print with multiple types ───────────────────
+    io::println("Test 8: int={} float={} bool={}", 42, 3.14, true);
+
+    // ── Test 9: io::read_line from stdin ────────────────────────
+    // Note: read_line returns allocated char*, caller must free.
+    // We test it by piping input; if no input, returns null (EOF).
+    unsafe {
+        char* line = io::read_line();
+        if (line != (char*)0) {
+            io::println("Test 9: read_line returned: {}", line);
+            __ivy_free(line);
+        } else {
+            io::println("Test 9: read_line returned null (EOF)");
+        }
+    }
+
+    io::println("All D6 tests passed!");
+    return 0;
+}

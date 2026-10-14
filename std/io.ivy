@@ -1,4 +1,4 @@
-// std/io.ivy — Ivy I/O module (C3)
+// std/io.ivy — Ivy I/O module (C3 + D6)
 //
 // Provides type-safe print/println/eprint/eprintln with {} format string
 // support. Uses CRT _write() for raw I/O (no printf).
@@ -6,6 +6,11 @@
 // In interpreter mode (--run), these are handled as builtins.
 // In codegen mode, the compiler emits inline IR that calls __ivy_write_str
 // / __ivy_fmt_int / __ivy_fmt_float / __ivy_fmt_bool / __ivy_write_char.
+//
+// D6 additions:
+//   io::read_line()   — read a line from stdin, returns char* (caller frees).
+//   io::read_file()   — read entire file, returns char* (caller frees).
+//   io::write_file()  — write bytes to a file, returns int (0 = success).
 //
 // See docs/Standard_Modules/IO.md for full specification.
 
@@ -21,3 +26,13 @@ export module io;
 //   io::println("x = {}", 42);             // x = 42
 //   io::println("{} + {} = {}", 1, 2, 3);  // 1 + 2 = 3
 //   io::eprintln("Error: not found");      // → stderr
+
+// D6: io::read_line / io::read_file / io::write_file are also compiler
+// builtins. The compiler recognizes them by name and emits inline IR
+// at each call site that calls __ivy_read_line / __ivy_read_file /
+// __ivy_write_file.
+//
+// Usage:
+//   char* line = io::read_line();          // read a line from stdin
+//   char* data = io::read_file("in.txt");  // read entire file
+//   int rc = io::write_file("out.txt", data, len);  // write file

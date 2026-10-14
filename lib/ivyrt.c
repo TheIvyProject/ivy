@@ -20,7 +20,7 @@
 
 #include <stdlib.h>   /* malloc, free, abort */
 #include <string.h>   /* strlen */
-#include <stdio.h>    /* puts, snprintf (inside __ivy_fmt_int only) */
+#include <stdio.h>    /* puts, snprintf, fgets, fopen, fclose, fread, fwrite (file I/O) */
 #ifdef _WIN32
 #  include <io.h>     /* _write, _gcvt */
 #else
@@ -138,4 +138,164 @@ char* __ivy_strdup(const char* s) {
     if (!buf) return 0;
     __ivy_memcpy(buf, s, len + 1);   /* include NUL */
     return buf;
+}
+
+/* ── Stdin ────────────────────────────────────────────────────── */
+
+char* __ivy_read_line(void) {
+    /* Read a line from stdin using fgets.  Returns an allocated
+     * NUL-terminated string (caller must free).  Strips trailing
+     * newline.  Returns null on EOF with no data. */
+    char buf[1024];
+    char* result = (char*)0;
+    unsigned long long resultLen = 0;
+
+    while (1) {
+        char* r = fgets(buf, (int)sizeof(buf), stdin);
+        if (!r) {
+            /* EOF or error.  If we have accumulated data, return it. */
+            return result;  /* may be null */
+        }
+        unsigned long long chunkLen = strlen(buf);
+        /* Check for newline — line complete. */
+        int hasNewline = 0;
+        if (chunkLen > 0 && buf[chunkLen - 1] == '\n') {
+            hasNewline = 1;
+            chunkLen--;  /* exclude newline */
+        }
+
+        /* Append to result. */
+        unsigned long long newLen = resultLen + chunkLen;
+        char* newBuf = (char*)__ivy_alloc(newLen + 1);
+        if (!newBuf) {
+            __ivy_free(result);
+            return 0;
+        }
+        if (result) {
+            __ivy_memcpy(newBuf, result, resultLen);
+        }
+        __ivy_memcpy(newBuf + resultLen, buf, chunkLen);
+        newBuf[newLen] = '\0';
+        __ivy_free(result);
+        result = newBuf;
+        resultLen = newLen;
+
+        if (hasNewline) {
+            return result;
+        }
+        /* No newline — line was longer than buffer, loop to read more. */
+    }
+}
+
+/* ── File I/O ──────────────────────────────────────────────────── */
+
+/* Opaque file handle wraps FILE*. */
+struct __ivy_file {
+    /* Internally, this IS a FILE*.  We store the FILE pointer
+     * directly as the first member so that `(__ivy_file*)f` can
+     * be cast to `(FILE*)f`.  This avoids exposing <stdio.h>
+     * to Ivy code. */
+    void* handle;   /* Actually FILE* */
+};
+
+/* The struct __ivy_file is designed so that its address IS the
+ * FILE* address.  We use a simple trick: allocate a struct whose
+ * first member is a FILE*. */
+#define IVY_FILE_PTR(f)  ((FILE*)((f)->handle))
+
+__ivy_file* __ivy_file_open_read(const char* path) {
+    if (!path) return 0;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return 0;
+    __ivy_file* f = (__ivy_file*)__ivy_alloc(sizeof(__ivy_file));
+    if (!f) { fclose(fp); return 0; }
+    f->handle = (void*)fp;
+    return f;
+}
+
+__ivy_file* __ivy_file_open_write(const char* path) {
+    if (!path) return 0;
+    FILE* fp = fopen(path, "wb");
+    if (!fp) return 0;
+    __ivy_file* f = (__ivy_file*)__ivy_alloc(sizeof(__ivy_file));
+    if (!f) { fclose(fp); return 0; }
+    f->handle = (void*)fp;
+    return f;
+}
+
+void __ivy_file_close(__ivy_file* f) {
+    if (!f) return;
+    if (f->handle) {
+        fclose(IVY_FILE_PTR(f));
+    }
+    __ivy_free(f);
+}
+
+unsigned long long __ivy_file_read(__ivy_file* f, void* buf,
+                                     unsigned long long n) {
+    if (!f || !f->handle || !buf || n == 0) return 0;
+    size_t got = fread(buf, 1, (size_t)n, IVY_FILE_PTR(f));
+    return (unsigned long long)got;
+}
+
+unsigned long long __ivy_file_write(__ivy_file* f, const void* buf,
+                                      unsigned long long n) {
+    if (!f || !f->handle || !buf || n == 0) return 0;
+    size_t put = fwrite(buf, 1, (size_t)n, IVY_FILE_PTR(f));
+    return (unsigned long long)put;
+}
+
+char* __ivy_read_file(const char* path, unsigned long long* outLen) {
+    if (outLen) *outLen = 0;
+    if (!path) return 0;
+    __ivy_file* f = __ivy_file_open_read(path);
+    if (!f) return 0;
+
+    /* Read in chunks, growing the buffer. */
+    unsigned long long cap = 4096;
+    unsigned long long len = 0;
+    char* buf = (char*)__ivy_alloc(cap);
+    if (!buf) { __ivy_file_close(f); return 0; }
+
+    while (1) {
+        if (len + 4096 > cap) {
+            unsigned long long newCap = cap * 2;
+            char* newBuf = (char*)__ivy_alloc(newCap);
+            if (!newBuf) {
+                __ivy_free(buf);
+                __ivy_file_close(f);
+                return 0;
+            }
+            __ivy_memcpy(newBuf, buf, len);
+            __ivy_free(buf);
+            buf = newBuf;
+            cap = newCap;
+        }
+        unsigned long long got = __ivy_file_read(f, buf + len, 4096);
+        if (got == 0) break;
+        len += got;
+    }
+    __ivy_file_close(f);
+
+    /* NUL-terminate for convenience. */
+    if (len >= cap) {
+        char* newBuf = (char*)__ivy_alloc(len + 1);
+        if (!newBuf) { __ivy_free(buf); return 0; }
+        __ivy_memcpy(newBuf, buf, len);
+        __ivy_free(buf);
+        buf = newBuf;
+    }
+    buf[len] = '\0';
+    if (outLen) *outLen = len;
+    return buf;
+}
+
+int __ivy_write_file(const char* path, const void* buf,
+                      unsigned long long n) {
+    if (!path || !buf) return 1;
+    __ivy_file* f = __ivy_file_open_write(path);
+    if (!f) return 1;
+    unsigned long long wrote = __ivy_file_write(f, buf, n);
+    __ivy_file_close(f);
+    return (wrote == n) ? 0 : 1;
 }

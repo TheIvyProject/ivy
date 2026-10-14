@@ -111,6 +111,8 @@ private:
     bool usesIvyFree_ = false;
     bool usesIvyPrint_ = false;  // 8.5: ivy::print/println builtins used
     bool usesIoPrint_ = false;  // C3: io::print/println/eprint/eprintln used
+    bool usesIoReadLine_ = false;  // D6: io::read_line used
+    bool usesIoFile_ = false;  // D6: io::read_file/write_file used
 
     // A7: C++ headers from `import cpp <header>` / `import cpp "file"`.
     // Passed to clang++ during linking so it compiles and links them.
@@ -295,6 +297,8 @@ private:
     // Uses CRT _write() for raw I/O (no printf). Format {} logic
     // is emitted inline per call site.
     void emitIoPrintRuntime();
+    // D6: Emit declare directives for io::read_line + file I/O runtime.
+    void emitIoD6Runtime();
     // C3: Lower an io::print/println/eprint/eprintln call.
     // Handles {} format string: splits the format string at compile-time
     // and emits a sequence of __ivy_write_str / __ivy_fmt_int / etc calls.

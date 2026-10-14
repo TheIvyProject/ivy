@@ -65,6 +65,12 @@ bool isCodegenBuiltin(std::string_view name) {
     if (name == "io::print" || name == "io::println" ||
         name == "io::eprint" || name == "io::eprintln")
         return true;
+    // D6: io::read_line — read a line from stdin.
+    // D6: io::read_file / io::write_file — file I/O.
+    if (name == "io::read_line" ||
+        name == "io::read_file" ||
+        name == "io::write_file")
+        return true;
     return false;
 }
 
@@ -552,6 +558,11 @@ void CodeGen::collectExpr(const mir::Expr& e) {
         if (c.callee == "io::print" || c.callee == "io::println" ||
             c.callee == "io::eprint" || c.callee == "io::eprintln")
             usesIoPrint_ = true;
+        // D6: Track io::read_line / io::read_file / io::write_file usage.
+        if (c.callee == "io::read_line")
+            usesIoReadLine_ = true;
+        if (c.callee == "io::read_file" || c.callee == "io::write_file")
+            usesIoFile_ = true;
         for (const auto& a : c.args) collectExpr(*a);
     } else if (std::holds_alternative<M::Index>(n)) {
         const M::Index& v = std::get<M::Index>(n);
@@ -756,6 +767,21 @@ void CodeGen::emitIoPrintRuntime() {
         emitLine("declare ptr @__ivy_fmt_bool(i1)");
     if (!declaredC_.contains("__ivy_write_newline"))
         emitLine("declare void @__ivy_write_newline(i32)");
+}
+
+// D6: Emit declare directives for io::read_line and file I/O runtime symbols.
+void CodeGen::emitIoD6Runtime() {
+    if (!usesIoReadLine_ && !usesIoFile_) return;
+    if (usesIoReadLine_) {
+        if (!declaredC_.contains("__ivy_read_line"))
+            emitLine("declare ptr @__ivy_read_line()");
+    }
+    if (usesIoFile_) {
+        if (!declaredC_.contains("__ivy_read_file"))
+            emitLine("declare ptr @__ivy_read_file(ptr, ptr)");
+        if (!declaredC_.contains("__ivy_write_file"))
+            emitLine("declare i32 @__ivy_write_file(ptr, ptr, i64)");
+    }
 }
 
 // C3: Helper — intern a C string constant and return a gep ptr to it.
@@ -1544,6 +1570,51 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                                 v.callee == "io::eprintln");
             const int fd = isErr ? 2 : 1;  // 1=stdout, 2=stderr
             return lowerIoPrint(v, fd, isLn, e.loc);
+        }
+
+        // D6: io::read_line — read a line from stdin, returns char*.
+        if (isBuiltinCall && v.callee == "io::read_line") {
+            const std::string t = newTemp();
+            emitLine(t + " = call ptr @__ivy_read_line()");
+            return t;
+        }
+
+        // D6: io::read_file — read entire file, returns char*.
+        // Signature: io::read_file(path: const char*) -> char*
+        // IR: %t = call ptr @__ivy_read_file(ptr %path, ptr %outLen)
+        //     The caller can ignore outLen (pass a stack alloca).
+        if (isBuiltinCall && v.callee == "io::read_file") {
+            // Lower the path argument.
+            std::string pathVal;
+            if (!v.args.empty()) {
+                pathVal = lowerExpr(*v.args[0]);
+            } else {
+                pathVal = "null";
+            }
+            // Allocate a stack slot for outLen (unsigned long long).
+            const std::string lenSlot = newTemp();
+            emitLine(lenSlot + " = alloca i64");
+            const std::string t = newTemp();
+            emitLine(t + " = call ptr @__ivy_read_file(ptr " + pathVal +
+                     ", ptr " + lenSlot + ")");
+            return t;
+        }
+
+        // D6: io::write_file — write bytes to file, returns int (0=success).
+        // Signature: io::write_file(path: const char*, data: const char*,
+        //           len: uint64) -> int
+        if (isBuiltinCall && v.callee == "io::write_file") {
+            std::string pathVal, dataVal, lenVal;
+            if (v.args.size() >= 1) pathVal = lowerExpr(*v.args[0]);
+            else pathVal = "null";
+            if (v.args.size() >= 2) dataVal = lowerExpr(*v.args[1]);
+            else dataVal = "null";
+            if (v.args.size() >= 3) lenVal = lowerExpr(*v.args[2]);
+            else lenVal = "0";
+            const std::string t = newTemp();
+            emitLine(t + " = call i32 @__ivy_write_file(ptr " + pathVal +
+                     ", ptr " + dataVal + ", i64 " + lenVal + ")");
+            return t;
         }
 
         std::string args;
@@ -2578,6 +2649,8 @@ bool CodeGen::generate(std::ostream& out) {
     // C3: Emit io::print runtime (_write-based, no printf).
     // Must come after function lowering so we know if io::print was used.
     emitIoPrintRuntime();
+    // D6: Emit io::read_line + file I/O runtime declares.
+    emitIoD6Runtime();
     // 8.2: Emit string constants and the __ivy_panic declaration AFTER
     // function lowering. emitBoundsCheck() (called from lowerFunction())
     // adds new panic-message strings to stringList_ and sets

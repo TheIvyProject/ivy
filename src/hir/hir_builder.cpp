@@ -101,6 +101,12 @@ bool isBuiltinFn(std::string_view name) {
     if (name == "io::print" || name == "io::println" ||
         name == "io::eprint" || name == "io::eprintln")
         return true;
+    // D6: io::read_line — read a line from stdin.
+    // D6: io::read_file / io::write_file — file I/O.
+    if (name == "io::read_line" ||
+        name == "io::read_file" ||
+        name == "io::write_file")
+        return true;
     return false;
 }
 
@@ -3310,9 +3316,18 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             // used). Set void type for print/println, int for printf.
             if (call.callee == "printf" || call.callee == "puts" ||
                 call.callee == "putchar")
-                out->type = hir::Type{"int", false, false, 0};
+                out->type = hir::Type{"int", false, false, false, 0};
+            else if (call.callee == "io::read_line")
+                // D6: io::read_line returns char* (allocated, caller frees).
+                out->type = hir::Type{"char", false, false, false, 1};
+            else if (call.callee == "io::read_file")
+                // D6: io::read_file returns char* (allocated, caller frees).
+                out->type = hir::Type{"char", false, false, false, 1};
+            else if (call.callee == "io::write_file")
+                // D6: io::write_file returns int (0 = success).
+                out->type = hir::Type{"int", false, false, false, 0};
             else
-                out->type = hir::Type{"void", false, false, 0};
+                out->type = hir::Type{"void", false, false, false, 0};
         } else {
             out->type = dummyType();
         }

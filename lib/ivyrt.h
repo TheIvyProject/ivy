@@ -86,6 +86,47 @@ int __ivy_strcmp(const char* a, const char* b);
  * null if `s` is null or allocation fails. */
 char* __ivy_strdup(const char* s);
 
+/* ── Stdin ────────────────────────────────────────────────────── */
+
+/* Read a line from stdin.  Returns a NUL-terminated C string
+ * allocated via __ivy_alloc (caller must free).  The newline
+ * character is stripped.  Returns null on EOF. */
+char* __ivy_read_line(void);
+
+/* ── File I/O ──────────────────────────────────────────────────── */
+
+/* Opaque file handle (wraps FILE*). */
+typedef struct __ivy_file __ivy_file;
+
+/* Open a file for reading.  Returns null on failure. */
+__ivy_file* __ivy_file_open_read(const char* path);
+
+/* Open a file for writing (truncates).  Returns null on failure. */
+__ivy_file* __ivy_file_open_write(const char* path);
+
+/* Close a file handle opened by __ivy_file_open_*.  Null-safe. */
+void __ivy_file_close(__ivy_file* f);
+
+/* Read up to `n` bytes from a file into `buf`.  Returns number of
+ * bytes read (0 at EOF). */
+unsigned long long __ivy_file_read(__ivy_file* f, void* buf,
+                                    unsigned long long n);
+
+/* Write `n` bytes from `buf` to a file.  Returns number of bytes
+ * written. */
+unsigned long long __ivy_file_write(__ivy_file* f, const void* buf,
+                                     unsigned long long n);
+
+/* Read an entire file into a buffer allocated via __ivy_alloc.
+ * Sets *outLen to the byte count.  Returns null on failure.
+ * Caller must free the returned buffer. */
+char* __ivy_read_file(const char* path, unsigned long long* outLen);
+
+/* Write `n` bytes to a file (truncates existing).  Returns 0 on
+ * success, non-zero on failure. */
+int __ivy_write_file(const char* path, const void* buf,
+                      unsigned long long n);
+
 #ifdef __cplusplus
 }
 #endif

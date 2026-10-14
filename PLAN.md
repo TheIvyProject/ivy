@@ -153,7 +153,7 @@ Stdlib viết bằng Ivy, đủ để viết app thực dụng.
 | D3 ✅ | **`ivy::slice<T>`** | ★★ | View vào array/vector, không own. Bounds-checked. Thay raw pointer + length. `T[N]` array → `slice<T>` khi pass to function |
 | D4 ✅ | **`ivy::unique_ptr<T>`** | ★★★ | RAII smart pointer. Move-only (không copy). `*` deref (chỉ unsafe hoặc qua safe accessor). Auto free tại scope-exit. Dựa trên B3 move semantics |
 | D5 ✅ | **`ivy::hash_map<K,V>` / `ivy::hash_set<T>`** | ★★★ | Hash table. `[]` access, `insert()`, `contains()`, `remove()`. Iterator support. Linear probing hoặc robin hood |
-| D6 | **`ivy::io` module** | ★★ | `io::print()`, `io::println()`, `io::eprint()`, `io::read_line()`. Stdout/stderr/stdin. File I/O: `io::File`, `io::read_file()`, `io::write_file()` |
+| D6 ✅ | **`ivy::io` module** | ★★ | `io::print()`, `io::println()`, `io::eprint()`, `io::read_line()`. Stdout/stderr/stdin. File I/O: `io::File`, `io::read_file()`, `io::write_file()` |
 | D7 | **`ivy::math` module** | ★ | Math functions: `abs()`, `min()`, `max()`, `sqrt()`, `sin()`, `cos()`, `pow()`, `floor()`, `ceil()`. Constexpr-friendly |
 
 ### Giai đoạn E — Loại bỏ C++ legacy
