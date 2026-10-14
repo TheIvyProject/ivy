@@ -127,6 +127,31 @@ char* __ivy_read_file(const char* path, unsigned long long* outLen);
 int __ivy_write_file(const char* path, const void* buf,
                       unsigned long long n);
 
+/* ── Math (D7) ────────────────────────────────────────────────
+ * Thin wrappers around libc math functions.  Declared with __ivy_
+ * prefix so Ivy modules can define same-named wrapper functions
+ * (e.g. `export double sqrt(double x)`) without infinite recursion. */
+
+double __ivy_sqrt(double x);
+double __ivy_sin(double x);
+double __ivy_cos(double x);
+double __ivy_tan(double x);
+double __ivy_pow(double base, double exp);
+double __ivy_floor(double x);
+double __ivy_ceil(double x);
+double __ivy_round(double x);
+double __ivy_trunc(double x);
+double __ivy_exp(double x);
+double __ivy_log(double x);
+double __ivy_log2(double x);
+double __ivy_log10(double x);
+double __ivy_atan(double x);
+double __ivy_asin(double x);
+double __ivy_acos(double x);
+double __ivy_atan2(double y, double x);
+double __ivy_fmod(double a, double b);
+double __ivy_fabs(double x);
+
 #ifdef __cplusplus
 }
 #endif

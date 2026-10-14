@@ -21,6 +21,7 @@
 #include <stdlib.h>   /* malloc, free, abort */
 #include <string.h>   /* strlen */
 #include <stdio.h>    /* puts, snprintf, fgets, fopen, fclose, fread, fwrite (file I/O) */
+#include <math.h>     /* sqrt, sin, cos, pow, floor, ceil, etc. (D7 math wrappers) */
 #ifdef _WIN32
 #  include <io.h>     /* _write, _gcvt */
 #else
@@ -299,3 +300,28 @@ int __ivy_write_file(const char* path, const void* buf,
     __ivy_file_close(f);
     return (wrote == n) ? 0 : 1;
 }
+
+/* ── Math wrappers (D7) ────────────────────────────────────────
+ * Thin wrappers around libc math functions.  Ivy modules call these
+ * via `extern "C"` declarations; the Ivy wrapper functions (e.g.
+ * `export double sqrt(double x)`) forward to these. */
+
+double __ivy_sqrt(double x)   { return sqrt(x); }
+double __ivy_sin(double x)    { return sin(x); }
+double __ivy_cos(double x)    { return cos(x); }
+double __ivy_tan(double x)    { return tan(x); }
+double __ivy_pow(double b, double e) { return pow(b, e); }
+double __ivy_floor(double x) { return floor(x); }
+double __ivy_ceil(double x)  { return ceil(x); }
+double __ivy_round(double x) { return round(x); }
+double __ivy_trunc(double x) { return trunc(x); }
+double __ivy_exp(double x)   { return exp(x); }
+double __ivy_log(double x)   { return log(x); }
+double __ivy_log2(double x)  { return log2(x); }
+double __ivy_log10(double x) { return log10(x); }
+double __ivy_atan(double x)  { return atan(x); }
+double __ivy_asin(double x)  { return asin(x); }
+double __ivy_acos(double x)  { return acos(x); }
+double __ivy_atan2(double y, double x) { return atan2(y, x); }
+double __ivy_fmod(double a, double b) { return fmod(a, b); }
+double __ivy_fabs(double x) { return fabs(x); }

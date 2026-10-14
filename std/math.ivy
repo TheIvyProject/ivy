@@ -1,40 +1,204 @@
-// Ivy Standard Library — math module
+// Ivy Standard Library — math module (D7)
+//
+// Provides math functions: abs, min, max, clamp, sqrt, sin, cos, tan,
+// pow, floor, ceil, round, exp, log, log2, log10, atan, asin, acos,
+// atan2, fmod, fabs.
+//
+// Integer functions (abs, min, max, clamp) are pure-Ivy with int32/int64
+// overloads.  Floating-point functions wrap libc math functions via
+// `extern "C"` declarations with `__ivy_` prefix to avoid name clashes.
+
+#pragma ivy cnumber
 export module math;
 
-export int32 add(int32 a, int32 b) {
-    return a + b;
-}
+// ── libc math functions (extern "C") ──────────────────────────
+// Declared with __ivy_ prefix to avoid infinite recursion when the
+// Ivy wrapper function has the same name.  The runtime library
+// (lib/ivyrt.c) provides thin wrappers that call the real libc
+// functions.
+extern "C" double __ivy_sqrt(double x);
+extern "C" double __ivy_sin(double x);
+extern "C" double __ivy_cos(double x);
+extern "C" double __ivy_tan(double x);
+extern "C" double __ivy_pow(double base, double exp);
+extern "C" double __ivy_floor(double x);
+extern "C" double __ivy_ceil(double x);
+extern "C" double __ivy_round(double x);
+extern "C" double __ivy_trunc(double x);
+extern "C" double __ivy_exp(double x);
+extern "C" double __ivy_log(double x);
+extern "C" double __ivy_log2(double x);
+extern "C" double __ivy_log10(double x);
+extern "C" double __ivy_atan(double x);
+extern "C" double __ivy_asin(double x);
+extern "C" double __ivy_acos(double x);
+extern "C" double __ivy_atan2(double y, double x);
+extern "C" double __ivy_fmod(double a, double b);
+extern "C" double __ivy_fabs(double x);
 
-export int32 sub(int32 a, int32 b) {
-    return a - b;
-}
+// ── Integer arithmetic ───────────────────────────────────────
 
-export int32 mul(int32 a, int32 b) {
-    return a * b;
-}
-
-export int32 min(int32 a, int32 b) {
-    if (a < b) {
-        return a;
-    }
-    return b;
-}
-
-export int32 max(int32 a, int32 b) {
-    if (a > b) {
-        return a;
-    }
-    return b;
-}
-
-export int32 abs(int32 n) {
+export int32_t abs(int32_t n) {
     if (n < 0) {
         return 0 - n;
     }
     return n;
 }
 
-export int32 clamp(int32 val, int32 lo, int32 hi) {
+export int64_t abs(int64_t n) {
+    if (n < 0) {
+        return 0 - n;
+    }
+    return n;
+}
+
+export int32_t add(int32_t a, int32_t b) {
+    return a + b;
+}
+
+export int32_t sub(int32_t a, int32_t b) {
+    return a - b;
+}
+
+export int32_t mul(int32_t a, int32_t b) {
+    return a * b;
+}
+
+export int32_t min(int32_t a, int32_t b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+export int32_t max(int32_t a, int32_t b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+export int64_t min(int64_t a, int64_t b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+export int64_t max(int64_t a, int64_t b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+export int32_t clamp(int32_t val, int32_t lo, int32_t hi) {
+    if (val < lo) {
+        return lo;
+    }
+    if (val > hi) {
+        return hi;
+    }
+    return val;
+}
+
+// ── Floating-point functions ──────────────────────────────────
+
+export double sqrt(double x) {
+    return __ivy_sqrt(x);
+}
+
+export double sin(double x) {
+    return __ivy_sin(x);
+}
+
+export double cos(double x) {
+    return __ivy_cos(x);
+}
+
+export double tan(double x) {
+    return __ivy_tan(x);
+}
+
+export double pow(double base, double exp) {
+    return __ivy_pow(base, exp);
+}
+
+export double floor(double x) {
+    return __ivy_floor(x);
+}
+
+export double ceil(double x) {
+    return __ivy_ceil(x);
+}
+
+export double round(double x) {
+    return __ivy_round(x);
+}
+
+export double trunc(double x) {
+    return __ivy_trunc(x);
+}
+
+export double exp(double x) {
+    return __ivy_exp(x);
+}
+
+export double log(double x) {
+    return __ivy_log(x);
+}
+
+export double log2(double x) {
+    return __ivy_log2(x);
+}
+
+export double log10(double x) {
+    return __ivy_log10(x);
+}
+
+export double atan(double x) {
+    return __ivy_atan(x);
+}
+
+export double asin(double x) {
+    return __ivy_asin(x);
+}
+
+export double acos(double x) {
+    return __ivy_acos(x);
+}
+
+export double atan2(double y, double x) {
+    return __ivy_atan2(y, x);
+}
+
+export double fmod(double a, double b) {
+    return __ivy_fmod(a, b);
+}
+
+export double fabs(double x) {
+    return __ivy_fabs(x);
+}
+
+export double abs(double x) {
+    return __ivy_fabs(x);
+}
+
+export double min(double a, double b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+export double max(double a, double b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+export double clamp(double val, double lo, double hi) {
     if (val < lo) {
         return lo;
     }

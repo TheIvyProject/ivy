@@ -1,0 +1,187 @@
+// test_d7_math.ivy — D7: ivy::math module tests
+//
+// Tests math::abs, min, max, clamp, sqrt, sin, cos, tan, pow,
+// floor, ceil, round, log, exp, atan2, fmod, fabs.
+// Tests both int32_t and double overloads.
+
+#pragma ivy cnumber
+
+import math;
+
+int main() {
+    io::println("D7: math module tests");
+
+    // ── Test 1: Integer abs ────────────────────────────────────
+    int32_t a1 = math::abs(-42);
+    if (a1 != 42) {
+        io::eprintln("Test 1 FAILED: abs(-42) = {}", a1);
+        return 1;
+    }
+    int32_t a2 = math::abs(42);
+    if (a2 != 42) {
+        io::eprintln("Test 1 FAILED: abs(42) = {}", a2);
+        return 1;
+    }
+    io::println("Test 1: abs(int32_t) OK: {}", a1);
+
+    // ── Test 2: int64 abs ──────────────────────────────────────
+    int64_t n2 = -9999999999;
+    int64_t a3 = math::abs(n2);
+    if (a3 != 9999999999) {
+        io::eprintln("Test 2 FAILED: abs(int64_t) = {}", a3);
+        return 1;
+    }
+    io::println("Test 2: abs(int64_t) OK: {}", a3);
+
+    // ── Test 3: Double abs ──────────────────────────────────────
+    double a4 = math::abs(-3.14);
+    if (a4 < 3.13 || a4 > 3.15) {
+        io::eprintln("Test 3 FAILED: abs(-3.14) = {}", a4);
+        return 1;
+    }
+    io::println("Test 3: abs(double) OK: {}", a4);
+
+    // ── Test 4: Integer min/max ─────────────────────────────────
+    int32_t m1 = math::min(10, 20);
+    if (m1 != 10) {
+        io::eprintln("Test 4 FAILED: min(10,20) = {}", m1);
+        return 1;
+    }
+    int32_t m2 = math::max(10, 20);
+    if (m2 != 20) {
+        io::eprintln("Test 4 FAILED: max(10,20) = {}", m2);
+        return 1;
+    }
+    io::println("Test 4: min/max(int32_t) OK: {} {}", m1, m2);
+
+    // ── Test 5: Double min/max ──────────────────────────────────
+    double m3 = math::min(3.14, 2.71);
+    if (m3 > 2.72 || m3 < 2.70) {
+        io::eprintln("Test 5 FAILED: min(3.14,2.71) = {}", m3);
+        return 1;
+    }
+    double m4 = math::max(3.14, 2.71);
+    if (m4 > 3.15 || m4 < 3.13) {
+        io::eprintln("Test 5 FAILED: max(3.14,2.71) = {}", m4);
+        return 1;
+    }
+    io::println("Test 5: min/max(double) OK: {} {}", m3, m4);
+
+    // ── Test 6: clamp ───────────────────────────────────────────
+    int32_t c1 = math::clamp(15, 10, 20);
+    if (c1 != 15) {
+        io::eprintln("Test 6 FAILED: clamp(15,10,20) = {}", c1);
+        return 1;
+    }
+    int32_t c2 = math::clamp(5, 10, 20);
+    if (c2 != 10) {
+        io::eprintln("Test 6 FAILED: clamp(5,10,20) = {}", c2);
+        return 1;
+    }
+    int32_t c3 = math::clamp(25, 10, 20);
+    if (c3 != 20) {
+        io::eprintln("Test 6 FAILED: clamp(25,10,20) = {}", c3);
+        return 1;
+    }
+    io::println("Test 6: clamp OK: {} {} {}", c1, c2, c3);
+
+    // ── Test 7: sqrt ────────────────────────────────────────────
+    double s1 = math::sqrt(4.0);
+    if (s1 < 1.99 || s1 > 2.01) {
+        io::eprintln("Test 7 FAILED: sqrt(4.0) = {}", s1);
+        return 1;
+    }
+    double s2 = math::sqrt(2.0);
+    if (s2 < 1.41 || s2 > 1.42) {
+        io::eprintln("Test 7 FAILED: sqrt(2.0) = {}", s2);
+        return 1;
+    }
+    io::println("Test 7: sqrt OK: {} {}", s1, s2);
+
+    // ── Test 8: sin/cos ─────────────────────────────────────────
+    double sin0 = math::sin(0.0);
+    if (sin0 < -0.01 || sin0 > 0.01) {
+        io::eprintln("Test 8 FAILED: sin(0) = {}", sin0);
+        return 1;
+    }
+    double cos0 = math::cos(0.0);
+    if (cos0 < 0.99 || cos0 > 1.01) {
+        io::eprintln("Test 8 FAILED: cos(0) = {}", cos0);
+        return 1;
+    }
+    io::println("Test 8: sin(0)={} cos(0)={}", sin0, cos0);
+
+    // ── Test 9: pow ─────────────────────────────────────────────
+    double p1 = math::pow(2.0, 10.0);
+    if (p1 < 1023.0 || p1 > 1025.0) {
+        io::eprintln("Test 9 FAILED: pow(2,10) = {}", p1);
+        return 1;
+    }
+    io::println("Test 9: pow(2,10) = {}", p1);
+
+    // ── Test 10: floor/ceil/round ───────────────────────────────
+    double f1 = math::floor(3.7);
+    if (f1 < 2.99 || f1 > 3.01) {
+        io::eprintln("Test 10 FAILED: floor(3.7) = {}", f1);
+        return 1;
+    }
+    double c4 = math::ceil(3.2);
+    if (c4 < 3.99 || c4 > 4.01) {
+        io::eprintln("Test 10 FAILED: ceil(3.2) = {}", c4);
+        return 1;
+    }
+    double r1 = math::round(3.5);
+    if (r1 < 3.99 || r1 > 4.01) {
+        io::eprintln("Test 10 FAILED: round(3.5) = {}", r1);
+        return 1;
+    }
+    io::println("Test 10: floor(3.7)={} ceil(3.2)={} round(3.5)={}", f1, c4, r1);
+
+    // ── Test 11: log/exp ────────────────────────────────────────
+    double l1 = math::log(2.718281828);
+    if (l1 < 0.99 || l1 > 1.01) {
+        io::eprintln("Test 11 FAILED: log(e) = {}", l1);
+        return 1;
+    }
+    double e1 = math::exp(1.0);
+    if (e1 < 2.71 || e1 > 2.72) {
+        io::eprintln("Test 11 FAILED: exp(1) = {}", e1);
+        return 1;
+    }
+    io::println("Test 11: log(e)={} exp(1)={}", l1, e1);
+
+    // ── Test 12: atan2 ──────────────────────────────────────────
+    double at1 = math::atan2(1.0, 1.0);
+    if (at1 < 0.78 || at1 > 0.79) {
+        io::eprintln("Test 12 FAILED: atan2(1,1) = {}", at1);
+        return 1;
+    }
+    io::println("Test 12: atan2(1,1) = {}", at1);
+
+    // ── Test 13: fmod ───────────────────────────────────────────
+    double fm1 = math::fmod(10.0, 3.0);
+    if (fm1 < 0.99 || fm1 > 1.01) {
+        io::eprintln("Test 13 FAILED: fmod(10,3) = {}", fm1);
+        return 1;
+    }
+    io::println("Test 13: fmod(10,3) = {}", fm1);
+
+    // ── Test 14: fabs ───────────────────────────────────────────
+    double fa1 = math::fabs(-5.5);
+    if (fa1 < 5.49 || fa1 > 5.51) {
+        io::eprintln("Test 14 FAILED: fabs(-5.5) = {}", fa1);
+        return 1;
+    }
+    io::println("Test 14: fabs(-5.5) = {}", fa1);
+
+    // ── Test 15: tan ─────────────────────────────────────────────
+    double t1 = math::tan(0.0);
+    if (t1 < -0.01 || t1 > 0.01) {
+        io::eprintln("Test 15 FAILED: tan(0) = {}", t1);
+        return 1;
+    }
+    io::println("Test 15: tan(0) = {}", t1);
+
+    io::println("All D7 math tests passed!");
+    return 0;
+}

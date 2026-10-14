@@ -1226,7 +1226,10 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             std::string t = newTemp();
             const std::string ty = llvmType(e.type);
             const std::string op = isFloatType(e.type) ? "fsub" : "sub";
-            emitLine(t + " = " + op + " " + ty + " 0, " + lowerExpr(*v.operand));
+            // D7: Float types require a float zero constant (0.0),
+            // not an integer 0 — LLVM IR rejects `fsub double 0, x`.
+            const std::string zero = isFloatType(e.type) ? "0.0" : "0";
+            emitLine(t + " = " + op + " " + ty + " " + zero + ", " + lowerExpr(*v.operand));
             return t;
         }
         if (v.op == "+") {

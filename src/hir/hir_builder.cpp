@@ -826,7 +826,22 @@ void HirBuilder::buildSignature(const Function& af) {
         return;
     }
     auto fn = std::make_unique<hir::Function>();
-    fn->name = af.name;
+    // D7: When compiling a module (export module math;), top-level
+    // functions have empty namespacePrefix but their names must be
+    // qualified with the module name so that:
+    //  1. HIR resolution finds them (functions_["math::abs"])
+    //  2. Codegen mangles them with the module scope
+    // This matches the .ivm reader which qualifies names on import.
+    // extern "C" functions are exempt — they must keep their bare names
+    // for C ABI compatibility (e.g. __ivy_sqrt, printf, malloc).
+    std::string_view fnName = af.name;
+    if (!af.isExternC && af.namespacePrefix.empty() && !ast_.moduleName.empty() &&
+        std::string_view(af.name).find("::") == std::string_view::npos) {
+        std::string qual = ast_.moduleName + "::" + std::string(af.name);
+        stringStorage_.push_back(std::move(qual));
+        fnName = stringStorage_.back();
+    }
+    fn->name = fnName;
     fn->namespacePrefix = af.namespacePrefix;
     fn->returnType = resolveTemplateStructType(resolveTypeAlias(af.returnType), af.loc);
     fn->isExternC = af.isExternC;
@@ -871,7 +886,9 @@ void HirBuilder::buildSignature(const Function& af) {
     }
 
     // Check for redefinition and register the overload.
-    auto& overloads = functions_[af.name];
+    // D7: Register under the qualified name (fn->name) so that calls
+    // like `math::abs(42)` resolve correctly.
+    auto& overloads = functions_[fn->name];
     for (const auto* existing : overloads) {
         if (existing->body && af.body) {
             // Two definitions with bodies — check if they're truly the
@@ -3109,7 +3126,25 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
             if (flattenMemberChain(*callee, qualified)) {
                 stringStorage_.push_back(std::move(qualified));
                 call.callee = stringStorage_.back();
-                call.target = resolveFunction(call.callee);
+                // D7: Use resolveOverload when multiple overloads exist
+                // (e.g. math::abs has int32_t, int64_t, double overloads).
+                // Previously this called resolveFunction which always
+                // returned the first overload, ignoring arg types.
+                auto it = functions_.find(call.callee);
+                if (it != functions_.end() && it->second.size() > 1) {
+                    std::vector<hir::Type> argTypes;
+                    argTypes.reserve(call.args.size());
+                    for (const auto& a : call.args) {
+                        argTypes.push_back(a ? a->type : dummyType());
+                    }
+                    call.target = resolveOverload(it->second, argTypes, e.loc);
+                    if (!call.target) {
+                        error(callee->loc, "no matching overload for '" +
+                              std::string(call.callee) + "'");
+                    }
+                } else {
+                    call.target = resolveFunction(call.callee);
+                }
                 if (!call.target) {
                     // 8.5: Check if this is a known interpreter/codegen
                     // builtin (ivy::print, ivy::println, printf, etc.).
@@ -3118,6 +3153,9 @@ std::unique_ptr<hir::Expr> HirBuilder::buildExpr(const Expr& e) {
                         error(callee->loc, "call to undeclared function '" +
                               std::string(call.callee) + "'");
                     }
+                } else {
+                    // Use the resolved target's name for codegen.
+                    call.callee = call.target->name;
                 }
             } else {
                 // Method call: `obj.method(args)` or `obj->method(args)`.
@@ -4279,7 +4317,18 @@ std::unique_ptr<hir::TranslationUnit> HirBuilder::build() {
             // Find the matching HIR function in the overload set.
             // Match by signature: same param count + types.
             hir::Function* fn = nullptr;
-            auto it = functions_.find(af.name);
+            // D7: Look up under the qualified name (same logic as
+            // buildSignature — module functions are registered as
+            // "module::func", not bare "func").
+            // extern "C" functions are exempt — they keep bare names.
+            std::string_view lookup = af.name;
+            if (!af.isExternC && af.namespacePrefix.empty() && !ast_.moduleName.empty() &&
+                std::string_view(af.name).find("::") == std::string_view::npos) {
+                std::string qual = ast_.moduleName + "::" + std::string(af.name);
+                stringStorage_.push_back(std::move(qual));
+                lookup = stringStorage_.back();
+            }
+            auto it = functions_.find(lookup);
             if (it != functions_.end()) {
                 for (hir::Function* cand : it->second) {
                     if (cand->params.size() != af.params.size()) continue;

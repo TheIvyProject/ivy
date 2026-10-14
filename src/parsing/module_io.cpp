@@ -260,6 +260,8 @@ bool readModuleInterface(TranslationUnit& tu,
             f.isExported = true;  // .ivm contains only exports
             std::string name;
             ls >> name;
+            // Store bare name temporarily — we'll qualify it after
+            // reading isExternC (see below).
             f.name = intern(name);
             std::string retTypeStr;
             ls >> retTypeStr;
@@ -288,6 +290,15 @@ bool readModuleInterface(TranslationUnit& tu,
             f.isConstexpr = isConstexpr;
             f.isConsteval = isConsteval;
             f.isOperator = isOperator;
+            // D7: Qualify the function name with the module name so
+            // that calls like `math::abs(42)` resolve correctly.
+            // extern "C" functions are exempt — they keep their bare
+            // names for C ABI compatibility (e.g. __ivy_sqrt).
+            if (!isExternC && name.find("::") == std::string::npos &&
+                !tu.moduleName.empty()) {
+                std::string qual = tu.moduleName + "::" + name;
+                f.name = intern(qual);
+            }
             if (isOperator) {
                 std::string sym;
                 ls >> sym;
