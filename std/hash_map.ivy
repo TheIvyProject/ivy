@@ -1,0 +1,278 @@
+// Ivy Standard Library — hash_map<K, V> module (D5)
+//
+// Hash table with linear probing, open addressing.
+//
+// The struct holds three parallel arrays:
+//   keys_   — heap-allocated K buffer
+//   vals_   — heap-allocated V buffer
+//   states_ — byte array: 0=empty, 1=occupied, 2=tombstone
+//
+// K must be an integer type (int32_t, int64_t, uint64_t, etc.).
+// Hash = key % capacity.  Linear probing on collision.
+//
+// Methods:
+//   insert(k, v) — insert or update key→value
+//   get(k)       — return pointer to value, or null if absent
+//   contains(k)  — return true if key present
+//   remove(k)    — remove key (tombstone marker)
+//   len()        — number of occupied slots
+//   operator[]   — bounds-checked access, panic if absent
+//
+// RAII: frees keys_/vals_/states_ on destruction.
+
+#pragma ivy cnumber
+export module hash_map;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" void   __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" void   __ivy_memset(void* dst, int c, unsigned long long n);
+extern "C" void   __ivy_panic(const char* msg, int line);
+
+export template <typename K, typename V>
+struct hash_map {
+    K*     keys_;
+    V*     vals_;
+    char*  states_;
+    uint64 cap_;
+    uint64 count_;
+
+    // Default constructor — empty.
+    hash_map() {
+        unsafe {
+            this.keys_ = (K*)0;
+            this.vals_ = (V*)0;
+            this.states_ = (char*)0;
+        }
+        this.cap_ = 0;
+        this.count_ = 0;
+    }
+
+    // Destructor — free all buffers.
+    ~hash_map() {
+        unsafe {
+            __ivy_free(this.keys_);
+            __ivy_free(this.vals_);
+            __ivy_free(this.states_);
+            this.keys_ = (K*)0;
+            this.vals_ = (V*)0;
+            this.states_ = (char*)0;
+            this.cap_ = 0;
+            this.count_ = 0;
+        }
+    }
+
+    // Number of elements.
+    uint64 len() {
+        return this.count_;
+    }
+
+    // Internal: hash a key into [0, cap_).
+    // Uses integer modulo.  Caller must ensure cap_ > 0.
+    uint64 hashKey(K key) {
+        unsafe {
+            // Interpret key as uint64 via memcpy to avoid signed issues.
+            uint64 k = 0;
+            __ivy_memcpy(&k, &key, sizeof(K));
+            return k % this.cap_;
+        }
+    }
+
+    // Internal: grow and rehash when load factor exceeds 0.7.
+    void rehash() {
+        unsafe {
+            uint64 oldCap = this.cap_;
+            K* oldKeys = this.keys_;
+            V* oldVals = this.vals_;
+            char* oldStates = this.states_;
+
+            uint64 newCap = oldCap * 2;
+            if (newCap == 0) {
+                newCap = 16;
+            }
+
+            this.cap_ = newCap;
+            this.count_ = 0;
+            this.keys_ = (K*)__ivy_alloc(newCap * sizeof(K));
+            this.vals_ = (V*)__ivy_alloc(newCap * sizeof(V));
+            this.states_ = (char*)__ivy_alloc(newCap);
+            __ivy_memset(this.states_, 0, newCap);
+
+            // Re-insert all occupied slots.
+            uint64 i = 0;
+            while (i < oldCap) {
+                if (oldStates[i] == 1) {
+                    // Insert oldKeys[i] → oldVals[i] into new table.
+                    K key = oldKeys[i];
+                    V val = oldVals[i];
+                    uint64 idx = this.hashKey(key);
+                    while (this.states_[idx] == 1) {
+                        idx = idx + 1;
+                        if (idx >= this.cap_) {
+                            idx = 0;
+                        }
+                    }
+                    // Copy key.
+                    char* kslot = (char*)this.keys_ + idx * sizeof(K);
+                    __ivy_memcpy(kslot, &key, sizeof(K));
+                    // Copy value.
+                    char* vslot = (char*)this.vals_ + idx * sizeof(V);
+                    __ivy_memcpy(vslot, &val, sizeof(V));
+                    this.states_[idx] = 1;
+                    this.count_ = this.count_ + 1;
+                }
+                i = i + 1;
+            }
+
+            __ivy_free(oldKeys);
+            __ivy_free(oldVals);
+            __ivy_free(oldStates);
+        }
+    }
+
+    // Insert or update a key→value mapping.
+    void insert(K key, V value) {
+        unsafe {
+            // Initialize on first use.
+            if (this.cap_ == 0) {
+                this.cap_ = 16;
+                this.keys_ = (K*)__ivy_alloc(this.cap_ * sizeof(K));
+                this.vals_ = (V*)__ivy_alloc(this.cap_ * sizeof(V));
+                this.states_ = (char*)__ivy_alloc(this.cap_);
+                __ivy_memset(this.states_, 0, this.cap_);
+            }
+
+            // Grow if load factor > 0.7.
+            if (this.count_ * 10 >= this.cap_ * 7) {
+                this.rehash();
+            }
+
+            uint64 idx = this.hashKey(key);
+
+            // Linear probe: find existing key or empty/tombstone slot.
+            // Also track first tombstone for insertion optimization.
+            uint64 firstTomb = (uint64)-1;
+            while (true) {
+                if (this.states_[idx] == 0) {
+                    // Empty slot — insert here (or at first tombstone).
+                    uint64 insertIdx = idx;
+                    if (firstTomb != (uint64)-1) {
+                        insertIdx = firstTomb;
+                    }
+                    char* kslot = (char*)this.keys_ + insertIdx * sizeof(K);
+                    __ivy_memcpy(kslot, &key, sizeof(K));
+                    char* vslot = (char*)this.vals_ + insertIdx * sizeof(V);
+                    __ivy_memcpy(vslot, &value, sizeof(V));
+                    this.states_[insertIdx] = 1;
+                    this.count_ = this.count_ + 1;
+                    return;
+                }
+                if (this.states_[idx] == 1) {
+                    // Occupied — check if same key.
+                    K existing = *(K*)((char*)this.keys_ + idx * sizeof(K));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(K));
+                    __ivy_memcpy(&b, &key, sizeof(K));
+                    if (a == b) {
+                        // Update value.
+                        char* vslot = (char*)this.vals_ + idx * sizeof(V);
+                        __ivy_memcpy(vslot, &value, sizeof(V));
+                        return;
+                    }
+                }
+                if (this.states_[idx] == 2 && firstTomb == (uint64)-1) {
+                    firstTomb = idx;
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+            }
+        }
+    }
+
+    // Get a pointer to the value for `key`, or null if absent.
+    V* get(K key) {
+        unsafe {
+            if (this.cap_ == 0) {
+                return (V*)0;
+            }
+            uint64 idx = this.hashKey(key);
+            uint64 probes = 0;
+            while (probes < this.cap_) {
+                if (this.states_[idx] == 0) {
+                    return (V*)0;
+                }
+                if (this.states_[idx] == 1) {
+                    K existing = *(K*)((char*)this.keys_ + idx * sizeof(K));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(K));
+                    __ivy_memcpy(&b, &key, sizeof(K));
+                    if (a == b) {
+                        return (V*)((char*)this.vals_ + idx * sizeof(V));
+                    }
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+                probes = probes + 1;
+            }
+            return (V*)0;
+        }
+    }
+
+    // Check if key is present.
+    bool contains(K key) {
+        unsafe {
+            V* p = this.get(key);
+            return p != (V*)0;
+        }
+    }
+
+    // Remove a key (marks slot as tombstone).
+    void remove(K key) {
+        unsafe {
+            if (this.cap_ == 0) {
+                return;
+            }
+            uint64 idx = this.hashKey(key);
+            uint64 probes = 0;
+            while (probes < this.cap_) {
+                if (this.states_[idx] == 0) {
+                    return;
+                }
+                if (this.states_[idx] == 1) {
+                    K existing = *(K*)((char*)this.keys_ + idx * sizeof(K));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(K));
+                    __ivy_memcpy(&b, &key, sizeof(K));
+                    if (a == b) {
+                        this.states_[idx] = 2;
+                        this.count_ = this.count_ - 1;
+                        return;
+                    }
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+                probes = probes + 1;
+            }
+        }
+    }
+
+    // Bounds-checked element access.  Panics if key not found.
+    V& operator[](K key) {
+        unsafe {
+            V* p = this.get(key);
+            if (p == (V*)0) {
+                __ivy_panic("hash_map key not found", 0);
+            }
+            return *p;
+        }
+    }
+};

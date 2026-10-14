@@ -74,6 +74,9 @@ unsigned long long __ivy_strlen(const char* s);
 /* Copy `n` bytes from `src` to `dst`.  The buffers must not overlap. */
 void __ivy_memcpy(void* dst, const void* src, unsigned long long n);
 
+/* Fill `n` bytes of `dst` with byte value `c`. */
+void __ivy_memset(void* dst, int c, unsigned long long n);
+
 /* Compare two NUL-terminated C strings.  Returns 0 if equal, <0 if
  * a < b, >0 if a > b (lexicographic, like libc strcmp). */
 int __ivy_strcmp(const char* a, const char* b);

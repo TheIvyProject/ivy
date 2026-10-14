@@ -1,0 +1,228 @@
+// Ivy Standard Library — hash_set<T> module (D5)
+//
+// Hash set with linear probing, open addressing.
+// Stores keys only (no values), like hash_map but without V.
+//
+// The struct holds two parallel arrays:
+//   keys_    — heap-allocated T buffer
+//   states_  — byte array: 0=empty, 1=occupied, 2=tombstone
+//
+// T must be an integer type (int32_t, int64_t, uint64_t, etc.).
+// Hash = key % capacity.  Linear probing on collision.
+//
+// Methods:
+//   insert(k)    — add a key
+//   contains(k)  — return true if key present
+//   remove(k)    — remove key (tombstone marker)
+//   len()        — number of occupied slots
+//
+// RAII: frees keys_/states_ on destruction.
+
+#pragma ivy cnumber
+export module hash_set;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" void   __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" void   __ivy_memset(void* dst, int c, unsigned long long n);
+extern "C" void   __ivy_panic(const char* msg, int line);
+
+export template <typename T>
+struct hash_set {
+    T*     keys_;
+    char*  states_;
+    uint64 cap_;
+    uint64 count_;
+
+    // Default constructor — empty.
+    hash_set() {
+        unsafe {
+            this.keys_ = (T*)0;
+            this.states_ = (char*)0;
+        }
+        this.cap_ = 0;
+        this.count_ = 0;
+    }
+
+    // Destructor — free buffers.
+    ~hash_set() {
+        unsafe {
+            __ivy_free(this.keys_);
+            __ivy_free(this.states_);
+            this.keys_ = (T*)0;
+            this.states_ = (char*)0;
+            this.cap_ = 0;
+            this.count_ = 0;
+        }
+    }
+
+    // Number of elements.
+    uint64 len() {
+        return this.count_;
+    }
+
+    // Internal: hash a key into [0, cap_).
+    uint64 hashKey(T key) {
+        unsafe {
+            uint64 k = 0;
+            __ivy_memcpy(&k, &key, sizeof(T));
+            return k % this.cap_;
+        }
+    }
+
+    // Internal: grow and rehash when load factor exceeds 0.7.
+    void rehash() {
+        unsafe {
+            uint64 oldCap = this.cap_;
+            T* oldKeys = this.keys_;
+            char* oldStates = this.states_;
+
+            uint64 newCap = oldCap * 2;
+            if (newCap == 0) {
+                newCap = 16;
+            }
+
+            this.cap_ = newCap;
+            this.count_ = 0;
+            this.keys_ = (T*)__ivy_alloc(newCap * sizeof(T));
+            this.states_ = (char*)__ivy_alloc(newCap);
+            __ivy_memset(this.states_, 0, newCap);
+
+            uint64 i = 0;
+            while (i < oldCap) {
+                if (oldStates[i] == 1) {
+                    T key = oldKeys[i];
+                    uint64 idx = this.hashKey(key);
+                    while (this.states_[idx] == 1) {
+                        idx = idx + 1;
+                        if (idx >= this.cap_) {
+                            idx = 0;
+                        }
+                    }
+                    char* kslot = (char*)this.keys_ + idx * sizeof(T);
+                    __ivy_memcpy(kslot, &key, sizeof(T));
+                    this.states_[idx] = 1;
+                    this.count_ = this.count_ + 1;
+                }
+                i = i + 1;
+            }
+
+            __ivy_free(oldKeys);
+            __ivy_free(oldStates);
+        }
+    }
+
+    // Insert a key.  No-op if already present.
+    void insert(T key) {
+        unsafe {
+            if (this.cap_ == 0) {
+                this.cap_ = 16;
+                this.keys_ = (T*)__ivy_alloc(this.cap_ * sizeof(T));
+                this.states_ = (char*)__ivy_alloc(this.cap_);
+                __ivy_memset(this.states_, 0, this.cap_);
+            }
+
+            if (this.count_ * 10 >= this.cap_ * 7) {
+                this.rehash();
+            }
+
+            uint64 idx = this.hashKey(key);
+            uint64 firstTomb = (uint64)-1;
+            while (true) {
+                if (this.states_[idx] == 0) {
+                    uint64 insertIdx = idx;
+                    if (firstTomb != (uint64)-1) {
+                        insertIdx = firstTomb;
+                    }
+                    char* kslot = (char*)this.keys_ + insertIdx * sizeof(T);
+                    __ivy_memcpy(kslot, &key, sizeof(T));
+                    this.states_[insertIdx] = 1;
+                    this.count_ = this.count_ + 1;
+                    return;
+                }
+                if (this.states_[idx] == 1) {
+                    T existing = *(T*)((char*)this.keys_ + idx * sizeof(T));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(T));
+                    __ivy_memcpy(&b, &key, sizeof(T));
+                    if (a == b) {
+                        return;
+                    }
+                }
+                if (this.states_[idx] == 2 && firstTomb == (uint64)-1) {
+                    firstTomb = idx;
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+            }
+        }
+    }
+
+    // Check if key is present.
+    bool contains(T key) {
+        unsafe {
+            if (this.cap_ == 0) {
+                return false;
+            }
+            uint64 idx = this.hashKey(key);
+            uint64 probes = 0;
+            while (probes < this.cap_) {
+                if (this.states_[idx] == 0) {
+                    return false;
+                }
+                if (this.states_[idx] == 1) {
+                    T existing = *(T*)((char*)this.keys_ + idx * sizeof(T));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(T));
+                    __ivy_memcpy(&b, &key, sizeof(T));
+                    if (a == b) {
+                        return true;
+                    }
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+                probes = probes + 1;
+            }
+            return false;
+        }
+    }
+
+    // Remove a key (marks slot as tombstone).
+    void remove(T key) {
+        unsafe {
+            if (this.cap_ == 0) {
+                return;
+            }
+            uint64 idx = this.hashKey(key);
+            uint64 probes = 0;
+            while (probes < this.cap_) {
+                if (this.states_[idx] == 0) {
+                    return;
+                }
+                if (this.states_[idx] == 1) {
+                    T existing = *(T*)((char*)this.keys_ + idx * sizeof(T));
+                    uint64 a = 0;
+                    uint64 b = 0;
+                    __ivy_memcpy(&a, &existing, sizeof(T));
+                    __ivy_memcpy(&b, &key, sizeof(T));
+                    if (a == b) {
+                        this.states_[idx] = 2;
+                        this.count_ = this.count_ - 1;
+                        return;
+                    }
+                }
+                idx = idx + 1;
+                if (idx >= this.cap_) {
+                    idx = 0;
+                }
+                probes = probes + 1;
+            }
+        }
+    }
+};

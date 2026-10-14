@@ -112,6 +112,14 @@ void __ivy_memcpy(void* dst, const void* src, unsigned long long n) {
     }
 }
 
+void __ivy_memset(void* dst, int c, unsigned long long n) {
+    char* d = (char*)dst;
+    char ch = (char)c;
+    for (unsigned long long i = 0; i < n; ++i) {
+        d[i] = ch;
+    }
+}
+
 int __ivy_strcmp(const char* a, const char* b) {
     if (!a) a = "";
     if (!b) b = "";

@@ -1,0 +1,185 @@
+// D5 test: ivy::hash_map<K, V>
+//
+// Tests hash_map with insert, get, contains, remove, operator[],
+// collision handling, rehashing, and growth.
+
+#pragma ivy cnumber
+import hash_map;
+
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
+extern "C" int    printf(const char* fmt, ...);
+
+int main() {
+    // 1. Default constructor + len()
+    hash_map<int32_t, int32_t> m1;
+    if (m1.len() != 0) {
+        printf("FAIL: m1.len() should be 0\n");
+        return 1;
+    }
+
+    // 2. Insert and get
+    m1.insert(10, 100);
+    m1.insert(20, 200);
+    m1.insert(30, 300);
+    if (m1.len() != 3) {
+        printf("FAIL: m1.len() should be 3, got %llu\n", m1.len());
+        return 1;
+    }
+
+    // 3. Get values (returns V* — need unsafe for pointer deref)
+    unsafe {
+        int32_t* v1 = m1.get(10);
+        if (v1 == (int32_t*)0 || *v1 != 100) {
+            printf("FAIL: m1.get(10) should be 100\n");
+            return 1;
+        }
+        int32_t* v2 = m1.get(20);
+        if (v2 == (int32_t*)0 || *v2 != 200) {
+            printf("FAIL: m1.get(20) should be 200\n");
+            return 1;
+        }
+        int32_t* v3 = m1.get(30);
+        if (v3 == (int32_t*)0 || *v3 != 300) {
+            printf("FAIL: m1.get(30) should be 300\n");
+            return 1;
+        }
+
+        // 4. Get absent key
+        int32_t* vabsent = m1.get(999);
+        if (vabsent != (int32_t*)0) {
+            printf("FAIL: m1.get(999) should be null\n");
+            return 1;
+        }
+    }
+
+    // 5. contains()
+    if (!m1.contains(10)) {
+        printf("FAIL: m1 should contain 10\n");
+        return 1;
+    }
+    if (m1.contains(999)) {
+        printf("FAIL: m1 should not contain 999\n");
+        return 1;
+    }
+
+    // 6. operator[] access
+    if (m1[10] != 100) {
+        printf("FAIL: m1[10] should be 100\n");
+        return 1;
+    }
+    if (m1[30] != 300) {
+        printf("FAIL: m1[30] should be 300\n");
+        return 1;
+    }
+
+    // 7. Update existing key
+    m1.insert(10, 111);
+    if (m1.len() != 3) {
+        printf("FAIL: m1.len() should still be 3 after update\n");
+        return 1;
+    }
+    if (m1[10] != 111) {
+        printf("FAIL: m1[10] should be 111 after update\n");
+        return 1;
+    }
+
+    // 8. Remove
+    m1.remove(20);
+    if (m1.len() != 2) {
+        printf("FAIL: m1.len() should be 2 after remove\n");
+        return 1;
+    }
+    if (m1.contains(20)) {
+        printf("FAIL: m1 should not contain 20 after remove\n");
+        return 1;
+    }
+    if (!m1.contains(10)) {
+        printf("FAIL: m1 should still contain 10\n");
+        return 1;
+    }
+    if (!m1.contains(30)) {
+        printf("FAIL: m1 should still contain 30\n");
+        return 1;
+    }
+
+    // 9. Re-insert after remove (tombstone reuse)
+    m1.insert(20, 222);
+    if (m1.len() != 3) {
+        printf("FAIL: m1.len() should be 3 after re-insert\n");
+        return 1;
+    }
+    if (m1[20] != 222) {
+        printf("FAIL: m1[20] should be 222 after re-insert\n");
+        return 1;
+    }
+
+    // 10. Growth — insert many elements to trigger rehash
+    hash_map<int32_t, int32_t> m2;
+    int32_t i = 0;
+    while (i < 100) {
+        m2.insert(i, i * 10);
+        i = i + 1;
+    }
+    if (m2.len() != 100) {
+        printf("FAIL: m2.len() should be 100, got %llu\n", m2.len());
+        return 1;
+    }
+    i = 0;
+    while (i < 100) {
+        if (m2[i] != i * 10) {
+            printf("FAIL: m2[%d] should be %d\n", i, i * 10);
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    // 11. Remove half and verify remaining
+    i = 0;
+    while (i < 50) {
+        m2.remove(i);
+        i = i + 1;
+    }
+    if (m2.len() != 50) {
+        printf("FAIL: m2.len() should be 50, got %llu\n", m2.len());
+        return 1;
+    }
+    i = 0;
+    while (i < 50) {
+        if (m2.contains(i)) {
+            printf("FAIL: m2 should not contain %d\n", i);
+            return 1;
+        }
+        i = i + 1;
+    }
+    i = 50;
+    while (i < 100) {
+        if (!m2.contains(i)) {
+            printf("FAIL: m2 should contain %d\n", i);
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    // 12. Update remaining keys
+    i = 50;
+    while (i < 100) {
+        m2.insert(i, i * 100);
+        i = i + 1;
+    }
+    if (m2.len() != 50) {
+        printf("FAIL: m2.len() should still be 50 after update\n");
+        return 1;
+    }
+    i = 50;
+    while (i < 100) {
+        if (m2[i] != i * 100) {
+            printf("FAIL: m2[%d] should be %d after update\n", i, i * 100);
+            return 1;
+        }
+        i = i + 1;
+    }
+
+    printf("D5 ivy::hash_map tests passed\n");
+    return 0;
+}
