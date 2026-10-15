@@ -1,4 +1,5 @@
 // 8.4 test: cast operators — static_cast, reinterpret_cast, const_cast, C-style cast
+// E2: Migrated from [[ivy::unsafe]] to unsafe { } keyword
 #pragma ivy cnumber
 
 extern "C" {
@@ -33,23 +34,21 @@ int main() {
     printf("static_cast<Color>(30) = %d\n", static_cast<int>(fromInt));
 
     // --- static_cast: pointer upcast (void*) ---
-    int x = 99;
-    int* ip = &x;
-    void* vp = static_cast<void*>(ip);
-    printf("static_cast<void*>(&x) ok\n");
+    unsafe {
+        int x = 99;
+        int* ip = &x;
+        void* vp = static_cast<void*>(ip);
+        printf("static_cast<void*>(&x) ok\n");
 
-    // --- static_cast: pointer downcast from void* (unsafe: deref) ---
-    [[ivy::unsafe]] {
+        // --- static_cast: pointer downcast from void* (unsafe: deref) ---
         int* recovered = static_cast<int*>(vp);
         printf("static_cast<int*>(void*) = %d\n", *recovered);
-    }
 
-    // --- static_cast: nullptr -> pointer ---
-    static_cast<int*>(nullptr);
-    printf("static_cast<int*>(nullptr) is null\n");
+        // --- static_cast: nullptr -> pointer ---
+        static_cast<int*>(nullptr);
+        printf("static_cast<int*>(nullptr) is null\n");
 
-    // --- reinterpret_cast (unsafe) ---
-    [[ivy::unsafe]] {
+        // --- reinterpret_cast (unsafe) ---
         long addr = reinterpret_cast<long>(&x);
         printf("reinterpret_cast<long>(&x) = %ld\n", addr);
 
@@ -59,17 +58,13 @@ int main() {
         // pointer-to-pointer reinterpret
         char* cp = reinterpret_cast<char*>(ip);
         printf("reinterpret_cast<char*>(int*) ok\n");
-    }
 
-    // --- const_cast (unsafe) ---
-    const int ci = 777;
-    [[ivy::unsafe]] {
+        // --- const_cast (unsafe) ---
+        const int ci = 777;
         int* mut = const_cast<int*>(&ci);
         printf("const_cast<int*>(&ci) ok, val = %d\n", *mut);
-    }
 
-    // --- C-style cast (unsafe) ---
-    [[ivy::unsafe]] {
+        // --- C-style cast (unsafe) ---
         double e = 2.71828;
         int cint = (int)e;
         printf("(int)2.71828 = %d\n", cint);

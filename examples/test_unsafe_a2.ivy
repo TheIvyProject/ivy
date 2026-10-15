@@ -1,6 +1,6 @@
 // A2 test: `unsafe { }` keyword block
-// Tests that `unsafe { }` works as a keyword block (new form),
-// and that `[[ivy::unsafe]] { }` still works (backward-compat alias).
+// E2: [[ivy::unsafe]] attribute is removed — use `unsafe { }` keyword.
+// This test verifies the keyword form works in all scenarios.
 #pragma ivy cnumber
 
 extern "C" {
@@ -12,7 +12,7 @@ extern "C" {
 int main() {
     int x = 42;
 
-    // --- A2: new `unsafe { }` keyword block form ---
+    // --- A2: `unsafe { }` keyword block form ---
     unsafe {
         int* p = &x;
         *p = 100;
@@ -45,12 +45,6 @@ int main() {
         double e = 2.71828;
         int cint = (int)e;
         printf("(int)2.71828 = %d\n", cint);
-    }
-
-    // --- A2: backward-compat — [[ivy::unsafe]] { } still works ---
-    [[ivy::unsafe]] {
-        int* p = &x;
-        printf("legacy [[ivy::unsafe]]: *p = %d\n", *p);
     }
 
     // --- A2: nested unsafe blocks ---

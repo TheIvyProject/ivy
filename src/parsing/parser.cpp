@@ -169,7 +169,7 @@ std::vector<Attribute> Parser::parseAttributeList() {
 
         std::string_view ns, name;
         // A2: Accept both Identifier and Keyword here so that
-        // `unsafe` (now a keyword) works inside [[ivy::unsafe]].
+        // `unsafe` (now a keyword) works inside `unsafe { }`.
         if (at(TokenKind::Identifier) || at(TokenKind::Keyword)) {
             ns = next().lexeme;
             if (at(TokenKind::ColonColon)) {
@@ -2236,18 +2236,19 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
         return makeStmt<Stmt::Unsafe>(loc, std::move(body));
     }
 
-    // Legacy: [[ivy::unsafe]] { ... } (backward-compat alias)
+    // E2: [[ivy::unsafe]] is removed — use `unsafe { }` keyword instead.
     if (at(TokenKind::LBracket) && peek(1).kind == TokenKind::LBracket) {
+        // Check if this is [[ivy::unsafe]] and emit a helpful error.
+        Token start = peek();
         std::vector<Attribute> attrs = parseAttributeList();
-        validateAttributes(attrs, {"unsafe"});
-        if (attrs.size() != 1 || attrs[0].name != "unsafe") {
-            errorAt(peek(), "only [[ivy::unsafe]] is allowed on statements");
+        for (const auto& a : attrs) {
+            if (a.name == "unsafe") {
+                errorAt(start, "[[ivy::unsafe]] is removed — use 'unsafe { }' instead");
+            }
         }
-        const bool saved = inUnsafe_;
-        inUnsafe_ = true;
-        std::unique_ptr<Stmt> body = parseStatement();
-        inUnsafe_ = saved;
-        return makeStmt<Stmt::Unsafe>(loc, std::move(body));
+        // If we get here, it's some other attribute on a statement (not
+        // valid).  Report it rather than silently dropping.
+        validateAttributes(attrs, {});
     }
 
     if (atKeyword("if")) return parseIf();
