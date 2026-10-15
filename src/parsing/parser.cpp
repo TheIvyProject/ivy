@@ -300,20 +300,26 @@ bool Parser::isTypeStart() const {
         kw == "bool" || kw == "char" || kw == "short" || kw == "int" ||
         kw == "long" || kw == "float" || kw == "double" ||
         kw == "auto" ||  // type deduction
-        // Ivy builtin types — new Ivy-native names (without _t suffix)
+        // Ivy builtin types (E3: _t suffix removed — use int32 not int32_t)
         kw == "int8" || kw == "int16" || kw == "int32" || kw == "int64" ||
         kw == "uint8" || kw == "uint16" || kw == "uint32" || kw == "uint64" ||
         kw == "int128" || kw == "uint128" ||
         kw == "float16" || kw == "float32" || kw == "float64" ||
         kw == "float128" || kw == "bfloat16" ||
         kw == "iptr" || kw == "uptr" || kw == "size" ||
-        // Legacy _t-suffixed names (backward-compat)
-        kw == "int8_t" || kw == "int16_t" || kw == "int32_t" || kw == "int64_t" ||
-        kw == "uint8_t" || kw == "uint16_t" || kw == "uint32_t" || kw == "uint64_t" ||
-        kw == "float16_t" || kw == "float32_t" || kw == "float64_t" ||
-        kw == "float128_t" || kw == "bfloat16_t" ||
-        kw == "size_t" || kw == "ptrdiff_t" || kw == "nullptr_t" ||
-        kw == "max_align_t") {
+        // These types only exist in _t form (no alias), so they stay.
+        kw == "nullptr_t" || kw == "max_align_t") {
+        return true;
+    }
+    // E3: _t-suffixed types are recognized as type starts so parseType()
+    // can emit a helpful error. They are NOT valid Ivy types.
+    if (kw.size() > 2 && kw.ends_with("_t") &&
+        (kw == "int8_t" || kw == "int16_t" || kw == "int32_t" ||
+         kw == "int64_t" || kw == "uint8_t" || kw == "uint16_t" ||
+         kw == "uint32_t" || kw == "uint64_t" || kw == "float16_t" ||
+         kw == "float32_t" || kw == "float64_t" || kw == "float128_t" ||
+         kw == "bfloat16_t" || kw == "size_t" || kw == "ptrdiff_t" ||
+         kw == "uptr_t" || kw == "int128_t" || kw == "uint128_t")) {
         return true;
     }
     return false;
@@ -453,14 +459,7 @@ Type Parser::parseType() {
         atKeyword("uint32") || atKeyword("uint64") || atKeyword("float16") ||
         atKeyword("float32") || atKeyword("float64") || atKeyword("float128") ||
         atKeyword("bfloat16") || atKeyword("int128") || atKeyword("uint128") ||
-        atKeyword("iptr") || atKeyword("uptr") || atKeyword("size") ||
-        // Legacy _t-suffixed names (backward-compat)
-        atKeyword("int8_t") || atKeyword("int16_t") || atKeyword("int32_t") ||
-        atKeyword("int64_t") || atKeyword("uint8_t") || atKeyword("uint16_t") ||
-        atKeyword("uint32_t") || atKeyword("uint64_t") || atKeyword("float16_t") ||
-        atKeyword("float32_t") || atKeyword("float64_t") || atKeyword("float128_t") ||
-        atKeyword("bfloat16_t") || atKeyword("size_t") || atKeyword("ptrdiff_t") ||
-        atKeyword("nullptr_t") || atKeyword("max_align_t")) {
+        atKeyword("iptr") || atKeyword("uptr") || atKeyword("size")) {
         // A1: Normalize Ivy-native names to canonical _t form so
         // downstream stages (HIR/MIR/codegen) see the same type identity.
         static const std::unordered_map<std::string_view, std::string_view>
@@ -479,6 +478,35 @@ Type Parser::parseType() {
         const std::string_view lex = next().lexeme;
         auto it = normalize.find(lex);
         t.base = (it != normalize.end()) ? it->second : lex;
+    } else if (atKeyword("nullptr_t") || atKeyword("max_align_t")) {
+        // These types only exist in _t form — no Ivy-native alias.
+        t.base = next().lexeme;
+    } else if (atKeyword("int8_t") || atKeyword("int16_t") ||
+               atKeyword("int32_t") || atKeyword("int64_t") ||
+               atKeyword("uint8_t") || atKeyword("uint16_t") ||
+               atKeyword("uint32_t") || atKeyword("uint64_t") ||
+               atKeyword("float16_t") || atKeyword("float32_t") ||
+               atKeyword("float64_t") || atKeyword("float128_t") ||
+               atKeyword("bfloat16_t") || atKeyword("size_t") ||
+               atKeyword("ptrdiff_t") || atKeyword("uptr_t") ||
+               atKeyword("int128_t") || atKeyword("uint128_t")) {
+        // E3: _t-suffixed types are removed from Ivy source.
+         // Use the Ivy-native name instead (int32, uint64, float64, etc.).
+         const std::string_view lex = peek().lexeme;
+         // Strip "_t" suffix for the suggestion.
+         std::string suggestion(lex);
+         if (suggestion.size() > 2 && suggestion.ends_with("_t")) {
+             suggestion = suggestion.substr(0, suggestion.size() - 2);
+         }
+         // Map special cases back to Ivy-native names.
+         if (suggestion == "ptrdiff") suggestion = "iptr";
+         // uptr_t -> uptr (already correct after stripping _t)
+         std::string msg = "_t-suffixed type '";
+         msg += std::string(lex);
+         msg += "' is removed — use '";
+         msg += suggestion;
+         msg += "' instead";
+         errorAt(peek(), msg);
     } else if (atKeyword("char")) {
         if (!cnumberEnabled_) {
             errorAt(peek(), "C-style type 'char' requires #pragma ivy cnumber; use int8/uint8");

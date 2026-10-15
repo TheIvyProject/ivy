@@ -32,15 +32,15 @@ int check_equal(T a, T b) {
 }
 
 int main() {
-    // int32_t satisfies Addable (has operator+)
-    int32_t x = add<int32_t>(3, 4);
+    // int32 satisfies Addable (has operator+)
+    int32 x = add<int32>(3, 4);
     printf("add(3,4) = %d\n", x);
 
-    // int32_t satisfies Equality (has operator==)
-    int32_t eq = check_equal<int32_t>(5, 5);
+    // int32 satisfies Equality (has operator==)
+    int32 eq = check_equal<int32>(5, 5);
     printf("equal(5,5) = %d\n", eq);
 
-    int32_t ne = check_equal<int32_t>(5, 6);
+    int32 ne = check_equal<int32>(5, 6);
     printf("equal(5,6) = %d\n", ne);
 
     printf("done\n");

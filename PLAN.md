@@ -19,7 +19,7 @@ lập được mô tả trong [docs/](file:///d:/project/Ivy/ivyc/docs/) và
 
 | Khía cạnh | Hiện tại (C++ subset) | Ivy 0.1 (độc lập) |
 |-----------|----------------------|-------------------|
-| **Tên type** | `int32_t`, `uint32_t`, `float32_t`... | `int32`, `uint32`, `float32`... (bỏ suffix `_t`) |
+| **Tên type** | `int32_t`, `uint32_t`, `float32_t`... | `int32`, `uint32`, `float32`... (bỏ suffix `_t`). `_t` variant giờ báo error, dùng `import cpp` cho tương thích C++ |
 | **C-style types** | `#pragma ivy cnumber` gate | Giữ — Ivy dùng chung ABI với C, `#pragma` cần cho `extern "C"` và system interop |
 | **Unsafe** | `[[ivy::unsafe]] { }` | `unsafe { }` (keyword, không phải attribute) |
 | **Move** | `std::move(a)` (chưa triển khai) | `move(a)` (builtin, không cần `std::`) |
@@ -103,7 +103,7 @@ migration hoàn tất.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| A1 ✅| **Đổi tên type bỏ `_t` suffix** | ★★ | Lexer: thêm `int8`/`int16`/`int32`/`int64`/`uint8`/`uint16`/`uint32`/`uint64`/`float16`/`float32`/`float64`/`float128`/`bfloat16`/`int128`/`uint128`/`iptr`/`uptr`/`size` làm keyword. HIR/Codegen: map type mới → LLVM type (giống `_t` cũ). Giữ `_t` variant làm alias (backward-compat trong giai đoạn chuyển đổi). Theo [Basic_Types.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Basic_Types.md) |
+| A1 ✅| **Đổi tên type bỏ `_t` suffix** | ★★ | Lexer: thêm `int8`/`int16`/`int32`/`int64`/`uint8`/`uint16`/`uint32`/`uint64`/`float16`/`float32`/`float64`/`float128`/`bfloat16`/`int128`/`uint128`/`iptr`/`uptr`/`size` làm keyword. HIR/Codegen: map type mới → LLVM type (giống `_t` cũ). E3: `_t` variant giờ báo error, dùng `import cpp` cho tương thích C++. Theo [Basic_Types.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Basic_Types.md) |
 | A2 ✅| **`unsafe` keyword block** | ★ | Lexer: thêm `unsafe` làm keyword. Parser: `unsafe { }` → parse như compound statement, set flag `inUnsafeBlock`. Thay thế `[[ivy::unsafe]] { }` (giữ attribute form làm alias tạm thời). HIR: `requireUnsafe()` check cả hai dạng. Theo [Unsafe_and_Casts.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Unsafe_and_Casts.md) |
 | A3 ✅| **`fn` keyword + trailing return type** | ★★ | Parser: `fn name(params) -> Type { body }` — new function declaration form. Dùng chung `parseFunction` với flag `isTrailingReturn`. `auto` cho return type vẫn dùng được (deduction). Theo [Functions.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Functions.md) |
 | A4 ✅| **`move()` builtin** | ★★ | Parser: nhận diện `move(expr)` như builtin function call (không cần `#include`). HIR: `move(a)` → mark `a` as moved-out, kiểm tra use-after-move ở compile-time. MIR: track move state. Theo [Ownership_Model.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Ownership_Model.md) |
@@ -163,7 +163,7 @@ Sau khi stdlib đủ, loại bỏ các C++ legacy features.
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
 | E2 ✅ | **Loại bỏ `[[ivy::unsafe]]` attribute** | ★ | Sau A2 ổn định: xóa attribute form, chỉ giữ `unsafe { }` keyword. Error nếu gặp `[[ivy::unsafe]]` |
-| E3 | **Loại bỏ `_t` suffix type** | ★ | Sau A1 migration: xóa `int32_t`/`uint32_t`/etc. Chỉ giữ `int32`/`uint32`/etc. Error nếu gặp `_t` variant |
+| E3 ✅ | **Loại bỏ `_t` suffix type** | ★ | Sau A1 migration: xóa `int32_t`/`uint32_t`/etc. Chỉ giữ `int32`/`uint32`/etc. Error nếu gặp `_t` variant. `import cpp` vẫn cho phép `cpp::std::int32_t` cho tương thích C++ |
 | E4 | **Preprocessor → module-only** | ★★★ | Ivy code: chỉ dùng `import`, không `#include`. Preprocessor chỉ cho FFI/macro trong `unsafe`. `#include` cấm trong `.ivy` file (chỉ `.cpp` legacy). Theo OLD_PLAN.md §10.3 |
 | E5 | **Loại bỏ `.cpp` extension support** | ★ | CLI: chỉ nhận `.ivy`. `.cpp`/`.cc`/`.cxx`/`.c` → error "use .ivy extension". Migration: `ivyc migrate file.cpp` → auto-convert |
 

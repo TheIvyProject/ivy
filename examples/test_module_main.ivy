@@ -15,7 +15,7 @@ int main() {
 
     // Use exported functions (declarations only — definitions are linked
     // from math.obj at link time)
-    int32_t sum = add(3, 4);
+    int32 sum = add(3, 4);
 
     // Verify struct and alias work via interpreter
     ivy::println(v.x);

@@ -1,14 +1,14 @@
 #pragma ivy cnumber
 
 struct Point {
-    int32_t x;
-    int32_t y;
-    int32_t z;
+    int32 x;
+    int32 y;
+    int32 z;
 };
 
 struct Config {
-    int32_t width;
-    int32_t height;
+    int32 width;
+    int32 height;
     bool visible;
 };
 

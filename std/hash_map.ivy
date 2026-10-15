@@ -7,7 +7,7 @@
 //   vals_   — heap-allocated V buffer
 //   states_ — byte array: 0=empty, 1=occupied, 2=tombstone
 //
-// K must be an integer type (int32_t, int64_t, uint64_t, etc.).
+// K must be an integer type (int32, int64, uint64, etc.).
 // Hash = key % capacity.  Linear probing on collision.
 //
 // Methods:

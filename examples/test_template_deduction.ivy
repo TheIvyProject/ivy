@@ -21,27 +21,27 @@ T increment(const T& x) {
 
 // Explicit template call + implicit deduction call mixed.
 int main() {
-    // Implicit deduction: identity(42) → T=int32_t
-    int32_t a = identity(42);
+    // Implicit deduction: identity(42) → T=int32
+    int32 a = identity(42);
     printf("identity(42) = %d\n", a);
 
-    // Implicit deduction: add(3, 4) → T=int32_t
-    int32_t b = add(3, 4);
+    // Implicit deduction: add(3, 4) → T=int32
+    int32 b = add(3, 4);
     printf("add(3, 4) = %d\n", b);
 
-    // Implicit deduction with const ref: increment(10) → T=int32_t
-    int32_t c = increment(10);
+    // Implicit deduction with const ref: increment(10) → T=int32
+    int32 c = increment(10);
     printf("increment(10) = %d\n", c);
 
-    // Explicit template args still work: identity<int32_t>(99)
-    int32_t d = identity<int32_t>(99);
-    printf("identity<int32_t>(99) = %d\n", d);
+    // Explicit template args still work: identity<int32>(99)
+    int32 d = identity<int32>(99);
+    printf("identity<int32>(99) = %d\n", d);
 
     // Mixed: deduce with different types
-    int32_t e = add(100, 200);
+    int32 e = add(100, 200);
     printf("add(100, 200) = %d\n", e);
 
-    int32_t sum = a + b + c + d + e;
+    int32 sum = a + b + c + d + e;
     printf("sum = %d\n", sum);
     printf("all template deduction tests passed\n");
     return 0;

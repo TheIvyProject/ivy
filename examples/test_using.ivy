@@ -2,12 +2,12 @@
 // Only `using Name = Type;` is supported (no `typedef`).
 
 // Basic alias to a primitive.
-using Int = int32_t;
-using Word = uint32_t;
-using SizeT = uint64_t;
+using Int = int32;
+using Word = uint32;
+using SizeT = uint64;
 
 // Alias to a pointer.
-using IntPtr = int32_t*;
+using IntPtr = int32*;
 
 // Alias chain: alias to another alias.
 using AnotherInt = Int;
@@ -21,7 +21,7 @@ struct Point {
     Point(Int x, Int y) : x(x), y(y) {}
 };
 
-int32_t main() {
+int32 main() {
     // Basic: alias as variable type.
     Int a = 42;
     Word w = 100u;
@@ -34,7 +34,7 @@ int32_t main() {
     // Struct field types are aliases — construct via ctor.
     Point pt(1, 2);
 
-    // Alias chain: AnotherInt → Int → int32_t.
+    // Alias chain: AnotherInt → Int → int32.
     AnotherInt c = 99;
 
     // Return sum to verify everything compiled/ran.

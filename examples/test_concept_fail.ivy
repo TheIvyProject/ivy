@@ -12,7 +12,7 @@ concept Addable = requires(T a, T b) {
 };
 
 struct Foo {
-    int32_t x;
+    int32 x;
 };
 
 // No operator+ for Foo — constraint should fail

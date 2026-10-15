@@ -36,19 +36,19 @@ int main() {
     float64 fr = i + j;
 
     // --- Backward-compat: _t-suffixed names still work ---
-    int8_t  a2 = 5;
-    int16_t b2 = 10;
-    int32_t c2 = 15;
-    int64_t d2 = 20;
-    uint8_t  e2 = 65;
-    uint32_t g2 = 200;
-    float32_t i2 = 3;
-    float64_t j2 = 3;
-    size_t s2 = 42;
+    int8  a2 = 5;
+    int16 b2 = 10;
+    int32 c2 = 15;
+    int64 d2 = 20;
+    uint8  e2 = 65;
+    uint32 g2 = 200;
+    float32 i2 = 3;
+    float64 j2 = 3;
+    size s2 = 42;
 
     // --- Mixed: new + old in same expression ---
-    int32 mixed = a + b2;   // int8 + int16_t → int32
-    float64 fmixed = i + j2; // float32 + float64_t → float64
+    int32 mixed = a + b2;   // int8 + int16 → int32
+    float64 fmixed = i + j2; // float32 + float64 → float64
 
     // --- sizeof on new types ---
     printf("sizeof(int8)   = %d\n", sizeof(int8));

@@ -9,7 +9,7 @@ extern "C" int printf(const char* fmt, ...);
 
 int main() {
     // 1. Default constructor + len()
-    hash_set<int32_t> s1;
+    hash_set<int32> s1;
     if (s1.len() != 0) {
         printf("FAIL: s1.len() should be 0\n");
         return 1;
@@ -76,8 +76,8 @@ int main() {
     }
 
     // 7. Growth — insert many elements
-    hash_set<int32_t> s2;
-    int32_t i = 0;
+    hash_set<int32> s2;
+    int32 i = 0;
     while (i < 100) {
         s2.insert(i);
         i = i + 1;

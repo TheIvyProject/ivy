@@ -1,0 +1,19 @@
+// E3 test: _t-suffixed types are removed from Ivy source code.
+// This test verifies that using int32_t (etc.) in Ivy code reports
+// an error directing the user to use int32 instead.
+//
+// EXPECT: compile failure with error message containing "removed"
+// and "instead"
+
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    // E3: This should fail to compile
+    int32_t x = 42;
+    printf("should not reach here: %d\n", x);
+    return 0;
+}

@@ -5,9 +5,9 @@ extern "C" {
 }
 
 struct Vec3 {
-    int32_t x;
-    int32_t y;
-    int32_t z;
+    int32 x;
+    int32 y;
+    int32 z;
 
     // Binary operator+: Vec3 + Vec3 -> Vec3
     Vec3 operator+(Vec3 other) {
@@ -32,15 +32,15 @@ struct Vec3 {
         return r;
     }
 
-    // Index operator[]: int index -> int32_t (component access)
-    int32_t operator[](int32_t i) {
+    // Index operator[]: int index -> int32 (component access)
+    int32 operator[](int32 i) {
         if (i == 0) { return this.x; }
         if (i == 1) { return this.y; }
         return this.z;
     }
 
-    // Call operator(): () -> int32_t (magnitude squared)
-    int32_t operator()() {
+    // Call operator(): () -> int32 (magnitude squared)
+    int32 operator()() {
         return this.x * this.x + this.y * this.y + this.z * this.z;
     }
 };
@@ -69,7 +69,7 @@ int main() {
     printf("a[0]=%d a[1]=%d a[2]=%d\n", a[0], a[1], a[2]);  // 1 2 3
 
     // operator()
-    int32_t mag = a();
+    int32 mag = a();
     printf("|a|^2 = %d\n", mag);  // 1+4+9 = 14
 
     printf("all operator overloading tests passed\n");

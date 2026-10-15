@@ -7,11 +7,11 @@ extern "C" void  __ivy_free(void* p);
 extern "C" int   printf(const char* fmt, ...);
 
 struct Point {
-    int32_t x;
-    int32_t y;
+    int32 x;
+    int32 y;
 };
 
-int32_t main() {
+int32 main() {
     unsafe {
         Point* pmem = (Point*)__ivy_alloc(8);
         pmem->x = 10;

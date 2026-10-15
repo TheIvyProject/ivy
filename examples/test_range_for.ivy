@@ -11,8 +11,8 @@ extern "C" {
     int printf(const char* fmt, ...);
 }
 
-int32_t main() {
-    int32_t arr[5];
+int32 main() {
+    int32 arr[5];
     arr[0] = 10;
     arr[1] = 20;
     arr[2] = 30;
@@ -20,26 +20,26 @@ int32_t main() {
     arr[4] = 50;
 
     // By-value: read each element
-    int32_t sum = 0;
-    for (int32_t x : arr) {
+    int32 sum = 0;
+    for (int32 x : arr) {
         sum = sum + x;
     }
 
     // By-reference: double each element in-place
-    for (int32_t& x : arr) {
+    for (int32& x : arr) {
         x = x * 2;
     }
 
     // Verify doubling: now arr = {20, 40, 60, 80, 100}
-    int32_t sum2 = 0;
-    for (int32_t x : arr) {
+    int32 sum2 = 0;
+    for (int32 x : arr) {
         sum2 = sum2 + x;
     }
 
     // break inside range-for: stop at first element >= 60
     // arr = {20, 40, 60, 80, 100} → stops at 60 (index 2)
-    int32_t firstBig = -1;
-    for (int32_t x : arr) {
+    int32 firstBig = -1;
+    for (int32 x : arr) {
         if (x >= 60) {
             firstBig = x;
             break;
@@ -48,8 +48,8 @@ int32_t main() {
 
     // continue inside range-for: sum even elements only
     // arr = {20, 40, 60, 80, 100} — all even → 300
-    int32_t evenSum = 0;
-    for (int32_t x : arr) {
+    int32 evenSum = 0;
+    for (int32 x : arr) {
         if (x % 2 != 0) continue;
         evenSum = evenSum + x;
     }
@@ -57,11 +57,11 @@ int32_t main() {
     // Nested range-for: accumulate i*5 + j for all (i, j) pairs.
     // 5*5 = 25 iterations: sum(i*5+j) for i,j in [0,5)
     //   = 5*sum(i*5) + 5*sum(j) = 5*50 + 5*10 = 250 + 50 = 300
-    int32_t mat[5];
+    int32 mat[5];
     mat[0] = 0; mat[1] = 1; mat[2] = 2; mat[3] = 3; mat[4] = 4;
-    int32_t nested = 0;
-    for (int32_t i : mat) {
-        for (int32_t j : mat) {
+    int32 nested = 0;
+    for (int32 i : mat) {
+        for (int32 j : mat) {
             nested = nested + i * 5 + j;
         }
     }

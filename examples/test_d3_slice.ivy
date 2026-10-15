@@ -9,9 +9,9 @@ import slice;
 import vector;
 
 // Function taking a slice — array decays to slice when passed.
-int32_t sumSlice(slice<int32_t> s) {
-    int32_t total = 0;
-    for (int32_t x : s) {
+int32 sumSlice(slice<int32> s) {
+    int32 total = 0;
+    for (int32 x : s) {
         total = total + x;
     }
     return total;
@@ -19,14 +19,14 @@ int32_t sumSlice(slice<int32_t> s) {
 
 int main() {
     // 1. Default constructor
-    slice<int32_t> s1;
+    slice<int32> s1;
     if (s1.len() != 0) {
         io::println("FAIL: s1.len() should be 0");
         return 1;
     }
 
     // 2. Construct from raw pointer + length (using a fixed-size array)
-    int32_t arr[5];
+    int32 arr[5];
     arr[0] = 1;
     arr[1] = 2;
     arr[2] = 3;
@@ -34,7 +34,7 @@ int main() {
     arr[4] = 5;
 
     unsafe {
-        slice<int32_t> s2 = slice<int32_t>(arr, 5);
+        slice<int32> s2 = slice<int32>(arr, 5);
         if (s2.len() != 5) {
             io::println("FAIL: s2.len() should be 5");
             return 1;
@@ -62,7 +62,7 @@ int main() {
         }
 
         // 5. Sub-slice
-        slice<int32_t> s3 = s2.subslice(1, 4);
+        slice<int32> s3 = s2.subslice(1, 4);
         if (s3.len() != 3) {
             io::println("FAIL: s3.len() should be 3");
             return 1;
@@ -77,8 +77,8 @@ int main() {
         }
 
         // 6. Range-based for over slice
-        int32_t sum = 0;
-        for (int32_t x : s2) {
+        int32 sum = 0;
+        for (int32 x : s2) {
             sum = sum + x;
         }
         // arr is {1, 2, 99, 4, 5} → sum = 111
@@ -88,18 +88,18 @@ int main() {
         }
 
         // 7. Pass slice to function
-        int32_t total = sumSlice(s2);
+        int32 total = sumSlice(s2);
         if (total != 111) {
             io::println("FAIL: sumSlice should be 111");
             return 1;
         }
 
         // 8. Slice from vector data
-        vector<int32_t> v;
+        vector<int32> v;
         v.push(10);
         v.push(20);
         v.push(30);
-        slice<int32_t> sv = slice<int32_t>(v.data_, v.len());
+        slice<int32> sv = slice<int32>(v.data_, v.len());
         if (sv.len() != 3) {
             io::println("FAIL: sv.len() should be 3");
             return 1;
@@ -116,7 +116,7 @@ int main() {
         }
 
         // 9. Sub-slice of sub-slice
-        slice<int32_t> s4 = s2.subslice(0, 3).subslice(1, 3);
+        slice<int32> s4 = s2.subslice(0, 3).subslice(1, 3);
         if (s4.len() != 2) {
             io::println("FAIL: s4.len() should be 2");
             return 1;

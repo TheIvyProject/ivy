@@ -6,12 +6,12 @@ extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 extern "C" int   printf(const char* fmt, ...);
 
-int32_t main() {
+int32 main() {
     unsafe {
-        int32_t* mem = (int32_t*)__ivy_alloc(4);
+        int32* mem = (int32*)__ivy_alloc(4);
         *mem = 42;
-        unique_ptr<int32_t> p = unique_ptr<int32_t>(mem);
-        int32_t val = *p;
+        unique_ptr<int32> p = unique_ptr<int32>(mem);
+        int32 val = *p;
         printf("val = %d\n", val);
     }
     return 0;

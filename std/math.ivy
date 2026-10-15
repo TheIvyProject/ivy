@@ -38,61 +38,61 @@ extern "C" double __ivy_fabs(double x);
 
 // ── Integer arithmetic ───────────────────────────────────────
 
-export int32_t abs(int32_t n) {
+export int32 abs(int32 n) {
     if (n < 0) {
         return 0 - n;
     }
     return n;
 }
 
-export int64_t abs(int64_t n) {
+export int64 abs(int64 n) {
     if (n < 0) {
         return 0 - n;
     }
     return n;
 }
 
-export int32_t add(int32_t a, int32_t b) {
+export int32 add(int32 a, int32 b) {
     return a + b;
 }
 
-export int32_t sub(int32_t a, int32_t b) {
+export int32 sub(int32 a, int32 b) {
     return a - b;
 }
 
-export int32_t mul(int32_t a, int32_t b) {
+export int32 mul(int32 a, int32 b) {
     return a * b;
 }
 
-export int32_t min(int32_t a, int32_t b) {
+export int32 min(int32 a, int32 b) {
     if (a < b) {
         return a;
     }
     return b;
 }
 
-export int32_t max(int32_t a, int32_t b) {
+export int32 max(int32 a, int32 b) {
     if (a > b) {
         return a;
     }
     return b;
 }
 
-export int64_t min(int64_t a, int64_t b) {
+export int64 min(int64 a, int64 b) {
     if (a < b) {
         return a;
     }
     return b;
 }
 
-export int64_t max(int64_t a, int64_t b) {
+export int64 max(int64 a, int64 b) {
     if (a > b) {
         return a;
     }
     return b;
 }
 
-export int32_t clamp(int32_t val, int32_t lo, int32_t hi) {
+export int32 clamp(int32 val, int32 lo, int32 hi) {
     if (val < lo) {
         return lo;
     }

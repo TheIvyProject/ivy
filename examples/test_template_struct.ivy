@@ -16,16 +16,16 @@ struct Box {
 };
 
 int main() {
-    Box<int32_t> a;
+    Box<int32> a;
     a.set(42);
     printf("a.get() = %d\n", a.get());  // 42
     printf("a.value = %d\n", a.value);   // 42
 
-    Box<int32_t> b;
+    Box<int32> b;
     b.set(100);
     printf("b.get() = %d\n", b.get());  // 100
 
-    int32_t sum = a.get() + b.get();
+    int32 sum = a.get() + b.get();
     printf("sum = %d\n", sum);          // 142
 
     printf("all template struct tests passed\n");

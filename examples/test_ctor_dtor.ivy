@@ -5,10 +5,10 @@ extern "C" {
 }
 
 struct Logger {
-    int32_t id;
+    int32 id;
 
     // Constructor with member initializer list.
-    Logger(int32_t id_) : id(id_) {
+    Logger(int32 id_) : id(id_) {
         printf("Logger(%d) constructed\n", this.id);
     }
 
@@ -19,8 +19,8 @@ struct Logger {
 };
 
 struct Pair {
-    int32_t a;
-    int32_t b;
+    int32 a;
+    int32 b;
 
     // Default constructor (no args).
     Pair() : a(0), b(0) {
@@ -28,7 +28,7 @@ struct Pair {
     }
 
     // Two-arg constructor with member init list.
-    Pair(int32_t x, int32_t y) : a(x), b(y) {
+    Pair(int32 x, int32 y) : a(x), b(y) {
         printf("Pair(%d, %d) constructed\n", this.a, this.b);
     }
 

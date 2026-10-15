@@ -9,7 +9,7 @@ import vector;
 
 int main() {
     // 1. Default constructor + len()
-    vector<int32_t> v1;
+    vector<int32> v1;
     if (v1.len() != 0) {
         io::eprintln("FAIL: v1.len() should be 0");
         return 1;
@@ -57,8 +57,8 @@ int main() {
     }
 
     // 6. Push many elements to test growth
-    vector<int32_t> v2;
-    int32_t i = 0;
+    vector<int32> v2;
+    int32 i = 0;
     while (i < 100) {
         v2.push(i * 2);
         i = i + 1;
@@ -86,14 +86,14 @@ int main() {
     }
 
     // 8. Range-based for over vector
-    vector<int32_t> v3;
+    vector<int32> v3;
     v3.push(1);
     v3.push(2);
     v3.push(3);
     v3.push(4);
     v3.push(5);
-    int32_t sum = 0;
-    for (int32_t x : v3) {
+    int32 sum = 0;
+    for (int32 x : v3) {
         sum = sum + x;
     }
     if (sum != 15) {
@@ -102,12 +102,12 @@ int main() {
     }
 
     // 9. Range-based for with reference — modify elements
-    vector<int32_t> v4;
+    vector<int32> v4;
     v4.push(10);
     v4.push(20);
     v4.push(30);
-    int32_t total = 0;
-    for (int32_t& x : v4) {
+    int32 total = 0;
+    for (int32& x : v4) {
         x = x * 2;
         total = total + x;
     }
