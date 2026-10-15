@@ -20,7 +20,7 @@ lập được mô tả trong [docs/](file:///d:/project/Ivy/ivyc/docs/) và
 | Khía cạnh | Hiện tại (C++ subset) | Ivy 0.1 (độc lập) |
 |-----------|----------------------|-------------------|
 | **Tên type** | `int32_t`, `uint32_t`, `float32_t`... | `int32`, `uint32`, `float32`... (bỏ suffix `_t`) |
-| **C-style types** | `#pragma ivy cnumber` gate | Loại bỏ hoàn toàn (chỉ giữ cho FFI `import cpp`) |
+| **C-style types** | `#pragma ivy cnumber` gate | Giữ — Ivy dùng chung ABI với C, `#pragma` cần cho `extern "C"` và system interop |
 | **Unsafe** | `[[ivy::unsafe]] { }` | `unsafe { }` (keyword, không phải attribute) |
 | **Move** | `std::move(a)` (chưa triển khai) | `move(a)` (builtin, không cần `std::`) |
 | **Lifetime** | `[[ivy::lt(a)]]` (chưa triển khai) | `lifetime<$a>` + `const T& $a x` (syntax native) |
@@ -162,7 +162,6 @@ Sau khi stdlib đủ, loại bỏ các C++ legacy features.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| E1 | **Loại bỏ `#pragma ivy cnumber`** | ★★ | Xóa C-style types (`int`, `long`, `short`, `unsigned`, `float`, `double`, `char` ngoài `unsafe`). Chỉ giữ cho FFI `import cpp`. Migration script: đổi type cũ sang Ivy type. Theo OLD_PLAN.md §10.1 |
 | E2 | **Loại bỏ `[[ivy::unsafe]]` attribute** | ★ | Sau A2 ổn định: xóa attribute form, chỉ giữ `unsafe { }` keyword. Error nếu gặp `[[ivy::unsafe]]` |
 | E3 | **Loại bỏ `_t` suffix type** | ★ | Sau A1 migration: xóa `int32_t`/`uint32_t`/etc. Chỉ giữ `int32`/`uint32`/etc. Error nếu gặp `_t` variant |
 | E4 | **Preprocessor → module-only** | ★★★ | Ivy code: chỉ dùng `import`, không `#include`. Preprocessor chỉ cho FFI/macro trong `unsafe`. `#include` cấm trong `.ivy` file (chỉ `.cpp` legacy). Theo OLD_PLAN.md §10.3 |
@@ -212,7 +211,7 @@ flowchart LR
     end
 
     subgraph P5["Ưu tiên 5 — Legacy removal"]
-        E1["E1: Bỏ cnumber"]
+        E2["E2: Bỏ unsafe attr"]
         E3["E3: Bỏ _t suffix"]
         E4["E4: Module-only"]
     end
