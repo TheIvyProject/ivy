@@ -850,9 +850,11 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
     const bool emitPreprocessed = !outPath.empty() && hasExtension(outPath, "i") ||
                                   !outPath.empty() && hasExtension(outPath, "ii");
 
-    // Run the preprocessor (#include expansion) unconditionally — the
-    // parser no longer accepts `#` tokens as directives. The search paths
-    // are exactly those passed via -I; there is no implicit system path.
+    // Run the preprocessor unconditionally — the parser no longer accepts
+    // `#` tokens as directives. E4: `#include` is only expanded for legacy
+    // `.cpp`/`.c` files; in `.ivy` files it is rejected (module-only —
+    // use `import <module>;` or `import cpp ...`). The search paths are
+    // exactly those passed via -I; there is no implicit system path.
     ivy::Preprocessor pp(std::move(tokens), path, includePaths);
     tokens = pp.run();
 

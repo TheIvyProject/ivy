@@ -15,7 +15,9 @@ namespace ivy {
 // C-preprocessor-style expansion for the Ivy subset.
 //
 // Runs after the lexer and before the parser. Currently supported:
-//   - `#include "..."` / `#include <...>` (recursively, with cycle guard)
+//   - `#include "..."` / `#include <...>` (recursively, with cycle guard;
+//     E4: only in legacy `.cpp`/`.c` files — rejected in `.ivy` files,
+//     which must use `import <module>;` / `import cpp ...` instead)
 //   - `#define NAME body...` (object-like macro)
 //   - `#define NAME(params) body...` (function-like macro; fixed-arity
 //     and variadic — the latter via `...` in the parameter list and
@@ -249,6 +251,20 @@ private:
     // leaves `pos` at the `#` token (caller emits it + skips the line).
     bool parseInclude(const std::vector<Token>& tokens, std::size_t& pos,
                       std::filesystem::path& resolved);
+
+    // E4: Rejects `#include` in `.ivy` files (module-only mode). If
+    // `tokens[pos]` is `#` followed by `include`, reports an error
+    // diagnostic ("use `import` instead") and advances `pos` past the
+    // whole directive line. Returns true when the directive was
+    // recognized as `#include` (caller should `continue`); false
+    // otherwise (caller falls through to the normal `#include` path,
+    // which only happens for legacy `.cpp` files).
+    bool rejectIvyInclude(const std::vector<Token>& tokens, std::size_t& pos);
+
+    // Returns true when `path` has a `.ivy` extension (Ivy module-only
+    // mode — `#include` is rejected there; only legacy `.cpp`/`.c`
+    // files may use `#include`).
+    static bool isIvyPath(const std::filesystem::path& path);
 
     // Parses a `#define NAME body...` or `#define NAME(params) body...`
     // directive starting at `pos` (which points at the `#` token). Registers

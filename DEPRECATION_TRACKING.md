@@ -85,8 +85,8 @@ Khi sẵn sàng loại bỏ hoàn toàn, đánh dấu "Removed" và xóa code pa
 | **Form cũ (deprecated)** | `#include <header>` / `#include "file"` — C preprocessor directive (chỉ dùng cho C++ legacy code) |
 | **File ảnh hưởng** | `src/parsing/lexer.cpp` (thêm `cpp` keyword), `src/parsing/parser.cpp` (`parseImport` đã hỗ trợ `import cpp`), `src/app/main.cpp` (thu thập cppHeaders, resolve path, truyền cho CodeGen), `src/codegen/codegen.cpp` (`linkExecutable` compile C++ headers thành object + link) |
 | **Cơ chế** | `import cpp` directive: (1) Parser parse `import cpp <header>` / `import cpp "file"` vào `ImportDecl{isCpp=true}`. (2) main.cpp thu thập các C++ headers, resolve local path (source dir + -I paths). System headers (angle form, không tìm thấy local) skip — chỉ là khai báo. (3) Codegen `linkExecutable`: compile mỗi local header thành object file bằng `clang++ -x c++ -c`, rồi link tất cả object files (Ivy + C++) với clang++. (4) Safety: C++ functions khai báo qua `extern "C"` trong Ivy code. Pointer operations trên C++ returned values đã enforce `requireUnsafe()`. |
-| **Khi nào loại bỏ** | `#include` vẫn được giữ cho preprocessor legacy (FFI/macro trong unsafe). Không loại bỏ hoàn toàn — `import cpp` là preferred form cho C++ interop. |
-| **Cách loại bỏ** | N/A — `#include` và `import cpp` tồn tại song song. `import cpp` là Ivy-native, `#include` cho backward-compat. |
+| **Khi nào loại bỏ** | E4 (hoàn thành): `#include` bị cấm trong `.ivy` files (module-only — dùng `import`/`import cpp`/`import c`). Vẫn được giữ cho legacy `.cpp`/`.c` files. Các directive khác (`#define`, `#ifdef`, `#pragma`, ...) vẫn hoạt động trong mọi file. |
+| **Cách loại bỏ** | Đã thực hiện: `Preprocessor::rejectIvyInclude()` báo error khi gặp `#include` trong file `.ivy` (cả main file và file được include). `import cpp` là Ivy-native form cho C++ interop, `#include` chỉ còn cho backward-compat `.cpp`. |
 
 ---
 

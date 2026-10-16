@@ -305,6 +305,30 @@ bool Preprocessor::parseInclude(const std::vector<Token>& tokens, std::size_t& p
     return false;
 }
 
+bool Preprocessor::isIvyPath(const std::filesystem::path& path) {
+    return path.extension() == ".ivy";
+}
+
+bool Preprocessor::rejectIvyInclude(const std::vector<Token>& tokens, std::size_t& pos) {
+    // pos points at the `#` token.
+    if (pos + 1 >= tokens.size()) return false;
+    const Token& dirTok = tokens[pos + 1];
+    if (dirTok.kind != TokenKind::Identifier && dirTok.kind != TokenKind::Keyword) {
+        return false;
+    }
+    if (dirTok.lexeme != "include") return false;
+    // E4: `#include` is removed from `.ivy` files — Ivy code uses
+    // `import <module>;` (or `import cpp ...` / `import c ...` for
+    // FFI headers). Only legacy `.cpp`/`.c` files may use `#include`.
+    const Token& hashTok = tokens[pos];
+    diagnostics_.push_back({hashTok.line, hashTok.col,
+                            "#include is removed in .ivy files — use 'import <module>;' "
+                            "instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)",
+                            false});
+    skipLine(tokens, pos);
+    return true;
+}
+
 bool Preprocessor::parseDefine(const std::vector<Token>& tokens, std::size_t& pos) {
     // pos points at the `#` token.
     const Token& hashTok = tokens[pos];
@@ -1495,6 +1519,12 @@ void Preprocessor::processFile(const std::filesystem::path& file) {
     for (std::size_t i = 0; i < local.size() && local[i].kind != TokenKind::EndOfFile; ) {
         if (local[i].kind == TokenKind::Hash) {
             const std::size_t before = i;
+            // E4: files with `.ivy` extension are module-only — `#include`
+            // is rejected (use `import` instead). Only legacy `.cpp`/`.c`
+            // files included from a legacy TU may use `#include`.
+            if (active() && isIvyPath(file) && rejectIvyInclude(local, i)) {
+                continue;
+            }
             std::filesystem::path resolved;
             if (active() && parseInclude(local, i, resolved)) {
                 processFile(resolved);
@@ -1606,6 +1636,12 @@ std::vector<Token> Preprocessor::run() {
     for (std::size_t i = 0; i < input_.size() && input_[i].kind != TokenKind::EndOfFile; ) {
         if (input_[i].kind == TokenKind::Hash) {
             const std::size_t before = i;
+            // E4: `.ivy` files are module-only — `#include` is rejected
+            // (use `import <module>;` or `import cpp ...` instead). Only
+            // legacy `.cpp`/`.c` files may use `#include`.
+            if (active() && isIvyPath(mainFile_) && rejectIvyInclude(input_, i)) {
+                continue;
+            }
             std::filesystem::path resolved;
             if (active() && parseInclude(input_, i, resolved)) {
                 processFile(resolved);

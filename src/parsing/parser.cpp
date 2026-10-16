@@ -640,11 +640,13 @@ void Parser::parseTopLevel(TranslationUnit& tu) {
     while (!at(TokenKind::EndOfFile)) {
         if (at(TokenKind::Hash)) {
             // The preprocessor runs before the parser and consumes every
-            // #include it recognizes. A `#` token reaching the parser
-            // means an unsupported directive (e.g. #define / #ifdef, not
-            // yet implemented) or a stray `#`.
+            // directive it recognizes (#include for legacy .cpp files,
+            // #define/#ifdef/#if/#pragma/#error/#warning/#line for all
+            // files). A `#` token reaching the parser means an
+            // unrecognized directive or a stray `#`. Note (E4): `#include`
+            // is rejected in `.ivy` files — use `import` instead.
             errorAt(peek(),
-                    "unsupported preprocessor directive (only #include is handled)");
+                    "unsupported preprocessor directive");
             synchronize();
             continue;
         }

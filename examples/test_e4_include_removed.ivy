@@ -1,0 +1,12 @@
+// E4 test: #include is removed from .ivy files (module-only).
+// This test verifies that using #include in Ivy code reports
+// an error directing the user to use `import` instead.
+//
+// EXPECT: compile failure with error message containing "removed"
+// and "import"
+
+#include <ivy.h>
+
+int32 main() {
+    return 0;
+}
