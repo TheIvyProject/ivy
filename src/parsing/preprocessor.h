@@ -201,9 +201,9 @@ private:
     // or re-#define'd by the user. `__LINE__` and `__FILE__` are
     // context-sensitive (they depend on the current token / file), so
     // they are expanded specially in `tryExpandPredefined` rather than
-    // being stored in `macros_`. `__DATE__`, `__TIME__`, and
-    // `__cplusplus` are fixed and inserted into `macros_` by
-    // `initPredefinedMacros()`.
+    // being stored in `macros_`. `__DATE__`, `__TIME__`, `__cplusplus`,
+    // and `__ivy__` (F0: Ivy language version, `202604L`) are fixed and
+    // inserted into `macros_` by `initPredefinedMacros()`.
     std::unordered_map<std::string, Macro> predefinedMacros_;
     std::string dateStr_;  // "Mmm dd yyyy"
     std::string timeStr_;  // "HH:MM:SS"

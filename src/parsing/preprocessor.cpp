@@ -113,7 +113,7 @@ bool Preprocessor::isDefined(std::string_view name) const {
 bool Preprocessor::isPredefined(std::string_view name) const {
     static const std::unordered_map<std::string, bool> kPredefined = {
         {"__LINE__", true}, {"__FILE__", true}, {"__DATE__", true},
-        {"__TIME__", true}, {"__cplusplus", true},
+        {"__TIME__", true}, {"__cplusplus", true}, {"__ivy__", true},
     };
     return kPredefined.find(std::string(name)) != kPredefined.end();
 }
@@ -148,6 +148,17 @@ void Preprocessor::initPredefinedMacros() {
         // Also insert into `macros_` so `defined(__cplusplus)` and #ifdef
         // work without special-casing.
         macros_["__cplusplus"] = m;
+    }
+    // F0: Register `__ivy__` as an object-like macro with body `202604L`
+    // (Ivy 0.5 language version, see spec/ivy05.md §2). Same pattern as
+    // `__cplusplus` above.
+    {
+        Macro m;
+        m.isFunctionLike = false;
+        buffers_.push_back("202604L");
+        m.body.push_back(Token{TokenKind::Integer, buffers_.back(), 0, 0});
+        predefinedMacros_["__ivy__"] = m;
+        macros_["__ivy__"] = m;
     }
     // Register `__DATE__` as an object-like macro with body `"Mmm dd yyyy"`.
     {
@@ -194,9 +205,10 @@ bool Preprocessor::tryExpandPredefined(const Token& tok) {
         output_.push_back(Token{TokenKind::String, buffers_.back(), tok.line, tok.col});
         return true;
     }
-    // `__DATE__`, `__TIME__`, `__cplusplus` are in `macros_` (inserted by
-    // `initPredefinedMacros`), so they expand through the normal object-like
-    // path. Return false here to let the caller handle them.
+    // `__DATE__`, `__TIME__`, `__cplusplus`, `__ivy__` are in `macros_`
+    // (inserted by `initPredefinedMacros`), so they expand through the
+    // normal object-like path. Return false here to let the caller
+    // handle them.
     return false;
 }
 
@@ -1625,8 +1637,9 @@ std::vector<Token> Preprocessor::run() {
     expansionStack_.clear();
     condStack_.clear();
 
-    // Initialize predefined macros (__cplusplus, __DATE__, __TIME__ are
-    // fixed; __LINE__ and __FILE__ are expanded context-sensitively).
+    // Initialize predefined macros (__cplusplus, __DATE__, __TIME__,
+    // __ivy__ are fixed; __LINE__ and __FILE__ are expanded
+    // context-sensitively).
     initPredefinedMacros();
 
     std::error_code ec;

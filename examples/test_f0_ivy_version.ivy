@@ -1,0 +1,22 @@
+// F0 test: __ivy__ predefined version macro == 202604L (Ivy 0.5).
+// This test verifies that __ivy__ is defined, cannot be #undef'd,
+// and expands to the language version (see spec/ivy05.md §2).
+//
+// EXPECT: compiles cleanly. If __ivy__ is missing or has a wrong value,
+// the #if/#ifndef checks below fail the build via #error.
+
+#ifndef __ivy__
+#error "__ivy__ should be defined"
+#endif
+
+#if __ivy__ != 202604L
+#error "__ivy__ should be 202604L"
+#endif
+
+int32 main() {
+    int32 v = __ivy__;
+    if (v != 202604L) {
+        return 1;
+    }
+    return 0;
+}

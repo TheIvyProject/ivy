@@ -181,7 +181,7 @@ Mốc cuối: Ivy tự biên dịch chính nó. Binary duy nhất là `ivy`
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| F0 | **Ivy 0.5 spec draft** | ★★ | Formal specification document: syntax grammar (EBNF), type system rules, ownership/borrow rules, ABI specification. Versioning: `__ivy__ = 202604L` |
+| F0 ✅ | **Ivy 0.5 spec draft** | ★★ | `spec/ivy05.md`: syntax grammar (EBNF), type system, ownership/borrow, ABI, versioning. `spec/` gỡ khỏi `.gitignore` (được track). `types.md`/`ownership.md` update 0.5. `__ivy__ = 202604L` predefined macro + test |
 | F1.1 | **Port lexer sang Ivy** | ★★ | `lexer.cpp/.h`, `token.h`. Làm đầu tiên (không phụ thuộc tầng nào). Xong khi: token stream khớp bản C++ (`--tokens`) trên toàn bộ `examples/` + `std/` |
 | F1.2 | **Port preprocessor sang Ivy** | ★★ | `preprocessor.cpp/.h` (`#include` legacy, `#define`, conditional, `#if`, macro, `#pragma`). Xong khi: output sau preprocess khớp bản C++ (so qua `-o .i` / `--tokens`), gồm cả error E4 |
 | F1.3 | **Port parser sang Ivy** | ★★★★ | `parser.cpp/.h`, `ast.h` (file lớn nhất — ~3300 dòng). Xong khi: `--ast` dump khớp bản C++, gồm cả mọi error case (E2/E3/E4, type errors ở parse-time) |
