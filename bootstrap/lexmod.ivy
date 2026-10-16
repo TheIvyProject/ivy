@@ -1,0 +1,1143 @@
+// bootstrap/lexmod.ivy — F1.1/F1.2: Ivy port of src/parsing/lexer.cpp
+// (+ token.h) as an importable module.
+//
+// Contains ONLY structs with methods + zero free functions: in module
+// files, free functions cannot call each other (not even same-file), so
+// every helper (keyword table, char classes, kind codes) is a method.
+// Tokens live in a stride-5 uint64 buffer (kind/start/count/line/col);
+// lexemes materialize from source text on demand.
+//
+// Used by lexdrive (F1.1 --lex differential) and ppmod (F1.2).
+
+#pragma ivy cnumber
+
+export module lexmod;
+
+import string;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+
+export struct Lexer {
+    string src_;
+    const char* buf_;
+    uint64 len_;
+    uint64 pos_;
+    uint64 line_;
+    uint64 col_;
+    string path_;
+    // Token buffer: stride-5 [kind,start,count,line,col] per token.
+    uint64* tbuf_;
+    uint64 tlen_;
+    uint64 tcap_;
+    // print_errs: print diagnostics as encountered. store: push tokens.
+    bool print_errs_;
+    bool store_;
+    bool failed_;
+
+    void setup(string src, uint64 len, string path) {
+        this.src_ = src;
+        this.len_ = len;
+        this.pos_ = 0;
+        this.line_ = 1;
+        this.col_ = 1;
+        this.path_ = path;
+        this.print_errs_ = false;
+        this.store_ = false;
+        this.failed_ = false;
+        unsafe {
+            this.buf_ = this.src_.cstr();
+            this.tbuf_ = (uint64*)0;
+        }
+        this.tlen_ = 0;
+        this.tcap_ = 0;
+        this.check_bom();
+    }
+
+    void reset() {
+        this.pos_ = 0;
+        this.line_ = 1;
+        this.col_ = 1;
+        this.tlen_ = 0;
+        this.check_bom();
+    }
+
+    bool failed() {
+        return this.failed_;
+    }
+
+    void check_bom() {
+        unsafe {
+            if (this.len_ >= 3) {
+                const char* b = this.buf_;
+                int32 b0 = (int32)b[0];
+                int32 b1 = (int32)b[1];
+                int32 b2 = (int32)b[2];
+                if (b0 == 239 && b1 == 187 && b2 == 191) {
+                    this.pos_ = 3;
+                }
+            }
+        }
+    }
+
+    char peek_at(uint64 off) {
+        unsafe {
+            const char* b = this.buf_;
+            if (this.pos_ + off >= this.len_) {
+                return '\0';
+            }
+            return b[this.pos_ + off];
+        }
+        return '?';
+    }
+
+    char peek() {
+        return this.peek_at(0);
+    }
+
+    void advance() {
+        unsafe {
+            const char* b = this.buf_;
+            char c = b[this.pos_];
+            this.pos_ = this.pos_ + 1;
+            if (c == '\n') {
+                this.line_ = this.line_ + 1;
+                this.col_ = 1;
+            } else {
+                this.col_ = this.col_ + 1;
+            }
+        }
+    }
+
+    void error_at(uint64 line, uint64 col, string msg) {
+        this.failed_ = true;
+        if (this.print_errs_) {
+            io::println("\"{}\":{}:{}: error: {}", this.path_.cstr(), line, col, msg.cstr());
+        }
+    }
+
+    void tgrow() {
+        unsafe {
+            uint64 new_cap = this.tcap_ * 2;
+            if (new_cap == 0) {
+                new_cap = 16;
+            }
+            uint64* nbuf = (uint64*)__ivy_alloc(new_cap * 5 * 8);
+            if (this.tlen_ > 0) {
+                __ivy_memcpy(nbuf, this.tbuf_, this.tlen_ * 5 * 8);
+            }
+            __ivy_free(this.tbuf_);
+            this.tbuf_ = nbuf;
+            this.tcap_ = new_cap;
+        }
+    }
+
+    void emit(uint64 line, uint64 col, uint64 code, uint64 start, uint64 count) {
+        if (this.store_) {
+            if (this.tlen_ >= this.tcap_) {
+                this.tgrow();
+            }
+            unsafe {
+                uint64* b = this.tbuf_;
+                uint64 o = this.tlen_ * 5;
+                b[o] = code;
+                b[o + 1] = start;
+                b[o + 2] = count;
+                b[o + 3] = line;
+                b[o + 4] = col;
+            }
+            this.tlen_ = this.tlen_ + 1;
+        }
+    }
+
+    uint64 tok_count() {
+        return this.tlen_;
+    }
+
+    uint64 kind_at(uint64 i) {
+        unsafe {
+            return this.tbuf_[i * 5];
+        }
+        return 999;
+    }
+
+    uint64 start_at(uint64 i) {
+        unsafe {
+            return this.tbuf_[i * 5 + 1];
+        }
+        return 0;
+    }
+
+    uint64 count_at(uint64 i) {
+        unsafe {
+            return this.tbuf_[i * 5 + 2];
+        }
+        return 0;
+    }
+
+    uint64 line_at(uint64 i) {
+        unsafe {
+            return this.tbuf_[i * 5 + 3];
+        }
+        return 0;
+    }
+
+    uint64 col_at(uint64 i) {
+        unsafe {
+            return this.tbuf_[i * 5 + 4];
+        }
+        return 0;
+    }
+
+    // Token kind codes, in src/parsing/token.h order.
+    uint64 tkc(string name) {
+        if (name == string("identifier")) { return 0; }
+        if (name == string("keyword")) { return 1; }
+        if (name == string("integer")) { return 2; }
+        if (name == string("float")) { return 3; }
+        if (name == string("string")) { return 4; }
+        if (name == string("char")) { return 5; }
+        if (name == string("lifetime")) { return 6; }
+        if (name == string("eof")) { return 7; }
+        if (name == string("plus")) { return 8; }
+        if (name == string("minus")) { return 9; }
+        if (name == string("star")) { return 10; }
+        if (name == string("slash")) { return 11; }
+        if (name == string("percent")) { return 12; }
+        if (name == string("assign")) { return 13; }
+        if (name == string("plus_assign")) { return 14; }
+        if (name == string("minus_assign")) { return 15; }
+        if (name == string("star_assign")) { return 16; }
+        if (name == string("slash_assign")) { return 17; }
+        if (name == string("percent_assign")) { return 18; }
+        if (name == string("amp")) { return 19; }
+        if (name == string("pipe")) { return 20; }
+        if (name == string("caret")) { return 21; }
+        if (name == string("tilde")) { return 22; }
+        if (name == string("amp_assign")) { return 23; }
+        if (name == string("pipe_assign")) { return 24; }
+        if (name == string("caret_assign")) { return 25; }
+        if (name == string("shl")) { return 26; }
+        if (name == string("shr")) { return 27; }
+        if (name == string("shl_assign")) { return 28; }
+        if (name == string("shr_assign")) { return 29; }
+        if (name == string("bang")) { return 30; }
+        if (name == string("eq")) { return 31; }
+        if (name == string("ne")) { return 32; }
+        if (name == string("lt")) { return 33; }
+        if (name == string("gt")) { return 34; }
+        if (name == string("le")) { return 35; }
+        if (name == string("ge")) { return 36; }
+        if (name == string("andand")) { return 37; }
+        if (name == string("oror")) { return 38; }
+        if (name == string("plusplus")) { return 39; }
+        if (name == string("minusminus")) { return 40; }
+        if (name == string("arrow")) { return 41; }
+        if (name == string("dot")) { return 42; }
+        if (name == string("arrowstar")) { return 43; }
+        if (name == string("dotstar")) { return 44; }
+        if (name == string("question")) { return 45; }
+        if (name == string("colon")) { return 46; }
+        if (name == string("coloncolon")) { return 47; }
+        if (name == string("semi")) { return 48; }
+        if (name == string("comma")) { return 49; }
+        if (name == string("lparen")) { return 50; }
+        if (name == string("rparen")) { return 51; }
+        if (name == string("lbrace")) { return 52; }
+        if (name == string("rbrace")) { return 53; }
+        if (name == string("lbracket")) { return 54; }
+        if (name == string("rbracket")) { return 55; }
+        if (name == string("ellipsis")) { return 56; }
+        if (name == string("hash")) { return 57; }
+        if (name == string("hashhash")) { return 58; }
+        return 999;
+    }
+
+    // Print one token line directly with the kind display name
+    // (mirroring tokenKindName()). Names print as literals (no temp
+    // strings) to keep per-token churn minimal at scale.
+    void print_tok_lex(uint64 ln, uint64 co, const char* nm, string lx) {
+        if (lx.empty()) {
+            io::println("{}:{}\t{}", ln, co, nm);
+        } else {
+            io::println("{}:{}\t{}\t'{}'", ln, co, nm, lx.cstr());
+        }
+    }
+
+    void print_tok(uint64 code, uint64 ln, uint64 co, string lx) {
+        if (code == 0) { this.print_tok_lex(ln, co, "identifier", lx); return; }
+        if (code == 1) { this.print_tok_lex(ln, co, "keyword", lx); return; }
+        if (code == 2) { this.print_tok_lex(ln, co, "integer", lx); return; }
+        if (code == 3) { this.print_tok_lex(ln, co, "float", lx); return; }
+        if (code == 4) { this.print_tok_lex(ln, co, "string", lx); return; }
+        if (code == 5) { this.print_tok_lex(ln, co, "char", lx); return; }
+        if (code == 6) { this.print_tok_lex(ln, co, "lifetime", lx); return; }
+        if (code == 7) { this.print_tok_lex(ln, co, "eof", lx); return; }
+        if (code == 8) { this.print_tok_lex(ln, co, "+", lx); return; }
+        if (code == 9) { this.print_tok_lex(ln, co, "-", lx); return; }
+        if (code == 10) { this.print_tok_lex(ln, co, "*", lx); return; }
+        if (code == 11) { this.print_tok_lex(ln, co, "/", lx); return; }
+        if (code == 12) { this.print_tok_lex(ln, co, "%", lx); return; }
+        if (code == 13) { this.print_tok_lex(ln, co, "=", lx); return; }
+        if (code == 14) { this.print_tok_lex(ln, co, "+=", lx); return; }
+        if (code == 15) { this.print_tok_lex(ln, co, "-=", lx); return; }
+        if (code == 16) { this.print_tok_lex(ln, co, "*=", lx); return; }
+        if (code == 17) { this.print_tok_lex(ln, co, "/=", lx); return; }
+        if (code == 18) { this.print_tok_lex(ln, co, "%=", lx); return; }
+        if (code == 19) { this.print_tok_lex(ln, co, "&", lx); return; }
+        if (code == 20) { this.print_tok_lex(ln, co, "|", lx); return; }
+        if (code == 21) { this.print_tok_lex(ln, co, "^", lx); return; }
+        if (code == 22) { this.print_tok_lex(ln, co, "~", lx); return; }
+        if (code == 23) { this.print_tok_lex(ln, co, "&=", lx); return; }
+        if (code == 24) { this.print_tok_lex(ln, co, "|=", lx); return; }
+        if (code == 25) { this.print_tok_lex(ln, co, "^=", lx); return; }
+        if (code == 26) { this.print_tok_lex(ln, co, "<<", lx); return; }
+        if (code == 27) { this.print_tok_lex(ln, co, ">>", lx); return; }
+        if (code == 28) { this.print_tok_lex(ln, co, "<<=", lx); return; }
+        if (code == 29) { this.print_tok_lex(ln, co, ">>=", lx); return; }
+        if (code == 30) { this.print_tok_lex(ln, co, "!", lx); return; }
+        if (code == 31) { this.print_tok_lex(ln, co, "==", lx); return; }
+        if (code == 32) { this.print_tok_lex(ln, co, "!=", lx); return; }
+        if (code == 33) { this.print_tok_lex(ln, co, "<", lx); return; }
+        if (code == 34) { this.print_tok_lex(ln, co, ">", lx); return; }
+        if (code == 35) { this.print_tok_lex(ln, co, "<=", lx); return; }
+        if (code == 36) { this.print_tok_lex(ln, co, ">=", lx); return; }
+        if (code == 37) { this.print_tok_lex(ln, co, "&&", lx); return; }
+        if (code == 38) { this.print_tok_lex(ln, co, "||", lx); return; }
+        if (code == 39) { this.print_tok_lex(ln, co, "++", lx); return; }
+        if (code == 40) { this.print_tok_lex(ln, co, "--", lx); return; }
+        if (code == 41) { this.print_tok_lex(ln, co, "->", lx); return; }
+        if (code == 42) { this.print_tok_lex(ln, co, ".", lx); return; }
+        if (code == 43) { this.print_tok_lex(ln, co, "->*", lx); return; }
+        if (code == 44) { this.print_tok_lex(ln, co, ".*", lx); return; }
+        if (code == 45) { this.print_tok_lex(ln, co, "?", lx); return; }
+        if (code == 46) { this.print_tok_lex(ln, co, ":", lx); return; }
+        if (code == 47) { this.print_tok_lex(ln, co, "::", lx); return; }
+        if (code == 48) { this.print_tok_lex(ln, co, ";", lx); return; }
+        if (code == 49) { this.print_tok_lex(ln, co, ",", lx); return; }
+        if (code == 50) { this.print_tok_lex(ln, co, "(", lx); return; }
+        if (code == 51) { this.print_tok_lex(ln, co, ")", lx); return; }
+        if (code == 52) { this.print_tok_lex(ln, co, "{", lx); return; }
+        if (code == 53) { this.print_tok_lex(ln, co, "}", lx); return; }
+        if (code == 54) { this.print_tok_lex(ln, co, "[", lx); return; }
+        if (code == 55) { this.print_tok_lex(ln, co, "]", lx); return; }
+        if (code == 56) { this.print_tok_lex(ln, co, "...", lx); return; }
+        if (code == 57) { this.print_tok_lex(ln, co, "#", lx); return; }
+        if (code == 58) { this.print_tok_lex(ln, co, "##", lx); return; }
+        this.print_tok_lex(ln, co, "?", lx);
+    }
+
+    // Full C++ keyword set, mirrored from Lexer::keywords().
+    bool is_kw(string id) {
+        if (id == string("alignas")) { return true; }
+        if (id == string("alignof")) { return true; }
+        if (id == string("and")) { return true; }
+        if (id == string("and_eq")) { return true; }
+        if (id == string("asm")) { return true; }
+        if (id == string("auto")) { return true; }
+        if (id == string("bfloat16")) { return true; }
+        if (id == string("bfloat16_t")) { return true; }
+        if (id == string("bitand")) { return true; }
+        if (id == string("bitor")) { return true; }
+        if (id == string("bool")) { return true; }
+        if (id == string("break")) { return true; }
+        if (id == string("case")) { return true; }
+        if (id == string("catch")) { return true; }
+        if (id == string("char")) { return true; }
+        if (id == string("char16_t")) { return true; }
+        if (id == string("char32_t")) { return true; }
+        if (id == string("char8_t")) { return true; }
+        if (id == string("class")) { return true; }
+        if (id == string("co_await")) { return true; }
+        if (id == string("co_return")) { return true; }
+        if (id == string("co_yield")) { return true; }
+        if (id == string("compl")) { return true; }
+        if (id == string("concept")) { return true; }
+        if (id == string("const")) { return true; }
+        if (id == string("const_cast")) { return true; }
+        if (id == string("consteval")) { return true; }
+        if (id == string("constexpr")) { return true; }
+        if (id == string("constinit")) { return true; }
+        if (id == string("continue")) { return true; }
+        if (id == string("cpp")) { return true; }
+        if (id == string("decltype")) { return true; }
+        if (id == string("default")) { return true; }
+        if (id == string("delete")) { return true; }
+        if (id == string("do")) { return true; }
+        if (id == string("double")) { return true; }
+        if (id == string("dynamic_cast")) { return true; }
+        if (id == string("else")) { return true; }
+        if (id == string("enum")) { return true; }
+        if (id == string("explicit")) { return true; }
+        if (id == string("export")) { return true; }
+        if (id == string("extern")) { return true; }
+        if (id == string("false")) { return true; }
+        if (id == string("final")) { return true; }
+        if (id == string("float")) { return true; }
+        if (id == string("float128")) { return true; }
+        if (id == string("float128_t")) { return true; }
+        if (id == string("float16")) { return true; }
+        if (id == string("float16_t")) { return true; }
+        if (id == string("float32")) { return true; }
+        if (id == string("float32_t")) { return true; }
+        if (id == string("float64")) { return true; }
+        if (id == string("float64_t")) { return true; }
+        if (id == string("fn")) { return true; }
+        if (id == string("for")) { return true; }
+        if (id == string("friend")) { return true; }
+        if (id == string("goto")) { return true; }
+        if (id == string("if")) { return true; }
+        if (id == string("import")) { return true; }
+        if (id == string("inline")) { return true; }
+        if (id == string("int")) { return true; }
+        if (id == string("int128")) { return true; }
+        if (id == string("int16")) { return true; }
+        if (id == string("int16_t")) { return true; }
+        if (id == string("int32")) { return true; }
+        if (id == string("int32_t")) { return true; }
+        if (id == string("int64")) { return true; }
+        if (id == string("int64_t")) { return true; }
+        if (id == string("int8")) { return true; }
+        if (id == string("int8_t")) { return true; }
+        if (id == string("iptr")) { return true; }
+        if (id == string("lifetime")) { return true; }
+        if (id == string("long")) { return true; }
+        if (id == string("max_align_t")) { return true; }
+        if (id == string("module")) { return true; }
+        if (id == string("mutable")) { return true; }
+        if (id == string("namespace")) { return true; }
+        if (id == string("new")) { return true; }
+        if (id == string("nextcase")) { return true; }
+        if (id == string("noexcept")) { return true; }
+        if (id == string("not")) { return true; }
+        if (id == string("not_eq")) { return true; }
+        if (id == string("nullopt")) { return true; }
+        if (id == string("nullptr")) { return true; }
+        if (id == string("nullptr_t")) { return true; }
+        if (id == string("operator")) { return true; }
+        if (id == string("or")) { return true; }
+        if (id == string("or_eq")) { return true; }
+        if (id == string("override")) { return true; }
+        if (id == string("private")) { return true; }
+        if (id == string("protected")) { return true; }
+        if (id == string("ptrdiff_t")) { return true; }
+        if (id == string("public")) { return true; }
+        if (id == string("register")) { return true; }
+        if (id == string("reinterpret_cast")) { return true; }
+        if (id == string("requires")) { return true; }
+        if (id == string("return")) { return true; }
+        if (id == string("short")) { return true; }
+        if (id == string("signed")) { return true; }
+        if (id == string("size")) { return true; }
+        if (id == string("size_t")) { return true; }
+        if (id == string("sizeof")) { return true; }
+        if (id == string("static")) { return true; }
+        if (id == string("static_assert")) { return true; }
+        if (id == string("static_cast")) { return true; }
+        if (id == string("struct")) { return true; }
+        if (id == string("switch")) { return true; }
+        if (id == string("template")) { return true; }
+        if (id == string("this")) { return true; }
+        if (id == string("thread_local")) { return true; }
+        if (id == string("throw")) { return true; }
+        if (id == string("true")) { return true; }
+        if (id == string("try")) { return true; }
+        if (id == string("typedef")) { return true; }
+        if (id == string("typeid")) { return true; }
+        if (id == string("typename")) { return true; }
+        if (id == string("uint128")) { return true; }
+        if (id == string("uint16")) { return true; }
+        if (id == string("uint16_t")) { return true; }
+        if (id == string("uint32")) { return true; }
+        if (id == string("uint32_t")) { return true; }
+        if (id == string("uint64")) { return true; }
+        if (id == string("uint64_t")) { return true; }
+        if (id == string("uint8")) { return true; }
+        if (id == string("uint8_t")) { return true; }
+        if (id == string("union")) { return true; }
+        if (id == string("unsafe")) { return true; }
+        if (id == string("unsigned")) { return true; }
+        if (id == string("uptr")) { return true; }
+        if (id == string("using")) { return true; }
+        if (id == string("virtual")) { return true; }
+        if (id == string("void")) { return true; }
+        if (id == string("volatile")) { return true; }
+        if (id == string("wchar_t")) { return true; }
+        if (id == string("while")) { return true; }
+        if (id == string("xor")) { return true; }
+        if (id == string("xor_eq")) { return true; }
+        return false;
+    }
+
+    bool is_raw_prefix(string id) {
+        if (id == string("R")) { return true; }
+        if (id == string("u8R")) { return true; }
+        if (id == string("uR")) { return true; }
+        if (id == string("UR")) { return true; }
+        if (id == string("LR")) { return true; }
+        return false;
+    }
+
+    bool is_str_prefix(string id) {
+        if (id == string("L")) { return true; }
+        if (id == string("u")) { return true; }
+        if (id == string("U")) { return true; }
+        if (id == string("u8")) { return true; }
+        return false;
+    }
+
+    bool is_char_prefix(string id) {
+        if (id == string("L")) { return true; }
+        if (id == string("u")) { return true; }
+        if (id == string("U")) { return true; }
+        return false;
+    }
+
+    bool ch_is_ident_start(char c) {
+        if (c == '_') { return true; }
+        if (c >= 'a') {
+            if (c <= 'z') { return true; }
+        }
+        if (c >= 'A') {
+            if (c <= 'Z') { return true; }
+        }
+        return false;
+    }
+
+    bool ch_is_ident_cont(char c) {
+        if (this.ch_is_ident_start(c)) { return true; }
+        if (c >= '0') {
+            if (c <= '9') { return true; }
+        }
+        return false;
+    }
+
+    bool ch_is_digit(char c) {
+        if (c >= '0') {
+            if (c <= '9') { return true; }
+        }
+        return false;
+    }
+
+    bool ch_is_hex(char c) {
+        if (this.ch_is_digit(c)) { return true; }
+        if (c >= 'a') {
+            if (c <= 'f') { return true; }
+        }
+        if (c >= 'A') {
+            if (c <= 'F') { return true; }
+        }
+        return false;
+    }
+
+    bool ch_is_bin(char c) {
+        if (c == '0') { return true; }
+        if (c == '1') { return true; }
+        return false;
+    }
+
+    bool ch_is_suffix(char c) {
+        if (c == 'u') { return true; }
+        if (c == 'U') { return true; }
+        if (c == 'l') { return true; }
+        if (c == 'L') { return true; }
+        if (c == 'f') { return true; }
+        if (c == 'F') { return true; }
+        return false;
+    }
+
+    void skip_trivia() {
+        while (true) {
+            char c = this.peek();
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f' || c == '\n') {
+                this.advance();
+            } else {
+                if (c == '/' && this.peek_at(1) == '/') {
+                    while (this.peek() != '\n' && this.peek() != '\0') {
+                        this.advance();
+                    }
+                } else {
+                    if (c == '/' && this.peek_at(1) == '*') {
+                        uint64 sl = this.line_;
+                        uint64 sc = this.col_;
+                        this.advance();
+                        this.advance();
+                        bool closed = false;
+                        while (this.peek() != '\0') {
+                            if (this.peek() == '*' && this.peek_at(1) == '/') {
+                                this.advance();
+                                this.advance();
+                                closed = true;
+                                break;
+                            }
+                            this.advance();
+                        }
+                        if (!closed) {
+                            this.error_at(sl, sc, string("unterminated block comment"));
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    void lex_word(uint64 start, uint64 line, uint64 col) {
+        string src = this.src_;
+        while (this.ch_is_ident_cont(this.peek())) {
+            this.advance();
+        }
+        string id = src.substr(start, this.pos_ - start);
+        if (this.is_raw_prefix(id) && this.peek() == '"') {
+            this.lex_raw(start, line, col);
+            return;
+        }
+        if (this.is_str_prefix(id)) {
+            if (this.peek() == '"') {
+                this.lex_string(start, line, col);
+                return;
+            }
+            if (this.peek() == '\'') {
+                this.lex_char(start, line, col);
+                return;
+            }
+        }
+        if (this.is_kw(id)) {
+            this.emit(line, col, this.tkc(string("keyword")), start, this.pos_ - start);
+        } else {
+            this.emit(line, col, this.tkc(string("identifier")), start, this.pos_ - start);
+        }
+    }
+
+    void lex_token() {
+        uint64 start = this.pos_;
+        uint64 line = this.line_;
+        uint64 col = this.col_;
+        char c = this.peek();
+        if (c == '$' && this.ch_is_ident_start(this.peek_at(1))) {
+            this.advance();
+            while (this.ch_is_ident_cont(this.peek())) {
+                this.advance();
+            }
+            this.emit(line, col, this.tkc(string("lifetime")), start, this.pos_ - start);
+            return;
+        }
+        if (this.ch_is_ident_start(c)) {
+            this.lex_word(start, line, col);
+            return;
+        }
+        if (this.ch_is_digit(c) || (c == '.' && this.ch_is_digit(this.peek_at(1)))) {
+            this.lex_number(line, col);
+            return;
+        }
+        if (c == '"') {
+            this.lex_string(start, line, col);
+            return;
+        }
+        if (c == '\'') {
+            this.lex_char(start, line, col);
+            return;
+        }
+        if (this.try_op3(start, line, col)) {
+            return;
+        }
+        if (this.try_op2(start, line, col)) {
+            return;
+        }
+        if (this.try_op1(start, line, col)) {
+            return;
+        }
+        this.error_at(line, col, string("unexpected character"));
+        this.advance();
+        this.emit(line, col, this.tkc(string("eof")), start, 1);
+    }
+
+    bool try_op3(uint64 start, uint64 line, uint64 col) {
+        char p0 = this.peek();
+        char p1 = this.peek_at(1);
+        char p2 = this.peek_at(2);
+        if (p0 == '.' && p1 == '.' && p2 == '.') {
+            this.advance();
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("ellipsis")), start, 3);
+            return true;
+        }
+        if (p0 == '<' && p1 == '<' && p2 == '=') {
+            this.advance();
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("shl_assign")), start, 3);
+            return true;
+        }
+        if (p0 == '>' && p1 == '>' && p2 == '=') {
+            this.advance();
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("shr_assign")), start, 3);
+            return true;
+        }
+        if (p0 == '-' && p1 == '>' && p2 == '*') {
+            this.advance();
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("arrowstar")), start, 3);
+            return true;
+        }
+        return false;
+    }
+
+    bool try_op2(uint64 start, uint64 line, uint64 col) {
+        char p0 = this.peek();
+        char p1 = this.peek_at(1);
+        if (p0 == '<' && p1 == '<') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("shl")), start, 2);
+            return true;
+        }
+        if (p0 == '>' && p1 == '>') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("shr")), start, 2);
+            return true;
+        }
+        if (p0 == '+' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("plus_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '-' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("minus_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '*' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("star_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '/' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("slash_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '%' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("percent_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '&' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("amp_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '|' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("pipe_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '^' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("caret_assign")), start, 2);
+            return true;
+        }
+        if (p0 == '+' && p1 == '+') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("plusplus")), start, 2);
+            return true;
+        }
+        if (p0 == '-' && p1 == '-') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("minusminus")), start, 2);
+            return true;
+        }
+        if (p0 == '-' && p1 == '>') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("arrow")), start, 2);
+            return true;
+        }
+        if (p0 == '<' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("le")), start, 2);
+            return true;
+        }
+        if (p0 == '>' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("ge")), start, 2);
+            return true;
+        }
+        if (p0 == '=' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("eq")), start, 2);
+            return true;
+        }
+        if (p0 == '!' && p1 == '=') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("ne")), start, 2);
+            return true;
+        }
+        if (p0 == '&' && p1 == '&') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("andand")), start, 2);
+            return true;
+        }
+        if (p0 == '|' && p1 == '|') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("oror")), start, 2);
+            return true;
+        }
+        if (p0 == ':' && p1 == ':') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("coloncolon")), start, 2);
+            return true;
+        }
+        if (p0 == '.' && p1 == '*') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("dotstar")), start, 2);
+            return true;
+        }
+        if (p0 == '#' && p1 == '#') {
+            this.advance();
+            this.advance();
+            this.emit(line, col, this.tkc(string("hashhash")), start, 2);
+            return true;
+        }
+        return false;
+    }
+
+    bool try_op1(uint64 start, uint64 line, uint64 col) {
+        char p0 = this.peek();
+        if (p0 == '+') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("plus")), start, 1);
+            return true;
+        }
+        if (p0 == '-') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("minus")), start, 1);
+            return true;
+        }
+        if (p0 == '*') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("star")), start, 1);
+            return true;
+        }
+        if (p0 == '/') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("slash")), start, 1);
+            return true;
+        }
+        if (p0 == '%') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("percent")), start, 1);
+            return true;
+        }
+        if (p0 == '=') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("assign")), start, 1);
+            return true;
+        }
+        if (p0 == '<') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("lt")), start, 1);
+            return true;
+        }
+        if (p0 == '>') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("gt")), start, 1);
+            return true;
+        }
+        if (p0 == '!') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("bang")), start, 1);
+            return true;
+        }
+        if (p0 == '~') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("tilde")), start, 1);
+            return true;
+        }
+        if (p0 == '&') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("amp")), start, 1);
+            return true;
+        }
+        if (p0 == '|') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("pipe")), start, 1);
+            return true;
+        }
+        if (p0 == '^') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("caret")), start, 1);
+            return true;
+        }
+        if (p0 == '?') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("question")), start, 1);
+            return true;
+        }
+        if (p0 == ':') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("colon")), start, 1);
+            return true;
+        }
+        if (p0 == ';') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("semi")), start, 1);
+            return true;
+        }
+        if (p0 == ',') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("comma")), start, 1);
+            return true;
+        }
+        if (p0 == '(') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("lparen")), start, 1);
+            return true;
+        }
+        if (p0 == ')') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("rparen")), start, 1);
+            return true;
+        }
+        if (p0 == '{') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("lbrace")), start, 1);
+            return true;
+        }
+        if (p0 == '}') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("rbrace")), start, 1);
+            return true;
+        }
+        if (p0 == '[') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("lbracket")), start, 1);
+            return true;
+        }
+        if (p0 == ']') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("rbracket")), start, 1);
+            return true;
+        }
+        if (p0 == '.') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("dot")), start, 1);
+            return true;
+        }
+        if (p0 == '#') {
+            this.advance();
+            this.emit(line, col, this.tkc(string("hash")), start, 1);
+            return true;
+        }
+        return false;
+    }
+
+    void lex_number(uint64 line, uint64 col) {
+        uint64 start = this.pos_;
+        bool is_float = false;
+        if (this.peek() == '0' && (this.peek_at(1) == 'x' || this.peek_at(1) == 'X')) {
+            this.advance();
+            this.advance();
+            bool any = false;
+            while (this.ch_is_hex(this.peek()) || this.peek() == '\'') {
+                if (this.peek() != '\'') {
+                    any = true;
+                }
+                this.advance();
+            }
+            if (!any) {
+                this.error_at(line, col, string("invalid hexadecimal literal: expected hex digits after '0x'"));
+            }
+        } else {
+            if (this.peek() == '0' && (this.peek_at(1) == 'b' || this.peek_at(1) == 'B')) {
+                this.advance();
+                this.advance();
+                bool any = false;
+                while (this.ch_is_bin(this.peek()) || this.peek() == '\'') {
+                    if (this.peek() != '\'') {
+                        any = true;
+                    }
+                    this.advance();
+                }
+                if (!any) {
+                    this.error_at(line, col, string("invalid binary literal: expected binary digits after '0b'"));
+                }
+            } else {
+                while (this.ch_is_digit(this.peek()) || this.peek() == '\'') {
+                    this.advance();
+                }
+                if (this.peek() == '.' && this.peek_at(1) != '.') {
+                    is_float = true;
+                    this.advance();
+                    while (this.ch_is_digit(this.peek()) || this.peek() == '\'') {
+                        this.advance();
+                    }
+                }
+                if ((this.peek() == 'e' || this.peek() == 'E') && (this.ch_is_digit(this.peek_at(1)) || ((this.peek_at(1) == '+' || this.peek_at(1) == '-') && this.ch_is_digit(this.peek_at(2))))) {
+                    is_float = true;
+                    this.advance();
+                    if (this.peek() == '+' || this.peek() == '-') {
+                        this.advance();
+                    }
+                    while (this.ch_is_digit(this.peek()) || this.peek() == '\'') {
+                        this.advance();
+                    }
+                }
+            }
+        }
+        while (this.ch_is_suffix(this.peek())) {
+            if (this.peek() == 'f' || this.peek() == 'F') {
+                is_float = true;
+            }
+            this.advance();
+        }
+        if (is_float) {
+            this.emit(line, col, this.tkc(string("float")), start, this.pos_ - start);
+        } else {
+            this.emit(line, col, this.tkc(string("integer")), start, this.pos_ - start);
+        }
+    }
+
+    void lex_string(uint64 start, uint64 line, uint64 col) {
+        this.advance();
+        while (true) {
+            char c = this.peek();
+            if (c == '\0' || c == '\n') {
+                this.error_at(line, col, string("unterminated string literal"));
+                break;
+            }
+            this.advance();
+            if (c == '"') {
+                break;
+            }
+            if (c == '\\' && this.peek() != '\0') {
+                this.advance();
+            }
+        }
+        this.emit(line, col, this.tkc(string("string")), start, this.pos_ - start);
+    }
+
+    void lex_char(uint64 start, uint64 line, uint64 col) {
+        this.advance();
+        while (true) {
+            char c = this.peek();
+            if (c == '\0' || c == '\n') {
+                this.error_at(line, col, string("unterminated character literal"));
+                break;
+            }
+            this.advance();
+            if (c == '\'') {
+                break;
+            }
+            if (c == '\\' && this.peek() != '\0') {
+                this.advance();
+            }
+        }
+        this.emit(line, col, this.tkc(string("char")), start, this.pos_ - start);
+    }
+
+    void lex_raw(uint64 start, uint64 line, uint64 col) {
+        this.advance();
+        uint64 dstart = this.pos_;
+        while (this.peek() != '(' && this.peek() != '\0' && this.peek() != '\n') {
+            this.advance();
+        }
+        if (this.peek() != '(') {
+            this.error_at(line, col, string("unterminated raw string literal"));
+            this.emit(line, col, this.tkc(string("string")), start, this.pos_ - start);
+            return;
+        }
+        this.advance();
+        uint64 dlen = this.pos_ - dstart - 1;
+        bool closed = false;
+        while (this.pos_ < this.len_) {
+            if (this.peek() == ')' && this.match_delim(dstart, dlen) && this.peek_at(1 + dlen) == '"') {
+                this.advance();
+                uint64 k = 0;
+                while (k < dlen) {
+                    this.advance();
+                    k = k + 1;
+                }
+                this.advance();
+                closed = true;
+                break;
+            }
+            this.advance();
+        }
+        if (!closed) {
+            this.error_at(line, col, string("unterminated raw string literal"));
+        }
+        this.emit(line, col, this.tkc(string("string")), start, this.pos_ - start);
+    }
+
+    bool match_delim(uint64 dstart, uint64 dlen) {
+        uint64 k = 0;
+        while (k < dlen) {
+            unsafe {
+                const char* b = this.buf_;
+                if (b[this.pos_ + 1 + k] != b[dstart + k]) {
+                    return false;
+                }
+            }
+            k = k + 1;
+        }
+        return true;
+    }
+
+    void scan() {
+        while (this.pos_ < this.len_) {
+            this.skip_trivia();
+            if (this.pos_ >= this.len_) {
+                break;
+            }
+            this.lex_token();
+        }
+        this.emit(this.line_, this.col_, this.tkc(string("eof")), this.pos_, 0);
+    }
+
+    // Print stored tokens in `ivy --lex` format (caller: lexdrive).
+    void print_toks() {
+        string src = this.src_;
+        uint64 eof_code = this.tkc(string("eof"));
+        uint64 i = 0;
+        uint64 n = this.tok_count();
+        while (i < n) {
+            uint64 code = this.kind_at(i);
+            uint64 ln = this.line_at(i);
+            uint64 co = this.col_at(i);
+            if (code == eof_code) {
+                io::print("{}:{}\teof", ln, co);
+            } else {
+                string lx = src.substr(this.start_at(i), this.count_at(i));
+                this.print_tok(code, ln, co, lx);
+            }
+            i = i + 1;
+        }
+    }
+};
