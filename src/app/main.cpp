@@ -30,7 +30,7 @@
 namespace {
 
 void printUsage() {
-    std::cout << "usage: ivyc [options] <file.ivy>\n"
+    std::cout << "usage: ivy [options] <file.ivy>\n"
                  "\n"
                  "Source files:\n"
                  "  .ivy        Ivy source (only accepted extension)\n"
@@ -796,7 +796,7 @@ void dumpMir(const ivy::mir::TranslationUnit& tu, std::ostream& os) {
 // E5: Only `.ivy` is accepted as a source-file extension. Legacy C/C++
 // extensions (`.cpp`/`.cc`/`.cxx`/`.c`) are rejected — rename the file
 // to `.ivy` (C++ interop is via `import cpp ...`, not `#include`).
-// (`ivyc migrate` auto-conversion is a separate future task.)
+// (`ivy migrate` auto-conversion is a separate future task.)
 bool isLegacySourceExtension(std::string_view extLower) {
     return extLower == "cpp" || extLower == "cc" ||
            extLower == "cxx" || extLower == "c";
@@ -828,7 +828,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         std::optional<ivy::CodeGen::Platform> targetPlatform) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        std::cerr << "ivyc: error: cannot open file '" << path << "'\n";
+        std::cerr << "ivy: error: cannot open file '" << path << "'\n";
         return 2;
     }
     const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -879,7 +879,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         const std::string text = pp.reconstructSource();
         std::ofstream ofs(outPath);
         if (!ofs) {
-            std::cerr << "ivyc: error: cannot open output file '" << outPath << "'\n";
+            std::cerr << "ivy: error: cannot open output file '" << outPath << "'\n";
             return 2;
         }
         ofs << text;
@@ -938,7 +938,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                 std::filesystem::path ivmPath =
                     ivy::resolveModulePath(modName, includePaths);
                 if (ivmPath.empty()) {
-                    std::cerr << "ivyc: error: module '" << modName
+                    std::cerr << "ivy: error: module '" << modName
                               << "' not found (searched .ivm files in include paths)\n";
                     failed = true;
                     continue;
@@ -972,7 +972,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             std::filesystem::path ivmPath =
                 ivy::resolveModulePath(modName, includePaths);
             if (ivmPath.empty()) {
-                std::cerr << "ivyc: error: module '" << modName
+                std::cerr << "ivy: error: module '" << modName
                           << "' not found (searched .ivm files in include paths)\n";
                 failed = true;
                 continue;
@@ -1250,10 +1250,10 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
             }
         }
         if (!ivy::writeModuleInterface(*tu, ivmOut)) {
-            std::cerr << "ivyc: warning: failed to write module interface '"
+            std::cerr << "ivy: warning: failed to write module interface '"
                       << ivmOut.string() << "'\n";
         } else {
-            std::cerr << "ivyc: module interface written to '"
+            std::cerr << "ivy: module interface written to '"
                       << ivmOut.string() << "'\n";
         }
     }
@@ -1317,7 +1317,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                       << "\n";
         }
         if (ok) {
-            std::cerr << "ivyc: '" << objPath << "' generated\n";
+            std::cerr << "ivy: '" << objPath << "' generated\n";
         }
         return ok ? 0 : 1;
     }
@@ -1349,7 +1349,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                           << ": error: " << d.message << "\n";
             }
             if (ok) {
-                std::cerr << "ivyc: '" << objPath << "' generated\n";
+                std::cerr << "ivy: '" << objPath << "' generated\n";
             }
             return ok ? 0 : 1;
         }
@@ -1377,7 +1377,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
                       << "\n";
         }
         if (ok) {
-            std::cerr << "ivyc: '" << exePath << "' generated\n";
+            std::cerr << "ivy: '" << exePath << "' generated\n";
         }
         return ok ? 0 : 1;
     }
@@ -1391,7 +1391,7 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         if (!outPath.empty()) {
             std::ofstream ofs(outPath);
             if (!ofs) {
-                std::cerr << "ivyc: error: cannot open output file '" << outPath << "'\n";
+                std::cerr << "ivy: error: cannot open output file '" << outPath << "'\n";
                 return 2;
             }
             ok = cg.generate(ofs);
@@ -1453,7 +1453,7 @@ int main(int argc, char** argv) {
             crtStatic = true;
         } else if (arg == "--target") {
             if (i + 1 >= argc) {
-                std::cerr << "ivyc: error: option '--target' requires an ABI name\n";
+                std::cerr << "ivy: error: option '--target' requires an ABI name\n";
                 return 2;
             }
             const std::string_view t(argv[++i]);
@@ -1462,19 +1462,19 @@ int main(int argc, char** argv) {
             } else if (t == "msvc") {
                 targetPlatform = ivy::CodeGen::Platform::MSVC;
             } else {
-                std::cerr << "ivyc: error: unknown target ABI '" << t
+                std::cerr << "ivy: error: unknown target ABI '" << t
                           << "' (expected 'itanium' or 'msvc')\n";
                 return 2;
             }
         } else if (arg == "-o") {
             if (i + 1 >= argc) {
-                std::cerr << "ivyc: error: option '-o' requires a file name\n";
+                std::cerr << "ivy: error: option '-o' requires a file name\n";
                 return 2;
             }
             outPath = argv[++i];
         } else if (arg == "-I") {
             if (i + 1 >= argc) {
-                std::cerr << "ivyc: error: option '-I' requires a directory\n";
+                std::cerr << "ivy: error: option '-I' requires a directory\n";
                 return 2;
             }
             includePaths.emplace_back(argv[++i]);
@@ -1485,7 +1485,7 @@ int main(int argc, char** argv) {
             printUsage();
             return 0;
         } else if (!arg.empty() && arg[0] == '-') {
-            std::cerr << "ivyc: error: unknown option '" << arg << "'\n";
+            std::cerr << "ivy: error: unknown option '" << arg << "'\n";
             printUsage();
             return 2;
         } else {
@@ -1527,13 +1527,13 @@ int main(int argc, char** argv) {
         for (char& c : fileExtLower) c = static_cast<char>(std::tolower(c));
         if (fileExtLower != "ivy") {
             if (fileExtLower.empty()) {
-                std::cerr << "ivyc: error: missing file extension — use the .ivy extension\n";
+                std::cerr << "ivy: error: missing file extension — use the .ivy extension\n";
             } else if (isLegacySourceExtension(fileExtLower)) {
-                std::cerr << "ivyc: error: legacy '." << fileExtLower
+                std::cerr << "ivy: error: legacy '." << fileExtLower
                           << "' files are no longer accepted — use the .ivy extension "
                              "(rename to .ivy; C++ interop via 'import cpp ...')\n";
             } else {
-                std::cerr << "ivyc: error: unrecognized file extension '." << fileExtLower
+                std::cerr << "ivy: error: unrecognized file extension '." << fileExtLower
                           << "' — expected .ivy\n";
             }
             return 2;

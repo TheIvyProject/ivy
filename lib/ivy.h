@@ -1,7 +1,7 @@
-// ivyc/lib/ivy.h — standard header for the Ivy subset.
+// ivy/lib/ivy.h — standard header for the Ivy subset.
 //
 // This file provides declarations that Ivy programs can pull in via
-// `#include <ivy.h>`. It is processed by the ivyc preprocessor and
+// `#include <ivy.h>`. It is processed by the ivy preprocessor and
 // compiled as Ivy source code.
 //
 // 8.5: ivy::print / ivy::println — type-aware printing (no printf needed).

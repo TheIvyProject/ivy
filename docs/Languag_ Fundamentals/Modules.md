@@ -62,9 +62,9 @@ int32 main() {
 Ivy uses binary/text module interface files (`.ivm` — *Ivy Module Interface*), similar to Clang's `.pcm` files:
 
 1. **Compilation Phase:**
-   When compiling a module unit, `ivyc` generates an `.ivm` interface file containing only public `export` declarations (functions, structs, enums, aliases, concepts).
+   When compiling a module unit, `ivy` generates an `.ivm` interface file containing only public `export` declarations (functions, structs, enums, aliases, concepts).
 2. **Import Phase:**
-   When consuming an `import`, `ivyc` parses the precompiled `.ivm` file directly instead of re-parsing source files or header files.
+   When consuming an `import`, `ivy` parses the precompiled `.ivm` file directly instead of re-parsing source files or header files.
 3. **Link Phase:**
    Function bodies are compiled into object files (`.obj` / `.o`) and linked at link-time.
 

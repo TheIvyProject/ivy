@@ -1,8 +1,8 @@
 // Test: Variadic templates (7.6)
 // Covers: `typename... Args`, pack expansion `args...`,
 //         `sizeof...(pack)`, fold expressions.
-// Build: ivyc --run examples/test_variadic.ivy
-//        ivyc --llvm examples/test_variadic.ivy
+// Build: ivy --run examples/test_variadic.ivy
+//        ivy --llvm examples/test_variadic.ivy
 
 #pragma ivy cnumber
 

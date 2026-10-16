@@ -115,4 +115,4 @@ static_assert(buffer.size() == 10, "Buffer size mismatch");
 
 ### 7. Comptime Execution with IvyInterpret
 
-Unlike traditional C++ template meta-evaluation limits, `ivyc` integrates **IvyInterpret** directly into the compiler pipeline. Non-trivial constant expressions and comptime functions are executed directly on MIR data structures at compile time, enabling fast and comprehensive meta-programming.
+Unlike traditional C++ template meta-evaluation limits, `ivy` integrates **IvyInterpret** directly into the compiler pipeline. Non-trivial constant expressions and comptime functions are executed directly on MIR data structures at compile time, enabling fast and comprehensive meta-programming.

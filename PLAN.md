@@ -165,20 +165,39 @@ Sau khi stdlib đủ, loại bỏ các C++ legacy features.
 | E2 ✅ | **Loại bỏ `[[ivy::unsafe]]` attribute** | ★ | Sau A2 ổn định: xóa attribute form, chỉ giữ `unsafe { }` keyword. Error nếu gặp `[[ivy::unsafe]]` |
 | E3 ✅ | **Loại bỏ `_t` suffix type** | ★ | Sau A1 migration: xóa `int32_t`/`uint32_t`/etc. Chỉ giữ `int32`/`uint32`/etc. Error nếu gặp `_t` variant. `import cpp` vẫn cho phép `cpp::std::int32_t` cho tương thích C++ |
 | E4 ✅ | **Preprocessor → module-only** | ★★★ | Ivy code: chỉ dùng `import`, không `#include`. Preprocessor chỉ cho FFI/macro trong `unsafe`. `#include` cấm trong `.ivy` file (chỉ `.cpp` legacy). Theo OLD_PLAN.md §10.3 |
-| E5 ✅ | **Loại bỏ `.cpp` extension support** | ★ | CLI: chỉ nhận `.ivy`. `.cpp`/`.cc`/`.cxx`/`.c` → error "use .ivy extension". (`ivyc migrate file.cpp` auto-convert — task riêng, chưa làm) |
+| E5 ✅ | **Loại bỏ `.cpp` extension support** | ★ | CLI: chỉ nhận `.ivy`. `.cpp`/`.cc`/`.cxx`/`.c` → error "use .ivy extension". (`ivy migrate file.cpp` auto-convert — task G4, chưa làm) |
 
-### Giai đoạn F — Self-hosting & công cụ
+### Giai đoạn F — Self-hosting (track Ivy 0.5)
 
-Mốc cuối: Ivy tự biên dịch chính nó.
+Mốc cuối: Ivy tự biên dịch chính nó. Binary duy nhất là `ivy`
+(Zig-style; công cụ sau này là subcommand, không tách binary mới).
+
+Điều kiện tiên quyết (đã chốt trước khi port):
+1. **Đóng băng syntax core** từ giai đoạn E — tới 0.5 chỉ thêm, không đổi.
+2. **Spec 0.5 draft (F0) trước** — port theo spec, không port theo code C++.
+3. **Test suite xanh** — sửa hết test fail tồn đọng (`concept_fail`,
+   `designated_init`, `using`, `template_deduction`) để có baseline đối chiếu.
+4. **Backend vẫn LLVM** (gọi qua C-API, như Zig) — không viết native backend ở 0.5.
 
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
-| F1 | **Port ivyc sang Ivy (từng tầng)** | ★★★★★+ | Bắt đầu bằng port lexer → parser → HIR → MIR → codegen. Dùng IvyInterpret để chạy bootstrap. Mỗi tầng port xong, dùng Ivy-compiler để compile tầng tiếp theo. Theo OLD_PLAN.md §10.5 |
-| F2 | **`ivyc fmt` — formatter** | ★★ | Auto-format Ivy code. Style guide: indent 4 spaces, `{` cùng dòng, no trailing whitespace. AST-based (không text-based) |
-| F3 | **`ivyc doc` — documentation generator** | ★★ | Generate HTML docs từ `///` doc comments. Support `@param`, `@return`, `@example`. Cross-reference |
-| F4 | **LSP server** | ★★★ | Language Server Protocol. Features: go-to-definition, hover, autocomplete, diagnostics, rename refactoring. Dùng ivyc sebagai backend |
-| F5 | **Ivy 1.0 spec** | ★★ | Formal specification document. Syntax grammar (EBNF), type system rules, ownership/borrow rules, ABI specification. Versioning: `__ivy__ = 202604L` |
-| F6 | **Diagnostic style riêng** | ★ | Error messages có hint sửa lỗi (gợi ý fix). Color output (terminal ANSI). Error codes (IVY-E001). Consistent format: `error[IVY-E001]: message` |
+| F0 | **Ivy 0.5 spec draft** | ★★ | Formal specification document: syntax grammar (EBNF), type system rules, ownership/borrow rules, ABI specification. Versioning: `__ivy__ = 202604L` |
+| F1 | **Port compiler sang Ivy (từng tầng)** | ★★★★★+ | Bắt đầu bằng port lexer → parser → HIR → MIR → codegen. Dùng IvyInterpret để chạy bootstrap. Mỗi tầng port xong, dùng Ivy-compiler để compile tầng tiếp theo. Theo OLD_PLAN.md §10.5 |
+| F2 | **Bootstrap validation + CI dogfood** | ★★★ | `ivy` biên dịch chính nó. CI chạy compiler do Ivy-built trên toàn bộ test suite — output phải khớp bản C++-built. Đây là định nghĩa "xong" của self-hosting |
+| F3 | **Port std/runtime sang Ivy** | ★★★★ | `libivyrt` (allocator, print/format, panic) + std modules viết lại bằng Ivy, bỏ phụ thuộc C++. Backend vẫn LLVM — port compiler (F1) trước, std sau (tránh deadlock: compiler Ivy cần std tối thiểu để viết) |
+
+### Giai đoạn G — Tooling (viết bằng Ivy, sau F)
+
+Làm sau self-hosting để không viết 2 lần (C++ rồi port lại). Mọi tool viết
+trực tiếp bằng Ivy trên compiler tự host.
+
+| # | Task | Độ khó | Chi tiết triển khai |
+|---|------|--------|---------------------|
+| G1 | **`ivy fmt` — formatter** | ★★ | Auto-format Ivy code. Style guide: indent 4 spaces, `{` cùng dòng, no trailing whitespace. AST-based (không text-based) |
+| G2 | **`ivy doc` — documentation generator** | ★★ | Generate HTML docs từ `///` doc comments. Support `@param`, `@return`, `@example`. Cross-reference |
+| G3 | **LSP server** | ★★★ | Language Server Protocol. Features: go-to-definition, hover, autocomplete, diagnostics, rename refactoring. Dùng `ivy` làm backend |
+| G4 | **`ivy migrate` — auto-convert** | ★★ | Phần nợ của E5: `.cpp` → `.ivy` tự động. Rewrite đã được định nghĩa sẵn bởi E2/E3/E4: `[[ivy::unsafe]]` → `unsafe { }`, strip `_t` suffix, `#include` → `import`, rename extension |
+| G5 | **Diagnostic style riêng** | ★ | Error messages có hint sửa lỗi (gợi ý fix). Color output (terminal ANSI). Error codes (IVY-E001). Consistent format: `error[IVY-E001]: message` |
 
 ---
 
@@ -216,12 +235,19 @@ flowchart LR
         E4["E4: Module-only"]
     end
 
-    subgraph P6["Ưu tiên 6 — Self-host"]
-        F1["F1: Port ivyc → Ivy"]
-        F5["F5: Ivy 1.0 spec"]
+    subgraph P6["Ưu tiên 6 — Self-host (0.5)"]
+        F0["F0: Spec 0.5 draft"]
+        F1["F1: Port compiler → Ivy"]
+        F3["F3: Port std/runtime → Ivy"]
     end
 
-    P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    subgraph P7["Ưu tiên 7 — Tooling (bằng Ivy)"]
+        G1["G1: ivy fmt"]
+        G3["G3: LSP server"]
+        G4["G4: ivy migrate"]
+    end
+
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
 
     style P1 fill:#c8e6c9,color:#1a5e20
     style P2 fill:#bbdefb,color:#0d47a1
@@ -229,6 +255,7 @@ flowchart LR
     style P4 fill:#f3e5f5,color:#7b1fa2
     style P5 fill:#ffcdd2,color:#b71c1c
     style P6 fill:#cfd8dc,color:#263238
+    style P7 fill:#d7ccc8,color:#4e342e
 ```
 
 **Nguyên tắc**: Mỗi task phải có test file trong `examples/`. Mỗi task hoàn
@@ -251,7 +278,15 @@ loại bỏ legacy.
 5. **Module-only**: Ivy code dùng `import`, không `#include`. Preprocessor chỉ
    cho FFI/macro trong unsafe.
 
-Self-hosting (F1) và Ivy 1.0 spec (F5) thuộc Ivy 1.0, không phải 0.1.
+Self-hosting (F) và tooling (G) thuộc Ivy 0.5, không phải 0.1.
+Phiên bản 1.0 chỉ đặt khi cam kết ổn định (semver) — 0.x được phép breaking change.
+
+**Quy ước version**: 0.1 = syntax độc lập + compiler C++ + dùng CRT/libc
+(hiện tại). 0.5 = compiler tự host + std/runtime bằng Ivy (backend vẫn LLVM).
+1.0 (tương lai) = đóng băng đảm bảo ổn định.
+
+**Quy ước tên binary**: một binary duy nhất là `ivy` (Zig-style).
+Không còn tên `ivyc`.
 
 ---
 

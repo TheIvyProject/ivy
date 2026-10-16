@@ -103,13 +103,13 @@ Các syntax sau có form mới nhưng **vẫn được giữ lâu dài**, không
 
 | | |
 |---|---|
-| **Task** | E5 (`ivyc migrate` auto-convert là task riêng, chưa làm) |
+| **Task** | E5 (`ivy migrate` auto-convert là task riêng, chưa làm) |
 | **Form mới (preferred)** | `.ivy` — extension duy nhất CLI chấp nhận |
 | **Form cũ (removed)** | `.cpp`/`.cc`/`.cxx`/`.c` — báo error "no longer accepted — use the .ivy extension"; extension lạ/missing cũng báo error |
 | **File ảnh hưởng** | `src/app/main.cpp` — `isLegacySourceExtension()` + validation block trong `main()` (exit 2), `printUsage()` cập nhật |
 | **Cơ chế** | Check extension (case-insensitive) trước khi đọc file. `.ivy` → compile như thường; legacy cpp-family → error gợi ý rename + `import cpp ...` cho interop; ext lạ → "unrecognized ... expected .ivy"; missing → "missing file extension". Preprocessor vẫn giữ khả năng expand `#include` cho `.cpp` (dùng nội bộ/test), chỉ CLI từ chối nhận file legacy. |
 | **Khi nào loại bỏ** | Đã thực hiện (E5). |
-| **Cách loại bỏ** | Đã xong — chỉ còn `ivyc migrate file.cpp` auto-convert (task riêng). |
+| **Cách loại bỏ** | Đã xong — chỉ còn `ivy migrate file.cpp` auto-convert (task riêng). |
 
 ---
 

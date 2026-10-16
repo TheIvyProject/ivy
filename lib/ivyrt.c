@@ -1,4 +1,4 @@
-/* ivyc/lib/ivyrt.c — Ivy runtime library (C bootstrap).
+/* ivy/lib/ivyrt.c — Ivy runtime library (C bootstrap).
  *
  * C5: Precompiled static library containing the Ivy runtime:
  *   - Allocator  (__ivy_alloc / __ivy_free  — wrap libc malloc/free)

@@ -11,8 +11,8 @@
 //   - Chained: outer macro expands to an inner macro call
 //
 // Run:
-//   ivyc -o examples\test_funclike.i examples\test_funclike.cpp   (inspect expansion)
-//   ivyc --llvm examples\test_funclike.cpp -o examples\test_funclike.ll
+//   ivy -o examples\test_funclike.i examples\test_funclike.cpp   (inspect expansion)
+//   ivy --llvm examples\test_funclike.cpp -o examples\test_funclike.ll
 
 #define SQUARE(x) ((x) * (x))
 #define ADD(a, b) ((a) + (b))

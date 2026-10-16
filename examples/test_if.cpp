@@ -21,8 +21,8 @@
 // in functions.
 //
 // Run:
-//   ivyc -o examples\test_if.i examples\test_if.cpp
-//   ivyc --llvm examples\test_if.cpp -o examples\test_if.ll
+//   ivy -o examples\test_if.i examples\test_if.cpp
+//   ivy --llvm examples\test_if.cpp -o examples\test_if.ll
 
 #define VERSION 3
 #define FEATURE_X 1

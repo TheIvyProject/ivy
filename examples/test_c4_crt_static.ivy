@@ -4,7 +4,7 @@
 // -Xclang --dependent-lib=libcmt to select static CRT (libcmt.lib).
 // On POSIX, it passes -static to select libc.a.
 //
-// Run: ivyc --crt-static test_c4_crt_static.ivy -o test_c4.exe && ./test_c4.exe
+// Run: ivy --crt-static test_c4_crt_static.ivy -o test_c4.exe && ./test_c4.exe
 // Expected output: "C4 static CRT test passed"
 
 #pragma ivy cnumber

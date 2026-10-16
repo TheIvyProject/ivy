@@ -116,7 +116,7 @@ bool writeModuleInterface(const TranslationUnit& tu,
                           const std::filesystem::path& outputPath) {
     std::ofstream out(outputPath, std::ios::binary);
     if (!out) {
-        std::cerr << "ivyc: error: cannot write module interface to '"
+        std::cerr << "ivy: error: cannot write module interface to '"
                   << outputPath.string() << "'\n";
         return false;
     }
@@ -224,7 +224,7 @@ bool readModuleInterface(TranslationUnit& tu,
                          const std::filesystem::path& ivmPath) {
     std::ifstream in(ivmPath, std::ios::binary);
     if (!in) {
-        std::cerr << "ivyc: error: cannot read module interface '"
+        std::cerr << "ivy: error: cannot read module interface '"
                   << ivmPath.string() << "'\n";
         return false;
     }
@@ -236,7 +236,7 @@ bool readModuleInterface(TranslationUnit& tu,
 
     // Check magic
     if (!std::getline(ss, line) || line != "IVYMOD\x01") {
-        std::cerr << "ivyc: error: invalid module interface file '"
+        std::cerr << "ivy: error: invalid module interface file '"
                   << ivmPath.string() << "' (bad magic)\n";
         return false;
     }

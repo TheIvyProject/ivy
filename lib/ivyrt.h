@@ -1,4 +1,4 @@
-// ivyc/lib/ivyrt.h — Ivy runtime library header.
+// ivy/lib/ivyrt.h — Ivy runtime library header.
 //
 // C5: Precompiled static library (libivyrt) containing the Ivy
 // runtime.  User Ivy code never calls libc directly — it goes

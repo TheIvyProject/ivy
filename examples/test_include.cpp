@@ -7,8 +7,8 @@
 //
 // After preprocessing, the resulting token stream should parse cleanly and
 // emit LLVM IR. Run with:
-//   ivyc -I lib examples/test_include.cpp --llvm
-//   ivyc -I lib -o examples/test_include.i examples/test_include.cpp
+//   ivy -I lib examples/test_include.cpp --llvm
+//   ivy -I lib -o examples/test_include.i examples/test_include.cpp
 //
 // Then verify the expanded text with a C++ compiler, e.g.:
 //   clang++ -std=c++23 examples/test_include.i -o /tmp/a.out

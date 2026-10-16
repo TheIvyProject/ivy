@@ -40,7 +40,7 @@ const int32& $a foo(
 
 ## Modern Compiler Pipeline
 
-The `ivyc` compiler architecture draws strong architectural inspiration from modern compilers (such as rustc):
+The `ivy` compiler architecture draws strong architectural inspiration from modern compilers (such as rustc):
 
 ```
 Source (.ivy) ──► Lexer ──► Preprocessor ──► Parser ──► AST ──► HIR ──► MIR ──► LLVM IR ──► Native Binary
@@ -54,9 +54,9 @@ Source (.ivy) ──► Lexer ──► Preprocessor ──► Parser ──► 
 
 ## IvyInterpret
 
-Unlike the restricted `constexpr` mechanisms in standard C++, Ivy features **IvyInterpret**—a built-in, MIR-level tree-walking interpreter embedded directly within `ivyc`.
+Unlike the restricted `constexpr` mechanisms in standard C++, Ivy features **IvyInterpret**—a built-in, MIR-level tree-walking interpreter embedded directly within `ivy`.
 
-- Executes MIR in memory with zero backend compilation overhead (`ivyc --run <file.ivy>`).
+- Executes MIR in memory with zero backend compilation overhead (`ivy --run <file.ivy>`).
 - Enables advanced compile-time evaluation: pure code paths and side-effect-free calculations can run during compilation to embed direct values into output binaries.
 - Guarantees full memory safety validation before execution.
 

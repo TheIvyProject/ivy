@@ -2,7 +2,7 @@
 //
 // Tests the dynamic array type with RAII, push, pop, len, operator[].
 //
-// Run: ivyc test_d2_vector.ivy -o test_d2_vector.exe && ./test_d2_vector.exe
+// Run: ivy test_d2_vector.ivy -o test_d2_vector.exe && ./test_d2_vector.exe
 
 #pragma ivy cnumber
 import vector;

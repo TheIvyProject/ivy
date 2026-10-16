@@ -5,7 +5,7 @@
 // lib/ivyrt.c.  The codegen emits `declare` for the __ivy_* symbols
 // and linkExecutable() adds libivyrt.lib to the clang++ link line.
 //
-// Run: ivyc test_c5_libivyrt.ivy -o test_c5.exe && ./test_c5.exe
+// Run: ivy test_c5_libivyrt.ivy -o test_c5.exe && ./test_c5.exe
 // Expected: exercises io::println (libivyrt I/O) and new/delete
 //           (libivyrt allocator).  All output must be correct.
 

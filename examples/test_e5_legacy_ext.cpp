@@ -1,5 +1,5 @@
 // E5 test: legacy .cpp extension is rejected by the CLI.
-// This test verifies that passing a .cpp/.cc/.cxx/.c file to ivyc
+// This test verifies that passing a .cpp/.cc/.cxx/.c file to ivy
 // reports an error directing the user to use the .ivy extension.
 //
 // EXPECT: immediate failure (exit 2) with error message containing

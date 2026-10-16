@@ -2,7 +2,7 @@
 //
 // Tests the owned string type with RAII, methods, and operators.
 //
-// Run: ivyc test_d1_string.ivy -o test_d1.exe && ./test_d1.exe
+// Run: ivy test_d1_string.ivy -o test_d1.exe && ./test_d1.exe
 
 #pragma ivy cnumber
 import string;

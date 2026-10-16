@@ -15,8 +15,8 @@
 // `-o .i` expansion check.
 //
 // Run:
-//   ivyc -o examples\test_define.i examples\test_define.cpp   (inspect expansion)
-//   ivyc --llvm examples\test_define.cpp -o examples\test_define.ll
+//   ivy -o examples\test_define.i examples\test_define.cpp   (inspect expansion)
+//   ivy --llvm examples\test_define.cpp -o examples\test_define.ll
 
 #define ANSWER 42
 #define PI 3.14

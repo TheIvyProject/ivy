@@ -4,7 +4,7 @@
 //   "C-style type 'int' requires #pragma ivy cnumber"
 //
 // Run:
-//   ivyc --llvm examples\test_no_cnumber.cpp -o examples\test_no_cnumber.ll
+//   ivy --llvm examples\test_no_cnumber.cpp -o examples\test_no_cnumber.ll
 //   (expect exit code 1)
 
 int bad_int() { return 42; }

@@ -23,8 +23,8 @@
 // focuses on __LINE__ and __cplusplus.
 //
 // Run:
-//   ivyc -o examples\test_predefined.i examples\test_predefined.cpp
-//   ivyc --llvm examples\test_predefined.cpp -o examples\test_predefined.ll
+//   ivy -o examples\test_predefined.i examples\test_predefined.cpp
+//   ivy --llvm examples\test_predefined.cpp -o examples\test_predefined.ll
 
 // --- __cplusplus is defined and usable in #if ---
 #if defined(__cplusplus)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ivyc LANGUAGES C CXX)
+project(ivy LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,13 +30,13 @@ if(MSVC)
 else()
     target_compile_options(ivyrt PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-# Expose the built archive path to ivyc via a compile definition so
+# Expose the built archive path to ivy via a compile definition so
 # linkExecutable() can find libivyrt.lib / libivyrt.a at runtime.
 # The generator expression $<TARGET_FILE:ivyrt> is evaluated by the
-# build system at compile time of ivyc, baking the absolute path.
+# build system at compile time of ivy, baking the absolute path.
 # (Applied after add_executable below — target must exist first.)
 
-add_executable(ivyc
+add_executable(ivy
     src/app/main.cpp
     src/parsing/lexer.cpp
     src/parsing/preprocessor.cpp
@@ -48,20 +48,20 @@ add_executable(ivyc
     src/mir/interpreter.cpp
 )
 
-target_include_directories(ivyc PRIVATE src ${LLVM_INCLUDE_DIRS})
+target_include_directories(ivy PRIVATE src ${LLVM_INCLUDE_DIRS})
 
-# C5: Bake the absolute path to the built libivyrt archive into ivyc.
-target_compile_definitions(ivyc PRIVATE
+# C5: Bake the absolute path to the built libivyrt archive into ivy.
+target_compile_definitions(ivy PRIVATE
     IVYRT_LIB_PATH="$<TARGET_FILE:ivyrt>")
 
 # Suppress LLVM's C-style warnings when compiling our code.
-target_compile_definitions(ivyc PRIVATE ${LLVM_DEFINITIONS})
+target_compile_definitions(ivy PRIVATE ${LLVM_DEFINITIONS})
 
 if(MSVC)
-    target_compile_options(ivyc PRIVATE /W4 /permissive- /FS
+    target_compile_options(ivy PRIVATE /W4 /permissive- /FS
         /wd4244 /wd4267 /wd4146 /wd4291 /wd4624 /wd4996)
 else()
-    target_compile_options(ivyc PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(ivy PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # 8.1: Link LLVM libraries needed for object file emission.
@@ -81,4 +81,4 @@ llvm_map_components_to_libnames(LLVM_LIBS
     Analysis
 )
 
-target_link_libraries(ivyc PRIVATE ${LLVM_LIBS})
+target_link_libraries(ivy PRIVATE ${LLVM_LIBS})

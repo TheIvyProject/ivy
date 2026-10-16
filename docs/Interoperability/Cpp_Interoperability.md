@@ -156,7 +156,7 @@ Because Ivy shares the exact C++ ABI, calling convention, and memory layout, C++
    ```
 
 2. **C++ Header Declaration (`math_ops.hpp`):**
-   `ivyc` can emit a matching C++ header or you can declare matching signatures directly in C++:
+   `ivy` can emit a matching C++ header or you can declare matching signatures directly in C++:
    ```cpp
    // math_ops.hpp
    #pragma once
@@ -189,7 +189,7 @@ Because Ivy shares the exact C++ ABI, calling convention, and memory layout, C++
 
 4. **Compile and Link:**
    ```bash
-   ivyc -c math_ops.ivy -o math_ops.obj
+   ivy -c math_ops.ivy -o math_ops.obj
    clang++ main.cpp math_ops.obj -o app
    ```
 

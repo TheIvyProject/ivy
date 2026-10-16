@@ -2,8 +2,8 @@
 #pragma ivy cnumber
 //
 // Run:
-//   ivyc -I examples examples\test_include_simple.cpp --llvm
-//   ivyc -I examples -o examples\test_include_simple.i examples\test_include_simple.cpp
+//   ivy -I examples examples\test_include_simple.cpp --llvm
+//   ivy -I examples -o examples\test_include_simple.i examples\test_include_simple.cpp
 
 #include "ivy_simple.h"
 

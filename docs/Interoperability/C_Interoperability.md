@@ -195,7 +195,7 @@ Ivy functions can also be exported to plain C. Because C does not support C++ na
 
 4. **Compile and Link:**
    ```bash
-   ivyc -c crypto.ivy -o crypto.obj
+   ivy -c crypto.ivy -o crypto.obj
    clang main.c crypto.obj -o app
    ```
 

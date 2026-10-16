@@ -617,7 +617,7 @@ void CodeGen::collectFunction(const mir::Function& fn) {
 
 // --- module scaffolding ---
 
-void CodeGen::emitHeader() { emitLine("; LLVM IR emitted by ivyc"); }
+void CodeGen::emitHeader() { emitLine("; LLVM IR emitted by ivy"); }
 
 void CodeGen::emitGlobals() {
     if (usesMalloc_ && !declaredC_.contains("malloc")) emitLine("declare ptr @malloc(i64)");
@@ -2698,7 +2698,7 @@ bool CodeGen::emitObject(const std::string& outPath) {
     if (!module) {
         std::string msg;
         llvm::raw_string_ostream rso(msg);
-        diag.print("ivyc", rso);
+        diag.print("ivy", rso);
         rso.flush();
         error({}, "LLVM IR parse error: " + msg);
         return false;
@@ -2932,7 +2932,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
     }
 
     // C5: Path to the precompiled libivyrt static archive.  The CMake
-    // build bakes the absolute path into ivyc via IVYRT_LIB_PATH so we
+    // build bakes the absolute path into ivy via IVYRT_LIB_PATH so we
     // don't need to search at runtime.  The archive provides the
     // __ivy_* runtime symbols (allocator, I/O, panic); the linker
     // drops unused members automatically.
@@ -2990,7 +2990,7 @@ bool CodeGen::linkExecutable(const std::string& exePath) {
         CloseHandle(pi.hThread);
     } else {
         DWORD err = GetLastError();
-        std::cerr << "ivyc: CreateProcessA failed (error " << err << ")\n";
+        std::cerr << "ivy: CreateProcessA failed (error " << err << ")\n";
     }
 #else
     int rc = std::system(cmd.c_str());

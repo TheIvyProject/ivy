@@ -2,7 +2,7 @@
 //
 // Tests the non-owning view type with bounds-checked access.
 //
-// Run: ivyc test_d3_slice.ivy -o test_d3_slice.exe && ./test_d3_slice.exe
+// Run: ivy test_d3_slice.ivy -o test_d3_slice.exe && ./test_d3_slice.exe
 
 #pragma ivy cnumber
 import slice;

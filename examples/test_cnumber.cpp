@@ -10,8 +10,8 @@
 // not a type).
 //
 // Run:
-//   ivyc --llvm examples\test_cnumber.cpp -o examples\test_cnumber.ll
-//   ivyc --llvm examples\test_no_cnumber.cpp -o examples\test_no_cnumber.ll  (should fail)
+//   ivy --llvm examples\test_cnumber.cpp -o examples\test_cnumber.ll
+//   ivy --llvm examples\test_no_cnumber.cpp -o examples\test_no_cnumber.ll  (should fail)
 
 #pragma ivy cnumber
 

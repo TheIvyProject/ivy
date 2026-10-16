@@ -17,8 +17,8 @@
 // in functions.
 //
 // Run:
-//   ivyc -o examples\test_ifdef.i examples\test_ifdef.cpp
-//   ivyc --llvm examples\test_ifdef.cpp -o examples\test_ifdef.ll
+//   ivy -o examples\test_ifdef.i examples\test_ifdef.cpp
+//   ivy --llvm examples\test_ifdef.cpp -o examples\test_ifdef.ll
 
 #define DEBUG 1
 #define FEATURE 1
