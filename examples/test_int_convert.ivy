@@ -1,0 +1,70 @@
+// Test integer conversion semantics (sext/zext/trunc) + mixed compares.
+//
+// EXPECT: compiles and runs with exit 0. Widening must preserve the
+// source value: sign-extend signed sources, zero-extend unsigned ones
+// (previously always zext — int32 -1 became int64 4294967295).
+
+#pragma ivy cnumber
+
+int32 check_sext() {
+    int32 fails = 0;
+    int64 neg = 0 - 1;
+    if (neg != 0 - 1) {
+        fails = fails + 1;
+    }
+    if (!(neg < 0)) {
+        fails = fails + 1;
+    }
+    if (neg > 0) {
+        fails = fails + 1;
+    }
+    int64 pos = 42;
+    if (pos != 42) {
+        fails = fails + 1;
+    }
+    return fails;
+}
+
+int32 check_zext() {
+    int32 fails = 0;
+    // 0 - 1 is int32 arithmetic (-1); converting to uint64 must
+    // zero-extend (2^64 - 1), which is not < 0 and exceeds int32 max.
+    // (Literals over INT32_MAX would wrap at lex time — out of scope.)
+    uint64 big = 0 - 1;
+    if (big < 0) {
+        fails = fails + 1;
+    }
+    if (!(big > 2147483647)) {
+        fails = fails + 1;
+    }
+    uint32 w = 2000000000;
+    uint64 w2 = w;
+    if (w2 != 2000000000) {
+        fails = fails + 1;
+    }
+    return fails;
+}
+
+int32 check_trunc() {
+    int32 fails = 0;
+    // Build 2^32 + 1 without an overflowing literal.
+    int64 big = 2147483647;
+    big = big + big + 3;
+    int32 lo = 0;
+    unsafe {
+        lo = (int32)big;
+    }
+    if (lo != 1) {
+        fails = fails + 1;
+    }
+    return fails;
+}
+
+int32 main() {
+    int32 fails = 0;
+    fails = fails + check_sext();
+    fails = fails + check_zext();
+    fails = fails + check_trunc();
+    io::println("int_convert fails={}", fails);
+    return fails;
+}

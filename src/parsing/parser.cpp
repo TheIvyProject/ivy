@@ -446,12 +446,15 @@ Type Parser::parseType() {
         }
     }
     // `unsigned`/`signed` — C-style, requires #pragma ivy cnumber.
+    // An explicit keyword always wins over the base-implied signedness below.
+    bool sawExplicitSign = false;
     if (atKeyword("unsigned") || atKeyword("signed")) {
         if (!cnumberEnabled_) {
             errorAt(peek(), "C-style type '" + std::string(peek().lexeme) +
-                    "' requires #pragma ivy cnumber; use a fixed-width type like int32/uint32");
+                            "' requires #pragma ivy cnumber; use a fixed-width type like int32/uint32");
         }
         t.isUnsigned = atKeyword("unsigned");
+        sawExplicitSign = true;
         next();
     }
     if (atKeyword("int8") || atKeyword("int16") || atKeyword("int32") ||
@@ -478,6 +481,14 @@ Type Parser::parseType() {
         const std::string_view lex = next().lexeme;
         auto it = normalize.find(lex);
         t.base = (it != normalize.end()) ? it->second : lex;
+        // Unsigned-ness is implied by the base name (mirrors HIR's
+        // isIvyUnsigned); an explicit `unsigned`/`signed` keyword wins.
+        if (!sawExplicitSign) {
+            t.isUnsigned = t.base == "uint8_t" || t.base == "uint16_t" ||
+                           t.base == "uint32_t" || t.base == "uint64_t" ||
+                           t.base == "uint128_t" || t.base == "uptr_t" ||
+                           t.base == "size_t";
+        }
     } else if (atKeyword("nullptr_t") || atKeyword("max_align_t")) {
         // These types only exist in _t form — no Ivy-native alias.
         t.base = next().lexeme;

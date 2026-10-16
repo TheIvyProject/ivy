@@ -247,9 +247,11 @@ private:
 
     // Emits a cast from `fromTy` to `toTy` if needed (e.g. integer
     // extensions/truncations, float promotions). Returns the resulting
-    // value (possibly a new SSA name).
+    // value (possibly a new SSA name). `fromUnsigned` selects zero- vs
+    // sign-extension for widening (must reflect the SOURCE type).
     std::string emitCast(const std::string& value, const std::string& from,
-                         const std::string& to, SourceLoc loc);
+                         const std::string& to, SourceLoc loc,
+                         bool fromUnsigned);
 
     // Allocates a fresh SSA temporary name (e.g. "%tmp.0", "%tmp.1", ...).
     std::string newTemp();

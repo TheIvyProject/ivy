@@ -316,7 +316,8 @@ static bool isFpType(const std::string& s) {
 }
 
 std::string CodeGen::emitCast(const std::string& value, const std::string& from,
-                               const std::string& to, SourceLoc loc) {
+                               const std::string& to, SourceLoc loc,
+                               bool fromUnsigned) {
     if (from == to) return value;
     // `null` literal is a ptr — if target is ptr, just use it directly.
     if (value == "null" && to == "ptr") return "null";
@@ -335,11 +336,15 @@ std::string CodeGen::emitCast(const std::string& value, const std::string& from,
         return t;
     }
 
-    // int -> int (zext / trunc / bitcast)
+    // int -> int (sext/zext / trunc / bitcast). Widening must preserve
+    // the source value: sign-extend signed sources, zero-extend
+    // unsigned ones (previously always zext — miscompiled negative
+    // signed values, e.g. int32 -1 → int64 became 4294967295).
     const int fb = intBits(from), tb = intBits(to);
     if (fb > 0 && tb > 0) {
         if (fb < tb) {
-            emitLine(t + " = zext " + from + " " + value + " to " + to);
+            emitLine(t + " = " + std::string(fromUnsigned ? "zext" : "sext") +
+                     " " + from + " " + value + " to " + to);
         } else if (fb > tb) {
             emitLine(t + " = trunc " + from + " " + value + " to " + to);
         } else {
@@ -364,7 +369,8 @@ std::string CodeGen::emitCast(const std::string& value, const std::string& from,
     }
     // int -> float
     if (fb > 0 && isFpType(to)) {
-        emitLine(t + " = sitofp " + from + " " + value + " to " + to);
+        emitLine(t + " = " + std::string(fromUnsigned ? "uitofp" : "sitofp") +
+                 " " + from + " " + value + " to " + to);
         return t;
     }
     // float -> int
@@ -1308,11 +1314,11 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         const std::string lhsTy = valueLlvmType(v.lhs->type);
         const std::string rhsTy = valueLlvmType(v.rhs->type);
         const std::string lhsC = isCmp
-            ? emitCast(lhsV, lhsTy, opTy, e.loc)
-            : emitCast(lhsV, lhsTy, ty, e.loc);
+            ? emitCast(lhsV, lhsTy, opTy, e.loc, v.lhs->type.isUnsigned)
+            : emitCast(lhsV, lhsTy, ty, e.loc, v.lhs->type.isUnsigned);
         const std::string rhsC = isCmp
-            ? emitCast(rhsV, rhsTy, opTy, e.loc)
-            : emitCast(rhsV, rhsTy, ty, e.loc);
+            ? emitCast(rhsV, rhsTy, opTy, e.loc, v.rhs->type.isUnsigned)
+            : emitCast(rhsV, rhsTy, ty, e.loc, v.rhs->type.isUnsigned);
 
         if (isCmp) {
             std::string op;
@@ -1672,7 +1678,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 if (callee && pi < callee->params.size()) {
                     const std::string paramTy = valueLlvmType(callee->params[pi].type);
                     if (paramTy != ty && paramTy != "void") {
-                        val = emitCast(val, ty, paramTy, e.loc);
+                        val = emitCast(val, ty, paramTy, e.loc, a->type.isUnsigned);
                         ty = paramTy;
                     }
                 }
@@ -1870,7 +1876,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
                 const std::string val = lowerExpr(*ci);
                 const std::string fieldTy = llvmType(sIt->second.fields[i].type);
                 const std::string c = emitCast(val, valueLlvmType(ci->type),
-                                               fieldTy, e.loc);
+                                               fieldTy, e.loc, ci->type.isUnsigned);
                 std::string gep = newTemp();
                 emitLine(gep + " = getelementptr " + sIt->second.llvmType +
                          ", ptr " + slot + ", i32 0, i32 " + std::to_string(i));
@@ -1899,7 +1905,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         if (fromTy == "ptr" && toTy == "ptr") return operandV;
         // For all other conversions, reuse emitCast which handles
         // zext/trunc/fptosi/sitofp/fpext/fptrunc/ptrtoint/inttoptr.
-        return emitCast(operandV, fromTy, toTy, e.loc);
+        return emitCast(operandV, fromTy, toTy, e.loc, v.operand->type.isUnsigned);
     }
     error(e.loc, "unsupported expression");
     return "undef";
@@ -1928,7 +1934,7 @@ void CodeGen::lowerInitListInto(const mir::Expr::InitList& il,
         if (!elem) continue;
         const std::string val = lowerExpr(*elem);
         const std::string fieldTy = llvmType(meta.fields[i].type);
-        const std::string c = emitCast(val, valueLlvmType(elem->type), fieldTy, loc);
+        const std::string c = emitCast(val, valueLlvmType(elem->type), fieldTy, loc, elem->type.isUnsigned);
         std::string gep = newTemp();
         emitLine(gep + " = getelementptr " + ty + ", ptr " + slot +
                  ", i32 0, i32 " + std::to_string(i));
@@ -2050,7 +2056,7 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
             } else {
                 const std::string v = lowerExpr(*a.init);
                 const std::string fromTy = valueLlvmType(a.init->type);
-                const std::string c = emitCast(v, fromTy, slotTy, inst.loc);
+                const std::string c = emitCast(v, fromTy, slotTy, inst.loc, a.init->type.isUnsigned);
                 emitLine("store " + slotTy + " " + c + ", ptr " + slot);
             }
         } else if (structTypes_.contains(a.type.base)) {
@@ -2070,7 +2076,7 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
         const std::string v = lowerExpr(*s.value);
         const std::string toTy = valueLlvmType(s.target->type);
         const std::string fromTy = valueLlvmType(s.value->type);
-        const std::string c = emitCast(v, fromTy, toTy, inst.loc);
+        const std::string c = emitCast(v, fromTy, toTy, inst.loc, s.value->type.isUnsigned);
         emitLine("store " + toTy + " " + c + ", ptr " + p);
         return;
     }
@@ -2091,7 +2097,7 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
                 const std::string v = lowerExpr(*r.value);
                 const std::string fromTy = valueLlvmType(r.value->type);
                 const std::string toTy = valueLlvmType(curFnReturnType_);
-                const std::string c = emitCast(v, fromTy, toTy, inst.loc);
+                const std::string c = emitCast(v, fromTy, toTy, inst.loc, r.value->type.isUnsigned);
                 emitLine("ret " + toTy + " " + c);
             }
         } else {
