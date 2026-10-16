@@ -999,7 +999,7 @@ std::string CodeGen::lowerLValue(const mir::Expr& e) {
         }
         const std::string val = lowerExpr(e);
         const std::string slot = newTemp();
-        emitLine(slot + " = alloca " + rt);
+        emitEntryAlloca(slot + " = alloca " + rt);
         emitLine("store " + rt + " " + val + ", ptr " + slot);
         return slot;
     }
@@ -1605,7 +1605,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             }
             // Allocate a stack slot for outLen (unsigned long long).
             const std::string lenSlot = newTemp();
-            emitLine(lenSlot + " = alloca i64");
+            emitEntryAlloca(lenSlot + " = alloca i64");
             const std::string t = newTemp();
             emitLine(t + " = call ptr @__ivy_read_file(ptr " + pathVal +
                      ", ptr " + lenSlot + ")");
@@ -1691,7 +1691,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             }
             const std::string rt2 = llvmType(e.type);
             const std::string slot = newTemp();
-            emitLine(slot + " = alloca " + rt2);
+            emitEntryAlloca(slot + " = alloca " + rt2);
             std::string fullArgs = "ptr " + slot;
             if (!args.empty()) fullArgs += ", " + args;
             emitLine("call void @" +
@@ -1841,7 +1841,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         const M::InitList& v = std::get<M::InitList>(n);
         const std::string slot = newAllocaSlot();
         const std::string ty = llvmType(e.type);
-        emitLine(slot + " = alloca " + ty);
+        emitEntryAlloca(slot + " = alloca " + ty);
         lowerInitListInto(v, slot, e.type, e.loc);
         std::string t = newTemp();
         emitLine(t + " = load " + ty + ", ptr " + slot);
@@ -1857,7 +1857,7 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         const M::Lambda& v = std::get<M::Lambda>(n);
         const std::string slot = newAllocaSlot();
         const std::string ty = llvmType(e.type);
-        emitLine(slot + " = alloca " + ty);
+        emitEntryAlloca(slot + " = alloca " + ty);
         // Zero-initialize the closure struct first.
         emitLine("store " + ty + " zeroinitializer, ptr " + slot);
         // Store each capture value into its field via GEP.
@@ -2026,14 +2026,15 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
 
     if (std::holds_alternative<I::Alloca>(n)) {
         const I::Alloca& a = std::get<I::Alloca>(n);
-        const std::string slot = valueName(a.var);
+        // The slot was hoisted to the entry block (see lowerFunction):
+        // emitting `alloca` here would re-execute it every time a loop
+        // body runs (stack leak → stack overflow at scale). Only the
+        // init store runs at this site (side-effect order preserved).
+        const std::string slot = vars_.at(a.var);
         const std::string slotTy = llvmType(a.type);
         if (a.type.isReference) {
             // Reference: no new alloca — alias the referenced variable's slot.
             // init is guaranteed by HIR to be an lvalue (IdentRef or Deref).
-            vars_[a.var] = slot;  // placeholder
-            varIsRef_[a.var] = true;  // D1: track reference variables
-            emitLine(slot + " = alloca ptr");  // storage for the address
             if (a.init) {
                 // Get the address of the referenced object (lowerLValue).
                 const std::string addr = lowerLValue(*a.init);
@@ -2041,9 +2042,6 @@ void CodeGen::lowerInst(const mir::Inst& inst) {
             }
             return;
         }
-        emitLine(slot + " = alloca " + slotTy);
-        vars_[a.var] = slot;
-        varIsRef_[a.var] = false;  // D1: value variable
         if (a.init) {
             if (std::holds_alternative<mir::Expr::InitList>(a.init->node)) {
                 // Aggregate init: GEP + store each element into the slot.
@@ -2469,7 +2467,15 @@ void CodeGen::lowerFunction(const mir::Function& fn) {
     inlineBlock_ = 0;
     vars_.clear();
     blockNames_.clear();
+    entryAllocas_.clear();
     curFnReturnType_ = fn.returnType;
+
+    // Lower into a local buffer: temporary-slot `alloca`s created during
+    // lowering are collected in entryAllocas_ and spliced into the entry
+    // block at the end (they must execute once, not per loop iteration).
+    std::ostringstream fnOut;
+    std::ostream* savedOut = out_;
+    out_ = &fnOut;
 
     // name the blocks: bb<index>
     for (std::size_t i = 0; i < fn.blocks.size(); ++i) {
@@ -2496,6 +2502,28 @@ void CodeGen::lowerFunction(const mir::Function& fn) {
         varIsRef_[p.name] = p.type.isReference;  // D1
     }
 
+    // Hoist every local slot to the entry block. An `alloca` inside a
+    // loop body would re-execute every iteration (stack leak → stack
+    // overflow at scale: any loop-local variable crashed past ~40K
+    // iterations). Reserving once up front is what clang does; init
+    // stores still run at their original sites (order preserved).
+    for (const auto& b : fn.blocks) {
+        for (const auto& inst : b->insts) {
+            if (!std::holds_alternative<mir::Inst::Alloca>(inst->node)) continue;
+            const auto& a = std::get<mir::Inst::Alloca>(inst->node);
+            const std::string slot = valueName(a.var);
+            const std::string slotTy =
+                a.type.isReference ? "ptr" : llvmType(a.type);
+            emitLine(slot + " = alloca " + slotTy);
+            vars_[a.var] = slot;
+            varIsRef_[a.var] = a.type.isReference;  // D1
+        }
+    }
+
+    // Marker: temporary-slot allocas collected during lowering are spliced
+    // here (after the prologue, before the first block).
+    emitLine(";__IVY_ENTRY_ALLOCAS__");
+
     const bool isVoidRet = llvmType(fn.returnType) == "void";
     if (!fn.blocks.empty()) {
         // the entry block (alloca prologue) must end with a terminator before
@@ -2509,6 +2537,16 @@ void CodeGen::lowerFunction(const mir::Function& fn) {
     }
     emitLine("}");
     emitLine("");
+
+    out_ = savedOut;
+    std::string body = fnOut.str();
+    std::string extra;
+    for (const std::string& l : entryAllocas_) extra += l + "\n";
+    const std::string marker = ";__IVY_ENTRY_ALLOCAS__\n";
+    const std::size_t at = body.find(marker);
+    if (at != std::string::npos) body.replace(at, marker.size(), extra);
+    *out_ << body;
+    entryAllocas_.clear();
 }
 
 bool CodeGen::generate(std::ostream& out) {

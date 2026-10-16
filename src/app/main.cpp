@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -1027,13 +1028,39 @@ int run(const std::filesystem::path& path, bool showTokens, bool showLex, bool s
     // 9.2: Merge imported module declarations into the main TU.
     // This makes imported functions, structs, enums, and type aliases
     // available for HIR building and codegen.
-    for (auto& [modName, impTu] : importedModules) {
-        // Append imported declarations (functions, structs, enums, using, concepts)
-        for (auto& f : impTu.functions) tu->functions.push_back(std::move(f));
-        for (auto& s : impTu.structs) tu->structs.push_back(std::move(s));
-        for (auto& e : impTu.enums) tu->enums.push_back(std::move(e));
-        for (auto& u : impTu.usingDecls) tu->usingDecls.push_back(std::move(u));
-        for (auto& c : impTu.concepts) tu->concepts.push_back(std::move(c));
+    //
+    // F1.2: Dedupe imported TYPES by name (diamond imports — a driver
+    // importing both `string` and `lexmod` sees string's struct twice:
+    // directly and re-exported through lexmod.ivm). Types follow ODR
+    // (same name = same entity, like #pragma once). Functions are NOT
+    // deduped: overloads across modules must all stay visible.
+    {
+        std::unordered_set<std::string_view> haveStructs, haveEnums,
+            haveAliases, haveConcepts;
+        for (const auto& s : tu->structs) haveStructs.insert(s.name);
+        for (const auto& e : tu->enums) haveEnums.insert(e.name);
+        for (const auto& u : tu->usingDecls) haveAliases.insert(u.name);
+        for (const auto& c : tu->concepts) haveConcepts.insert(c.name);
+        for (auto& [modName, impTu] : importedModules) {
+            // Append imported declarations (functions, structs, enums, using, concepts)
+            for (auto& f : impTu.functions) tu->functions.push_back(std::move(f));
+            for (auto& s : impTu.structs) {
+                if (haveStructs.insert(s.name).second)
+                    tu->structs.push_back(std::move(s));
+            }
+            for (auto& e : impTu.enums) {
+                if (haveEnums.insert(e.name).second)
+                    tu->enums.push_back(std::move(e));
+            }
+            for (auto& u : impTu.usingDecls) {
+                if (haveAliases.insert(u.name).second)
+                    tu->usingDecls.push_back(std::move(u));
+            }
+            for (auto& c : impTu.concepts) {
+                if (haveConcepts.insert(c.name).second)
+                    tu->concepts.push_back(std::move(c));
+            }
+        }
     }
 
     // D2: For template structs imported from modules, the .ivm file

@@ -132,6 +132,10 @@ private:
     // whether to load from the slot.
     std::unordered_map<std::string_view, bool> varIsRef_;
     std::unordered_map<const mir::Block*, std::string> blockNames_;  // block -> "bb<i>"
+    // Temporary-slot `alloca` lines collected during lowering, spliced
+    // into the entry block by lowerFunction. Emitting them inline would
+    // re-execute per loop iteration (stack leak → stack overflow).
+    std::vector<std::string> entryAllocas_;
     std::string curBlock_;
     int temp_ = 0;
     int alloca_ = 0;
@@ -255,6 +259,14 @@ private:
 
     // Emits a line to the output stream (with leading indentation).
     void emitLine(const std::string& line);
+
+    // Buffers an `alloca` line for the entry block (flushed by
+    // lowerFunction after the prologue). Temporary slots created during
+    // lowering must go through here — emitting them inline would
+    // re-execute per loop iteration (stack leak → stack overflow).
+    void emitEntryAlloca(const std::string& line) {
+        entryAllocas_.push_back(line);
+    }
 
     // Decodes a string literal body (without quotes) into raw bytes.
     bool decodeBody(std::string_view body, std::string& bytes);
