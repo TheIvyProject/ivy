@@ -3121,7 +3121,11 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         }
         // Parse the first operand. Use `parseUnary` (not `parseExpr`)
         // so that a following binary operator is recognized as part of
-        // the fold syntax, not consumed by `parseBinary`.
+        // the fold syntax, not consumed by `parseBinary`. The position
+        // and diagnostic count are saved so a non-fold can reparse the
+        // whole content with correct precedence (see below).
+        const std::size_t savePos = pos_;
+        const std::size_t saveDiags = diagnostics_.size();
         std::unique_ptr<Expr> inner = parseUnary();
         // Check for fold pattern: `expr op ...` (unary right fold) or
         // `expr op ... op expr` (binary fold).
@@ -3141,18 +3145,26 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
                                                      std::move(rhs), /*isLeftPack=*/false);
                 return out;
             }
-            // Not a fold — backtrack the operator.
-            // We already consumed it; reconstruct by wrapping in Binary.
-            // But we don't have the rhs yet, so just continue parsing
-            // as a normal expression (the operator will be handled by
-            // the binary parser if we hadn't consumed it).  Since we
-            // consumed it, we need to build a Binary node manually.
-            std::unique_ptr<Expr> rhs = parseExpr();
+            // Not a fold — reparse the whole parenthesized content as a
+            // full conditional expression. Parsing just the rhs with
+            // parseExpr() here would swallow a following `?:` into the
+            // rhs, silently mis-parsing `(a == 1 ? b : 3)` as
+            // `(a == (1 ? b : 3))`. Restoring also discards any
+            // speculative diagnostics from the lookahead above.
+            pos_ = savePos;
+            diagnostics_.resize(saveDiags);
+            std::unique_ptr<Expr> full = parseConditional();
             expect(TokenKind::RParen, "expected ')' to close parenthesized expression");
-            return makeExpr<Expr::Binary>(loc, foldOp, std::move(inner), std::move(rhs));
+            return full;
         }
+        // No fold operator ahead: `(x)` or `(a ? b : c)` (no binary
+        // operator before `?` — the parseUnary lookahead above cannot see
+        // the conditional). Reparse uniformly for correct precedence.
+        pos_ = savePos;
+        diagnostics_.resize(saveDiags);
+        std::unique_ptr<Expr> content = parseConditional();
         expect(TokenKind::RParen, "expected ')' to close parenthesized expression");
-        return inner;
+        return content;
     }
 
     // Unsupported constructs in expression position.

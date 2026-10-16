@@ -1275,12 +1275,17 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
             curBlock_ = evalB;
             emitLine(evalB + ":");
             const std::string rhsV = lowerExpr(*v.rhs);
+            // The rhs may itself contain &&/||/?: which create nested
+            // blocks — the fall-through block is wherever lowering ended
+            // up, not necessarily evalB. Branch from there and use it as
+            // the PHI predecessor (else malformed CFG → backend crash).
+            const std::string rhsEnd = curBlock_;
             emitLine("br label %" + mergeB);
             curBlock_ = mergeB;
             emitLine(mergeB + ":");
             std::string p = newTemp();
             emitLine(p + " = phi i1 [ " + (v.op == "&&" ? "false" : "true") +
-                     ", %" + prev + " ], [ " + rhsV + ", %" + evalB + " ]");
+                     ", %" + prev + " ], [ " + rhsV + ", %" + rhsEnd + " ]");
             return p;
         }
 
@@ -1395,16 +1400,20 @@ std::string CodeGen::lowerExpr(const mir::Expr& e) {
         curBlock_ = thenB;
         emitLine(thenB + ":");
         const std::string thenV = lowerExpr(*v.thenBranch);
+        // Branches may contain nested &&/||/?: (see above) — capture the
+        // real fall-through blocks for the PHI predecessors.
+        const std::string thenEnd = curBlock_;
         emitLine("br label %" + mergeB);
         curBlock_ = elseB;
         emitLine(elseB + ":");
         const std::string elseV = lowerExpr(*v.elseBranch);
+        const std::string elseEnd = curBlock_;
         emitLine("br label %" + mergeB);
         curBlock_ = mergeB;
         emitLine(mergeB + ":");
         std::string p = newTemp();
-        emitLine(p + " = phi " + llvmType(e.type) + " [ " + thenV + ", %" + thenB +
-                 " ], [ " + elseV + ", %" + elseB + " ]");
+        emitLine(p + " = phi " + llvmType(e.type) + " [ " + thenV + ", %" + thenEnd +
+                 " ], [ " + elseV + ", %" + elseEnd + " ]");
         return p;
     }
     if (std::holds_alternative<M::Call>(n)) {
