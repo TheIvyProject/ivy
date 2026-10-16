@@ -30,11 +30,10 @@
 namespace {
 
 void printUsage() {
-    std::cout << "usage: ivyc [options] <file.ivy|file.cpp>\n"
+    std::cout << "usage: ivyc [options] <file.ivy>\n"
                  "\n"
                  "Source files:\n"
-                 "  .ivy        Ivy source (the safe C++ subset)\n"
-                 "  .cpp/.cc/.cxx/.c  Legacy C/C++ source (migration)\n"
+                 "  .ivy        Ivy source (only accepted extension)\n"
                  "\n"
                  "options:\n"
                  "  --tokens   print the token stream (debug)\n"
@@ -794,12 +793,13 @@ void dumpMir(const ivy::mir::TranslationUnit& tu, std::ostream& os) {
 
 // --- driver ---
 
-// Accepted source-file extensions. `.ivy` marks Ivy code (the new
-// safe subset); `.cpp`/`.cc`/`.cxx`/`.c` are accepted for compatibility
-// with legacy C/C++ files being migrated to Ivy.
-bool isKnownSourceExtension(std::string_view ext) {
-    return ext == "ivy" || ext == "cpp" || ext == "cc" ||
-           ext == "cxx" || ext == "c";
+// E5: Only `.ivy` is accepted as a source-file extension. Legacy C/C++
+// extensions (`.cpp`/`.cc`/`.cxx`/`.c`) are rejected — rename the file
+// to `.ivy` (C++ interop is via `import cpp ...`, not `#include`).
+// (`ivyc migrate` auto-conversion is a separate future task.)
+bool isLegacySourceExtension(std::string_view extLower) {
+    return extLower == "cpp" || extLower == "cc" ||
+           extLower == "cxx" || extLower == "c";
 }
 
 std::string_view getExtension(std::string_view path) {
@@ -1519,14 +1519,25 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Validate source extension — warn (not error) on unknown extensions.
-    // `.ivy` is the canonical Ivy extension; `.cpp`/`.cc`/`.cxx`/`.c` are
-    // accepted for legacy migration. Other extensions are warned about but
-    // still processed (the user may know what they are doing).
-    const std::string_view fileExt = getExtension(fileArg);
-    if (!fileExt.empty() && !isKnownSourceExtension(fileExt)) {
-        std::cerr << "ivyc: warning: unrecognized file extension '." << fileExt
-                  << "' — expected .ivy, .cpp, .cc, .cxx, or .c\n";
+    // E5: Validate source extension — only `.ivy` is accepted.
+    // Legacy C/C++ extensions are rejected (rename to `.ivy`); anything
+    // else (including a missing extension) is rejected as unrecognized.
+    {
+        std::string fileExtLower{getExtension(fileArg)};
+        for (char& c : fileExtLower) c = static_cast<char>(std::tolower(c));
+        if (fileExtLower != "ivy") {
+            if (fileExtLower.empty()) {
+                std::cerr << "ivyc: error: missing file extension — use the .ivy extension\n";
+            } else if (isLegacySourceExtension(fileExtLower)) {
+                std::cerr << "ivyc: error: legacy '." << fileExtLower
+                          << "' files are no longer accepted — use the .ivy extension "
+                             "(rename to .ivy; C++ interop via 'import cpp ...')\n";
+            } else {
+                std::cerr << "ivyc: error: unrecognized file extension '." << fileExtLower
+                          << "' — expected .ivy\n";
+            }
+            return 2;
+        }
     }
 
     // 8.2: If -o has a .o/.obj extension, imply -c (compile only).
