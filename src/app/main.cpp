@@ -36,7 +36,8 @@ void printUsage() {
                  "  .ivy        Ivy source (only accepted extension)\n"
                  "\n"
                  "options:\n"
-                 "  --tokens   print the token stream (debug)\n"
+                 "  --tokens   print the token stream after preprocessing (debug)\n"
+                 "  --lex      print the raw lexer token stream, before preprocessing (debug)\n"
                  "  --ast      print the parsed AST (debug)\n"
                  "  --hir      print the analyzed HIR (debug)\n"
                  "  --mir      print the lowered MIR with lifetime annotations (debug)\n"
@@ -820,7 +821,7 @@ bool hasExtension(const std::string& path, std::string_view ext) {
     return got == ext;
 }
 
-int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool showHir,
+int run(const std::filesystem::path& path, bool showTokens, bool showLex, bool showAst, bool showHir,
         bool showMir, bool showLlvm, bool doRun, bool compileOnly, bool linkMode,
         bool crtStatic,
         const std::string& outPath,
@@ -842,6 +843,20 @@ int run(const std::filesystem::path& path, bool showTokens, bool showAst, bool s
         failed = true;
     }
     if (failed) return 1;
+
+    // F1.1: Raw lexer dump for differential testing of the Ivy lexer port
+    // (bootstrap/lexer.ivy). Same line format as --tokens, but the tokens
+    // are pre-preprocessor (directives visible) and EOF carries the lexer's
+    // own position (not the preprocessor's 0:0).
+    if (showLex) {
+        for (const ivy::Token& t : tokens) {
+            std::cout << t.line << ":" << t.col << "\t" << ivy::tokenKindName(t.kind);
+            if (t.kind == ivy::TokenKind::EndOfFile) break;
+            if (!t.lexeme.empty()) std::cout << "\t'" << t.lexeme << "'";
+            std::cout << "\n";
+        }
+        return 0;
+    }
 
     // Decide whether the user asked for preprocessed C++ output (.i / .ii).
     // When `-o file.i` or `-o file.ii` is given, we run the preprocessor
@@ -1422,6 +1437,7 @@ int main(int argc, char** argv) {
     std::filesystem::path file;
     std::string fileArg;  // original argv string for extension checks
     bool showTokens = false;
+    bool showLex = false;
     bool showAst = false;
     bool showHir = false;
     bool showMir = false;
@@ -1437,6 +1453,8 @@ int main(int argc, char** argv) {
         const std::string_view arg(argv[i]);
         if (arg == "--tokens") {
             showTokens = true;
+        } else if (arg == "--lex") {
+            showLex = true;
         } else if (arg == "--ast") {
             showAst = true;
         } else if (arg == "--hir") {
@@ -1556,12 +1574,12 @@ int main(int argc, char** argv) {
 
     // 8.2: If no action flag was given and -o is not a .ll/.i/.ii,
     // default to compile + link to a native executable.
-    bool linkMode = !showTokens && !showAst && !showHir && !showMir &&
+    bool linkMode = !showTokens && !showLex && !showAst && !showHir && !showMir &&
                     !showLlvm && !doRun && !compileOnly &&
                     (outPath.empty() ||
                      (!hasExtension(outPath, "ll") && !hasExtension(outPath, "i") &&
                       !hasExtension(outPath, "ii")));
 
-    return run(file, showTokens, showAst, showHir, showMir, showLlvm, doRun,
+    return run(file, showTokens, showLex, showAst, showHir, showMir, showLlvm, doRun,
                compileOnly, linkMode, crtStatic, outPath, includePaths, targetPlatform);
 }
