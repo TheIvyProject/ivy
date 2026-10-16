@@ -182,9 +182,19 @@ Mốc cuối: Ivy tự biên dịch chính nó. Binary duy nhất là `ivy`
 | # | Task | Độ khó | Chi tiết triển khai |
 |---|------|--------|---------------------|
 | F0 | **Ivy 0.5 spec draft** | ★★ | Formal specification document: syntax grammar (EBNF), type system rules, ownership/borrow rules, ABI specification. Versioning: `__ivy__ = 202604L` |
-| F1 | **Port compiler sang Ivy (từng tầng)** | ★★★★★+ | Bắt đầu bằng port lexer → parser → HIR → MIR → codegen. Dùng IvyInterpret để chạy bootstrap. Mỗi tầng port xong, dùng Ivy-compiler để compile tầng tiếp theo. Theo OLD_PLAN.md §10.5 |
+| F1.1 | **Port lexer sang Ivy** | ★★ | `lexer.cpp/.h`, `token.h`. Làm đầu tiên (không phụ thuộc tầng nào). Xong khi: token stream khớp bản C++ (`--tokens`) trên toàn bộ `examples/` + `std/` |
+| F1.2 | **Port preprocessor sang Ivy** | ★★ | `preprocessor.cpp/.h` (`#include` legacy, `#define`, conditional, `#if`, macro, `#pragma`). Xong khi: output sau preprocess khớp bản C++ (so qua `-o .i` / `--tokens`), gồm cả error E4 |
+| F1.3 | **Port parser sang Ivy** | ★★★★ | `parser.cpp/.h`, `ast.h` (file lớn nhất — ~3300 dòng). Xong khi: `--ast` dump khớp bản C++, gồm cả mọi error case (E2/E3/E4, type errors ở parse-time) |
+| F1.4 | **Port HIR sang Ivy** | ★★★★ | `hir/` (type check, name resolution, borrow/lifetime/move check, template instantiation). Xong khi: `--hir` dump + mọi diagnostic khớp bản C++ |
+| F1.5 | **Port MIR + interpreter sang Ivy** | ★★★★ | `mir_builder`, `mir.h`, `interpreter` + `interp_*`. Xong khi: `--mir` dump khớp; `--run` outputs khớp trên toàn bộ suite. Tầng này là bootstrap runner (dùng IvyInterpret để chạy compiler Ivy ở F2) |
+| F1.6 | **Port codegen sang Ivy (qua LLVM C API)** | ★★★ | `codegen.cpp/.h` gọi LLVM qua `import c <llvm-c/...>`, không dùng C++ API (tránh gánh template/STL interop). Xong khi: LLVM IR text khớp bản C++ (trừ dòng header), object link chạy đúng |
+| F1.7 | **Port CLI driver + module I/O sang Ivy** | ★★ | `app/main.cpp`, `module_io.cpp` (arg parse, `import` resolve, `.ivm` R/W, link orchestration). Xong khi: binary tự host build được chính nó — tiền đề cho F2 |
 | F2 | **Bootstrap validation + CI dogfood** | ★★★ | `ivy` biên dịch chính nó. CI chạy compiler do Ivy-built trên toàn bộ test suite — output phải khớp bản C++-built. Đây là định nghĩa "xong" của self-hosting |
 | F3 | **Port std/runtime sang Ivy** | ★★★★ | `libivyrt` (allocator, print/format, panic) + std modules viết lại bằng Ivy, bỏ phụ thuộc C++. Backend vẫn LLVM — port compiler (F1) trước, std sau (tránh deadlock: compiler Ivy cần std tối thiểu để viết) |
+
+*Quy tắc sequencing F1: làm tuần tự F1.1 → F1.7 (mỗi tầng phụ thuộc output tầng
+trước). Mỗi tầng xong phải pass differential test với bản C++-built trước khi
+sang tầng tiếp theo. Theo OLD_PLAN.md §10.5.*
 
 ### Giai đoạn G — Tooling (viết bằng Ivy, sau F)
 
