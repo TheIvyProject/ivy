@@ -1,0 +1,3 @@
+#define SQUARE(x) ((x)*(x))
+#define SUM(a, b) SQUARE(a) + SQUARE(b)
+SUM(2, 3)

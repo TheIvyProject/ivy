@@ -1,0 +1,2 @@
+#define LOG(...) tag __VA_ARGS__
+LOG(1, 2)

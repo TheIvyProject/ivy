@@ -1,0 +1,3 @@
+#define ID(x) x
+#define N 5
+ID(N)

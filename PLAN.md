@@ -113,6 +113,12 @@ src/                              selfhost/
   `ivy --tokens`, `-Modules token,lexer,preprocessor -Driver ppdrive`. Corpus
   `selfhost/corpus/pp/define_obj/` (10 file). Lệnh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/define_obj -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
+- H2.2: cùng port + driver; oracle `--tokens`. Port thêm `#define` function-like
+  (fixed-arity + variadic `...`/`__VA_ARGS__`): tham số thực được pre-expand
+  (mirror `expandFunctionLike`), body sau thay thế được rescan; dấu `,` nối
+  `__VA_ARGS__` tổng hợp lấy lexeme từ separator call-site nhưng line/col của
+  tên macro. Corpus `selfhost/corpus/pp/define_fn/` (12 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/define_fn -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
 - Gate tầng H1 (H1.1–H1.6): port lex byte-identical toàn bộ token stream trên
   98 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
   gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
@@ -140,7 +146,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
 | H2.1 | `#define` object-like | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_obj` | ✅ byte-identical 10 files |
-| H2.2 | `#define` function-like + variadic | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_fn` | ☐ |
+| H2.2 | `#define` function-like + variadic | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_fn` | ✅ byte-identical 12 files |
 | H2.3 | Conditional (`#if/#ifdef/#elif/#else`) | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/cond` | ☐ |
 | H2.4 | Macro expansion / paste / stringify | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/expand` | ☐ |
 | H2.5 | `#pragma`, predefined macros | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/pragma` | ☐ |

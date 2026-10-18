@@ -1,0 +1,2 @@
+#define SQ(x) ((x)*(x))
+SQ(3)

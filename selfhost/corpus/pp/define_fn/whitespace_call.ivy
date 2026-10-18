@@ -1,0 +1,2 @@
+#define F(x) x
+F (1)

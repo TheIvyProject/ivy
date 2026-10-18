@@ -1,23 +1,26 @@
-// selfhost/parsing/preprocessor.ivy — Ivy self-host preprocessor (H2.1:
-// object-like `#define`).
+// selfhost/parsing/preprocessor.ivy — Ivy self-host preprocessor (H2.x).
 //
-// Feature-sliced port of src/parsing/preprocessor.cpp. H2.1 covers the
-// object-like macro path only: `#define NAME body...`, storage of the body,
-// and recursive replacement of `NAME` in the token stream (with a self-
-// reference cycle guard), plus verbatim emission of everything else.
+// Feature-sliced port of src/parsing/preprocessor.cpp.
+//   H2.1: object-like `#define NAME body...` + recursive replacement with a
+//         self-reference cycle guard.
+//   H2.2: function-like `#define NAME(params) body...`, fixed-arity and
+//         variadic (`...` + `__VA_ARGS__`). Arguments are pre-expanded before
+//         substitution (mirrors expandFunctionLike), the substituted body is
+//         then rescanned (mirrors expandTokenVector).
+//
+// Still H2.3+: conditionals, `#pragma`, predefined macros, `#`/`##`, `#line`,
+// `#error`/`#warning`, `#include`. The corpus (selfhost/corpus/pp/*) avoids
+// those. An unrecognized directive is emitted verbatim (`#` + rest of the line,
+// object-like macros expanded), exactly as the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
-// line/col of the body token, and the output stream ends with a synthetic
-// `eof` token at 0:0 (unlike the lexer's own eof token).
-//
-// The corpus (selfhost/corpus/pp/define_obj) is restricted to object-like
-// macros: no function-like macros, `#include`, conditionals, `#pragma`,
-// `#line`/`#error`/`#warning`, predefined macros, or `#`/`##` operators — those
-// are H2.2-H2.7. An unrecognized directive is emitted verbatim (`#` + rest of
-// the line), exactly as the C++ generic path does.
+// line/col of the body token; substituted arguments keep the *call-site*
+// line/col; the synthetic `__VA_ARGS__` join comma takes the macro name's
+// line/col but the lexeme of the call-site separator; and the output stream
+// ends with a synthetic `eof` token at 0:0.
 //
 // Oracle: src/parsing/preprocessor.cpp via `ivy --tokens`.
-// Harness: selfhost/difftest.ps1 -Oracle --tokens -Module preprocessor -Driver ppdrive
+// Harness: selfhost/difftest.ps1 -Oracle --tokens -Driver ppdrive
 
 #pragma ivy cnumber
 export module preprocessor;
@@ -26,15 +29,20 @@ import token;
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 
-// sizeof(MacroRec): 5 * 8 = 40 bytes.
+// sizeof(MacroRec): 8 * 8 = 64 bytes.
 export struct MacroRec {
     long name_off;
     long name_len;
     long body_start;
     long body_count;
-    long used;
+    long param_start;
+    long param_cnt;
+    long is_fn;
+    long is_va;
 };
 
+// Saved output-buffer state for the argument-capture swap (mirrors the
+// `std::swap(output_, out)` dance in expandFunctionLike).
 export struct Preprocessor {
     Token* in_;
     long in_n_;
@@ -45,10 +53,14 @@ export struct Preprocessor {
     MacroRec* macros_;
     long macro_cap_;
     long macro_n_;
+    long* param_off_;
+    long* param_len_;
+    long param_cap_;
+    long param_n_;
     long* stack_;   // (off,len) pairs for the expansion cycle guard
     long stack_n_;
     long stack_cap_;
-    long next_;     // out-param: index after a consumed directive
+    long next_;     // out-param: index after a consumed directive/invocation
     bool cnumber_;
     bool has_error_;
 
@@ -59,13 +71,17 @@ export struct Preprocessor {
         this.src_ = src;
         unsafe {
             this.out_ = (Token*) __ivy_alloc(out_cap * 32);
-            this.macros_ = (MacroRec*) __ivy_alloc(macro_cap * 40);
+            this.macros_ = (MacroRec*) __ivy_alloc(macro_cap * 64);
             this.stack_ = (long*) __ivy_alloc(macro_cap * 16);
+            this.param_off_ = (long*) __ivy_alloc(8192 * 8);
+            this.param_len_ = (long*) __ivy_alloc(8192 * 8);
         }
         this.out_cap_ = out_cap;
         this.out_n_ = 0;
         this.macro_cap_ = macro_cap;
         this.macro_n_ = 0;
+        this.param_cap_ = 8192;
+        this.param_n_ = 0;
         this.stack_cap_ = macro_cap;
         this.stack_n_ = 0;
         this.next_ = 0;
@@ -86,6 +102,8 @@ export struct Preprocessor {
             __ivy_free(this.out_);
             __ivy_free(this.macros_);
             __ivy_free(this.stack_);
+            __ivy_free(this.param_off_);
+            __ivy_free(this.param_len_);
         }
     }
 
@@ -125,6 +143,14 @@ export struct Preprocessor {
                 i = i + 1;
             }
             return k[i] == 0;
+        }
+        return false;
+    }
+
+    // `toks[i].kind == s` with a raw token pointer (used for slices).
+    bool kat(Token* toks, long i, const char* s) {
+        unsafe {
+            return this.kind_eq(toks[i], s);
         }
         return false;
     }
@@ -208,11 +234,12 @@ export struct Preprocessor {
         return -1;
     }
 
-    void register_macro(long off, long len, long body_start, long body_count) {
+    long register_macro(long off, long len, long body_start, long body_count,
+                        long param_start, long param_cnt, bool is_fn, bool is_va) {
         long i = this.find_macro(off, len);
         if (i < 0) {
             if (this.macro_n_ >= this.macro_cap_) {
-                return;
+                return -1;
             }
             i = this.macro_n_;
             this.macro_n_ = this.macro_n_ + 1;
@@ -222,8 +249,48 @@ export struct Preprocessor {
             this.macros_[i].name_len = len;
             this.macros_[i].body_start = body_start;
             this.macros_[i].body_count = body_count;
-            this.macros_[i].used = 1;
+            this.macros_[i].param_start = param_start;
+            this.macros_[i].param_cnt = param_cnt;
+            this.macros_[i].is_fn = is_fn ? 1 : 0;
+            this.macros_[i].is_va = is_va ? 1 : 0;
         }
+        return i;
+    }
+
+    void register_param(long off, long len) {
+        if (this.param_n_ >= this.param_cap_) {
+            return;
+        }
+        unsafe {
+            this.param_off_[this.param_n_] = off;
+            this.param_len_[this.param_n_] = len;
+        }
+        this.param_n_ = this.param_n_ + 1;
+    }
+
+    // Local index of the body token `bt` among macro `mi`'s named params,
+    // or -1 when it is not a parameter name.
+    long find_param_slot(long mi, Token bt) {
+        long pstart = 0;
+        long pcnt = 0;
+        unsafe {
+            pstart = this.macros_[mi].param_start;
+            pcnt = this.macros_[mi].param_cnt;
+        }
+        long i = 0;
+        while (i < pcnt) {
+            long po = 0;
+            long pl = 0;
+            unsafe {
+                po = this.param_off_[pstart + i];
+                pl = this.param_len_[pstart + i];
+            }
+            if (this.name_eq(po, pl, bt.off, bt.len)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
     }
 
     // --- expansion cycle guard (stack of names) --------------------------
@@ -259,17 +326,49 @@ export struct Preprocessor {
         }
     }
 
-    // --- object-like expansion -------------------------------------------
+    // --- expansion core ---------------------------------------------------
 
-    // Recursively expand the object-like macro `mi` invoked by `nameTok`,
-    // appending the result to out_. Body tokens keep their definition-site
-    // position (mirrors expandObjectLike + expandTokenVector in C++).
-    void expand_object(Token nameTok, long mi, long depth) {
+    // Recursively expand tokens [start,end) of `toks`, appending to out_.
+    // Mirrors Preprocessor::expandTokenVector.
+    void expand_range(Token* toks, long n, long start, long end) {
+        long i = start;
+        while (i < end) {
+            Token t;
+            unsafe {
+                t = toks[i];
+            }
+            if (this.kind_eq(t, "eof")) {
+                return;
+            }
+            if (this.kind_eq(t, "identifier")) {
+                long mi = this.find_macro(t.off, t.len);
+                if (mi >= 0) {
+                    long is_fn = 0;
+                    unsafe {
+                        is_fn = this.macros_[mi].is_fn;
+                    }
+                    if (is_fn != 0) {
+                        this.expand_function_like(toks, n, i, t, mi);
+                        i = this.next_;
+                        continue;
+                    }
+                    this.expand_object(t, mi);
+                    i = i + 1;
+                    continue;
+                }
+            }
+            this.out_push(t);
+            i = i + 1;
+        }
+    }
+
+    // Mirrors expandObjectLike + the empty-paramMap substituteBody.
+    void expand_object(Token nameTok, long mi) {
         if (this.in_stack(nameTok.off, nameTok.len)) {
             this.out_push(nameTok);
             return;
         }
-        if (depth >= 100) {
+        if (this.stack_n_ >= 100) {
             this.has_error_ = true;
             this.out_push(nameTok);
             return;
@@ -281,24 +380,248 @@ export struct Preprocessor {
             bs = this.macros_[mi].body_start;
             bc = this.macros_[mi].body_count;
         }
+        this.expand_range(this.in_, this.in_n_, bs, bs + bc);
+        this.pop_stack();
+    }
+
+    // Mirrors Preprocessor::expandFunctionLike: parse the actual argument
+    // list, pre-expand each argument, substitute into the body, rescan.
+    void expand_function_like(Token* toks, long n, long pos, Token nameTok, long mi) {
+      unsafe {
+        long p0 = pos + 1;
+        if (p0 >= n || !this.kat(toks, p0, "(")) {
+            // Not invoked (no `(`) — emit the name verbatim.
+            this.out_push(nameTok);
+            this.next_ = pos + 1;
+            return;
+        }
+
+        long pcnt = 0;
+        long is_va = 0;
+        unsafe {
+            pcnt = this.macros_[mi].param_cnt;
+            is_va = this.macros_[mi].is_va;
+        }
+
+        // --- parse actual arguments: balanced parens, comma-separated. -----
+        long maxargs = n + 2;
+        long* as = (long*) __ivy_alloc(maxargs * 8);
+        long* ae = (long*) __ivy_alloc(maxargs * 8);
+        long* so = (long*) __ivy_alloc(maxargs * 8);  // separator comma offsets
+        long* sl = (long*) __ivy_alloc(maxargs * 8);
+
+        long p = p0 + 1;  // past `(`
+        long cur_start = p;
+        long depth = 1;
+        long nargs = 0;
+        while (p < n && depth > 0) {
+            if (this.kat(toks, p, "(")) {
+                depth = depth + 1;
+                p = p + 1;
+                continue;
+            }
+            if (this.kat(toks, p, ")")) {
+                depth = depth - 1;
+                if (depth == 0) {
+                    if (p > cur_start || nargs > 0) {
+                        unsafe {
+                            as[nargs] = cur_start;
+                            ae[nargs] = p;
+                        }
+                        nargs = nargs + 1;
+                    }
+                    p = p + 1;
+                    break;
+                }
+                p = p + 1;
+                continue;
+            }
+            if (this.kat(toks, p, ",") && depth == 1) {
+                Token cm;
+                unsafe {
+                    cm = toks[p];
+                }
+                unsafe {
+                    as[nargs] = cur_start;
+                    ae[nargs] = p;
+                    so[nargs] = cm.off;
+                    sl[nargs] = cm.len;
+                }
+                nargs = nargs + 1;
+                p = p + 1;
+                cur_start = p;
+                continue;
+            }
+            p = p + 1;
+        }
+        if (depth != 0) {
+            // Unterminated argument list.
+            this.has_error_ = true;
+            this.next_ = p;
+            unsafe {
+                __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+            }
+            return;
+        }
+
+        // --- arity check ---------------------------------------------------
+        if (is_va != 0) {
+            if (nargs < pcnt) {
+                this.has_error_ = true;
+                this.next_ = p;
+                unsafe {
+                    __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+                }
+                return;
+            }
+        } else if (nargs != pcnt) {
+            this.has_error_ = true;
+            this.next_ = p;
+            unsafe {
+                __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+            }
+            return;
+        }
+
+        // --- pre-expand arguments into a shared scratch buffer. ------------
+        long slots = pcnt + (is_va != 0 ? 1 : 0);
+        long body_start = 0;
+        long body_count = 0;
+        unsafe {
+            body_start = this.macros_[mi].body_start;
+            body_count = this.macros_[mi].body_count;
+        }
+        long ex_cap = (n + body_count) * 16 + 1024;
+        Token* ex = (Token*) __ivy_alloc(ex_cap * 32);
+        long* exo = (long*) __ivy_alloc((slots + 1) * 8);
+        long* exc = (long*) __ivy_alloc((slots + 1) * 8);
+
+        Token* sav_buf = this.out_;
+        long sav_cap = this.out_cap_;
+        long sav_n = this.out_n_;
+        this.out_ = ex;
+        this.out_cap_ = ex_cap;
+        this.out_n_ = 0;
+        long si = 0;
+        while (si < pcnt) {
+            unsafe {
+                exo[si] = this.out_n_;
+            }
+            this.expand_range(toks, n, as[si], ae[si]);
+            unsafe {
+                exc[si] = this.out_n_ - exo[si];
+            }
+            si = si + 1;
+        }
+        if (is_va != 0) {
+            long vs = pcnt;
+            unsafe {
+                exo[vs] = this.out_n_;
+            }
+            long ei = pcnt;
+            while (ei < nargs) {
+                if (ei > pcnt) {
+                    long co = 0;
+                    long cl = 0;
+                    unsafe {
+                        co = so[ei - 1];
+                        cl = sl[ei - 1];
+                    }
+                    this.out_push_raw(",", nameTok.line, nameTok.col, co, cl);
+                }
+                this.expand_range(toks, n, as[ei], ae[ei]);
+                ei = ei + 1;
+            }
+            unsafe {
+                exc[vs] = this.out_n_ - exo[vs];
+            }
+        }
+        long ex_n = this.out_n_;
+        this.out_ = sav_buf;
+        this.out_cap_ = sav_cap;
+        this.out_n_ = sav_n;
+
+        // --- cycle + depth guard (after arg pre-expansion, per C++ order). --
+        if (this.in_stack(nameTok.off, nameTok.len)) {
+            this.out_push(nameTok);
+            this.next_ = p;
+            unsafe {
+                __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+                __ivy_free(ex); __ivy_free(exo); __ivy_free(exc);
+            }
+            return;
+        }
+        if (this.stack_n_ >= 100) {
+            this.has_error_ = true;
+            this.out_push(nameTok);
+            this.next_ = p;
+            unsafe {
+                __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+                __ivy_free(ex); __ivy_free(exo); __ivy_free(exc);
+            }
+            return;
+        }
+        this.push_stack(nameTok.off, nameTok.len);
+
+        // --- substitute the body (expanded args), then rescan. -------------
+        long sub_cap = (body_count + ex_n) * 2 + 256;
+        Token* sub = (Token*) __ivy_alloc(sub_cap * 32);
+        long sub_n = 0;
         long k = 0;
-        while (k < bc) {
+        while (k < body_count) {
             Token bt;
             unsafe {
-                bt = this.in_[bs + k];
+                bt = this.in_[body_start + k];
             }
+            long slot = -1;
             if (this.kind_eq(bt, "identifier")) {
-                long m2 = this.find_macro(bt.off, bt.len);
-                if (m2 >= 0) {
-                    this.expand_object(bt, m2, depth + 1);
-                    k = k + 1;
-                    continue;
+                slot = this.find_param_slot(mi, bt);
+                if (slot < 0 && is_va != 0 &&
+                    this.lexeme_eq(bt.off, bt.len, "__VA_ARGS__")) {
+                    slot = pcnt;
                 }
             }
-            this.out_push(bt);
+            if (slot >= 0) {
+                long eo = 0;
+                long ec = 0;
+                unsafe {
+                    eo = exo[slot];
+                    ec = exc[slot];
+                }
+                long t = 0;
+                while (t < ec && sub_n < sub_cap) {
+                    unsafe {
+                        sub[sub_n].kind = ex[eo + t].kind;
+                        sub[sub_n].line = ex[eo + t].line;
+                        sub[sub_n].col = ex[eo + t].col;
+                        sub[sub_n].off = ex[eo + t].off;
+                        sub[sub_n].len = ex[eo + t].len;
+                    }
+                    sub_n = sub_n + 1;
+                    t = t + 1;
+                }
+                k = k + 1;
+                continue;
+            }
+            if (sub_n < sub_cap) {
+                unsafe {
+                    sub[sub_n].kind = bt.kind;
+                    sub[sub_n].line = bt.line;
+                    sub[sub_n].col = bt.col;
+                    sub[sub_n].off = bt.off;
+                    sub[sub_n].len = bt.len;
+                }
+                sub_n = sub_n + 1;
+            }
             k = k + 1;
         }
+        this.expand_range(sub, sub_n, 0, sub_n);
         this.pop_stack();
+
+        __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+        __ivy_free(ex); __ivy_free(exo); __ivy_free(exc); __ivy_free(sub);
+        this.next_ = p;
+      }
     }
 
     // --- directive parsing ------------------------------------------------
@@ -329,7 +652,7 @@ export struct Preprocessor {
         long name_line = 0;
         long name_col = 0;
         bool have_name = false;
-        if (p < this.in_n_) {
+        if (p < this.in_n_ && !this.tok_eof(p)) {
             unsafe {
                 if (this.kind_eq(this.in_[p], "identifier")) {
                     name_off = this.in_[p].off;
@@ -352,10 +675,9 @@ export struct Preprocessor {
         }
 
         // Function-like detection: `(` immediately after the name (no
-        // whitespace) — column adjacency. Unsupported in H2.1 (H2.2); consume
-        // the line without registering.
+        // whitespace) — column adjacency (lexer dropped the trivia).
         bool function_like = false;
-        if (p + 1 < this.in_n_) {
+        if (p + 1 < this.in_n_ && !this.tok_eof(p + 1)) {
             unsafe {
                 Token lp = this.in_[p + 1];
                 if (this.kind_eq(lp, "(") && lp.line == name_line &&
@@ -364,31 +686,125 @@ export struct Preprocessor {
                 }
             }
         }
+
+        long pstart = this.param_n_;
+        long pcnt = 0;
+        bool is_va = false;
         if (function_like) {
-            long q = p + 1;
-            while (q < this.in_n_ && !this.tok_eof(q) && this.tok_line(q) == hline) {
+            long q = p + 1;  // at `(`
+            q = q + 1;       // consume `(`
+            while (q < this.in_n_ && !this.tok_eof(q) && !this.kat(this.in_, q, ")")) {
+                if (this.kat(this.in_, q, "...")) {
+                    is_va = true;
+                    q = q + 1;
+                    break;
+                }
+                if (this.kat(this.in_, q, "identifier")) {
+                    unsafe {
+                        this.register_param(this.in_[q].off, this.in_[q].len);
+                    }
+                    q = q + 1;
+                    if (q < this.in_n_ && !this.tok_eof(q) && this.kat(this.in_, q, "...")) {
+                        is_va = true;
+                        q = q + 1;
+                        break;
+                    }
+                    if (q < this.in_n_ && !this.tok_eof(q) && this.kat(this.in_, q, ",")) {
+                        q = q + 1;
+                        continue;
+                    }
+                    continue;
+                }
+                if (this.kat(this.in_, q, ",")) {
+                    q = q + 1;
+                    continue;
+                }
+                // Unexpected token in the parameter list — skip it.
                 q = q + 1;
             }
-            this.next_ = q;
-            return true;
+            if (q >= this.in_n_ || this.tok_eof(q) || !this.kat(this.in_, q, ")")) {
+                // Unterminated macro parameter list — diagnostic + skip line.
+                this.has_error_ = true;
+                long z = p;
+                while (z < this.in_n_ && !this.tok_eof(z) && this.tok_line(z) == hline) {
+                    z = z + 1;
+                }
+                this.next_ = z;
+                return true;
+            }
+            q = q + 1;  // consume `)`
+            p = q;      // body starts here
+            pcnt = this.param_n_ - pstart;
+        } else {
+            p = p + 1;  // consume the name (object-like)
         }
 
-        long body_start = p + 1;
-        long b = body_start;
+        // Collect body tokens until end of the directive line.
+        long b = p;
         while (b < this.in_n_ && !this.tok_eof(b) && this.tok_line(b) == hline) {
             b = b + 1;
         }
-        long body_count = b - body_start;
-        this.register_macro(name_off, name_len, body_start, body_count);
+        long body_count = b - p;
+        this.register_macro(name_off, name_len, p, body_count, pstart, pcnt,
+                            function_like, is_va);
         this.next_ = b;
         return true;
     }
 
     // --- main loop --------------------------------------------------------
 
+    // Emit the token at `i` verbatim, expanding object-like macros only
+    // (function-like names without args are verbatim). Mirrors emitToken
+    // for the unrecognized-directive path.
+    void emit_at(long i) {
+        Token t = this.at(i);
+        if (!this.kind_eq(t, "identifier")) {
+            this.out_push(t);
+            return;
+        }
+        long mi = this.find_macro(t.off, t.len);
+        if (mi < 0) {
+            this.out_push(t);
+            return;
+        }
+        long is_fn = 0;
+        unsafe {
+            is_fn = this.macros_[mi].is_fn;
+        }
+        if (is_fn != 0) {
+            this.out_push(t);
+            return;
+        }
+        this.expand_object(t, mi);
+    }
+
+    // Process a single non-directive token; sets next_.
+    void step(long i) {
+        Token t = this.at(i);
+        if (this.kind_eq(t, "identifier")) {
+            long mi = this.find_macro(t.off, t.len);
+            if (mi >= 0) {
+                long is_fn = 0;
+                unsafe {
+                    is_fn = this.macros_[mi].is_fn;
+                }
+                if (is_fn != 0) {
+                    this.expand_function_like(this.in_, this.in_n_, i, t, mi);
+                    return;
+                }
+                this.expand_object(t, mi);
+                this.next_ = i + 1;
+                return;
+            }
+        }
+        this.out_push(t);
+        this.next_ = i + 1;
+    }
+
     void run() {
         this.out_n_ = 0;
         this.macro_n_ = 0;
+        this.param_n_ = 0;
         this.stack_n_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
@@ -401,24 +817,16 @@ export struct Preprocessor {
                     continue;
                 }
                 // Unrecognized directive: emit `#` + rest of the line.
-                this.out_push(t);
+                this.emit_at(i);
                 i = i + 1;
                 while (i < this.in_n_ && !this.tok_eof(i) && this.tok_line(i) == t.line) {
-                    this.out_push(this.at(i));
+                    this.emit_at(i);
                     i = i + 1;
                 }
                 continue;
             }
-            if (this.kind_eq(t, "identifier")) {
-                long mi = this.find_macro(t.off, t.len);
-                if (mi >= 0) {
-                    this.expand_object(t, mi, 0);
-                    i = i + 1;
-                    continue;
-                }
-            }
-            this.out_push(t);
-            i = i + 1;
+            this.step(i);
+            i = this.next_;
         }
         this.out_push_raw("eof", 0, 0, 0, 0);
     }
