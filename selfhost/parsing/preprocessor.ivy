@@ -26,11 +26,13 @@
 //         with single-space joins and string-quote stripping). `#line` remaps
 //         subsequent emitted token lines (emitToken path only) and overrides
 //         the diagnostic file name; `#error` is fatal, `#warning` is not.
+//   H2.7: E4 — `#include` is rejected in `.ivy` files with a diagnostic and
+//         the line is skipped.
 //
-// Still H2.7+: `#include` (rejected in `.ivy`), and the remaining pp
-// diagnostics. The corpus (selfhost/corpus/pp/*) avoids `#include`. An
-// unrecognized directive is emitted verbatim (`#` + rest of the line,
-// object-like macros expanded), exactly as the C++ generic path does.
+// This completes H2 (H2.1–H2.7). Not ported: real `#include` expansion for
+// legacy `.cpp`/`.c` files (the corpus is all `.ivy`). An unrecognized
+// directive is emitted verbatim (`#` + rest of the line, object-like macros
+// expanded), exactly as the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
 // line/col of the body token; substituted arguments keep the *call-site*
@@ -115,6 +117,7 @@ export struct Preprocessor {
     long line_offset_;    // added to emitted token lines (`#line`)
     char* lfile_;         // `#line N "file"` diagnostic-name override
     long line_file_len_;  // 0 => no override
+    bool is_ivy_;         // input path ends in `.ivy` (E4: reject #include)
     long in_cap_;     // capacity of in_ (input tokens + synthetic body tokens)
     long xt_n_;       // cursor for synthetic body tokens appended to in_
     char* file_;      // copy of the main file path (for `__FILE__`)
@@ -188,6 +191,15 @@ export struct Preprocessor {
         this.has_error_ = false;
         this.line_offset_ = 0;
         this.line_file_len_ = 0;
+        this.is_ivy_ = false;
+        if (path_len >= 4) {
+            unsafe {
+                if (path[path_len - 4] == '.' && path[path_len - 3] == 'i' &&
+                    path[path_len - 2] == 'v' && path[path_len - 1] == 'y') {
+                    this.is_ivy_ = true;
+                }
+            }
+        }
         this.dtxt_cap_ = 65536;
         this.dtxt_n_ = 0;
         this.dcap_ = 256;
@@ -1575,6 +1587,31 @@ export struct Preprocessor {
         return true;
     }
 
+    // Mirrors Preprocessor::rejectIvyInclude (E4): in `.ivy` files `#include`
+    // is removed — emit a diagnostic and skip the line. `pos` points at `#`.
+    bool reject_ivy_include(long pos) {
+        if (pos + 1 >= this.in_n_) {
+            return false;
+        }
+        Token d;
+        unsafe {
+            d = this.in_[pos + 1];
+        }
+        if (!this.kind_eq(d, "identifier") && !this.kind_eq(d, "keyword")) {
+            return false;
+        }
+        if (!this.lexeme_eq(d.off, d.len, "include")) {
+            return false;
+        }
+        long hl = this.tok_line(pos);
+        long hc = this.tok_col(pos);
+        this.diag_add(hl, hc,
+                      "#include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)",
+                      -1, 0, false);
+        this.next_ = this.line_end(pos);
+        return true;
+    }
+
     // Mirrors Preprocessor::parsePragma. `pos` points at `#`. Processed even
     // when inactive (a pragma flag persists regardless of conditional state).
     // Unknown pragmas always warn; `#pragma ivy cnumber` only sets the flag
@@ -2486,6 +2523,11 @@ export struct Preprocessor {
             Token t = this.at(i);
             if (this.kind_eq(t, "#")) {
                 long before = i;
+                // E4: `.ivy` files reject `#include` (use `import`).
+                if (this.active() && this.is_ivy_ && this.reject_ivy_include(before)) {
+                    i = this.next_;
+                    continue;
+                }
                 if (this.active() && this.parse_define(before)) {
                     i = this.next_;
                     continue;
