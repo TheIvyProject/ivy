@@ -1,0 +1,2 @@
+#define AB a ## b
+AB

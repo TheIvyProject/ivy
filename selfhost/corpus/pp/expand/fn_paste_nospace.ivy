@@ -1,0 +1,2 @@
+#define GLUE(a,b) a##b
+GLUE(x,y)

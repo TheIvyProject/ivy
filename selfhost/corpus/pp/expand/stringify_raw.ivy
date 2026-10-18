@@ -1,0 +1,3 @@
+#define V 5
+#define S(x) #x
+S(V)

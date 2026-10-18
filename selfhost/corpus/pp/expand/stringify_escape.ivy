@@ -1,0 +1,3 @@
+#define S(x) #x
+S("q")
+S('x')

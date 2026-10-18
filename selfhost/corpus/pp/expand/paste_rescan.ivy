@@ -1,0 +1,3 @@
+#define ONE 1
+#define M(a, b) a ## b
+M(O, NE)

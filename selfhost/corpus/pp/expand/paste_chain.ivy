@@ -1,0 +1,2 @@
+#define CC3(a, b, c) a ## b ## c
+CC3(x, y, z)

@@ -89,12 +89,12 @@ void run() {
                     long in_n = lx.token_count();
                     long out_cap = in_n * 8 + 256;
                     Preprocessor pp;
-                    pp.setup(lx.tokens(), in_n, content, out_cap, 1024);
+                    pp.setup(lx.tokens(), in_n, content, (long)len, out_cap, 1024);
                     pp.run();
                     Printer pr;
                     pr.out = pp.output();
                     pr.n = pp.output_count();
-                    pr.src = content;
+                    pr.src = pp.arena();
                     pr.show();
                     pp.release();
                 }

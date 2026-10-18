@@ -1,0 +1,2 @@
+#define J(a, b) a ## b
+J(x, )

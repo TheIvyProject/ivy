@@ -1,0 +1,2 @@
+#define W(a) a ## world
+W(hello)

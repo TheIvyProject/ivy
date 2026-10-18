@@ -11,12 +11,16 @@
 //         `#undef`, with the `#if` constant-expression evaluator (precedence
 //         climbing over `long long`, `defined NAME`/`defined(NAME)`, one-level
 //         object-like macro expansion, undefined identifiers -> 0).
+//   H2.4: `#` (stringify) and `##` (token paste) in macro bodies, via
+//         substituteBody over raw + expanded argument token buffers (object-
+//         and function-like). Synthetic lexemes (pasted/stringified text) are
+//         stored in a unified text arena that also holds a copy of the source,
+//         so the printer and macro-name lookups read them uniformly.
 //
-// Still H2.4+: `#`/`##`, `#pragma`, predefined macros, `#line`,
-// `#error`/`#warning`, `#include`, and the pp diagnostics stream. The corpus
-// (selfhost/corpus/pp/*) avoids those. An unrecognized directive is emitted
-// verbatim (`#` + rest of the line, object-like macros expanded), exactly as
-// the C++ generic path does.
+// Still H2.5+: `#pragma`, predefined macros, `#line`, `#error`/`#warning`,
+// `#include`, and the pp diagnostics stream. The corpus (selfhost/corpus/pp/*)
+// avoids those. An unrecognized directive is emitted verbatim (`#` + rest of
+// the line, object-like macros expanded), exactly as the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
 // line/col of the body token; substituted arguments keep the *call-site*
@@ -30,9 +34,11 @@
 #pragma ivy cnumber
 export module preprocessor;
 import token;
+import lexer;
 
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
 
 // sizeof(MacroRec): 8 * 8 = 64 bytes.
 export struct MacroRec {
@@ -90,16 +96,25 @@ export struct Preprocessor {
     long ex_cap_;
     long ex_n_;
     long ex_pos_;
+    long src_n_;      // arena cursor (bytes appended past the original source)
+    long arena_cap_;  // total capacity of src_ (source copy + synthetic text)
+    Token* sub_p_;    // out-param: buffer built by substitute_body
     long next_;     // out-param: index after a consumed directive/invocation
     bool cnumber_;
     bool has_error_;
 
-    void setup(Token* input, long in_count, char* src,
+    void setup(Token* input, long in_count, char* src, long src_len,
                long out_cap, long macro_cap) {
         this.in_ = input;
         this.in_n_ = in_count;
-        this.src_ = src;
+        // Unified text arena: a copy of the original source at offset 0
+        // (so all input token offsets stay valid), followed by appended
+        // synthetic lexemes produced by `#` stringify and `##` paste.
+        this.arena_cap_ = src_len + 1048576;
         unsafe {
+            this.src_ = (char*) __ivy_alloc(this.arena_cap_);
+            __ivy_memcpy(this.src_, src, (unsigned long long)src_len);
+            this.src_[src_len] = 0;
             this.out_ = (Token*) __ivy_alloc(out_cap * 32);
             this.macros_ = (MacroRec*) __ivy_alloc(macro_cap * 64);
             this.stack_ = (long*) __ivy_alloc(macro_cap * 16);
@@ -107,6 +122,10 @@ export struct Preprocessor {
             this.param_len_ = (long*) __ivy_alloc(8192 * 8);
             this.conds_ = (CondRec*) __ivy_alloc(256 * 32);
             this.ex_ = (ETok*) __ivy_alloc(65536 * 32);
+        }
+        this.src_n_ = src_len;
+        unsafe {
+            this.sub_p_ = (Token*) 0;
         }
         this.out_cap_ = out_cap;
         this.out_n_ = 0;
@@ -134,6 +153,12 @@ export struct Preprocessor {
         return this.out_n_;
     }
 
+    // Base of the unified text arena (source + synthetic lexemes). The printer
+    // must read token lexemes from here, not from the original source buffer.
+    char* arena() {
+        return this.src_;
+    }
+
     void release() {
         unsafe {
             __ivy_free(this.out_);
@@ -143,7 +168,22 @@ export struct Preprocessor {
             __ivy_free(this.param_len_);
             __ivy_free(this.conds_);
             __ivy_free(this.ex_);
+            __ivy_free(this.src_);
         }
+    }
+
+    // Append `n` bytes to the arena (NUL-terminated), returning the offset.
+    long syn_puts(char* s, long n) {
+        if (this.src_n_ + n + 1 > this.arena_cap_) {
+            return 0;
+        }
+        unsafe {
+            __ivy_memcpy(this.src_ + this.src_n_, s, (unsigned long long)n);
+            this.src_[this.src_n_ + n] = 0;
+        }
+        long off = this.src_n_;
+        this.src_n_ = this.src_n_ + n;
+        return off;
     }
 
     // --- low-level helpers ------------------------------------------------
@@ -179,8 +219,11 @@ export struct Preprocessor {
     }
 
     bool kind_eq(Token t, const char* s) {
+        return this.kind_str_eq(t.kind, s);
+    }
+
+    bool kind_str_eq(char* k, const char* s) {
         unsafe {
-            char* k = t.kind;
             long i = 0;
             while (s[i] != 0) {
                 if (k[i] != s[i]) {
@@ -410,6 +453,7 @@ export struct Preprocessor {
 
     // Mirrors expandObjectLike + the empty-paramMap substituteBody.
     void expand_object(Token nameTok, long mi) {
+      unsafe {
         if (this.in_stack(nameTok.off, nameTok.len)) {
             this.out_push(nameTok);
             return;
@@ -426,8 +470,15 @@ export struct Preprocessor {
             bs = this.macros_[mi].body_start;
             bc = this.macros_[mi].body_count;
         }
-        this.expand_range(this.in_, this.in_n_, bs, bs + bc);
+        long sub_n = this.substitute_body(this.in_, this.in_n_, bs, bc, mi,
+                                          (Token*)0, (long*)0, (long*)0,
+                                          (Token*)0, (long*)0, (long*)0,
+                                          0, nameTok);
+        Token* sub = this.sub_p_;
+        this.expand_range(sub, sub_n, 0, sub_n);
+        __ivy_free(sub);
         this.pop_stack();
+      }
     }
 
     // Mirrors Preprocessor::expandFunctionLike: parse the actual argument
@@ -529,7 +580,11 @@ export struct Preprocessor {
             return;
         }
 
-        // --- pre-expand arguments into a shared scratch buffer. ------------
+        // --- materialize raw + pre-expanded argument token buffers. --------
+        // Mirrors the `paramMap` (raw + expanded) built by C++
+        // expandFunctionLike, including the synthetic `,` join tokens for
+        // `__VA_ARGS__`. `raw` is used by `#` (stringify) and `##` (paste);
+        // `exp` is used by normal parameter substitution.
         long slots = pcnt + (is_va != 0 ? 1 : 0);
         long body_start = 0;
         long body_count = 0;
@@ -537,32 +592,91 @@ export struct Preprocessor {
             body_start = this.macros_[mi].body_start;
             body_count = this.macros_[mi].body_count;
         }
-        long ex_cap = (n + body_count) * 16 + 1024;
-        Token* ex = (Token*) __ivy_alloc(ex_cap * 32);
-        long* exo = (long*) __ivy_alloc((slots + 1) * 8);
-        long* exc = (long*) __ivy_alloc((slots + 1) * 8);
 
-        Token* sav_buf = this.out_;
-        long sav_cap = this.out_cap_;
-        long sav_n = this.out_n_;
-        this.out_ = ex;
-        this.out_cap_ = ex_cap;
-        this.out_n_ = 0;
+        long acap = (n + body_count) * 16 + 1024;
+        Token* raw = (Token*) __ivy_alloc(acap * 32);
+        Token* exp = (Token*) __ivy_alloc(acap * 32);
+        long* rawo = (long*) __ivy_alloc((slots + 1) * 8);
+        long* rawc = (long*) __ivy_alloc((slots + 1) * 8);
+        long* expo = (long*) __ivy_alloc((slots + 1) * 8);
+        long* expc = (long*) __ivy_alloc((slots + 1) * 8);
+        long raw_n = 0;
+
         long si = 0;
         while (si < pcnt) {
             unsafe {
-                exo[si] = this.out_n_;
+                rawo[si] = raw_n;
             }
-            this.expand_range(toks, n, as[si], ae[si]);
+            long ai = as[si];
+            while (ai < ae[si] && raw_n < acap) {
+                unsafe {
+                    raw[raw_n] = toks[ai];
+                }
+                raw_n = raw_n + 1;
+                ai = ai + 1;
+            }
             unsafe {
-                exc[si] = this.out_n_ - exo[si];
+                rawc[si] = raw_n - rawo[si];
             }
             si = si + 1;
         }
         if (is_va != 0) {
             long vs = pcnt;
             unsafe {
-                exo[vs] = this.out_n_;
+                rawo[vs] = raw_n;
+            }
+            long ei = pcnt;
+            while (ei < nargs) {
+                if (ei > pcnt) {
+                    if (raw_n < acap) {
+                        unsafe {
+                            raw[raw_n].kind = (char*)"comma";
+                            raw[raw_n].line = nameTok.line;
+                            raw[raw_n].col = nameTok.col;
+                            raw[raw_n].off = so[ei - 1];
+                            raw[raw_n].len = sl[ei - 1];
+                        }
+                        raw_n = raw_n + 1;
+                    }
+                }
+                long ai = as[ei];
+                while (ai < ae[ei] && raw_n < acap) {
+                    unsafe {
+                        raw[raw_n] = toks[ai];
+                    }
+                    raw_n = raw_n + 1;
+                    ai = ai + 1;
+                }
+                ei = ei + 1;
+            }
+            unsafe {
+                rawc[vs] = raw_n - rawo[vs];
+            }
+        }
+
+        // Pre-expand the arguments into `exp` (mirrors the per-argument
+        // expandTokenVector pass), redirecting out_ into the scratch buffer.
+        Token* sav_buf = this.out_;
+        long sav_cap = this.out_cap_;
+        long sav_n = this.out_n_;
+        this.out_ = exp;
+        this.out_cap_ = acap;
+        this.out_n_ = 0;
+        si = 0;
+        while (si < pcnt) {
+            unsafe {
+                expo[si] = this.out_n_;
+            }
+            this.expand_range(toks, n, as[si], ae[si]);
+            unsafe {
+                expc[si] = this.out_n_ - expo[si];
+            }
+            si = si + 1;
+        }
+        if (is_va != 0) {
+            long vs = pcnt;
+            unsafe {
+                expo[vs] = this.out_n_;
             }
             long ei = pcnt;
             while (ei < nargs) {
@@ -579,10 +693,9 @@ export struct Preprocessor {
                 ei = ei + 1;
             }
             unsafe {
-                exc[vs] = this.out_n_ - exo[vs];
+                expc[vs] = this.out_n_ - expo[vs];
             }
         }
-        long ex_n = this.out_n_;
         this.out_ = sav_buf;
         this.out_cap_ = sav_cap;
         this.out_n_ = sav_n;
@@ -593,7 +706,8 @@ export struct Preprocessor {
             this.next_ = p;
             unsafe {
                 __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
-                __ivy_free(ex); __ivy_free(exo); __ivy_free(exc);
+                __ivy_free(raw); __ivy_free(exp); __ivy_free(rawo); __ivy_free(rawc);
+                __ivy_free(expo); __ivy_free(expc);
             }
             return;
         }
@@ -603,70 +717,338 @@ export struct Preprocessor {
             this.next_ = p;
             unsafe {
                 __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
-                __ivy_free(ex); __ivy_free(exo); __ivy_free(exc);
+                __ivy_free(raw); __ivy_free(exp); __ivy_free(rawo); __ivy_free(rawc);
+                __ivy_free(expo); __ivy_free(expc);
             }
             return;
         }
         this.push_stack(nameTok.off, nameTok.len);
 
-        // --- substitute the body (expanded args), then rescan. -------------
-        long sub_cap = (body_count + ex_n) * 2 + 256;
-        Token* sub = (Token*) __ivy_alloc(sub_cap * 32);
-        long sub_n = 0;
+        // --- substitute the body (#, ##, params), then rescan. -------------
+        long sub_n = this.substitute_body(this.in_, this.in_n_, body_start,
+                                          body_count, mi, raw, rawo, rawc,
+                                          exp, expo, expc, slots, nameTok);
+        Token* sub = this.sub_p_;
+        this.expand_range(sub, sub_n, 0, sub_n);
+        this.pop_stack();
+        __ivy_free(sub);
+
+        __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
+        __ivy_free(raw); __ivy_free(exp); __ivy_free(rawo); __ivy_free(rawc);
+        __ivy_free(expo); __ivy_free(expc);
+        this.next_ = p;
+      }
+    }
+
+    // --- # stringify and ## paste (8.7) ----------------------------------
+
+    bool is_va_of(long mi) {
+        unsafe {
+            return this.macros_[mi].is_va != 0;
+        }
+        return false;
+    }
+
+    // Slot index of body token `bt` (named param or `__VA_ARGS__`), or -1.
+    long param_slot(long mi, long slots, Token bt) {
+        long slot = this.find_param_slot(mi, bt);
+        if (slot < 0 && slots > 0 && this.is_va_of(mi) &&
+            this.lexeme_eq(bt.off, bt.len, "__VA_ARGS__")) {
+            slot = slots - 1;
+        }
+        return slot;
+    }
+
+    // Mirrors Preprocessor::stringifyTokens: join raw token lexemes with
+    // single spaces, escape `\` and `"`, wrap in double quotes. The result is
+    // a `string` token at (line,col) with its lexeme stored in the arena.
+    Token stringify(Token* toks, long off, long cnt, int line, int col) {
+      unsafe {
+        long total = 0;
         long k = 0;
-        while (k < body_count) {
-            Token bt;
+        while (k < cnt) {
+            Token t;
             unsafe {
-                bt = this.in_[body_start + k];
+                t = toks[off + k];
             }
-            long slot = -1;
-            if (this.kind_eq(bt, "identifier")) {
-                slot = this.find_param_slot(mi, bt);
-                if (slot < 0 && is_va != 0 &&
-                    this.lexeme_eq(bt.off, bt.len, "__VA_ARGS__")) {
-                    slot = pcnt;
-                }
-            }
-            if (slot >= 0) {
-                long eo = 0;
-                long ec = 0;
-                unsafe {
-                    eo = exo[slot];
-                    ec = exc[slot];
-                }
-                long t = 0;
-                while (t < ec && sub_n < sub_cap) {
-                    unsafe {
-                        sub[sub_n].kind = ex[eo + t].kind;
-                        sub[sub_n].line = ex[eo + t].line;
-                        sub[sub_n].col = ex[eo + t].col;
-                        sub[sub_n].off = ex[eo + t].off;
-                        sub[sub_n].len = ex[eo + t].len;
-                    }
-                    sub_n = sub_n + 1;
-                    t = t + 1;
-                }
-                k = k + 1;
-                continue;
-            }
-            if (sub_n < sub_cap) {
-                unsafe {
-                    sub[sub_n].kind = bt.kind;
-                    sub[sub_n].line = bt.line;
-                    sub[sub_n].col = bt.col;
-                    sub[sub_n].off = bt.off;
-                    sub[sub_n].len = bt.len;
-                }
-                sub_n = sub_n + 1;
+            total = total + t.len;
+            if (k > 0) {
+                total = total + 1;
             }
             k = k + 1;
         }
-        this.expand_range(sub, sub_n, 0, sub_n);
-        this.pop_stack();
+        char* buf = (char*) __ivy_alloc(total * 2 + 4);
+        long n = 0;
+        unsafe {
+            buf[n] = 34;  // opening quote
+        }
+        n = n + 1;
+        k = 0;
+        while (k < cnt) {
+            Token t;
+            unsafe {
+                t = toks[off + k];
+            }
+            if (k > 0) {
+                unsafe {
+                    buf[n] = 32;  // space
+                }
+                n = n + 1;
+            }
+            long j = 0;
+            while (j < t.len) {
+                char c = 0;
+                unsafe {
+                    c = this.src_[t.off + j];
+                }
+                if (c == 92 || c == 34) {
+                    unsafe {
+                        buf[n] = 92;  // backslash
+                    }
+                    n = n + 1;
+                }
+                unsafe {
+                    buf[n] = c;
+                }
+                n = n + 1;
+                j = j + 1;
+            }
+            k = k + 1;
+        }
+        unsafe {
+            buf[n] = 34;  // closing quote
+        }
+        n = n + 1;
+        unsafe {
+            buf[n] = 0;
+        }
+        long soff = this.syn_puts(buf, n);
+        __ivy_free(buf);
+        Token st;
+        unsafe {
+            st.kind = (char*)"string";
+        }
+        st.line = line;
+        st.col = col;
+        st.off = soff;
+        st.len = n;
+        return st;
+      }
+    }
 
-        __ivy_free(as); __ivy_free(ae); __ivy_free(so); __ivy_free(sl);
-        __ivy_free(ex); __ivy_free(exo); __ivy_free(exc); __ivy_free(sub);
-        this.next_ = p;
+    // Mirrors Preprocessor::pasteTokens: paste lexemes, re-lex to determine
+    // the resulting kind. On an invalid paste, emit an Identifier.
+    Token paste(Token left, Token right) {
+      unsafe {
+        long llen = left.len;
+        long rlen = right.len;
+        char* buf = (char*) __ivy_alloc(llen + rlen + 1);
+        unsafe {
+            __ivy_memcpy(buf, this.src_ + left.off, (unsigned long long)llen);
+            __ivy_memcpy(buf + llen, this.src_ + right.off, (unsigned long long)rlen);
+            buf[llen + rlen] = 0;
+        }
+        Token result;
+        unsafe {
+            result.kind = (char*)"identifier";
+        }
+        result.line = left.line;
+        result.col = left.col;
+        result.len = llen + rlen;
+
+        Lexer lx;
+        lx.setup(buf, (uint64)(llen + rlen), (char*)"");
+        lx.lex_all(64);
+        long ln = lx.token_count();
+        if (ln == 0 || this.kind_str_eq(lx.tokens()[0].kind, "eof")) {
+            // Invalid paste -> Identifier.
+            this.has_error_ = true;
+        } else if (ln > 1 && !this.kind_str_eq(lx.tokens()[1].kind, "eof")) {
+            // Multiple tokens -> still use the first (lenient).
+            this.has_error_ = true;
+            unsafe {
+                result.kind = lx.tokens()[0].kind;
+            }
+        } else {
+            unsafe {
+                result.kind = lx.tokens()[0].kind;
+            }
+        }
+        lx.release();
+        result.off = this.syn_puts(buf, llen + rlen);
+        __ivy_free(buf);
+        return result;
+      }
+    }
+
+    // Mirrors Preprocessor::substituteBody: one pass over the macro body
+    // performing `#` stringify, `##` paste, and parameter substitution.
+    // Returns the number of tokens; the buffer is left in `this.sub_p_`.
+    long substitute_body(Token* toks, long bn, long bs, long bc, long mi,
+                         Token* raw, long* rawo, long* rawc,
+                         Token* exp, long* expo, long* expc,
+                         long slots, Token nameTok) {
+      unsafe {
+        long cap = bc * 8 + 4096;
+        Token* res = (Token*) __ivy_alloc(cap * 32);
+        long rn = 0;
+        long i = 0;
+        while (i < bc) {
+            Token bt;
+            unsafe {
+                bt = toks[bs + i];
+            }
+
+            // `#` stringify (only with params/variadic).
+            if (this.kind_eq(bt, "#") && slots > 0) {
+                bool did = false;
+                if (i + 1 < bc) {
+                    Token nx;
+                    unsafe {
+                        nx = toks[bs + i + 1];
+                    }
+                    if (this.kind_eq(nx, "identifier")) {
+                        long slot = this.param_slot(mi, slots, nx);
+                        if (slot >= 0) {
+                            long ro = 0;
+                            long rc = 0;
+                            unsafe {
+                                ro = rawo[slot];
+                                rc = rawc[slot];
+                            }
+                            Token st = this.stringify(raw, ro, rc, bt.line, bt.col);
+                            if (rn < cap) {
+                                unsafe {
+                                    res[rn] = st;
+                                }
+                                rn = rn + 1;
+                            }
+                            i = i + 2;
+                            did = true;
+                        }
+                    }
+                }
+                if (did) {
+                    continue;
+                }
+                if (rn < cap) {
+                    unsafe {
+                        res[rn] = bt;
+                    }
+                    rn = rn + 1;
+                }
+                i = i + 1;
+                continue;
+            }
+
+            // `##` token paste.
+            if (this.kind_eq(bt, "##")) {
+                long adv = 1;  // consume the `##` itself
+                if (rn == 0) {
+                    this.has_error_ = true;
+                    i = i + 1;
+                    continue;
+                }
+                rn = rn - 1;
+                Token leftTok;
+                unsafe {
+                    leftTok = res[rn];
+                }
+                bool hasRight = false;
+                bool placemark = false;
+                Token rightTok;
+                if (i + 1 < bc) {
+                    Token nx;
+                    unsafe {
+                        nx = toks[bs + i + 1];
+                    }
+                    if (this.kind_eq(nx, "identifier") && slots > 0) {
+                        long slot = this.param_slot(mi, slots, nx);
+                        if (slot >= 0) {
+                            long rc = 0;
+                            unsafe {
+                                rc = rawc[slot];
+                            }
+                            if (rc > 0) {
+                                long ro = 0;
+                                unsafe {
+                                    ro = rawo[slot];
+                                }
+                                unsafe {
+                                    rightTok = raw[ro + rc - 1];
+                                }
+                                hasRight = true;
+                            } else {
+                                placemark = true;
+                            }
+                            adv = 2;  // consume the parameter too
+                        }
+                    }
+                    if (!hasRight && !placemark) {
+                        rightTok = nx;
+                        hasRight = true;
+                        adv = 2;  // consume the right operand too
+                    }
+                }
+                if (placemark) {
+                    if (rn < cap) {
+                        unsafe {
+                            res[rn] = leftTok;
+                        }
+                        rn = rn + 1;
+                    }
+                    i = i + adv;
+                    continue;
+                }
+                Token outTok;
+                if (hasRight) {
+                    outTok = this.paste(leftTok, rightTok);
+                } else {
+                    outTok = leftTok;
+                }
+                if (rn < cap) {
+                    unsafe {
+                        res[rn] = outTok;
+                    }
+                    rn = rn + 1;
+                }
+                i = i + adv;
+                continue;
+            }
+
+            // Normal parameter substitution (expanded argument tokens).
+            if (this.kind_eq(bt, "identifier") && slots > 0) {
+                long slot = this.param_slot(mi, slots, bt);
+                if (slot >= 0) {
+                    long eo = 0;
+                    long ec = 0;
+                    unsafe {
+                        eo = expo[slot];
+                        ec = expc[slot];
+                    }
+                    long t = 0;
+                    while (t < ec && rn < cap) {
+                        unsafe {
+                            res[rn] = exp[eo + t];
+                        }
+                        rn = rn + 1;
+                        t = t + 1;
+                    }
+                    i = i + 1;
+                    continue;
+                }
+            }
+
+            if (rn < cap) {
+                unsafe {
+                    res[rn] = bt;
+                }
+                rn = rn + 1;
+            }
+            i = i + 1;
+        }
+        this.sub_p_ = res;
+        return rn;
       }
     }
 

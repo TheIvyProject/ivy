@@ -1,0 +1,2 @@
+#define NUM(x) 1 ## x
+NUM(2)
