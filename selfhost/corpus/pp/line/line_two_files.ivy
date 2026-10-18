@@ -1,0 +1,3 @@
+#line 1 "x.c"
+#line 10 "y.c"
+#warning w

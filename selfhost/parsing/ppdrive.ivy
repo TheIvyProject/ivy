@@ -95,12 +95,16 @@ void run() {
                     long dc = pp.diag_count();
                     long di = 0;
                     bool failed = false;
+                    char* fname = line;
+                    if (pp.has_line_file() != 0) {
+                        fname = pp.line_file();
+                    }
                     while (di < dc) {
                         long w = pp.diag_warn(di);
                         if (w == 0) {
                             failed = true;
                         }
-                        io::print(line);
+                        io::print(fname);
                         io::print(":{}", pp.diag_line(di));
                         io::print(":{}", pp.diag_col(di));
                         if (w != 0) {

@@ -1,0 +1,3 @@
+#line 100 "foo.c"
+x
+__LINE__

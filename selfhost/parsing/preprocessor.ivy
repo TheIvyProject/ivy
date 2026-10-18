@@ -22,11 +22,15 @@
 //         #undef-predefined diagnostics, and the pp diagnostics stream
 //         (emitted by the driver, gates the token dump on failure). Predefined
 //         body tokens live in an extended copy of the input token buffer.
+//   H2.6: `#line N ["file"]`, `#error`, `#warning` (message text collected
+//         with single-space joins and string-quote stripping). `#line` remaps
+//         subsequent emitted token lines (emitToken path only) and overrides
+//         the diagnostic file name; `#error` is fatal, `#warning` is not.
 //
-// Still H2.6+: `#line`, `#error`/`#warning`, `#include`, and the remaining pp
-// diagnostics. The corpus (selfhost/corpus/pp/*) avoids those. An unrecognized
-// directive is emitted verbatim (`#` + rest of the line, object-like macros
-// expanded), exactly as the C++ generic path does.
+// Still H2.7+: `#include` (rejected in `.ivy`), and the remaining pp
+// diagnostics. The corpus (selfhost/corpus/pp/*) avoids `#include`. An
+// unrecognized directive is emitted verbatim (`#` + rest of the line,
+// object-like macros expanded), exactly as the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
 // line/col of the body token; substituted arguments keep the *call-site*
@@ -108,6 +112,9 @@ export struct Preprocessor {
     long next_;     // out-param: index after a consumed directive/invocation
     bool cnumber_;
     bool has_error_;
+    long line_offset_;    // added to emitted token lines (`#line`)
+    char* lfile_;         // `#line N "file"` diagnostic-name override
+    long line_file_len_;  // 0 => no override
     long in_cap_;     // capacity of in_ (input tokens + synthetic body tokens)
     long xt_n_;       // cursor for synthetic body tokens appended to in_
     char* file_;      // copy of the main file path (for `__FILE__`)
@@ -157,6 +164,7 @@ export struct Preprocessor {
             this.dtoff_ = (long*) __ivy_alloc(256 * 8);
             this.dtlen_ = (long*) __ivy_alloc(256 * 8);
             this.dwarn_ = (long*) __ivy_alloc(256 * 8);
+            this.lfile_ = (char*) __ivy_alloc(512);
         }
         this.src_n_ = src_len;
         unsafe {
@@ -178,6 +186,8 @@ export struct Preprocessor {
         this.next_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
+        this.line_offset_ = 0;
+        this.line_file_len_ = 0;
         this.dtxt_cap_ = 65536;
         this.dtxt_n_ = 0;
         this.dcap_ = 256;
@@ -198,6 +208,15 @@ export struct Preprocessor {
         return this.src_;
     }
 
+    // True when a `#line N "file"` directive supplied a diagnostic file name.
+    long has_line_file() {
+        return this.line_file_len_ > 0 ? 1 : 0;
+    }
+
+    char* line_file() {
+        return this.lfile_;
+    }
+
     void release() {
         unsafe {
             __ivy_free(this.out_);
@@ -216,6 +235,7 @@ export struct Preprocessor {
             __ivy_free(this.dtoff_);
             __ivy_free(this.dtlen_);
             __ivy_free(this.dwarn_);
+            __ivy_free(this.lfile_);
         }
     }
 
@@ -388,6 +408,22 @@ export struct Preprocessor {
             this.out_[this.out_n_].len = n;
         }
         this.out_n_ = this.out_n_ + 1;
+    }
+
+    // Push a token with the `#line` offset applied (mirrors emitToken, which
+    // is the only place the C++ oracle remaps token lines).
+    void out_push_remap(Token t) {
+        if (this.line_offset_ != 0 && t.line != 0) {
+            long r = t.line;
+            r = r + this.line_offset_;
+            if (r < 1) {
+                r = 1;
+            }
+            unsafe {
+                t.line = (int)r;
+            }
+        }
+        this.out_push(t);
     }
 
     // --- macro table ------------------------------------------------------
@@ -1583,7 +1619,159 @@ export struct Preprocessor {
         return true;
     }
 
-    // --- #if constant-expression evaluation ------------------------------
+    // Mirrors collectMessage: joins the rest of a #error/#warning line's token
+    // lexemes with single spaces (string-literal quotes stripped) into the
+    // arena, NUL-terminated, and sets next_ past the line. Returns the offset.
+    long collect_message(long p, long dir_line) {
+        long start = this.src_n_;
+        bool first = true;
+        long q = p;
+        while (q < this.in_n_ && !this.tok_eof(q) && this.tok_line(q) == dir_line) {
+            if (!first) {
+                unsafe {
+                    this.syn_puts((char*)" ", 1);
+                }
+            }
+            first = false;
+            Token tk;
+            unsafe {
+                tk = this.in_[q];
+            }
+            long off = tk.off;
+            long len = tk.len;
+            if (this.kind_eq(tk, "string") && tk.len >= 2) {
+                unsafe {
+                    if (this.src_[tk.off] == '"' && this.src_[tk.off + tk.len - 1] == '"') {
+                        off = tk.off + 1;
+                        len = tk.len - 2;
+                    }
+                }
+            }
+            unsafe {
+                this.syn_puts(this.src_ + off, len);
+            }
+            q = q + 1;
+        }
+        this.next_ = q;
+        return start;
+    }
+
+    // Mirrors Preprocessor::parseError. `pos` points at `#`.
+    bool parse_error(long pos) {
+        if (!this.dir_is(pos, "error")) {
+            return false;
+        }
+        if (!this.active()) {
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        long hl = this.tok_line(pos);
+        long hc = this.tok_col(pos);
+        long start = this.collect_message(pos + 2, hl);
+        long mlen = this.src_n_ - start;
+        this.diag_add(hl, hc, "#error: ", start, mlen, false);
+        this.has_error_ = true;
+        return true;
+    }
+
+    // Mirrors Preprocessor::parseWarning. `pos` points at `#`.
+    bool parse_warning(long pos) {
+        if (!this.dir_is(pos, "warning")) {
+            return false;
+        }
+        if (!this.active()) {
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        long hl = this.tok_line(pos);
+        long hc = this.tok_col(pos);
+        long start = this.collect_message(pos + 2, hl);
+        long mlen = this.src_n_ - start;
+        this.diag_add(hl, hc, "#warning: ", start, mlen, true);
+        return true;
+    }
+
+    // Mirrors Preprocessor::parseLine (`#line N ["file"]`). `pos` points at `#`.
+    bool parse_line(long pos) {
+        if (!this.dir_is(pos, "line")) {
+            return false;
+        }
+        if (!this.active()) {
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        long hline = this.tok_line(pos);
+        long hl = hline;
+        long hc = this.tok_col(pos);
+        long p = pos + 2;
+        if (p >= this.in_n_ || this.tok_eof(p) || this.tok_line(p) != hline) {
+            this.diag_add(hl, hc, "#line: expected line number", -1, 0, false);
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        if (!this.kat(this.in_, p, "integer")) {
+            this.diag_add(hl, hc, "#line: expected integer line number", -1, 0, false);
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        Token nt;
+        unsafe {
+            nt = this.in_[p];
+        }
+        long v = 0;
+        bool any = false;
+        long i = 0;
+        unsafe {
+            while (i < nt.len) {
+                char c = this.src_[nt.off + i];
+                if (c < '0' || c > '9') {
+                    break;
+                }
+                v = v * 10 + (long)(c - '0');
+                any = true;
+                i = i + 1;
+            }
+        }
+        if (!any) {
+            this.diag_add(hl, hc, "#line: invalid line number", -1, 0, false);
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        if (v < 1) {
+            this.diag_add(hl, hc, "#line: line number must be positive", -1, 0, false);
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+        p = p + 1;
+        if (p < this.in_n_ && !this.tok_eof(p) && this.tok_line(p) == hline &&
+            this.kat(this.in_, p, "string")) {
+            Token st;
+            unsafe {
+                st = this.in_[p];
+            }
+            if (st.len >= 2) {
+                unsafe {
+                    if (this.src_[st.off] == '"' && this.src_[st.off + st.len - 1] == '"') {
+                        long n = st.len - 2;
+                        if (n > 511) {
+                            n = 511;
+                        }
+                        __ivy_memcpy(this.lfile_, this.src_ + st.off + 1,
+                                     (unsigned long long)n);
+                        this.lfile_[n] = 0;
+                        this.line_file_len_ = n;
+                    }
+                }
+            }
+            p = p + 1;
+        }
+        while (p < this.in_n_ && !this.tok_eof(p) && this.tok_line(p) == hline) {
+            p = p + 1;
+        }
+        this.line_offset_ = v - (hline + 1);
+        this.next_ = p;
+        return true;
+    }
 
     long digit_val(long c) {
         if (c >= 48 && c <= 57) {
@@ -2212,6 +2400,16 @@ export struct Preprocessor {
     // for the unrecognized-directive path.
     void emit_at(long i) {
         Token t = this.at(i);
+        if (this.line_offset_ != 0 && t.line != 0) {
+            long r = t.line;
+            r = r + this.line_offset_;
+            if (r < 1) {
+                r = 1;
+            }
+            unsafe {
+                t.line = (int)r;
+            }
+        }
         if (!this.kind_eq(t, "identifier")) {
             this.out_push(t);
             return;
@@ -2258,7 +2456,7 @@ export struct Preprocessor {
                 return;
             }
         }
-        this.out_push(t);
+        this.out_push_remap(t);
         this.next_ = i + 1;
     }
 
@@ -2272,6 +2470,9 @@ export struct Preprocessor {
         this.ex_pos_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
+        this.line_offset_ = 0;
+        this.line_file_len_ = 0;
+        this.line_file_len_ = 0;
         this.dn_ = 0;
         this.dtxt_n_ = 0;
         // Register the predefined object-like macros (bodies at 0:0). The
@@ -2297,6 +2498,20 @@ export struct Preprocessor {
                 }
                 // Pragmas are processed even when inactive.
                 if (this.parse_pragma(before)) {
+                    i = this.next_;
+                    continue;
+                }
+                // #error / #warning / #line (processed even when inactive;
+                // they consume the line and set next_).
+                if (this.parse_error(before)) {
+                    i = this.next_;
+                    continue;
+                }
+                if (this.parse_warning(before)) {
+                    i = this.next_;
+                    continue;
+                }
+                if (this.parse_line(before)) {
                     i = this.next_;
                     continue;
                 }

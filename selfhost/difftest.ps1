@@ -36,6 +36,8 @@
 #     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
 #   H2.5 (predefined macros + #pragma + pp diagnostics): -Dir selfhost/corpus/pp/predef
 #     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
+#   H2.6 (#line / #error / #warning): -Dir selfhost/corpus/pp/line
+#     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 
