@@ -1,0 +1,1 @@
+extern "C" void p(int32 x, ...);

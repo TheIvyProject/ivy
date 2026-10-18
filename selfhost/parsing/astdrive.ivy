@@ -1,0 +1,204 @@
+// selfhost/parsing/astdrive.ivy — H3.x differential-test driver for the parser
+// port.
+//
+// Reads file paths from stdin (one per line), lexes + preprocesses each with
+// the Ivy ports, parses with the Ivy parser, and prints `=== path ===` + the
+// `ivy --ast` AST dump (functions only, mirroring dumpAst). Preprocessor and
+// parser diagnostics are printed in the oracle format and gate the dump.
+// Used by selfhost/difftest.ps1
+//   (-Oracle --ast -Modules token,lexer,preprocessor,parser -Driver astdrive).
+
+#pragma ivy cnumber
+import token;
+import lexer;
+import preprocessor;
+import ast;
+import parser;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+// Free functions cannot take raw-pointer parameters, so the printer is a
+// struct whose fields hold them.
+struct Dumper {
+    long slen(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    void dump_type(AType t) {
+        if (t.is_const != 0) {
+            io::print("const ");
+        }
+        if (t.is_unsigned != 0) {
+            io::print("unsigned ");
+        }
+        io::print(t.base);
+        long i = 0;
+        while (i < t.ptr_depth) {
+            io::print("*");
+            i = i + 1;
+        }
+    }
+
+    void dump_attrs(AAttr* attrs, long n) {
+        long i = 0;
+        while (i < n) {
+            AAttr a;
+            unsafe {
+                a = attrs[i];
+            }
+            io::print("[[ivy::");
+            io::print(a.name);
+            if (a.has_args != 0) {
+                io::print("(");
+                io::print(a.args);
+                io::print(")");
+            }
+            io::print("]]");
+            i = i + 1;
+        }
+    }
+
+    void emit(AFunction f) {
+        io::print("function ");
+        if (f.is_extern_c != 0) {
+            io::print("[extern \"C\"] ");
+        }
+        this.dump_attrs(f.attrs, f.nattrs);
+        io::println("");
+        io::print("  return ");
+        this.dump_type(f.ret);
+        io::print(" ");
+        io::print(f.name);
+        io::print("(");
+        long j = 0;
+        while (j < f.nparams) {
+            if (j > 0) {
+                io::print(", ");
+            }
+            AParam p;
+            unsafe {
+                p = f.params[j];
+            }
+            this.dump_type(p.type);
+            if (this.slen(p.name) > 0) {
+                io::print(" ");
+                io::print(p.name);
+            }
+            if (p.nattrs > 0) {
+                io::print(" ");
+                this.dump_attrs(p.attrs, p.nattrs);
+            }
+            j = j + 1;
+        }
+        io::println(")");
+        if (f.has_body != 0) {
+            io::println("  block");
+        } else {
+            io::println("  (declaration only)");
+        }
+        io::println("");
+    }
+};
+
+void run() {
+    while (true) {
+        unsafe {
+            char* line = io::read_line();
+            if (line == (char*)0) {
+                break;
+            }
+            uint64 np = __ivy_strlen(line);
+            if (np > 0 && line[np - 1] == 13) {
+                line[np - 1] = 0;
+            }
+            io::println("=== {} ===", line);
+            char* content = io::read_file(line);
+            if (content != (char*)0) {
+                uint64 len = __ivy_strlen(content);
+                long cap = (long)len + 16;
+
+                Lexer lx;
+                lx.setup(content, len, line);
+                lx.lex_all(cap);
+
+                if (!lx.had_error()) {
+                    long in_n = lx.token_count();
+                    long out_cap = in_n * 8 + 256;
+                    Preprocessor pp;
+                    pp.setup(lx.tokens(), in_n, content, (long)len, line, (long)np,
+                             out_cap, 1024);
+                    pp.run();
+                    long dc = pp.diag_count();
+                    long di = 0;
+                    bool pp_failed = false;
+                    char* fname = line;
+                    if (pp.has_line_file() != 0) {
+                        fname = pp.line_file();
+                    }
+                    while (di < dc) {
+                        long w = pp.diag_warn(di);
+                        if (w == 0) {
+                            pp_failed = true;
+                        }
+                        io::print(fname);
+                        io::print(":{}", pp.diag_line(di));
+                        io::print(":{}", pp.diag_col(di));
+                        if (w != 0) {
+                            io::print(": warning: ");
+                        } else {
+                            io::print(": error: ");
+                        }
+                        io::println("{}", pp.diag_msg(di));
+                        di = di + 1;
+                    }
+                    if (!pp_failed) {
+                        Parser pa;
+                        pa.setup(pp.output(), pp.output_count(), pp.arena(), (long)len);
+                        pa.set_cnumber(pp.cnumber_enabled());
+                        pa.parse();
+                        if (pa.failed() != 0) {
+                            long nd = pa.diag_count();
+                            long k = 0;
+                            while (k < nd) {
+                                io::print(fname);
+                                io::print(":{}", pa.diag_line(k));
+                                io::print(":{}", pa.diag_col(k));
+                                io::print(": error: ");
+                                io::println("{}", pa.diag_msg(k));
+                                k = k + 1;
+                            }
+                        } else {
+                            Dumper d;
+                            long n = pa.fn_count();
+                            long i = 0;
+                            while (i < n) {
+                                AFunction f = pa.get_fn(i);
+                                d.emit(f);
+                                i = i + 1;
+                            }
+                        }
+                        pa.release();
+                    }
+                    pp.release();
+                }
+                lx.release();
+                __ivy_free(content);
+            }
+            __ivy_free(line);
+        }
+    }
+}
+
+int32 main() {
+    run();
+    return 0;
+}

@@ -1,0 +1,6 @@
+void a() {}
+extern "C" void b();
+constexpr int32 c();
+fn d() -> int32;
+int32* e();
+void f(int32 x, int32 y) {}

@@ -41,6 +41,12 @@
 #   H2.7 (reject #include in .ivy): -Dir selfhost/corpus/pp/no_include
 #     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
 #
+# Parser features use the AST oracle (`--ast`) and the ast driver:
+#   H3.1 (declarations: func def/proto, extern "C", constexpr, fn trailing,
+#     variadic, unnamed params, lifetime<>, cnumber c-style types, ptr returns):
+#     -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#
 # Exit 0 = identical, 1 = mismatch or build failure.
 
 param(

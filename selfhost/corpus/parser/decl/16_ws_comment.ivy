@@ -1,0 +1,6 @@
+// leading comment
+void  f ( int32  a )   { }
+
+/* block comment */
+void g();
+

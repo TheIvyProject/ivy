@@ -229,6 +229,11 @@ export struct Preprocessor {
         return this.lfile_;
     }
 
+    // True when `#pragma ivy cnumber` was active (opts into C-style types).
+    long cnumber_enabled() {
+        return this.cnumber_ ? 1 : 0;
+    }
+
     void release() {
         unsafe {
             __ivy_free(this.out_);

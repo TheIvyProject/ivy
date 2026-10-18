@@ -1,0 +1,1039 @@
+// selfhost/parsing/parser.ivy — Ivy self-host parser (H3.1: declarations).
+//
+// Feature-sliced port of src/parsing/parser.cpp. H3.1 covers the declaration
+// grammar needed to reproduce the `ivy --ast` function dump:
+//   - top-level functions (leading return type and `fn ... -> Type` form)
+//   - parameters (named/unnamed, pointer/reference/const, variadic `...`,
+//     native `$a` lifetimes, `Args...` packs)
+//   - attributes `[[ivy::name(args)]]` on functions/parameters
+//   - `extern "C"` (single declaration and `{ ... }` block)
+//   - `constexpr` / `consteval` specifiers
+//   - `lifetime<$a, ...>` declaration prefix
+//   - Ivy fixed-width types (normalized to `_t` form), C-style types under
+//     `#pragma ivy cnumber`, and `auto`
+//   - function bodies: `{ }` (compound) or `;` (declaration only). Statement
+//     parsing arrives in H3.3; H3.1 corpus uses empty bodies.
+//
+// Oracle: src/parsing/parser.cpp + dumpAst in src/app/main.cpp via `ivy --ast`.
+// Harness: selfhost/difftest.ps1 -Oracle --ast -Modules token,lexer,preprocessor,parser -Driver astdrive
+
+#pragma ivy cnumber
+export module parser;
+import token;
+import lexer;
+import preprocessor;
+import ast;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+
+// A parsed attribute list (slice of the parser attribute pool).
+export struct AAttrList {
+    AAttr* items;
+    long n;
+};
+
+// A parsed parameter list (slice of the parser parameter pool).
+export struct AParamList {
+    AParam* items;
+    long n;
+    long variadic;
+};
+
+// sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
+// sizes (AAttr 24, AParam 64, AFunction 96) so `__ivy_alloc` can be used.
+export struct Parser {
+    Token* toks_;
+    long n_;
+    long pos_;
+    long failed_;
+    long cnumber_;
+    char* src_;      // text arena (preprocessor output arena)
+
+    // function pool
+    AFunction* fpool_;
+    long fn_n_;
+    long fn_cap_;
+
+    // attribute pool (shared by functions + params)
+    AAttr* apool_;
+    long ap_n_;
+    long ap_cap_;
+
+    // parameter pool
+    AParam* ppool_;
+    long pp_n_;
+    long pp_cap_;
+
+    // string intern buffer
+    char* sbuf_;
+    long sb_n_;
+    long sb_cap_;
+
+    // diagnostics
+    long* dline_;
+    long* dcol_;
+    const char** dmsg_;
+    long dn_;
+    long dcap_;
+
+    long ce_;   // constexpr flag (scratch, set by parse_constexpr_spec)
+    long cv_;   // consteval flag
+
+    void setup(Token* input, long in_count, char* arena, long src_len) {
+        this.toks_ = input;
+        this.n_ = in_count;
+        this.pos_ = 0;
+        this.failed_ = 0;
+        this.cnumber_ = 0;
+        this.src_ = arena;
+        this.fn_n_ = 0;
+        this.fn_cap_ = in_count + 16;
+        this.ap_n_ = 0;
+        this.ap_cap_ = in_count + 16;
+        this.pp_n_ = 0;
+        this.pp_cap_ = in_count + 16;
+        this.sb_n_ = 0;
+        this.sb_cap_ = src_len + 8192;
+        this.dn_ = 0;
+        this.dcap_ = in_count + 16;
+        this.ce_ = 0;
+        this.cv_ = 0;
+        unsafe {
+            this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 96);
+            this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 24);
+            this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 64);
+            this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
+            this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dmsg_ = (char**) __ivy_alloc(this.dcap_ * 8);
+        }
+    }
+
+    void set_cnumber(long v) {
+        this.cnumber_ = v;
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.fpool_);
+            __ivy_free(this.apool_);
+            __ivy_free(this.ppool_);
+            __ivy_free(this.sbuf_);
+            __ivy_free(this.dline_);
+            __ivy_free(this.dcol_);
+            __ivy_free((void*)this.dmsg_);
+        }
+    }
+
+    // --- string helpers ---------------------------------------------------
+
+    long cstr_len(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    bool cstr_eq(const char* a, const char* b) {
+        unsafe {
+            long i = 0;
+            while (a[i] != 0) {
+                if (b[i] != a[i]) {
+                    return false;
+                }
+                if (b[i] == 0) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return b[i] == 0;
+        }
+        return false;
+    }
+
+    bool kind_eq(Token t, const char* s) {
+        unsafe {
+            long i = 0;
+            while (s[i] != 0) {
+                if (t.kind[i] != s[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return t.kind[i] == 0;
+        }
+        return false;
+    }
+
+    bool lexeme_eq(long off, long len, const char* lit) {
+        unsafe {
+            long i = 0;
+            while (lit[i] != 0) {
+                if (i >= len) {
+                    return false;
+                }
+                if (this.src_[off + i] != lit[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return i == len;
+        }
+        return false;
+    }
+
+    Token eof_tok() {
+        Token t;
+        unsafe {
+            t.kind = (char*)"eof";
+        }
+        t.line = 0;
+        t.col = 0;
+        t.off = 0;
+        t.len = 0;
+        return t;
+    }
+
+    Token peek(long k) {
+        if (this.pos_ + k < this.n_) {
+            unsafe {
+                return this.toks_[this.pos_ + k];
+            }
+        }
+        return this.eof_tok();
+    }
+
+    Token next() {
+        Token t = this.peek(0);
+        if (this.pos_ < this.n_) {
+            this.pos_ = this.pos_ + 1;
+        }
+        return t;
+    }
+
+    bool at(const char* s) {
+        return this.kind_eq(this.peek(0), s);
+    }
+
+    bool kw(const char* s) {
+        Token t = this.peek(0);
+        return this.kind_eq(t, "keyword") && this.lexeme_eq(t.off, t.len, s);
+    }
+
+    bool at_lifetime() {
+        return this.kind_eq(this.peek(0), "lifetime");
+    }
+
+    // --- diagnostics ------------------------------------------------------
+
+    void error_at(Token t, const char* msg) {
+        if (this.failed_ != 0) {
+            if (this.kind_eq(t, "eof")) {
+                return;
+            }
+        }
+        if (this.dn_ >= this.dcap_) {
+            return;
+        }
+        unsafe {
+            this.dline_[this.dn_] = t.line;
+            this.dcol_[this.dn_] = t.col;
+            this.dmsg_[this.dn_] = msg;
+        }
+        this.dn_ = this.dn_ + 1;
+        this.failed_ = 1;
+    }
+
+    long diag_count() {
+        return this.dn_;
+    }
+
+    long diag_line(long i) {
+        unsafe {
+            return this.dline_[i];
+        }
+        return 0;
+    }
+
+    long diag_col(long i) {
+        unsafe {
+            return this.dcol_[i];
+        }
+        return 0;
+    }
+
+    const char* diag_msg(long i) {
+        unsafe {
+            return this.dmsg_[i];
+        }
+        return "";
+    }
+
+    void expect(const char* kind, const char* msg) {
+        if (this.at(kind)) {
+            this.next();
+            return;
+        }
+        this.error_at(this.peek(0), msg);
+        this.next();
+    }
+
+    void synchronize() {
+        if (this.at("eof")) {
+            return;
+        }
+        long advanced = 0;
+        while (!this.at(";") && !this.at("}") && !this.at("eof")) {
+            this.next();
+            advanced = 1;
+        }
+        if (this.at(";")) {
+            this.next();
+            advanced = 1;
+        }
+        if (advanced == 0) {
+            this.next();
+        }
+    }
+
+    // --- string interning -------------------------------------------------
+
+    void sb_put(const char* s, long n) {
+        if (this.sb_n_ + n + 1 > this.sb_cap_) {
+            return;
+        }
+        unsafe {
+            __ivy_memcpy(this.sbuf_ + this.sb_n_, s, (unsigned long long)n);
+        }
+        this.sb_n_ = this.sb_n_ + n;
+    }
+
+    void sb_put_raw(const char* s, long n) {
+        if (this.sb_n_ + n + 1 > this.sb_cap_) {
+            return;
+        }
+        unsafe {
+            __ivy_memcpy(this.sbuf_ + this.sb_n_, s, (unsigned long long)n);
+            this.sbuf_[this.sb_n_ + n] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + n;
+    }
+
+    const char* intern(long off, long len) {
+        long start = this.sb_n_;
+        if (this.sb_n_ + len + 1 > this.sb_cap_) {
+            return "";
+        }
+        unsafe {
+            __ivy_memcpy(this.sbuf_ + this.sb_n_, this.src_ + off, (unsigned long long)len);
+            this.sbuf_[this.sb_n_ + len] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + len + 1;
+        unsafe {
+            return this.sbuf_ + start;
+        }
+        return "";
+    }
+
+    const char* intern_tok(Token t) {
+        unsafe {
+            return this.intern(t.off, t.len);
+        }
+        return "";
+    }
+
+    // --- type predicates --------------------------------------------------
+
+    // Ivy-native type keyword -> canonical `_t` name ("" if not one).
+    const char* ivy_base(Token t) {
+        if (this.lexeme_eq(t.off, t.len, "int8")) { return "int8_t"; }
+        if (this.lexeme_eq(t.off, t.len, "int16")) { return "int16_t"; }
+        if (this.lexeme_eq(t.off, t.len, "int32")) { return "int32_t"; }
+        if (this.lexeme_eq(t.off, t.len, "int64")) { return "int64_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uint8")) { return "uint8_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uint16")) { return "uint16_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uint32")) { return "uint32_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uint64")) { return "uint64_t"; }
+        if (this.lexeme_eq(t.off, t.len, "int128")) { return "int128_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uint128")) { return "uint128_t"; }
+        if (this.lexeme_eq(t.off, t.len, "float16")) { return "float16_t"; }
+        if (this.lexeme_eq(t.off, t.len, "float32")) { return "float32_t"; }
+        if (this.lexeme_eq(t.off, t.len, "float64")) { return "float64_t"; }
+        if (this.lexeme_eq(t.off, t.len, "float128")) { return "float128_t"; }
+        if (this.lexeme_eq(t.off, t.len, "bfloat16")) { return "bfloat16_t"; }
+        if (this.lexeme_eq(t.off, t.len, "iptr")) { return "ptrdiff_t"; }
+        if (this.lexeme_eq(t.off, t.len, "uptr")) { return "uptr_t"; }
+        if (this.lexeme_eq(t.off, t.len, "size")) { return "size_t"; }
+        return "";
+    }
+
+    long ivy_unsign(const char* base) {
+        if (this.cstr_eq(base, "uint8_t")) { return 1; }
+        if (this.cstr_eq(base, "uint16_t")) { return 1; }
+        if (this.cstr_eq(base, "uint32_t")) { return 1; }
+        if (this.cstr_eq(base, "uint64_t")) { return 1; }
+        if (this.cstr_eq(base, "uint128_t")) { return 1; }
+        if (this.cstr_eq(base, "uptr_t")) { return 1; }
+        if (this.cstr_eq(base, "size_t")) { return 1; }
+        return 0;
+    }
+
+    bool is_ivy_type_kw(Token t) {
+        return this.lexeme_eq(t.off, t.len, "int8") ||
+               this.lexeme_eq(t.off, t.len, "int16") ||
+               this.lexeme_eq(t.off, t.len, "int32") ||
+               this.lexeme_eq(t.off, t.len, "int64") ||
+               this.lexeme_eq(t.off, t.len, "uint8") ||
+               this.lexeme_eq(t.off, t.len, "uint16") ||
+               this.lexeme_eq(t.off, t.len, "uint32") ||
+               this.lexeme_eq(t.off, t.len, "uint64") ||
+               this.lexeme_eq(t.off, t.len, "int128") ||
+               this.lexeme_eq(t.off, t.len, "uint128") ||
+               this.lexeme_eq(t.off, t.len, "float16") ||
+               this.lexeme_eq(t.off, t.len, "float32") ||
+               this.lexeme_eq(t.off, t.len, "float64") ||
+               this.lexeme_eq(t.off, t.len, "float128") ||
+               this.lexeme_eq(t.off, t.len, "bfloat16") ||
+               this.lexeme_eq(t.off, t.len, "iptr") ||
+               this.lexeme_eq(t.off, t.len, "uptr") ||
+               this.lexeme_eq(t.off, t.len, "size");
+    }
+
+    // E3: `_t`-suffixed keywords are recognized so parse_type can reject them.
+    bool is_removed_t(Token t) {
+        return this.lexeme_eq(t.off, t.len, "int8_t") ||
+               this.lexeme_eq(t.off, t.len, "int16_t") ||
+               this.lexeme_eq(t.off, t.len, "int32_t") ||
+               this.lexeme_eq(t.off, t.len, "int64_t") ||
+               this.lexeme_eq(t.off, t.len, "uint8_t") ||
+               this.lexeme_eq(t.off, t.len, "uint16_t") ||
+               this.lexeme_eq(t.off, t.len, "uint32_t") ||
+               this.lexeme_eq(t.off, t.len, "uint64_t") ||
+               this.lexeme_eq(t.off, t.len, "float16_t") ||
+               this.lexeme_eq(t.off, t.len, "float32_t") ||
+               this.lexeme_eq(t.off, t.len, "float64_t") ||
+               this.lexeme_eq(t.off, t.len, "float128_t") ||
+               this.lexeme_eq(t.off, t.len, "bfloat16_t") ||
+               this.lexeme_eq(t.off, t.len, "size_t") ||
+               this.lexeme_eq(t.off, t.len, "ptrdiff_t") ||
+               this.lexeme_eq(t.off, t.len, "uptr_t") ||
+               this.lexeme_eq(t.off, t.len, "int128_t") ||
+               this.lexeme_eq(t.off, t.len, "uint128_t");
+    }
+
+    bool is_base_type_kw(Token t) {
+        return this.lexeme_eq(t.off, t.len, "const") ||
+               this.lexeme_eq(t.off, t.len, "unsigned") ||
+               this.lexeme_eq(t.off, t.len, "signed") ||
+               this.lexeme_eq(t.off, t.len, "void") ||
+               this.lexeme_eq(t.off, t.len, "bool") ||
+               this.lexeme_eq(t.off, t.len, "char") ||
+               this.lexeme_eq(t.off, t.len, "short") ||
+               this.lexeme_eq(t.off, t.len, "int") ||
+               this.lexeme_eq(t.off, t.len, "long") ||
+               this.lexeme_eq(t.off, t.len, "float") ||
+               this.lexeme_eq(t.off, t.len, "double") ||
+               this.lexeme_eq(t.off, t.len, "auto") ||
+               this.lexeme_eq(t.off, t.len, "nullptr_t") ||
+               this.lexeme_eq(t.off, t.len, "max_align_t") ||
+               this.is_ivy_type_kw(t);
+    }
+
+    bool is_cstyle_kw(Token t) {
+        return this.lexeme_eq(t.off, t.len, "unsigned") ||
+               this.lexeme_eq(t.off, t.len, "signed") ||
+               this.lexeme_eq(t.off, t.len, "char") ||
+               this.lexeme_eq(t.off, t.len, "short") ||
+               this.lexeme_eq(t.off, t.len, "int") ||
+               this.lexeme_eq(t.off, t.len, "long") ||
+               this.lexeme_eq(t.off, t.len, "float") ||
+               this.lexeme_eq(t.off, t.len, "double");
+    }
+
+    long is_type_start() {
+        Token t = this.peek(0);
+        if (!this.kind_eq(t, "keyword")) {
+            return 0;
+        }
+        if (this.cnumber_ == 0) {
+            if (this.is_cstyle_kw(t)) {
+                return 0;
+            }
+        }
+        if (this.is_base_type_kw(t)) {
+            return 1;
+        }
+        if (this.is_removed_t(t)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    // --- parseType --------------------------------------------------------
+
+    AType parse_type() {
+        AType t;
+        t.base = "";
+        t.is_unsigned = 0;
+        t.is_const = 0;
+        t.is_ref = 0;
+        t.ptr_depth = 0;
+        if (this.kw("const")) {
+            t.is_const = 1;
+            this.next();
+        }
+        if (this.kw("auto")) {
+            this.next();
+            t.base = "auto";
+            while (this.at("*")) {
+                this.next();
+                t.ptr_depth = t.ptr_depth + 1;
+            }
+            if (this.at("&")) {
+                this.next();
+                t.is_ref = 1;
+            }
+            return t;
+        }
+        long saw = 0;
+        if (this.kw("unsigned") || this.kw("signed")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type requires #pragma ivy cnumber; use a fixed-width type like int32/uint32");
+            }
+            t.is_unsigned = this.kw("unsigned") ? 1 : 0;
+            saw = 1;
+            this.next();
+        }
+        if (this.is_ivy_type_kw(this.peek(0))) {
+            Token c = this.peek(0);
+            t.base = this.ivy_base(c);
+            this.next();
+            if (saw == 0) {
+                t.is_unsigned = this.ivy_unsign(t.base);
+            }
+        }
+        if (this.kw("nullptr_t")) {
+            this.next();
+            t.base = "nullptr_t";
+        }
+        if (this.kw("max_align_t")) {
+            this.next();
+            t.base = "max_align_t";
+        }
+        if (this.kw("char")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'char' requires #pragma ivy cnumber; use int8/uint8");
+            }
+            this.next();
+            t.base = "char";
+        }
+        if (this.kw("short")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'short' requires #pragma ivy cnumber; use int16/uint16");
+            }
+            this.next();
+            if (this.kw("int")) {
+                this.next();
+            }
+            t.base = "short";
+        }
+        if (this.kw("int")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'int' requires #pragma ivy cnumber; use int32/uint32");
+            }
+            this.next();
+            t.base = "int";
+        }
+        if (this.kw("float")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'float' requires #pragma ivy cnumber; use float32");
+            }
+            this.next();
+            t.base = "float";
+        }
+        if (this.kw("double")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'double' requires #pragma ivy cnumber; use float64");
+            }
+            this.next();
+            t.base = "double";
+        }
+        if (this.kw("bool")) {
+            this.next();
+            t.base = "bool";
+        }
+        if (this.kw("void")) {
+            this.next();
+            t.base = "void";
+        }
+        if (this.kw("long")) {
+            if (this.cnumber_ == 0) {
+                this.error_at(this.peek(0),
+                              "C-style type 'long' requires #pragma ivy cnumber; use int64");
+            }
+            this.next();
+            if (this.kw("long")) {
+                this.next();
+                if (this.kw("int")) {
+                    this.next();
+                }
+                t.base = "long long";
+            } else {
+                if (this.kw("double")) {
+                    this.next();
+                    t.base = "long double";
+                } else {
+                    if (this.kw("int")) {
+                        this.next();
+                    }
+                    t.base = "long";
+                }
+            }
+        }
+        if (this.is_removed_t(this.peek(0))) {
+            this.error_at(this.peek(0),
+                          "_t-suffixed type is removed in .ivy files");
+        }
+        if (this.cstr_len(t.base) == 0) {
+            if (saw == 0 && t.is_const == 0) {
+                this.error_at(this.peek(0),
+                              "expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)");
+            } else {
+                t.base = "int";
+            }
+        }
+        while (this.at("*")) {
+            this.next();
+            t.ptr_depth = t.ptr_depth + 1;
+            if (this.kw("const")) {
+                this.next();
+            }
+        }
+        if (this.at("&")) {
+            this.next();
+            t.is_ref = 1;
+            if (this.kw("const")) {
+                t.is_const = 1;
+                this.next();
+            }
+        }
+        return t;
+    }
+
+    // --- attributes -------------------------------------------------------
+
+    AAttrList parse_attrs() {
+        AAttrList result;
+        unsafe {
+            long start = this.ap_n_;
+            while (this.at("[") && this.kind_eq(this.peek(1), "[")) {
+                this.next();
+                this.next();
+                const char* name = "";
+                const char* ns = "";
+                if (this.at("identifier") || this.at("keyword")) {
+                    const char* first = this.intern_tok(this.next());
+                    if (this.at("::")) {
+                        this.next();
+                        if (this.at("identifier") || this.at("keyword")) {
+                            ns = first;
+                            name = this.intern_tok(this.next());
+                        } else {
+                            this.error_at(this.peek(0), "expected attribute name after '::'");
+                        }
+                    } else {
+                        name = first;
+                    }
+                } else {
+                    this.error_at(this.peek(0), "expected attribute name");
+                }
+                long has_args = 0;
+                const char* args = "";
+                if (this.at("(")) {
+                    this.next();
+                    has_args = 1;
+                    long ab = this.sb_n_;
+                    long first2 = 1;
+                    while (!this.at(")") && !this.at("eof")) {
+                        if (first2 == 0) {
+                            this.sb_put(", ", 2);
+                        }
+                        first2 = 0;
+                        Token av = this.peek(0);
+                        this.sb_put_raw(this.src_ + av.off, av.len);
+                        this.next();
+                        if (!this.at(")")) {
+                            this.expect(",", "expected ',' in attribute argument list");
+                        }
+                    }
+                    this.sbuf_[this.sb_n_] = 0;
+                    args = this.sbuf_ + ab;
+                    this.sb_n_ = this.sb_n_ + 1;
+                    this.expect(")", "expected ')' to close attribute argument list");
+                }
+                this.expect("]", "expected ']'");
+                this.expect("]", "expected ']'");
+                if (!this.cstr_eq(ns, "") && !this.cstr_eq(ns, "ivy")) {
+                    this.error_at(this.peek(0), "unknown attribute namespace: only ivy:: is supported");
+                    continue;
+                }
+                AAttr a;
+                a.name = name;
+                a.args = args;
+                a.has_args = has_args;
+                if (this.ap_n_ < this.ap_cap_) {
+                    this.apool_[this.ap_n_] = a;
+                    this.ap_n_ = this.ap_n_ + 1;
+                }
+            }
+            result.items = this.apool_ + start;
+            result.n = this.ap_n_ - start;
+        }
+        return result;
+    }
+
+    // Copy a caller-provided attribute list into the pool; returns its index.
+    long copy_attrs(AAttrList l) {
+        long start = this.ap_n_;
+        long i = 0;
+        while (i < l.n) {
+            if (this.ap_n_ < this.ap_cap_) {
+                unsafe {
+                    this.apool_[this.ap_n_] = l.items[i];
+                }
+                this.ap_n_ = this.ap_n_ + 1;
+            }
+            i = i + 1;
+        }
+        return start;
+    }
+
+    void push_fn(AFunction f) {
+        if (this.fn_n_ >= this.fn_cap_) {
+            return;
+        }
+        unsafe {
+            this.fpool_[this.fn_n_] = f;
+        }
+        this.fn_n_ = this.fn_n_ + 1;
+    }
+
+    void push_param(AParam p) {
+        if (this.pp_n_ >= this.pp_cap_) {
+            return;
+        }
+        unsafe {
+            this.ppool_[this.pp_n_] = p;
+        }
+        this.pp_n_ = this.pp_n_ + 1;
+    }
+
+    long fn_count() {
+        return this.fn_n_;
+    }
+
+    AFunction get_fn(long i) {
+        unsafe {
+            if (i < this.fn_n_) {
+                return this.fpool_[i];
+            }
+            return this.fpool_[0];
+        }
+    }
+
+    // --- declarations -----------------------------------------------------
+
+    void parse_constexpr_spec() {
+        this.ce_ = 0;
+        this.cv_ = 0;
+        while (this.kw("constexpr") || this.kw("consteval")) {
+            if (this.kw("constexpr")) {
+                this.ce_ = 1;
+                this.next();
+            } else {
+                this.cv_ = 1;
+                this.ce_ = 1;
+                this.next();
+            }
+        }
+    }
+
+    void parse_lifetime_decl() {
+        this.next();  // `lifetime`
+        if (!this.at("<")) {
+            this.error_at(this.peek(0), "expected '<' after 'lifetime'");
+            return;
+        }
+        this.next();
+        while (!this.at(">") && !this.at("eof")) {
+            if (!this.at_lifetime()) {
+                this.error_at(this.peek(0), "expected a lifetime variable ($name) in lifetime<...>");
+                this.synchronize();
+                return;
+            }
+            this.next();
+            if (this.at(",")) {
+                this.next();
+            }
+        }
+        this.expect(">", "expected '>' to close lifetime<...>");
+    }
+
+    AParamList parse_params() {
+        long start = this.pp_n_;
+        long va = 0;
+        while (!this.at(")") && !this.at("eof")) {
+            if (this.at("...")) {
+                this.next();
+                va = 1;
+                return this.make_param_list(start, va);
+            }
+            AParam p;
+            p.name = "";
+            unsafe {
+                p.attrs = this.apool_;
+            }
+            p.nattrs = 0;
+            p.type = this.parse_type();
+            if (this.at("...")) {
+                this.next();  // parameter pack marker
+            }
+            if (this.at_lifetime()) {
+                this.next();
+            }
+            if (this.at("identifier")) {
+                p.name = this.intern_tok(this.next());
+            }
+            long pa_start = this.ap_n_;
+            this.parse_attrs();
+            unsafe {
+                p.attrs = this.apool_ + pa_start;
+            }
+            p.nattrs = this.ap_n_ - pa_start;
+            this.push_param(p);
+            if (!this.at(")")) {
+                this.expect(",", "expected ',' between parameters");
+                if (this.at(")")) {
+                    return this.make_param_list(start, va);
+                }
+            }
+        }
+        return this.make_param_list(start, va);
+    }
+
+    AParamList make_param_list(long start, long va) {
+        AParamList l;
+        unsafe {
+            l.items = this.ppool_ + start;
+        }
+        l.n = this.pp_n_ - start;
+        l.variadic = va;
+        return l;
+    }
+
+    long parse_compound_empty() {
+        this.expect("{", "expected '{'");
+        long n = 0;
+        while (!this.at("}") && !this.at("eof")) {
+            // H3.1: statements are not parsed yet; consume tokens so an
+            // accidental statement body does not loop. The corpus uses empty
+            // bodies only.
+            this.next();
+            n = n + 1;
+        }
+        this.expect("}", "expected '}' to close block");
+        return n;
+    }
+
+    void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
+                        AParamList pl, long is_extern_c) {
+        unsafe {
+            f.attrs = this.apool_ + a_start;
+        }
+        f.nattrs = a_end - a_start;
+        f.ret = ret;
+        f.name = name;
+        unsafe {
+            f.params = pl.items;
+        }
+        f.nparams = pl.n;
+        f.is_extern_c = is_extern_c;
+        f.has_body = 0;
+        if (this.at("{")) {
+            this.parse_compound_empty();
+            f.has_body = 1;
+        } else {
+            this.expect(";", "expected '{' for function body or ';' for a declaration");
+        }
+        this.push_fn(f);
+    }
+
+    void parse_function(AAttrList caller, long is_extern_c, long ce, long cv) {
+        unsafe {
+            long a_start = this.copy_attrs(caller);
+            AType ret = this.parse_type();
+            if (this.cstr_len(ret.base) == 0) {
+                this.synchronize();
+                return;
+            }
+            if (this.at_lifetime()) {
+                this.next();
+            }
+            this.parse_attrs();
+            long a_end = this.ap_n_;
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected function name");
+                this.synchronize();
+                return;
+            }
+            const char* name = this.intern_tok(this.next());
+            this.expect("(", "expected '(' after function name");
+            AParamList pl = this.parse_params();
+            this.expect(")", "expected ')' to close parameter list");
+            AFunction f;
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c);
+        }
+    }
+
+    void parse_fn_trailing(AAttrList caller, long is_extern_c, long ce, long cv) {
+        unsafe {
+            long a_start = this.copy_attrs(caller);
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected function name after 'fn'");
+                this.synchronize();
+                return;
+            }
+            const char* name = this.intern_tok(this.next());
+            this.expect("(", "expected '(' after function name");
+            AParamList pl = this.parse_params();
+            this.expect(")", "expected ')' to close parameter list");
+            if (!this.at("->")) {
+                this.error_at(this.peek(0), "expected '->' after parameter list in 'fn' declaration");
+                this.synchronize();
+                return;
+            }
+            this.next();
+            AType ret = this.parse_type();
+            if (this.cstr_len(ret.base) == 0) {
+                this.synchronize();
+                return;
+            }
+            if (this.at_lifetime()) {
+                this.next();
+            }
+            this.parse_attrs();
+            long a_end = this.ap_n_;
+            AFunction f;
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c);
+        }
+    }
+
+    void parse_extern_c(AAttrList attrs) {
+        if (this.at("{")) {
+            this.next();
+            while (!this.at("}") && !this.at("eof")) {
+                AAttrList f = this.parse_attrs();
+                this.parse_function(f, 1, 0, 0);
+            }
+            this.expect("}", "expected '}' to close extern \"C\" block");
+            return;
+        }
+        this.parse_function(attrs, 1, 0, 0);
+    }
+
+    void parse_top() {
+        while (!this.at("eof")) {
+            if (this.at("#")) {
+                this.error_at(this.peek(0), "unsupported preprocessor directive");
+                this.synchronize();
+                continue;
+            }
+            if (this.kw("extern")) {
+                this.next();
+                if (this.at("string") && this.lexeme_eq(this.peek(0).off, this.peek(0).len, "\"C\"")) {
+                    this.next();
+                    AAttrList a = this.parse_attrs();
+                    this.parse_extern_c(a);
+                } else {
+                    this.error_at(this.peek(0), "only 'extern \"C\"' is supported in the Ivy subset");
+                    this.synchronize();
+                }
+                continue;
+            }
+            if (this.kw("constexpr") || this.kw("consteval")) {
+                this.parse_constexpr_spec();
+                if (this.kw("fn")) {
+                    this.next();
+                    AAttrList a = this.parse_attrs();
+                    this.parse_fn_trailing(a, 0, this.ce_, this.cv_);
+                    continue;
+                }
+                if (this.is_type_start() == 0) {
+                    this.error_at(this.peek(0), "expected a type after constexpr/consteval");
+                    this.synchronize();
+                    continue;
+                }
+                AAttrList a = this.parse_attrs();
+                this.parse_function(a, 0, this.ce_, this.cv_);
+                continue;
+            }
+            if (this.kw("lifetime")) {
+                this.parse_lifetime_decl();
+                if (this.kw("constexpr") || this.kw("consteval")) {
+                    this.parse_constexpr_spec();
+                    if (this.kw("fn")) {
+                        this.next();
+                        AAttrList a2 = this.parse_attrs();
+                        this.parse_fn_trailing(a2, 0, this.ce_, this.cv_);
+                        continue;
+                    }
+                    AAttrList a3 = this.parse_attrs();
+                    this.parse_function(a3, 0, this.ce_, this.cv_);
+                    continue;
+                }
+                if (this.kw("fn")) {
+                    this.next();
+                    AAttrList a4 = this.parse_attrs();
+                    this.parse_fn_trailing(a4, 0, 0, 0);
+                    continue;
+                }
+                AAttrList a5 = this.parse_attrs();
+                this.parse_function(a5, 0, 0, 0);
+                continue;
+            }
+            if (this.kw("fn")) {
+                this.next();
+                AAttrList a = this.parse_attrs();
+                this.parse_fn_trailing(a, 0, 0, 0);
+                continue;
+            }
+            AAttrList a = this.parse_attrs();
+            if (this.kw("fn")) {
+                this.next();
+                AAttrList m = this.parse_attrs();
+                this.parse_fn_trailing(a, 0, 0, 0);
+                continue;
+            }
+            this.parse_function(a, 0, 0, 0);
+        }
+    }
+
+    long failed() {
+        return this.failed_;
+    }
+
+    void parse() {
+        this.parse_top();
+    }
+};

@@ -1,0 +1,49 @@
+// selfhost/parsing/ast.ivy — AST node model for the self-host parser port.
+//
+// Mirror of the subset of src/parsing/ast.h that H3.1 (declarations) needs:
+// function/parameter/type/attribute records sufficient to reproduce the
+// `ivy --ast` dump (`dumpAst` in src/app/main.cpp). Strings are stored as
+// NUL-terminated `char*` into either a parser-interned buffer or a static
+// literal (canonical Ivy type names are normalized to their `_t` form).
+
+#pragma ivy cnumber
+export module ast;
+
+// A resolved type: canonical base name plus const/unsigned/reference/pointer
+// qualifiers. `base` is "" when no type could be parsed.
+export struct AType {
+    const char* base;
+    long is_unsigned;
+    long is_const;
+    long is_ref;
+    long ptr_depth;
+};
+
+// An `[[ivy::name(args)]]` attribute. `args` is the argument list already
+// joined with ", " (as `dumpAttrs` prints it); `has_args` distinguishes an
+// empty argument list from no argument list.
+export struct AAttr {
+    const char* name;
+    const char* args;
+    long has_args;
+};
+
+// A function parameter: type, optional name, and attributes.
+export struct AParam {
+    AType type;
+    const char* name;
+    AAttr* attrs;
+    long nattrs;
+};
+
+// A top-level function declaration or definition.
+export struct AFunction {
+    AAttr* attrs;
+    long nattrs;
+    AType ret;
+    const char* name;
+    AParam* params;
+    long nparams;
+    long is_extern_c;
+    long has_body;
+};

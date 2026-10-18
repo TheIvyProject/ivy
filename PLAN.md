@@ -159,6 +159,13 @@ src/                              selfhost/
   98 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
   gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
   hoàn tất.
+- H3.1 (Declaration): port parser + dump AST byte-identical trên
+  `selfhost/corpus/parser/decl/` (15 file) so với `ivy --ast` (khai báo hàm:
+  định nghĩa `{}`, prototype `;`, `extern "C"` (đơn và block), `constexpr`,
+  `fn ... -> T;`, variadic `...`, tham số ẩn danh, `lifetime<...>` (biến thể
+  `fn` trailing), kiểu C-style dưới `#pragma ivy cnumber`, trả về con trỏ,
+  `unsigned`/`const`; gồm 2 file chẩn đoán C-style type/`char`). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
 
 ---
 
@@ -193,7 +200,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ☐ |
+| H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ✅ byte-identical 15 files |
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ☐ |
 | H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ☐ |
 | H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ☐ |

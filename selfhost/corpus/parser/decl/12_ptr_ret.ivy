@@ -1,0 +1,2 @@
+int32* p();
+const char* s(uint8* buf);

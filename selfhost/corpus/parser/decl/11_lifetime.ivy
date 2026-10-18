@@ -1,0 +1,1 @@
+lifetime<$a> fn f() -> const int32& $a;

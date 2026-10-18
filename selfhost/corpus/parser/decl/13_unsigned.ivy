@@ -1,0 +1,2 @@
+const uint32 f();
+uint64 g(uint16 a, const long b);
