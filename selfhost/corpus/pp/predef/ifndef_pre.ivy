@@ -1,0 +1,5 @@
+#ifndef __cplusplus
+no
+#else
+yes
+#endif

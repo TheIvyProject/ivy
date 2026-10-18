@@ -1,0 +1,3 @@
+#if __cplusplus >= 202302L
+modern
+#endif

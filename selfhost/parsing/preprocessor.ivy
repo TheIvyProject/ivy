@@ -16,11 +16,17 @@
 //         and function-like). Synthetic lexemes (pasted/stringified text) are
 //         stored in a unified text arena that also holds a copy of the source,
 //         so the printer and macro-name lookups read them uniformly.
+//   H2.5: predefined macros (`__LINE__`/`__FILE__` context-sensitive;
+//         `__cplusplus`/`__ivy__`/`__DATE__`/`__TIME__` object-like at 0:0),
+//         `#pragma ivy cnumber`, unknown-pragma / redefine-predefined /
+//         #undef-predefined diagnostics, and the pp diagnostics stream
+//         (emitted by the driver, gates the token dump on failure). Predefined
+//         body tokens live in an extended copy of the input token buffer.
 //
-// Still H2.5+: `#pragma`, predefined macros, `#line`, `#error`/`#warning`,
-// `#include`, and the pp diagnostics stream. The corpus (selfhost/corpus/pp/*)
-// avoids those. An unrecognized directive is emitted verbatim (`#` + rest of
-// the line, object-like macros expanded), exactly as the C++ generic path does.
+// Still H2.6+: `#line`, `#error`/`#warning`, `#include`, and the remaining pp
+// diagnostics. The corpus (selfhost/corpus/pp/*) avoids those. An unrecognized
+// directive is emitted verbatim (`#` + rest of the line, object-like macros
+// expanded), exactly as the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
 // line/col of the body token; substituted arguments keep the *call-site*
@@ -102,19 +108,42 @@ export struct Preprocessor {
     long next_;     // out-param: index after a consumed directive/invocation
     bool cnumber_;
     bool has_error_;
+    long in_cap_;     // capacity of in_ (input tokens + synthetic body tokens)
+    long xt_n_;       // cursor for synthetic body tokens appended to in_
+    char* file_;      // copy of the main file path (for `__FILE__`)
+    long file_len_;
+    char* dtxt_;      // diagnostic message text arena
+    long dtxt_cap_;
+    long dtxt_n_;
+    long* dline_;
+    long* dcol_;
+    long* dtoff_;
+    long* dtlen_;
+    long* dwarn_;
+    long dcap_;
+    long dn_;
 
     void setup(Token* input, long in_count, char* src, long src_len,
-               long out_cap, long macro_cap) {
-        this.in_ = input;
+               char* path, long path_len, long out_cap, long macro_cap) {
         this.in_n_ = in_count;
+        this.in_cap_ = in_count + 256;
+        this.xt_n_ = in_count;
         // Unified text arena: a copy of the original source at offset 0
         // (so all input token offsets stay valid), followed by appended
         // synthetic lexemes produced by `#` stringify and `##` paste.
         this.arena_cap_ = src_len + 1048576;
+        this.file_len_ = path_len;
         unsafe {
             this.src_ = (char*) __ivy_alloc(this.arena_cap_);
             __ivy_memcpy(this.src_, src, (unsigned long long)src_len);
             this.src_[src_len] = 0;
+            // Extended token buffer: the input tokens followed by room for
+            // synthetic macro-body tokens (predefined macros' bodies).
+            this.in_ = (Token*) __ivy_alloc(this.in_cap_ * 32);
+            __ivy_memcpy(this.in_, input, (unsigned long long)(in_count * 32));
+            this.file_ = (char*) __ivy_alloc(path_len + 1);
+            __ivy_memcpy(this.file_, path, (unsigned long long)path_len);
+            this.file_[path_len] = 0;
             this.out_ = (Token*) __ivy_alloc(out_cap * 32);
             this.macros_ = (MacroRec*) __ivy_alloc(macro_cap * 64);
             this.stack_ = (long*) __ivy_alloc(macro_cap * 16);
@@ -122,6 +151,12 @@ export struct Preprocessor {
             this.param_len_ = (long*) __ivy_alloc(8192 * 8);
             this.conds_ = (CondRec*) __ivy_alloc(256 * 32);
             this.ex_ = (ETok*) __ivy_alloc(65536 * 32);
+            this.dtxt_ = (char*) __ivy_alloc(65536);
+            this.dline_ = (long*) __ivy_alloc(256 * 8);
+            this.dcol_ = (long*) __ivy_alloc(256 * 8);
+            this.dtoff_ = (long*) __ivy_alloc(256 * 8);
+            this.dtlen_ = (long*) __ivy_alloc(256 * 8);
+            this.dwarn_ = (long*) __ivy_alloc(256 * 8);
         }
         this.src_n_ = src_len;
         unsafe {
@@ -143,6 +178,10 @@ export struct Preprocessor {
         this.next_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
+        this.dtxt_cap_ = 65536;
+        this.dtxt_n_ = 0;
+        this.dcap_ = 256;
+        this.dn_ = 0;
     }
 
     Token* output() {
@@ -169,7 +208,51 @@ export struct Preprocessor {
             __ivy_free(this.conds_);
             __ivy_free(this.ex_);
             __ivy_free(this.src_);
+            __ivy_free(this.in_);
+            __ivy_free(this.file_);
+            __ivy_free(this.dtxt_);
+            __ivy_free(this.dline_);
+            __ivy_free(this.dcol_);
+            __ivy_free(this.dtoff_);
+            __ivy_free(this.dtlen_);
+            __ivy_free(this.dwarn_);
         }
+    }
+
+    // Append the decimal digits of `v` (non-negative) to the arena,
+    // NUL-terminated, returning the offset. Used for `__LINE__`.
+    long syn_put_int(long v) {
+        long start = this.src_n_;
+        if (start + 24 > this.arena_cap_) {
+            return 0;
+        }
+        long d = 0;
+        long x = v;
+        if (v == 0) {
+            unsafe {
+                this.src_[start] = '0';
+            }
+            d = 1;
+        } else {
+            long y = v;
+            while (y > 0) {
+                d = d + 1;
+                y = y / 10;
+            }
+            long i = d;
+            while (i > 0) {
+                i = i - 1;
+                unsafe {
+                    this.src_[start + i] = (char)(48 + (x % 10));
+                }
+                x = x / 10;
+            }
+        }
+        unsafe {
+            this.src_[start + d] = 0;
+        }
+        this.src_n_ = start + d;
+        return start;
     }
 
     // Append `n` bytes to the arena (NUL-terminated), returning the offset.
@@ -346,6 +429,175 @@ export struct Preprocessor {
         return i;
     }
 
+    // Length of a NUL-terminated C string (string literal or arena slice).
+    long cstr_len(const char* s) {
+        unsafe {
+            long n = 0;
+            while (s[n] != 0) {
+                n = n + 1;
+            }
+            return n;
+        }
+        return 0;
+    }
+
+    // Append a synthetic token to the extended input buffer, returning its
+    // index. Used to give predefined macros a body not present in the source.
+    long append_token(const char* kind, int line, int col, long off, long len) {
+        if (this.xt_n_ >= this.in_cap_) {
+            return this.in_n_;
+        }
+        long idx = this.xt_n_;
+        unsafe {
+            this.in_[idx].kind = (char*)kind;
+            this.in_[idx].line = line;
+            this.in_[idx].col = col;
+            this.in_[idx].off = off;
+            this.in_[idx].len = len;
+        }
+        this.xt_n_ = this.xt_n_ + 1;
+        return idx;
+    }
+
+    // Register an object-like predefined macro whose body is a single token
+    // of kind `kind` and lexeme `lex`, positioned at 0:0 (as the C++ oracle
+    // does for __cplusplus / __ivy__ / __DATE__ / __TIME__).
+    void register_predefined(const char* name, const char* kind, const char* lex) {
+        long nl = this.cstr_len(name);
+        long ll = this.cstr_len(lex);
+        long noff = 0;
+        long loff = 0;
+        unsafe {
+            noff = this.syn_puts((char*)name, nl);
+            loff = this.syn_puts((char*)lex, ll);
+        }
+        long bidx = this.append_token(kind, 0, 0, loff, ll);
+        this.register_macro(noff, nl, bidx, 1, 0, 0, false, false);
+    }
+
+    // The six predefined macro names (C++ `isPredefined`).
+    bool is_predefined(long off, long len) {
+        return this.lexeme_eq(off, len, "__LINE__") ||
+               this.lexeme_eq(off, len, "__FILE__") ||
+               this.lexeme_eq(off, len, "__DATE__") ||
+               this.lexeme_eq(off, len, "__TIME__") ||
+               this.lexeme_eq(off, len, "__cplusplus") ||
+               this.lexeme_eq(off, len, "__ivy__");
+    }
+
+    long int_digits(long v) {
+        if (v == 0) {
+            return 1;
+        }
+        long d = 0;
+        while (v > 0) {
+            d = d + 1;
+            v = v / 10;
+        }
+        return d;
+    }
+
+    // Expand the context-sensitive predefined macros `__LINE__`/`__FILE__`
+    // (the others are ordinary object-like macros in the table). Returns true
+    // when `t` was expanded into out_.
+    bool try_expand_predefined(Token t) {
+        if (!this.kind_eq(t, "identifier")) {
+            return false;
+        }
+        if (this.lexeme_eq(t.off, t.len, "__LINE__")) {
+            long off = this.syn_put_int(t.line);
+            this.out_push_raw("integer", t.line, t.col, off, this.int_digits(t.line));
+            return true;
+        }
+        if (this.lexeme_eq(t.off, t.len, "__FILE__")) {
+            long qoff = 0;
+            unsafe {
+                qoff = this.syn_puts((char*)"\"", 1);
+                this.syn_puts(this.file_, this.file_len_);
+                this.syn_puts((char*)"\"", 1);
+            }
+            this.out_push_raw("string", t.line, t.col, qoff, this.file_len_ + 2);
+            return true;
+        }
+        return false;
+    }
+
+    // --- diagnostics ------------------------------------------------------
+
+    // Record a diagnostic whose message is `prefix` + the arena slice
+    // [aoff, aoff+alen). A negative `aoff` means no suffix.
+    void diag_add(long line, long col, const char* prefix, long aoff, long alen,
+                  bool warn) {
+        if (this.dn_ >= this.dcap_) {
+            return;
+        }
+        long off = this.dtxt_n_;
+        long n = this.cstr_len(prefix);
+        if (aoff < 0) {
+            alen = 0;
+        }
+        if (off + n + alen + 1 > this.dtxt_cap_) {
+            return;
+        }
+        unsafe {
+            long i = 0;
+            while (i < n) {
+                this.dtxt_[off + i] = prefix[i];
+                i = i + 1;
+            }
+            long j = 0;
+            while (j < alen) {
+                this.dtxt_[off + n + j] = this.src_[aoff + j];
+                j = j + 1;
+            }
+            this.dtxt_[off + n + alen] = 0;
+        }
+        this.dtxt_n_ = off + n + alen + 1;
+        long idx = this.dn_;
+        unsafe {
+            this.dline_[idx] = line;
+            this.dcol_[idx] = col;
+            this.dtoff_[idx] = off;
+            this.dtlen_[idx] = n + alen;
+            this.dwarn_[idx] = warn ? 1 : 0;
+        }
+        this.dn_ = this.dn_ + 1;
+    }
+
+    long diag_count() {
+        return this.dn_;
+    }
+
+    int diag_line(long i) {
+        unsafe {
+            return (int)this.dline_[i];
+        }
+        return 0;
+    }
+
+    int diag_col(long i) {
+        unsafe {
+            return (int)this.dcol_[i];
+        }
+        return 0;
+    }
+
+    long diag_warn(long i) {
+        unsafe {
+            return this.dwarn_[i];
+        }
+        return 0;
+    }
+
+    char* diag_msg(long i) {
+        unsafe {
+            return this.dtxt_ + this.dtoff_[i];
+        }
+        unsafe {
+            return (char*)0;
+        }
+    }
+
     void register_param(long off, long len) {
         if (this.param_n_ >= this.param_cap_) {
             return;
@@ -430,6 +682,10 @@ export struct Preprocessor {
                 return;
             }
             if (this.kind_eq(t, "identifier")) {
+                if (this.try_expand_predefined(t)) {
+                    i = i + 1;
+                    continue;
+                }
                 long mi = this.find_macro(t.off, t.len);
                 if (mi >= 0) {
                     long is_fn = 0;
@@ -1155,7 +1411,13 @@ export struct Preprocessor {
                 unsafe {
                     nt = this.in_[p];
                 }
-                this.erase_macro(this.find_macro(nt.off, nt.len));
+                if (this.is_predefined(nt.off, nt.len)) {
+                    this.diag_add(nt.line, nt.col,
+                                  "cannot #undef predefined macro: ",
+                                  nt.off, nt.len, false);
+                } else {
+                    this.erase_macro(this.find_macro(nt.off, nt.len));
+                }
             }
             this.next_ = this.line_end(pos);
             return true;
@@ -1225,7 +1487,8 @@ export struct Preprocessor {
                 unsafe {
                     nt = this.in_[p];
                 }
-                bool def = this.find_macro(nt.off, nt.len) >= 0;
+                bool def = this.find_macro(nt.off, nt.len) >= 0 ||
+                           this.is_predefined(nt.off, nt.len);
                 cond = is_ifdef ? def : !def;
             } else {
                 this.has_error_ = true;
@@ -1273,6 +1536,50 @@ export struct Preprocessor {
             return true;
         }
         this.cond_n_ = this.cond_n_ - 1;
+        return true;
+    }
+
+    // Mirrors Preprocessor::parsePragma. `pos` points at `#`. Processed even
+    // when inactive (a pragma flag persists regardless of conditional state).
+    // Unknown pragmas always warn; `#pragma ivy cnumber` only sets the flag
+    // when active.
+    bool parse_pragma(long pos) {
+        if (!this.dir_is(pos, "pragma")) {
+            return false;
+        }
+        long e = this.line_end(pos);
+        long q = pos + 2;
+        long nargs = e - q;
+        bool recognized = false;
+        if (nargs >= 2) {
+            Token a0;
+            Token a1;
+            unsafe {
+                a0 = this.in_[q];
+                a1 = this.in_[q + 1];
+            }
+            if (this.lexeme_eq(a0.off, a0.len, "ivy") &&
+                this.lexeme_eq(a1.off, a1.len, "cnumber")) {
+                recognized = true;
+                if (this.active()) {
+                    this.cnumber_ = true;
+                }
+            }
+        }
+        if (!recognized) {
+            long hl = this.tok_line(pos);
+            long hc = this.tok_col(pos);
+            long aoff = -1;
+            long alen = 0;
+            if (nargs >= 1) {
+                unsafe {
+                    aoff = this.in_[q].off;
+                    alen = this.in_[q].len;
+                }
+            }
+            this.diag_add(hl, hc, "unknown #pragma: ", aoff, alen, false);
+        }
+        this.next_ = e;
         return true;
     }
 
@@ -1713,7 +2020,8 @@ export struct Preprocessor {
                 unsafe {
                     nt = this.in_[j];
                 }
-                bool def = this.find_macro(nt.off, nt.len) >= 0;
+                bool def = this.find_macro(nt.off, nt.len) >= 0 ||
+                           this.is_predefined(nt.off, nt.len);
                 j = j + 1;
                 if (have_paren) {
                     if (j >= ee || !this.kat(this.in_, j, ")")) {
@@ -1807,6 +2115,19 @@ export struct Preprocessor {
             return true;
         }
 
+        // Predefined macros cannot be redefined by the user.
+        if (this.is_predefined(name_off, name_len)) {
+            this.diag_add(name_line, name_col,
+                          "cannot redefine predefined macro: ",
+                          name_off, name_len, false);
+            long q2 = p;
+            while (q2 < this.in_n_ && !this.tok_eof(q2) && this.tok_line(q2) == hline) {
+                q2 = q2 + 1;
+            }
+            this.next_ = q2;
+            return true;
+        }
+
         // Function-like detection: `(` immediately after the name (no
         // whitespace) ? column adjacency (lexer dropped the trivia).
         bool function_like = false;
@@ -1895,6 +2216,9 @@ export struct Preprocessor {
             this.out_push(t);
             return;
         }
+        if (this.try_expand_predefined(t)) {
+            return;
+        }
         long mi = this.find_macro(t.off, t.len);
         if (mi < 0) {
             this.out_push(t);
@@ -1915,6 +2239,10 @@ export struct Preprocessor {
     void step(long i) {
         Token t = this.at(i);
         if (this.kind_eq(t, "identifier")) {
+            if (this.try_expand_predefined(t)) {
+                this.next_ = i + 1;
+                return;
+            }
             long mi = this.find_macro(t.off, t.len);
             if (mi >= 0) {
                 long is_fn = 0;
@@ -1944,6 +2272,14 @@ export struct Preprocessor {
         this.ex_pos_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
+        this.dn_ = 0;
+        this.dtxt_n_ = 0;
+        // Register the predefined object-like macros (bodies at 0:0). The
+        // context-sensitive `__LINE__`/`__FILE__` are handled separately.
+        this.register_predefined("__cplusplus", "integer", "202302L");
+        this.register_predefined("__ivy__", "integer", "202604L");
+        this.register_predefined("__DATE__", "string", "\"\"");
+        this.register_predefined("__TIME__", "string", "\"\"");
         long i = 0;
         while (i < this.in_n_ && !this.tok_eof(i)) {
             Token t = this.at(i);
@@ -1956,6 +2292,11 @@ export struct Preprocessor {
                 // Conditionals are processed even when inactive so nesting is
                 // tracked and the right branch is picked on #else/#endif.
                 if (this.parse_conditional(before)) {
+                    i = this.next_;
+                    continue;
+                }
+                // Pragmas are processed even when inactive.
+                if (this.parse_pragma(before)) {
                     i = this.next_;
                     continue;
                 }

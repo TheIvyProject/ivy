@@ -134,6 +134,13 @@ src/                              selfhost/
   printer và tra cứu tên macro đọc thống nhất. Corpus `selfhost/corpus/pp/expand/`
   (16 file). Lệnh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/expand -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
+- H2.5: cùng port + driver; oracle `--tokens`. Predefined macros (`__LINE__`/
+  `__FILE__` ngữ cảnh; `__cplusplus`/`__ivy__`/`__DATE__`/`__TIME__` object-like
+  tại 0:0), `#pragma ivy cnumber`, và chẩn đoán unknown-pragma / redefine /
+  #undef predefined. Body của predefined nằm trong bản sao mở rộng của mảng
+  token đầu vào; chẩn đoán do driver in ra và chặn dump token khi lỗi. Corpus
+  `selfhost/corpus/pp/predef/` (20 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/predef -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
 - Gate tầng H1 (H1.1–H1.6): port lex byte-identical toàn bộ token stream trên
   98 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
   gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
@@ -164,7 +171,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H2.2 | `#define` function-like + variadic | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_fn` | ✅ byte-identical 12 files |
 | H2.3 | Conditional (`#if/#ifdef/#elif/#else`) | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/cond` | ✅ byte-identical 16 files |
 | H2.4 | Macro expansion / paste / stringify | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/expand` | ✅ byte-identical 16 files |
-| H2.5 | `#pragma`, predefined macros | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/pragma` | ☐ |
+| H2.5 | `#pragma`, predefined macros | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/predef` | ✅ byte-identical 20 files |
 | H2.6 | `#line`, `#error`, `#warning` | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/line` | ☐ |
 | H2.7 | E4: từ chối `#include` trong `.ivy` | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/no_include` | ☐ |
 

@@ -1,0 +1,3 @@
+#if defined(__cplusplus) && defined(__LINE__) && defined(__DATE__)
+ok
+#endif

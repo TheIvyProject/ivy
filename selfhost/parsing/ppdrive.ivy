@@ -89,13 +89,35 @@ void run() {
                     long in_n = lx.token_count();
                     long out_cap = in_n * 8 + 256;
                     Preprocessor pp;
-                    pp.setup(lx.tokens(), in_n, content, (long)len, out_cap, 1024);
+                    pp.setup(lx.tokens(), in_n, content, (long)len, line, (long)np,
+                             out_cap, 1024);
                     pp.run();
-                    Printer pr;
-                    pr.out = pp.output();
-                    pr.n = pp.output_count();
-                    pr.src = pp.arena();
-                    pr.show();
+                    long dc = pp.diag_count();
+                    long di = 0;
+                    bool failed = false;
+                    while (di < dc) {
+                        long w = pp.diag_warn(di);
+                        if (w == 0) {
+                            failed = true;
+                        }
+                        io::print(line);
+                        io::print(":{}", pp.diag_line(di));
+                        io::print(":{}", pp.diag_col(di));
+                        if (w != 0) {
+                            io::print(": warning: ");
+                        } else {
+                            io::print(": error: ");
+                        }
+                        io::println("{}", pp.diag_msg(di));
+                        di = di + 1;
+                    }
+                    if (!failed) {
+                        Printer pr;
+                        pr.out = pp.output();
+                        pr.n = pp.output_count();
+                        pr.src = pp.arena();
+                        pr.show();
+                    }
                     pp.release();
                 }
                 lx.release();
