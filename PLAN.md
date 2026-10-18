@@ -150,6 +150,11 @@ src/                              selfhost/
   file `.ivy` (chẩn đoán + bỏ qua dòng). Corpus `selfhost/corpus/pp/no_include/`
   (9 file). Lệnh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/no_include -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
+- Gate tầng H2 (H2.1–H2.7): toàn bộ 7 corpus pp (`define_obj` 10, `define_fn` 12,
+  `cond` 16, `expand` 16, `predef` 20, `line` 22, `no_include` 9 — tổng 105 file)
+  byte-identical với `ivy --tokens` (gồm `eof`, chẩn đoán, macro paste/stringify,
+  predefined, `#line`/`#error`/`#warning`, từ chối `#include`). Tầng preprocessor
+  hoàn tất.
 - Gate tầng H1 (H1.1–H1.6): port lex byte-identical toàn bộ token stream trên
   98 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
   gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
