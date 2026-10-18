@@ -1,0 +1,5 @@
+if(foo)bar;
+return;a+b*c;
+x::y z->w q.r;
+a[0]=b,c;
+{alpha} (beta) [gamma];

@@ -1,0 +1,696 @@
+// selfhost/parsing/lexer.ivy — Ivy self-host lexer (H1.1 ident, H1.2 number,
+// H1.3 string/char/raw, H1.4 operator/punctuation, H1.5 trivia, H1.6 errors)
+//
+// Feature-sliced port of src/parsing/lexer.cpp. H1.1 implements the
+// identifier / keyword path (isIdentStart branch) and the `$name` lifetime
+// branch, plus whitespace trivia. H1.2 adds numeric literals (dec/hex/bin/
+// float with `'` digit separators and u/U/l/L/f/F suffixes). H1.3 adds string,
+// char and raw string literals including the L/u/U/u8/R/u8R/UR/LR prefixes.
+// H1.4 adds the full longest-match operator/punctuation table and the
+// EndOfFile token. H1.5 adds comment and full-whitespace trivia. H1.6 adds
+// lexer error diagnostics (unexpected character, invalid hex/bin literals,
+// unterminated string/char/raw literals and block comments) reported in the
+// oracle format `"path":line:col: error: message`.
+//
+// Oracle: src/parsing/lexer.cpp via `ivy --lex`.
+// Harness: selfhost/difftest.ps1
+
+#pragma ivy cnumber
+export module lexer;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+
+export struct Lexer {
+    char* src_;
+    uint64 len_;
+    uint64 pos_;
+    uint32 line_;
+    uint32 col_;
+    char* path_;
+    bool quiet_;
+    bool had_error_;
+
+    void setup(char* source, uint64 len, char* path) {
+        this.src_ = source;
+        this.len_ = len;
+        this.pos_ = 0;
+        this.line_ = 1;
+        this.col_ = 1;
+        this.path_ = path;
+        this.quiet_ = false;
+        this.had_error_ = false;
+    }
+
+    // When quiet, token emission is suppressed but lexing (and thus error
+    // collection) proceeds unchanged — used for the diagnostic pre-pass.
+    void set_quiet(bool q) {
+        this.quiet_ = q;
+    }
+
+    bool had_error() {
+        return this.had_error_;
+    }
+
+    // H1.6: report a lexer diagnostic exactly like `ivy --lex`
+    // (std::filesystem::path's operator<< wraps the path in double quotes).
+    void err(uint32 line, uint32 col, const char* msg) {
+        this.had_error_ = true;
+        io::println("\"{}\":{}:{}: error: {}", this.path_, line, col, msg);
+    }
+
+    // Byte-exact compare of src_[off..off+n) with a NUL-terminated literal.
+    bool eq(uint64 off, uint64 n, const char* lit) {
+        unsafe {
+            uint64 i = 0;
+            while (i < n) {
+                if (this.src_[off + i] != lit[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return lit[n] == 0;
+        }
+        return false;
+    }
+
+    // Full C++ keyword set — mirrors keywords() in src/parsing/lexer.cpp.
+    // Early-return chain (no deep boolean expression) to keep codegen happy.
+    bool is_keyword(uint64 off, uint64 n) {
+        if (this.eq(off, n, "alignas")) return true;
+        if (this.eq(off, n, "alignof")) return true;
+        if (this.eq(off, n, "and")) return true;
+        if (this.eq(off, n, "and_eq")) return true;
+        if (this.eq(off, n, "asm")) return true;
+        if (this.eq(off, n, "auto")) return true;
+        if (this.eq(off, n, "bitand")) return true;
+        if (this.eq(off, n, "bitor")) return true;
+        if (this.eq(off, n, "bool")) return true;
+        if (this.eq(off, n, "break")) return true;
+        if (this.eq(off, n, "case")) return true;
+        if (this.eq(off, n, "catch")) return true;
+        if (this.eq(off, n, "char")) return true;
+        if (this.eq(off, n, "char8_t")) return true;
+        if (this.eq(off, n, "char16_t")) return true;
+        if (this.eq(off, n, "char32_t")) return true;
+        if (this.eq(off, n, "class")) return true;
+        if (this.eq(off, n, "compl")) return true;
+        if (this.eq(off, n, "concept")) return true;
+        if (this.eq(off, n, "const")) return true;
+        if (this.eq(off, n, "consteval")) return true;
+        if (this.eq(off, n, "constexpr")) return true;
+        if (this.eq(off, n, "constinit")) return true;
+        if (this.eq(off, n, "const_cast")) return true;
+        if (this.eq(off, n, "continue")) return true;
+        if (this.eq(off, n, "co_await")) return true;
+        if (this.eq(off, n, "co_return")) return true;
+        if (this.eq(off, n, "co_yield")) return true;
+        if (this.eq(off, n, "decltype")) return true;
+        if (this.eq(off, n, "default")) return true;
+        if (this.eq(off, n, "delete")) return true;
+        if (this.eq(off, n, "do")) return true;
+        if (this.eq(off, n, "double")) return true;
+        if (this.eq(off, n, "dynamic_cast")) return true;
+        if (this.eq(off, n, "else")) return true;
+        if (this.eq(off, n, "enum")) return true;
+        if (this.eq(off, n, "explicit")) return true;
+        if (this.eq(off, n, "export")) return true;
+        if (this.eq(off, n, "extern")) return true;
+        if (this.eq(off, n, "false")) return true;
+        if (this.eq(off, n, "float")) return true;
+        if (this.eq(off, n, "for")) return true;
+        if (this.eq(off, n, "friend")) return true;
+        if (this.eq(off, n, "goto")) return true;
+        if (this.eq(off, n, "if")) return true;
+        if (this.eq(off, n, "inline")) return true;
+        if (this.eq(off, n, "int")) return true;
+        if (this.eq(off, n, "long")) return true;
+        if (this.eq(off, n, "mutable")) return true;
+        if (this.eq(off, n, "namespace")) return true;
+        if (this.eq(off, n, "new")) return true;
+        if (this.eq(off, n, "noexcept")) return true;
+        if (this.eq(off, n, "not")) return true;
+        if (this.eq(off, n, "not_eq")) return true;
+        if (this.eq(off, n, "nullptr")) return true;
+        if (this.eq(off, n, "operator")) return true;
+        if (this.eq(off, n, "or")) return true;
+        if (this.eq(off, n, "or_eq")) return true;
+        if (this.eq(off, n, "private")) return true;
+        if (this.eq(off, n, "protected")) return true;
+        if (this.eq(off, n, "public")) return true;
+        if (this.eq(off, n, "register")) return true;
+        if (this.eq(off, n, "reinterpret_cast")) return true;
+        if (this.eq(off, n, "requires")) return true;
+        if (this.eq(off, n, "return")) return true;
+        if (this.eq(off, n, "short")) return true;
+        if (this.eq(off, n, "signed")) return true;
+        if (this.eq(off, n, "sizeof")) return true;
+        if (this.eq(off, n, "static")) return true;
+        if (this.eq(off, n, "static_assert")) return true;
+        if (this.eq(off, n, "static_cast")) return true;
+        if (this.eq(off, n, "struct")) return true;
+        if (this.eq(off, n, "switch")) return true;
+        if (this.eq(off, n, "template")) return true;
+        if (this.eq(off, n, "this")) return true;
+        if (this.eq(off, n, "thread_local")) return true;
+        if (this.eq(off, n, "throw")) return true;
+        if (this.eq(off, n, "true")) return true;
+        if (this.eq(off, n, "try")) return true;
+        if (this.eq(off, n, "typedef")) return true;
+        if (this.eq(off, n, "typeid")) return true;
+        if (this.eq(off, n, "typename")) return true;
+        if (this.eq(off, n, "union")) return true;
+        if (this.eq(off, n, "unsigned")) return true;
+        if (this.eq(off, n, "using")) return true;
+        if (this.eq(off, n, "virtual")) return true;
+        if (this.eq(off, n, "void")) return true;
+        if (this.eq(off, n, "volatile")) return true;
+        if (this.eq(off, n, "wchar_t")) return true;
+        if (this.eq(off, n, "while")) return true;
+        if (this.eq(off, n, "xor")) return true;
+        if (this.eq(off, n, "xor_eq")) return true;
+        // Ivy additions.
+        if (this.eq(off, n, "final")) return true;
+        if (this.eq(off, n, "override")) return true;
+        if (this.eq(off, n, "unsafe")) return true;
+        if (this.eq(off, n, "fn")) return true;
+        if (this.eq(off, n, "lifetime")) return true;
+        if (this.eq(off, n, "nextcase")) return true;
+        if (this.eq(off, n, "import")) return true;
+        if (this.eq(off, n, "module")) return true;
+        if (this.eq(off, n, "cpp")) return true;
+        // Ivy builtin types (no _t suffix).
+        if (this.eq(off, n, "int8")) return true;
+        if (this.eq(off, n, "int16")) return true;
+        if (this.eq(off, n, "int32")) return true;
+        if (this.eq(off, n, "int64")) return true;
+        if (this.eq(off, n, "uint8")) return true;
+        if (this.eq(off, n, "uint16")) return true;
+        if (this.eq(off, n, "uint32")) return true;
+        if (this.eq(off, n, "uint64")) return true;
+        if (this.eq(off, n, "int128")) return true;
+        if (this.eq(off, n, "uint128")) return true;
+        if (this.eq(off, n, "float16")) return true;
+        if (this.eq(off, n, "float32")) return true;
+        if (this.eq(off, n, "float64")) return true;
+        if (this.eq(off, n, "float128")) return true;
+        if (this.eq(off, n, "bfloat16")) return true;
+        if (this.eq(off, n, "iptr")) return true;
+        if (this.eq(off, n, "uptr")) return true;
+        if (this.eq(off, n, "size")) return true;
+        // Legacy _t-suffixed names (backward-compat aliases).
+        if (this.eq(off, n, "int8_t")) return true;
+        if (this.eq(off, n, "int16_t")) return true;
+        if (this.eq(off, n, "int32_t")) return true;
+        if (this.eq(off, n, "int64_t")) return true;
+        if (this.eq(off, n, "uint8_t")) return true;
+        if (this.eq(off, n, "uint16_t")) return true;
+        if (this.eq(off, n, "uint32_t")) return true;
+        if (this.eq(off, n, "uint64_t")) return true;
+        if (this.eq(off, n, "float16_t")) return true;
+        if (this.eq(off, n, "float32_t")) return true;
+        if (this.eq(off, n, "float64_t")) return true;
+        if (this.eq(off, n, "float128_t")) return true;
+        if (this.eq(off, n, "bfloat16_t")) return true;
+        if (this.eq(off, n, "size_t")) return true;
+        if (this.eq(off, n, "ptrdiff_t")) return true;
+        if (this.eq(off, n, "nullptr_t")) return true;
+        if (this.eq(off, n, "max_align_t")) return true;
+        if (this.eq(off, n, "nullopt")) return true;
+        return false;
+    }
+
+    char peek(uint64 n) {
+        unsafe {
+            uint64 i = this.pos_ + n;
+            if (i < this.len_) {
+                return this.src_[i];
+            }
+        }
+        return 0;
+    }
+
+    // Absolute byte read (used to re-read raw-string delimiters already passed).
+    char byte_at(uint64 off) {
+        unsafe {
+            if (off < this.len_) {
+                return this.src_[off];
+            }
+        }
+        return 0;
+    }
+
+    // True when src_[pos_..] starts with the NUL-terminated literal `lit`
+    // (mirrors std::string_view::starts_with on the remainder of the source).
+    bool starts_with(const char* lit) {
+        unsafe {
+            uint64 i = 0;
+            while (lit[i] != 0) {
+                if (this.pos_ + i >= this.len_) {
+                    return false;
+                }
+                if (this.src_[this.pos_ + i] != lit[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    char advance() {
+        unsafe {
+            char c = this.src_[this.pos_];
+            this.pos_ = this.pos_ + 1;
+            if (c == 10) {
+                this.line_ = this.line_ + 1;
+                this.col_ = 1;
+            } else {
+                this.col_ = this.col_ + 1;
+            }
+            return c;
+        }
+        return 0;
+    }
+
+    bool is_ident_start(char c) {
+        if (c == '_') return true;
+        if (c >= 'a' && c <= 'z') return true;
+        if (c >= 'A' && c <= 'Z') return true;
+        return false;
+    }
+
+    bool is_ident_continue(char c) {
+        if (this.is_ident_start(c)) return true;
+        if (c >= '0' && c <= '9') return true;
+        return false;
+    }
+
+    bool is_digit(char c) {
+        if (c >= '0' && c <= '9') return true;
+        return false;
+    }
+
+    bool is_hex_digit(char c) {
+        if (this.is_digit(c)) return true;
+        if (c >= 'a' && c <= 'f') return true;
+        if (c >= 'A' && c <= 'F') return true;
+        return false;
+    }
+
+    bool is_bin_digit(char c) {
+        if (c == '0' || c == '1') return true;
+        return false;
+    }
+
+    // Integer/float suffixes (u, U, l, L, f, F) — matches isIntegerSuffixChar.
+    bool is_int_suffix(char c) {
+        if (c == 'u' || c == 'U' || c == 'l' || c == 'L') return true;
+        if (c == 'f' || c == 'F') return true;
+        return false;
+    }
+
+    // H1.3: literal prefixes — mirror src/parsing/lexer.cpp.
+    // Raw string prefixes (R"delim(...)delim", u8R"(...)", ...).
+    bool is_raw_string_prefix(uint64 off, uint64 n) {
+        if (this.eq(off, n, "R")) return true;
+        if (this.eq(off, n, "u8R")) return true;
+        if (this.eq(off, n, "uR")) return true;
+        if (this.eq(off, n, "UR")) return true;
+        if (this.eq(off, n, "LR")) return true;
+        return false;
+    }
+
+    // String/char literal prefixes: L (wchar_t), u (char16_t), U (char32_t),
+    // u8 (UTF-8 bytes).
+    bool is_string_prefix(uint64 off, uint64 n) {
+        if (this.eq(off, n, "L")) return true;
+        if (this.eq(off, n, "u")) return true;
+        if (this.eq(off, n, "U")) return true;
+        if (this.eq(off, n, "u8")) return true;
+        return false;
+    }
+
+    // H1.5 trivia: whitespace (space, tab, CR, VT, FF, LF) and comments
+    // (// line, /* block */). Mirrors Lexer::skipTrivia, including the H1.6
+    // "unterminated block comment" diagnostic at the comment's start.
+    void skip_trivia() {
+        while (this.pos_ < this.len_) {
+            char c = this.peek(0);
+            // 11 = '\v', 12 = '\f' (kept numeric to avoid escape dependencies).
+            if (c == ' ' || c == '\t' || c == '\r' || c == 11 || c == 12 || c == '\n') {
+                this.advance();
+                continue;
+            }
+            if (c == '/' && this.peek(1) == '/') {
+                while (this.peek(0) != '\n' && this.peek(0) != 0) {
+                    this.advance();
+                }
+                continue;
+            }
+            if (c == '/' && this.peek(1) == '*') {
+                uint32 start_line = this.line_;
+                uint32 start_col = this.col_;
+                this.advance();
+                this.advance();
+                bool closed = false;
+                while (this.peek(0) != 0) {
+                    if (this.peek(0) == '*' && this.peek(1) == '/') {
+                        this.advance();
+                        this.advance();
+                        closed = true;
+                        break;
+                    }
+                    this.advance();
+                }
+                if (!closed) {
+                    this.err(start_line, start_col, "unterminated block comment");
+                }
+                continue;
+            }
+            break;
+        }
+    }
+
+    // H1.2: numeric literal — mirrors Lexer::lexNumber in src/parsing/lexer.cpp.
+    // Classification (integer vs float) and the exact consumed extent must match
+    // the C++ oracle byte for byte. H1.6 adds the invalid hex/bin diagnostics.
+    void lex_number(uint32 line, uint32 col) {
+        uint64 start = this.pos_;
+        bool is_float = false;
+        if (this.peek(0) == '0' && (this.peek(1) == 'x' || this.peek(1) == 'X')) {
+            this.advance();
+            this.advance();
+            bool any = false;
+            while (this.is_hex_digit(this.peek(0)) || this.peek(0) == '\'') {
+                if (this.peek(0) != '\'') {
+                    any = true;
+                }
+                this.advance();
+            }
+            if (!any) {
+                this.err(line, col, "invalid hexadecimal literal: expected hex digits after '0x'");
+            }
+        } else if (this.peek(0) == '0' && (this.peek(1) == 'b' || this.peek(1) == 'B')) {
+            this.advance();
+            this.advance();
+            bool any = false;
+            while (this.is_bin_digit(this.peek(0)) || this.peek(0) == '\'') {
+                if (this.peek(0) != '\'') {
+                    any = true;
+                }
+                this.advance();
+            }
+            if (!any) {
+                this.err(line, col, "invalid binary literal: expected binary digits after '0b'");
+            }
+        } else {
+            while (this.is_digit(this.peek(0)) || this.peek(0) == '\'') {
+                this.advance();
+            }
+            // A '.' followed by another '.' is an ellipsis, not a fraction.
+            if (this.peek(0) == '.' && this.peek(1) != '.') {
+                is_float = true;
+                this.advance();
+                while (this.is_digit(this.peek(0)) || this.peek(0) == '\'') {
+                    this.advance();
+                }
+            }
+            if ((this.peek(0) == 'e' || this.peek(0) == 'E') &&
+                (this.is_digit(this.peek(1)) ||
+                 ((this.peek(1) == '+' || this.peek(1) == '-') &&
+                  this.is_digit(this.peek(2))))) {
+                is_float = true;
+                this.advance();
+                if (this.peek(0) == '+' || this.peek(0) == '-') {
+                    this.advance();
+                }
+                while (this.is_digit(this.peek(0)) || this.peek(0) == '\'') {
+                    this.advance();
+                }
+            }
+        }
+        while (this.is_int_suffix(this.peek(0))) {
+            if (this.peek(0) == 'f' || this.peek(0) == 'F') {
+                is_float = true;
+            }
+            this.advance();
+        }
+        if (is_float) {
+            this.emit(line, col, "float", start, this.pos_ - start);
+        } else {
+            this.emit(line, col, "integer", start, this.pos_ - start);
+        }
+    }
+
+    // H1.3: string literal — mirrors Lexer::lexStringLiteral. `start` may point
+    // at a prefix (L, u, U, u8); pos_ is at the opening '"'. Newline and EOF end
+    // the token without consuming the newline; escapes skip their next byte.
+    void lex_string_literal(uint64 start, uint32 line, uint32 col) {
+        this.advance();  // opening '"'
+        while (true) {
+            char c = this.peek(0);
+            if (c == 0 || c == '\n') {
+                this.err(line, col, "unterminated string literal");
+                break;
+            }
+            this.advance();
+            if (c == '"') {
+                break;
+            }
+            if (c == '\\' && this.peek(0) != 0) {
+                this.advance();
+            }
+        }
+        this.emit(line, col, "string", start, this.pos_ - start);
+    }
+
+    // H1.3: char literal — mirrors Lexer::lexCharLiteral.
+    void lex_char_literal(uint64 start, uint32 line, uint32 col) {
+        this.advance();  // opening '\''
+        while (true) {
+            char c = this.peek(0);
+            if (c == 0 || c == '\n') {
+                this.err(line, col, "unterminated character literal");
+                break;
+            }
+            this.advance();
+            if (c == '\'') {
+                break;
+            }
+            if (c == '\\' && this.peek(0) != 0) {
+                this.advance();
+            }
+        }
+        this.emit(line, col, "char", start, this.pos_ - start);
+    }
+
+    // True when src_[pos_..] begins with the raw-string closer: ')' + delim + '"'.
+    bool raw_closer_match(uint64 delim_start, uint64 delim_len) {
+        if (this.peek(0) != ')') {
+            return false;
+        }
+        uint64 i = 0;
+        while (i < delim_len) {
+            if (this.peek(1 + i) != this.byte_at(delim_start + i)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        if (this.peek(1 + delim_len) != '"') {
+            return false;
+        }
+        return true;
+    }
+
+    // H1.3: raw string literal — mirrors Lexer::lexRawString. `start` points at
+    // the R / u8R / uR / UR / LR prefix; pos_ is at the opening '"'.
+    void lex_raw_string(uint64 start, uint32 line, uint32 col) {
+        this.advance();  // opening '"'
+        uint64 delim_start = this.pos_;
+        while (this.peek(0) != '(' && this.peek(0) != 0 && this.peek(0) != '\n') {
+            this.advance();
+        }
+        if (this.peek(0) != '(') {
+            this.err(line, col, "unterminated raw string literal");
+            this.emit(line, col, "string", start, this.pos_ - start);
+            return;
+        }
+        uint64 delim_len = this.pos_ - delim_start;
+        this.advance();  // '('
+        bool closed = false;
+        while (this.pos_ < this.len_) {
+            if (this.raw_closer_match(delim_start, delim_len)) {
+                uint64 i = 0;
+                while (i < delim_len + 2) {
+                    this.advance();
+                    i = i + 1;
+                }
+                closed = true;
+                break;
+            }
+            this.advance();
+        }
+        if (!closed) {
+            this.err(line, col, "unterminated raw string literal");
+        }
+        this.emit(line, col, "string", start, this.pos_ - start);
+    }
+
+    // H1.4: try to match one operator/punctuation token at pos_. On success,
+    // consume `len` bytes and emit; the emitted kind name is the operator text
+    // itself (see tokenKindName in src/parsing/token.h).
+    bool try_operator(uint64 start, uint32 line, uint32 col, const char* text, uint64 len) {
+        if (this.starts_with(text)) {
+            uint64 i = 0;
+            while (i < len) {
+                this.advance();
+                i = i + 1;
+            }
+            this.emit(line, col, text, start, len);
+            return true;
+        }
+        return false;
+    }
+
+    // H1.4: longest-match-first operator scan — same order as kOperators in
+    // src/parsing/lexer.cpp. Returns false when no operator matches.
+    bool lex_operator(uint64 start, uint32 line, uint32 col) {
+        if (this.try_operator(start, line, col, "...", 3)) return true;
+        if (this.try_operator(start, line, col, "<<=", 3)) return true;
+        if (this.try_operator(start, line, col, ">>=", 3)) return true;
+        if (this.try_operator(start, line, col, "<<", 2)) return true;
+        if (this.try_operator(start, line, col, ">>", 2)) return true;
+        if (this.try_operator(start, line, col, "+=", 2)) return true;
+        if (this.try_operator(start, line, col, "-=", 2)) return true;
+        if (this.try_operator(start, line, col, "*=", 2)) return true;
+        if (this.try_operator(start, line, col, "/=", 2)) return true;
+        if (this.try_operator(start, line, col, "%=", 2)) return true;
+        if (this.try_operator(start, line, col, "&=", 2)) return true;
+        if (this.try_operator(start, line, col, "|=", 2)) return true;
+        if (this.try_operator(start, line, col, "^=", 2)) return true;
+        if (this.try_operator(start, line, col, "++", 2)) return true;
+        if (this.try_operator(start, line, col, "--", 2)) return true;
+        if (this.try_operator(start, line, col, "->*", 3)) return true;
+        if (this.try_operator(start, line, col, "->", 2)) return true;
+        if (this.try_operator(start, line, col, "<=", 2)) return true;
+        if (this.try_operator(start, line, col, ">=", 2)) return true;
+        if (this.try_operator(start, line, col, "==", 2)) return true;
+        if (this.try_operator(start, line, col, "!=", 2)) return true;
+        if (this.try_operator(start, line, col, "&&", 2)) return true;
+        if (this.try_operator(start, line, col, "||", 2)) return true;
+        if (this.try_operator(start, line, col, "::", 2)) return true;
+        if (this.try_operator(start, line, col, ".*", 2)) return true;
+        if (this.try_operator(start, line, col, "+", 1)) return true;
+        if (this.try_operator(start, line, col, "-", 1)) return true;
+        if (this.try_operator(start, line, col, "*", 1)) return true;
+        if (this.try_operator(start, line, col, "/", 1)) return true;
+        if (this.try_operator(start, line, col, "%", 1)) return true;
+        if (this.try_operator(start, line, col, "=", 1)) return true;
+        if (this.try_operator(start, line, col, "<", 1)) return true;
+        if (this.try_operator(start, line, col, ">", 1)) return true;
+        if (this.try_operator(start, line, col, "!", 1)) return true;
+        if (this.try_operator(start, line, col, "~", 1)) return true;
+        if (this.try_operator(start, line, col, "&", 1)) return true;
+        if (this.try_operator(start, line, col, "|", 1)) return true;
+        if (this.try_operator(start, line, col, "^", 1)) return true;
+        if (this.try_operator(start, line, col, "?", 1)) return true;
+        if (this.try_operator(start, line, col, ":", 1)) return true;
+        if (this.try_operator(start, line, col, ";", 1)) return true;
+        if (this.try_operator(start, line, col, ",", 1)) return true;
+        if (this.try_operator(start, line, col, "(", 1)) return true;
+        if (this.try_operator(start, line, col, ")", 1)) return true;
+        if (this.try_operator(start, line, col, "{", 1)) return true;
+        if (this.try_operator(start, line, col, "}", 1)) return true;
+        if (this.try_operator(start, line, col, "[", 1)) return true;
+        if (this.try_operator(start, line, col, "]", 1)) return true;
+        if (this.try_operator(start, line, col, ".", 1)) return true;
+        if (this.try_operator(start, line, col, "##", 2)) return true;
+        if (this.try_operator(start, line, col, "#", 1)) return true;
+        return false;
+    }
+
+    // Print one token in `ivy --lex` format: line:col<TAB>kind<TAB>'lexeme'.
+    // Suppressed in quiet mode (diagnostic pre-pass).
+    void emit(uint32 line, uint32 col, const char* kind, uint64 off, uint64 n) {
+        if (this.quiet_) {
+            return;
+        }
+        unsafe {
+            char* buf = (char*)__ivy_alloc(n + 1);
+            __ivy_memcpy(buf, this.src_ + off, n);
+            buf[n] = 0;
+            io::print("{}:{}\t", line, col);
+            io::print(kind);
+            io::print("\t'");
+            io::print(buf);
+            io::println("'");
+            __ivy_free(buf);
+        }
+    }
+
+    // `ivy --lex` prints the EndOfFile token as `line:col<TAB>eof` with no
+    // lexeme and no trailing newline; we emit it once after the token stream.
+    void emit_eof() {
+        if (this.quiet_) {
+            return;
+        }
+        io::print("{}:{}\t", this.line_, this.col_);
+        io::println("eof");
+    }
+
+    void dump() {
+        while (this.pos_ < this.len_) {
+            this.skip_trivia();
+            if (this.pos_ >= this.len_) {
+                break;
+            }
+            uint32 line = this.line_;
+            uint32 col = this.col_;
+            uint64 start = this.pos_;
+            char c = this.peek(0);
+            if (c == '$' && this.is_ident_start(this.peek(1))) {
+                this.advance();
+                while (this.is_ident_continue(this.peek(0))) {
+                    this.advance();
+                }
+                this.emit(line, col, "lifetime", start, this.pos_ - start);
+            } else if (this.is_ident_start(c)) {
+                while (this.is_ident_continue(this.peek(0))) {
+                    this.advance();
+                }
+                uint64 n = this.pos_ - start;
+                if (this.is_raw_string_prefix(start, n) && this.peek(0) == '"') {
+                    this.lex_raw_string(start, line, col);
+                } else if (this.is_string_prefix(start, n) &&
+                           (this.peek(0) == '"' || this.peek(0) == '\'')) {
+                    if (this.peek(0) == '"') {
+                        this.lex_string_literal(start, line, col);
+                    } else {
+                        this.lex_char_literal(start, line, col);
+                    }
+                } else if (this.is_keyword(start, n)) {
+                    this.emit(line, col, "keyword", start, n);
+                } else {
+                    this.emit(line, col, "identifier", start, n);
+                }
+            } else if (this.is_digit(c) || (c == '.' && this.is_digit(this.peek(1)))) {
+                this.lex_number(line, col);
+            } else if (c == '"') {
+                this.lex_string_literal(start, line, col);
+            } else if (c == '\'') {
+                this.lex_char_literal(start, line, col);
+            } else {
+                if (!this.lex_operator(start, line, col)) {
+                    // H1.6: no token matched — report and skip one byte
+                    // (mirrors Lexer::lexToken's errorAt + advance).
+                    this.err(line, col, "unexpected character");
+                    this.advance();
+                }
+            }
+        }
+        this.emit_eof();
+    }
+};

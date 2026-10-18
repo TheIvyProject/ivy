@@ -1,0 +1,6 @@
+// full line comment
+alpha // trailing comment
+// contains "string" and 'c' and 123 and /* not nested
+beta
+//
+gamma

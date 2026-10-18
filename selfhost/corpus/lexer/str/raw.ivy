@@ -1,0 +1,6 @@
+R"(raw string)" R"delim(...)delim" u8R"(u8 raw)" uR"(u raw)" UR"(U raw)" LR"(L raw)"
+R"(with "quotes" and \ backslash)" R"a(...)a" R"(contr); R"b(x)b"
+R"(has // comment and /* block */ inside)"
+R"(multi
+line
+raw)"

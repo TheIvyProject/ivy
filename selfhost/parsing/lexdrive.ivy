@@ -1,0 +1,53 @@
+// selfhost/parsing/lexdrive.ivy — H1.x differential-test driver.
+//
+// Reads file paths from stdin (one per line), lexes each with the Ivy lexer
+// port and prints `=== path ===` + the lexed tokens, matching the `ivy --lex`
+// oracle format. For sources with lex errors it prints only the diagnostics
+// (H1.6), mirroring `ivy --lex`. Used by selfhost/difftest.ps1.
+//
+// All raw-pointer work lives in one `unsafe` block (Ivy forbids raw pointer
+// parameters on free functions, and raw locals/indices outside unsafe).
+
+#pragma ivy cnumber
+import lexer;
+
+extern "C" void __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+void run() {
+    while (true) {
+        unsafe {
+            char* line = io::read_line();
+            if (line == (char*)0) {
+                break;
+            }
+            uint64 n = __ivy_strlen(line);
+            if (n > 0 && line[n - 1] == 13) {
+                line[n - 1] = 0;  // strip trailing CR (read_line strips LF only)
+            }
+            io::println("=== {} ===", line);
+            char* content = io::read_file(line);
+            if (content != (char*)0) {
+                uint64 len = __ivy_strlen(content);
+                Lexer lx;
+                // H1.6: diagnostic pre-pass. If the source lexes clean we then
+                // re-run to emit the token stream; otherwise the oracle prints
+                // only diagnostics (and exits non-zero) with no token dump.
+                lx.setup(content, len, line);
+                lx.set_quiet(true);
+                lx.dump();
+                if (!lx.had_error()) {
+                    lx.setup(content, len, line);
+                    lx.dump();
+                }
+                __ivy_free(content);
+            }
+            __ivy_free(line);
+        }
+    }
+}
+
+int32 main() {
+    run();
+    return 0;
+}

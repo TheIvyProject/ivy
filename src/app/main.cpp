@@ -845,8 +845,8 @@ int run(const std::filesystem::path& path, bool showTokens, bool showLex, bool s
     }
     if (failed) return 1;
 
-    // F1.1: Raw lexer dump for differential testing of the Ivy lexer port
-    // (bootstrap/lexer.ivy). Same line format as --tokens, but the tokens
+    // Raw lexer dump for differential testing of the Ivy lexer port
+    // (selfhost/parsing/lexer.ivy). Same line format as --tokens, but the tokens
     // are pre-preprocessor (directives visible) and EOF carries the lexer's
     // own position (not the preprocessor's 0:0).
     if (showLex) {

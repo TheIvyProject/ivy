@@ -1,0 +1,8 @@
+int32 foo bar
+uint64 baz _qux
+float32 zed
+int8 int16 int64 uint8
+size iptr uptr
+double integer notakeyword
+my_int32 int32x _int32
+int3232 double2 truex

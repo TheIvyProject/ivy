@@ -1,361 +1,236 @@
-# Kế hoạch phát triển Ivy 0.1 — Ngôn ngữ độc lập
+# Kế hoạch Ivy 0.5 — Self-hosting theo tính năng (cây đối xứng)
 
-- **Trạng thái**: Active — chuyển đổi từ C++ subset sang ngôn ngữ độc lập
-- **Cập nhật**: 2026-09-10
+- **Trạng thái**: Active — self-host 0.5; dừng hướng module-first
+- **Cập nhật**: 2026-10-17
 - **Người tạo**: User + AI
+- **Tiền đề**: [OLD_PLAN1.md](file:///d:/project/Ivy/ivyc/OLD_PLAN1.md) (0.1 — syntax độc lập, ✅)
 
 ---
 
-## Mục tiêu
+## 1. Vì sao đổi phương pháp
 
-Ivy 0.1 là phiên bản đầu tiên của Ivy với tư cách là một **ngôn ngữ lập trình
-độc lập**, không còn là "safe C++ subset". Tài liệu này kế hoạch hóa việc
-chuyển đổi từ trình biên dịch hiện tại (đã hoàn thành Giai đoạn 1–9 của
-[OLD_PLAN.md](file:///d:/project/Ivy/ivyc/OLD_PLAN.md)) sang ngôn ngữ Ivy độc
-lập được mô tả trong [docs/](file:///d:/project/Ivy/ivyc/docs/) và
-[spec/](file:///d:/project/Ivy/ivyc/spec/).
+Giai đoạn 0.1 đã xong: syntax độc lập, compiler C++ + CRT/libc
+(chi tiết ở [OLD_PLAN1.md](file:///d:/project/Ivy/ivyc/OLD_PLAN1.md)).
 
-### Tóm tắt thay đổi cốt lõi
+Lần port self-host đầu tiên (`bootstrap/lexmod.ivy`, `ppmod.ivy`) làm theo
+**module-first**: viết trọn một module rồi so output end-to-end. Ba vấn đề:
 
-| Khía cạnh | Hiện tại (C++ subset) | Ivy 0.1 (độc lập) |
-|-----------|----------------------|-------------------|
-| **Tên type** | `int32_t`, `uint32_t`, `float32_t`... | `int32`, `uint32`, `float32`... (bỏ suffix `_t`). `_t` variant giờ báo error, dùng `import cpp` cho tương thích C++ |
-| **C-style types** | `#pragma ivy cnumber` gate | Giữ — Ivy dùng chung ABI với C, `#pragma` cần cho `extern "C"` và system interop |
-| **Unsafe** | `[[ivy::unsafe]] { }` | `unsafe { }` (keyword, không phải attribute) |
-| **Move** | `std::move(a)` (chưa triển khai) | `move(a)` (builtin, không cần `std::`) |
-| **Lifetime** | `[[ivy::lt(a)]]` (chưa triển khai) | `lifetime<$a>` + `const T& $a x` (syntax native) |
-| **Entry point** | `main()` + CRT `_start` | `ivy_main()` + CRT `_start` (không tự viết `_start`) |
-| **Import** | `#include <ivy.h>` | `import ivy.io` (module system) |
-| **Function syntax** | `int32_t add(...)` | `int32 add(...)` hoặc `fn add(...) -> int32` |
-| **Trailing return** | Không có | `fn name(params) -> Type { }` |
-| **Switch fallthrough** | `break` enforcement | `nextcase` / `nextcase label;` (C3-inspired) |
-| **Null** | `nullptr` (chỉ unsafe) | `nullptr` (chỉ unsafe); safe dùng `ivy::optional<T>` |
-| **Error handling** | Không có | `ivy::expected<T, E>` (không try/catch) |
+1. **Đơn vị quá lớn** — module ~1000–3000 dòng; khi lệch chỉ thấy "output khác
+   ở dòng N", không khoanh vùng được tính năng nào hỏng.
+2. **Hai nguồn sự thật tồn tại lâu** — bản C++ và bản Ivy song song, không có
+   cơ chế kiểm chứng ở mức đơn vị nên khó tin bản port.
+3. **Không dogfood sớm** — phải xong cả tầng mới có giá trị sử dụng.
+
+**Quyết định**: bỏ hướng module-first và cây `bootstrap/`. Chuyển sang
+**feature-first + cây đối xứng**: port theo *tính năng*, mỗi bên nằm ở vị trí
+đối xứng để đối chiếu cơ học.
 
 ---
 
-## Hiện trạng tổng quan (2026-09-10)
+## 2. Nguyên tắc
 
-### Trình biên dịch đã hoàn thành (Giai đoạn 1–9)
+| # | Nguyên tắc | Nội dung |
+|---|-----------|----------|
+| P1 | **Feature-sliced** | Đơn vị công việc = **1 tính năng**, không phải 1 module. Mỗi tính năng có corpus + oracle + tiêu chí "xong" riêng |
+| P2 | **Layer-sequenced** | Thứ tự theo phụ thuộc tầng: lexer → preprocessor → parser → HIR → MIR/interp → codegen → driver. Không nhảy tầng |
+| P3 | **Symmetric tree** | `src/<path>` ↔ `selfhost/<path>`, ánh xạ 1:1 để đối chiếu. Mirror là **bản đồ điều hướng**, không phải nghĩa vụ 1:1 (spec 0.5 bỏ/teo một số phần, ví dụ preprocessor) |
+| P4 | **Oracle mức tính năng** | Diff ở mức đơn vị qua dump shim mỏng `extern "C"`, **không** bind STL/class C++ |
+| P5 | **Byte-identical gate** | Mỗi tầng xong phải pass `difftest` end-to-end byte-identical với baseline C++ |
+| P6 | **Freeze baseline** | Đóng băng compiler C++ (oracle) tại một tag trong suốt quá trình port |
+| P7 | **Spec-first** | Port theo [spec/ivy05.md](file:///d:/project/Ivy/ivyc/spec/ivy05.md), không port theo code C++ |
+| P8 | **Strangler + dogfood** | Tính năng/tầng nào xong thì thay vào binary thật (sau cờ), chạy suite qua nhánh Ivy, rồi xóa bản C++ tương ứng |
 
-Xem chi tiết trong [OLD_PLAN.md](file:///d:/project/Ivy/ivyc/OLD_PLAN.md). Tóm tắt:
+---
 
-| Thành phần | Trạng thái | Ghi chú |
-|-----------|-----------|---------|
-| Lexer | ✅ | Token stream đầy đủ; raw string, char escape, string prefix |
-| Preprocessor | ✅ | `#include`, `#define`, conditional, `#pragma`, `#`/`##` |
-| Parser | ✅ | AST đầy đủ; template, concept, module, inheritance |
-| HIR | ✅ | Type check, name resolution, constexpr folding, template instantiation |
-| MIR | ✅ | CFG lowering, lifetime annotation |
-| Interpreter | ✅ | IvyInterpret v0.2 (MIR-based, `--run`) |
-| Codegen | ✅ | LLVM IR emitter; Itanium/MSVC ABI mangling |
-| Linking | ✅ | Object file emission + linker invocation |
-| Modules | ✅ | `.ivm` binary interface, `export module` / `import` |
+## 3. Cấu trúc cây đối xứng
 
-### Khoảng cách giữa compiler hiện tại và spec Ivy 0.1
-
-Tài liệu trong `docs/` mô tả ngôn ngữ Ivy độc lập. Trình biên dịch hiện tại chưa
-triển khai một số cú pháp mới. Dưới đây là bản đồ khoảng cách:
-
-```mermaid
-flowchart TD
-    subgraph Current["Compiler hiện tại (C++ subset)"]
-        A["Type: int32_t, uint32_t..."]
-        B["Unsafe: [[ivy::unsafe]]"]
-        C["Move: std::move (chưa có)"]
-        D["Lifetime: [[ivy::lt]] (chưa có)"]
-        E["Main: int main()"]
-        F["Include: #include <ivy.h>"]
-        G["Switch: break-only"]
-    end
-
-    subgraph Target["Ivy 0.1 (độc lập)"]
-        A2["Type: int32, uint32..."]
-        B2["Unsafe: unsafe { }"]
-        C2["Move: move(a)"]
-        D2["Lifetime: lifetime<$a>"]
-        E2["Main: ivy_main()"]
-        F2["Import: import ivy.io"]
-        G2["Switch: nextcase"]
-    end
-
-    A -->|"Bỏ _t suffix"| A2
-    B -->|"Attribute → keyword"| B2
-    C -->|"std::move → move"| C2
-    D -->|"Attribute → native generic"| D2
-    E -->|"CRT → own runtime"| E2
-    F -->|"Preprocessor → module"| F2
-    G -->|"Thêm nextcase"| G2
-
-    style Current fill:#fff3e0,color:#e65100
-    style Target fill:#c8e6c9,color:#1a5e20
+```
+src/                              selfhost/
+  parsing/lexer.cpp            ↔    parsing/lexer.ivy
+  parsing/preprocessor.cpp     ↔    parsing/preprocessor.ivy
+  parsing/parser.cpp           ↔    parsing/parser.ivy
+  parsing/ast.h                ↔    parsing/ast.ivy
+  parsing/token.h              ↔    parsing/token.ivy
+  parsing/module_io.cpp        ↔    parsing/module_io.ivy
+  hir/hir.h                    ↔    hir/hir.ivy
+  hir/hir_builder.cpp          ↔    hir/hir_builder.ivy
+  mir/mir.h                    ↔    mir/mir.ivy
+  mir/mir_builder.cpp          ↔    mir/mir_builder.ivy
+  mir/interpreter.cpp          ↔    mir/interpreter.ivy
+  codegen/codegen.cpp          ↔    codegen/codegen.ivy
+  app/main.cpp                 ↔    app/main.ivy
+  common/diagnostic.h          ↔    common/diagnostic.ivy
 ```
 
----
-
-## Lộ trình Ivy 0.1
-
-### Giai đoạn A — Cú pháp ngôn ngữ độc lập (core syntax migration)
-
-Đây là bước đầu tiên: thay đổi cú pháp lexer/parser để nhận diện ngôn ngữ Ivy
-mới. Mỗi task có thể làm độc lập, không phá vỡ backward-compat cho đến khi
-migration hoàn tất.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| A1 ✅| **Đổi tên type bỏ `_t` suffix** | ★★ | Lexer: thêm `int8`/`int16`/`int32`/`int64`/`uint8`/`uint16`/`uint32`/`uint64`/`float16`/`float32`/`float64`/`float128`/`bfloat16`/`int128`/`uint128`/`iptr`/`uptr`/`size` làm keyword. HIR/Codegen: map type mới → LLVM type (giống `_t` cũ). E3: `_t` variant giờ báo error, dùng `import cpp` cho tương thích C++. Theo [Basic_Types.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Basic_Types.md) |
-| A2 ✅| **`unsafe` keyword block** | ★ | Lexer: thêm `unsafe` làm keyword. Parser: `unsafe { }` → parse như compound statement, set flag `inUnsafeBlock`. Thay thế `[[ivy::unsafe]] { }` (giữ attribute form làm alias tạm thời). HIR: `requireUnsafe()` check cả hai dạng. Theo [Unsafe_and_Casts.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Unsafe_and_Casts.md) |
-| A3 ✅| **`fn` keyword + trailing return type** | ★★ | Parser: `fn name(params) -> Type { body }` — new function declaration form. Dùng chung `parseFunction` với flag `isTrailingReturn`. `auto` cho return type vẫn dùng được (deduction). Theo [Functions.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Functions.md) |
-| A4 ✅| **`move()` builtin** | ★★ | Parser: nhận diện `move(expr)` như builtin function call (không cần `#include`). HIR: `move(a)` → mark `a` as moved-out, kiểm tra use-after-move ở compile-time. MIR: track move state. Theo [Ownership_Model.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Ownership_Model.md) |
-| A5 ✅| **`lifetime<$a>` syntax** | ★★★ | Lexer: nhận diện `$identifier` làm lifetime variable token. Parser: `lifetime<$a, $b>` declaration + `const T& $a x` annotation. HIR: lifetime constraint check (return lifetime phải thỏa). MIR: borrow checker (aliasing XOR mutability). Theo [Borrowing_and_Lifetimes.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Borrowing_and_Lifetimes.md) |
-| A6 ✅| **`nextcase` statement** | ★★ | Parser: `nextcase;` (unlabeled) + `nextcase LABEL;` (labeled) + `switch LABEL: { }` (labeled switch). MIR: jump to next/target case entry point. RAII: dtor cleanup case-local vars trước khi jump. Theo [Statements.md](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/Statements.md) |
-| A7 ✅| **`import cpp` directive** | ★★ | Mở rộng module system (9.2): `import cpp <header>` hoặc `import cpp "file"`. Discovery: tìm Clang/GCC/MSVC trên host. Compile C++ header → object, link. Safety tier classification (safe/unsafe/unknown). Theo [Cpp_Interoperability.md](file:///d:/project/Ivy/ivyc/docs/Interoperability/Cpp_Interoperability.md) |
-
-### Giai đoạn B — Ownership & Safety system
-
-Triển khai hệ thống an toàn memory đầy đủ — trái tim của Ivy.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| B1 ✅ | **Borrow Checker (aliasing XOR mutability)** | ★★★★ | MIR: track mọi borrow (mutable/immutable) per variable. Rule: nhiều `const T&` OK, chỉ 1 `T&`, không trộn. Error: "cannot borrow mutably while immutably borrowed". Phân tích CFG để xác định borrow scope end. Theo [ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md) §3 |
-| B2 ✅ | **Lifetime verification** | ★★★★ | Dựa trên A5. MIR: mỗi reference có lifetime tag. Check: reference không outlive data. Function return ref → lifetime phải thỏa. Dangling reference detection. Theo [ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md) §3.4 |
-| B3 ✅ | **Move semantics + use-after-move check** | ★★★ | Dựa trên A4. MIR: variable state tracking (initialized / moved-out). Read moved-out → compile error. Reassign → re-initialize. `move()` trên rvalue → OK. Theo [ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md) §2.4 |
-| B4 ✅ | **Null safety enforcement** | ★★ | Safe zone: `nullptr` forbidden, raw pointer forbidden. Dùng `ivy::optional<T>` thay thế. Unsafe: `nullptr` + `nullptr_t` OK. Parser/HIR: cấm `nullptr` literal ngoài `unsafe { }`. Theo [ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md) §4 |
-| B5 ✅ | **`ivy::expected<T, E>`** | ★★★ | Stdlib type: `struct expected { T value; E error; bool hasValue; }`. Hỗ trợ return value-or-error. Pattern: `if (result.hasValue) { } else { }`. Thay thế try/catch hoàn toàn. Theo [Null_and_Error_Handling.md](file:///d:/project/Ivy/ivyc/docs/Ownership/Null_and_Error_Handling.md) |
-| B6 ✅ | **`ivy::optional<T>`** | ★★ | Stdlib type: `struct optional { bool hasValue; T value; }`. `ivy::nullopt` constant. Hỗ trợ `hasValue` check. Thay thế nullable pointer trong safe zone |
-
-### Giai đoạn C — Runtime & linkage (học theo Rust)
-
-Ivy 0.1 **không tự viết lại C Runtime**. Cách tiếp cận giống Rust: dùng CRT có
-sẵn của nền tảng, tĩnh hóa khi cần, chỉ tự viết **lớp wrapper** an toàn bên trên.
-
-> **Bài học từ Rust**: Ngay cả Rust — ngôn ngữ an toàn memory nhất — vẫn link
-> CRT mặc định (glibc/Linux, ucrt/Windows, libSystem/macOS). Rust chỉ tự triển
-> khai khi ở chế độ `#![no_std]` (bare-metal/embedded). Ivy 0.1 là ngôn ngữ
-> ứng dụng, không phải OS/firmware → **dùng CRT, không tự viết lại**.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| C1 ✅ | **`ivy_main()` entry point** | ★★ | Codegen: `mangleFunction` rename user `main` → `ivy_main`, sinh C `main()` wrapper gọi `ivy_main()`. `void main()` → auto return 0. `int32 main()` → forward exit code. `std/start.ivy` (Zig-style runtime entry spec). Interpreter: gọi `main` trên MIR. **Không** tự emit `_start` (giao cho CRT) |
-| C2 ✅ | **Memory allocator dùng libc** | ★★ | `libivyrt` dùng `malloc`/`free` của libc bên trong, nhưng ** expose Ivy-safe API** (`__ivy_alloc`/`__ivy_free`). Arena layer (bump alloc) phía trên cho temporary. Không reimplement `malloc` — chỉ wrap. Tương tự `std::alloc::System` của Rust. Codegen: `new`→`@__ivy_alloc`, `delete`→`@__ivy_free`, emit inline IR wrappers (null-safe free). Interpreter: `__ivy_alloc`/`__ivy_free` builtins (malloc/free alias). `lib/ivyrt.h` + `std/alloc.ivy` |
-| C3 ✅ | **io::print()`/`format()` type-safe** | ★★ | `io::print()` / `io::println()` — type-aware wrapper. Dùng `write` syscall (POSIX) hoặc `WriteFile` (Windows) bên dưới, **không** dùng `printf` trực tiếp. Format string `{}` placeholder. Interpreter: built-in. Tự viết format logic (an toàn), chỉ ủy thác I/O raw cho OS/CRT. Triển khai đầy đủ theo `docs/Standard_Modules/IO.md` |
-| C4 ✅ | **Static CRT linking (tùy chọn)** | ★★ | CLI flag `--crt-static`: link CRT tĩnh (như Rust `crt-static`). Linux: link `libc.a` thay vì `libc.so`. Windows: link `libcmt` thay vì `msvcrt`. Mặc định: dynamic link (như Rust). Target bare-metal sau này: `#![no_std]` tương đương |
-| C5 ✅ | **Ivy runtime library (`libivyrt`)** | ★★ | `libivyrt` — precompiled static lib: allocator (wrap libc), print/format, panic, string ops cơ bản. Link mặc định. Viết bằng C (bootstrap) hoặc Ivy (sau self-host). **Dùng libc bên trong, nhưng user code không gọi libc trực tiếp** |
-
-### Giai đoạn D — Standard library
-
-Stdlib viết bằng Ivy, đủ để viết app thực dụng.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| D1 ✅ | **`ivy::string`** | ★★★ | Owned string, UTF-8. Methods: `len()`, `empty()`, `append()`, `concat()`, `substr()`, `==`/`!=`. RAII (auto free). Move semantics. Theo OLD_PLAN.md §10.4 |
-| D2 ✅ | **`ivy::vector<T>`** | ★★★ | Dynamic array. Methods: `push()`, `pop()`, `len()`, `[]` (bounds-checked), `iter()`. RAII. Move semantics. Bounds check inline → `__ivy_panic` nếu out-of-range (skip trong unsafe) |
-| D3 ✅ | **`ivy::slice<T>`** | ★★ | View vào array/vector, không own. Bounds-checked. Thay raw pointer + length. `T[N]` array → `slice<T>` khi pass to function |
-| D4 ✅ | **`ivy::unique_ptr<T>`** | ★★★ | RAII smart pointer. Move-only (không copy). `*` deref (chỉ unsafe hoặc qua safe accessor). Auto free tại scope-exit. Dựa trên B3 move semantics |
-| D5 ✅ | **`ivy::hash_map<K,V>` / `ivy::hash_set<T>`** | ★★★ | Hash table. `[]` access, `insert()`, `contains()`, `remove()`. Iterator support. Linear probing hoặc robin hood |
-| D6 ✅ | **`ivy::io` module** | ★★ | `io::print()`, `io::println()`, `io::eprint()`, `io::read_line()`. Stdout/stderr/stdin. File I/O: `io::File`, `io::read_file()`, `io::write_file()` |
-| D7 ✅ | **`ivy::math` module** | ★ | Math functions: `abs()`, `min()`, `max()`, `sqrt()`, `sin()`, `cos()`, `pow()`, `floor()`, `ceil()`. Constexpr-friendly |
-
-### Giai đoạn E — Loại bỏ C++ legacy
-
-Sau khi stdlib đủ, loại bỏ các C++ legacy features.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| E2 ✅ | **Loại bỏ `[[ivy::unsafe]]` attribute** | ★ | Sau A2 ổn định: xóa attribute form, chỉ giữ `unsafe { }` keyword. Error nếu gặp `[[ivy::unsafe]]` |
-| E3 ✅ | **Loại bỏ `_t` suffix type** | ★ | Sau A1 migration: xóa `int32_t`/`uint32_t`/etc. Chỉ giữ `int32`/`uint32`/etc. Error nếu gặp `_t` variant. `import cpp` vẫn cho phép `cpp::std::int32_t` cho tương thích C++ |
-| E4 ✅ | **Preprocessor → module-only** | ★★★ | Ivy code: chỉ dùng `import`, không `#include`. Preprocessor chỉ cho FFI/macro trong `unsafe`. `#include` cấm trong `.ivy` file (chỉ `.cpp` legacy). Theo OLD_PLAN.md §10.3 |
-| E5 ✅ | **Loại bỏ `.cpp` extension support** | ★ | CLI: chỉ nhận `.ivy`. `.cpp`/`.cc`/`.cxx`/`.c` → error "use .ivy extension". (`ivy migrate file.cpp` auto-convert — task G4, chưa làm) |
-
-### Giai đoạn F — Self-hosting (track Ivy 0.5)
-
-Mốc cuối: Ivy tự biên dịch chính nó. Binary duy nhất là `ivy`
-(Zig-style; công cụ sau này là subcommand, không tách binary mới).
-
-Điều kiện tiên quyết (đã chốt trước khi port):
-1. **Đóng băng syntax core** từ giai đoạn E — tới 0.5 chỉ thêm, không đổi.
-2. **Spec 0.5 draft (F0) trước** — port theo spec, không port theo code C++.
-3. **Test suite xanh** — sửa hết test fail tồn đọng (`concept_fail`,
-   `designated_init`, `using`, `template_deduction`) để có baseline đối chiếu.
-4. **Backend vẫn LLVM** (gọi qua C-API, như Zig) — không viết native backend ở 0.5.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| F0 ✅ | **Ivy 0.5 spec draft** | ★★ | `spec/ivy05.md`: syntax grammar (EBNF), type system, ownership/borrow, ABI, versioning. `spec/` gỡ khỏi `.gitignore` (được track). `types.md`/`ownership.md` update 0.5. `__ivy__ = 202604L` predefined macro + test |
-| F1.1 ✅ | **Port lexer sang Ivy** | ★★ | `bootstrap/lexmod.ivy` + `lexdrive.ivy` (module + driver). Xong khi: byte-identical với `ivy --lex` (flag mới: raw lexer dump) trên 102 files. Harness: `bootstrap/difftest.ps1`. Phát hiện & sửa 4 bug compiler trong lúc port: nested `&&`/`\|\|`/`?:` PHI sai (crash backend), precedence `(a == 1 ? b : 3)` parse sai trong parens (xem `test_shortcircuit.ivy`), `alloca` trong loop body leak stack (hoist về entry — mọi biến loop-local crash past ~40K iters), diamond-import duplicate struct (dedupe ODR khi merge module) |
-| F1.2 | **Port preprocessor sang Ivy** | ★★ | `preprocessor.cpp/.h` (`#include` legacy, `#define`, conditional, `#if`, macro, `#pragma`). Xong khi: output sau preprocess khớp bản C++ (so qua `-o .i` / `--tokens`), gồm cả error E4 |
-| F1.3 | **Port parser sang Ivy** | ★★★★ | `parser.cpp/.h`, `ast.h` (file lớn nhất — ~3300 dòng). Xong khi: `--ast` dump khớp bản C++, gồm cả mọi error case (E2/E3/E4, type errors ở parse-time) |
-| F1.4 | **Port HIR sang Ivy** | ★★★★ | `hir/` (type check, name resolution, borrow/lifetime/move check, template instantiation). Xong khi: `--hir` dump + mọi diagnostic khớp bản C++ |
-| F1.5 | **Port MIR + interpreter sang Ivy** | ★★★★ | `mir_builder`, `mir.h`, `interpreter` + `interp_*`. Xong khi: `--mir` dump khớp; `--run` outputs khớp trên toàn bộ suite. Tầng này là bootstrap runner (dùng IvyInterpret để chạy compiler Ivy ở F2) |
-| F1.6 | **Port codegen sang Ivy (qua LLVM C API)** | ★★★ | `codegen.cpp/.h` gọi LLVM qua `import c <llvm-c/...>`, không dùng C++ API (tránh gánh template/STL interop). Xong khi: LLVM IR text khớp bản C++ (trừ dòng header), object link chạy đúng |
-| F1.7 | **Port CLI driver + module I/O sang Ivy** | ★★ | `app/main.cpp`, `module_io.cpp` (arg parse, `import` resolve, `.ivm` R/W, link orchestration). Xong khi: binary tự host build được chính nó — tiền đề cho F2 |
-| F2 | **Bootstrap validation + CI dogfood** | ★★★ | `ivy` biên dịch chính nó. CI chạy compiler do Ivy-built trên toàn bộ test suite — output phải khớp bản C++-built. Đây là định nghĩa "xong" của self-hosting |
-| F3 | **Port std/runtime sang Ivy** | ★★★★ | `libivyrt` (allocator, print/format, panic) + std modules viết lại bằng Ivy, bỏ phụ thuộc C++. Backend vẫn LLVM — port compiler (F1) trước, std sau (tránh deadlock: compiler Ivy cần std tối thiểu để viết) |
-
-*Quy tắc sequencing F1: làm tuần tự F1.1 → F1.7 (mỗi tầng phụ thuộc output tầng
-trước). Mỗi tầng xong phải pass differential test với bản C++-built trước khi
-sang tầng tiếp theo. Theo OLD_PLAN.md §10.5.*
-
-### Giai đoạn G — Tooling (viết bằng Ivy, sau F)
-
-Làm sau self-hosting để không viết 2 lần (C++ rồi port lại). Mọi tool viết
-trực tiếp bằng Ivy trên compiler tự host.
-
-| # | Task | Độ khó | Chi tiết triển khai |
-|---|------|--------|---------------------|
-| G1 | **`ivy fmt` — formatter** | ★★ | Auto-format Ivy code. Style guide: indent 4 spaces, `{` cùng dòng, no trailing whitespace. AST-based (không text-based) |
-| G2 | **`ivy doc` — documentation generator** | ★★ | Generate HTML docs từ `///` doc comments. Support `@param`, `@return`, `@example`. Cross-reference |
-| G3 | **LSP server** | ★★★ | Language Server Protocol. Features: go-to-definition, hover, autocomplete, diagnostics, rename refactoring. Dùng `ivy` làm backend |
-| G4 | **`ivy migrate` — auto-convert** | ★★ | Phần nợ của E5: `.cpp` → `.ivy` tự động. Rewrite đã được định nghĩa sẵn bởi E2/E3/E4: `[[ivy::unsafe]]` → `unsafe { }`, strip `_t` suffix, `#include` → `import`, rename extension |
-| G5 | **Diagnostic style riêng** | ★ | Error messages có hint sửa lỗi (gợi ý fix). Color output (terminal ANSI). Error codes (IVY-E001). Consistent format: `error[IVY-E001]: message` |
+- `src/` = tham chiếu C++ (oracle). `selfhost/` = bản port Ivy.
+- Cây `bootstrap/` (lexmod/ppmod/lexdrive/ppdrive) **gỡ bỏ** — xem H0.
+- Một số file `src/` không có mirror đối ứng vì spec 0.5 đã bỏ/teo
+  (preprocessor trong `.ivy` bị cấm `#include` theo E4). Ghi rõ trong bảng §5.
 
 ---
 
-## Thứ tự ưu tiên
+## 4. Cơ chế đối chiếu (oracle)
 
-```mermaid
-flowchart LR
-    subgraph P1["Ưu tiên 1 — Core syntax"]
-        A1["A1: Đổi tên type"]
-        A2["A2: unsafe keyword"]
-        A3["A3: fn keyword"]
-    end
+1. **Oracle**: tái dùng chế độ dump sẵn có của compiler C++ (`--lex`, `--tokens`,
+   `--ast`, `--hir`, `--mir`) và **lọc theo token/đơn vị đang port** ở harness.
+   Chỉ thêm `extern "C"` shim khi chế độ dump sẵn có không đủ độ phân giải
+   (bind class C++ là phương án cuối, không phải mặc định).
+2. **Corpus theo tính năng**: `selfhost/corpus/<tầng>/<tính năng>/*.ivy` — nhỏ,
+   nhanh, đúng chỗ. Corpus toàn cục (`examples/`, `std/`) dùng cho gate tầng.
+3. **Harness**: `selfhost/difftest.ps1` — build driver, chạy oracle + port, lọc
+   cả hai theo `-Kinds` (danh sách token-kind), rồi so byte. Driver của tính
+   năng đặt cạnh module, ví dụ `selfhost/parsing/lexdrive.ivy`.
+4. **Bảng ánh xạ** (§5) là nguồn sự thật duy nhất về tiến độ.
 
-    subgraph P2["Ưu tiên 2 — Safety system"]
-        B1["B1: Borrow checker"]
-        B3["B3: Move semantics"]
-        B4["B4: Null safety"]
-    end
+### Hiện trạng
 
-    subgraph P3["Ưu tiên 3 — Runtime (wrap CRT)"]
-        C1["C1: ivy_main() entry"]
-        C3["C3: ivy::print/format"]
-        C5["C5: libivyrt (wrap libc)"]
-    end
-
-    subgraph P4["Ưu tiên 4 — Stdlib"]
-        D1["D1: ivy::string"]
-        D2["D2: ivy::vector"]
-        D6["D6: ivy::io"]
-    end
-
-    subgraph P5["Ưu tiên 5 — Legacy removal"]
-        E2["E2: Bỏ unsafe attr"]
-        E3["E3: Bỏ _t suffix"]
-        E4["E4: Module-only"]
-    end
-
-    subgraph P6["Ưu tiên 6 — Self-host (0.5)"]
-        F0["F0: Spec 0.5 draft"]
-        F1["F1: Port compiler → Ivy"]
-        F3["F3: Port std/runtime → Ivy"]
-    end
-
-    subgraph P7["Ưu tiên 7 — Tooling (bằng Ivy)"]
-        G1["G1: ivy fmt"]
-        G3["G3: LSP server"]
-        G4["G4: ivy migrate"]
-    end
-
-    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
-
-    style P1 fill:#c8e6c9,color:#1a5e20
-    style P2 fill:#bbdefb,color:#0d47a1
-    style P3 fill:#fff3e0,color:#e65100
-    style P4 fill:#f3e5f5,color:#7b1fa2
-    style P5 fill:#ffcdd2,color:#b71c1c
-    style P6 fill:#cfd8dc,color:#263238
-    style P7 fill:#d7ccc8,color:#4e342e
-```
-
-**Nguyên tắc**: Mỗi task phải có test file trong `examples/`. Mỗi task hoàn
-thành → update checklist. Backward-compat maintained cho đến khi giai đoạn E
-loại bỏ legacy.
+- H1.1: oracle = `ivy --lex` lọc kind `identifier,keyword,lifetime`; port =
+  `selfhost/parsing/lexer.ivy` + driver `selfhost/parsing/lexdrive.ivy`;
+  corpus `selfhost/corpus/lexer/ident/` (10 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1`.
+- H1.2: cùng port + driver; oracle lọc kind `integer,float`; corpus
+  `selfhost/corpus/lexer/num/` (8 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/num -Kinds integer,float`.
+- H1.3: cùng port + driver; oracle lọc kind `string,char`; corpus
+  `selfhost/corpus/lexer/str/` (7 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/str -Kinds string,char`.
+- H1.4: cùng port + driver; oracle `-Kinds all` (so toàn bộ token stream, gồm
+  cả `eof`; cần `all` vì kind của toán tử `,` trùng dấu phân cách `-Kinds`);
+  port đã phát token `eof`. Corpus `selfhost/corpus/lexer/op/` (5 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/op -Kinds all`.
+- H1.5: cùng port + driver; oracle `-Kinds all` (comment/whitespace là trivia,
+  không sinh token — kiểm chứng qua token stream + `eof`). Corpus
+  `selfhost/corpus/lexer/trivia/` (7 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/trivia -Kinds all`.
+- H1.6: cùng port + driver; oracle `-Kinds all`. Port thêm chẩn đoán lỗi lexer
+  (unexpected character; invalid hex/bin; unterminated string/char/raw/block
+  comment) đúng định dạng oracle `"path":line:col: error: msg` và **chỉ in chẩn
+  đoán** (không in token) khi có lỗi, giống `ivy --lex`. Corpus
+  `selfhost/corpus/lexer/err/` (9 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/err -Kinds all`.
+- Gate tầng H1 (H1.1–H1.6): port lex byte-identical toàn bộ token stream trên
+  95 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
+  gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
+  hoàn tất.
 
 ---
 
-## Tiêu chí hoàn thành Ivy 0.1
+## 5. Bảng ánh xạ tiến độ
 
-1. **Cú pháp độc lập**: `int32` (không `int32_t`), `unsafe { }` (không
-   `[[ivy::unsafe]]`), `move()` (không `std::move`), `fn` keyword, `lifetime<>`.
-2. **Safety system**: Borrow checker (aliasing XOR mutability), lifetime
-   verification, use-after-move detection, null safety enforcement.
-3. **Runtime (học theo Rust)**: Dùng CRT có sẵn, không tự viết lại. `ivy_main()`
-   entry point. `libivyrt` wrap libc (allocator, print/format, panic). Static
-   link tùy chọn (`--crt-static`). User code không gọi libc trực tiếp.
-4. **Stdlib tối thiểu**: `ivy::string`, `ivy::vector<T>`, `ivy::optional<T>`,
-   `ivy::expected<T,E>`, `ivy::io`, `ivy::math` — đủ viết app thực dụng.
-5. **Module-only**: Ivy code dùng `import`, không `#include`. Preprocessor chỉ
-   cho FFI/macro trong unsafe.
+Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` ↔ `status`.
 
-Self-hosting (F) và tooling (G) thuộc Ivy 0.5, không phải 0.1.
-Phiên bản 1.0 chỉ đặt khi cam kết ổn định (semver) — 0.x được phép breaking change.
+### H1 — Lexer
 
-**Quy ước version**: 0.1 = syntax độc lập + compiler C++ + dùng CRT/libc
-(hiện tại). 0.5 = compiler tự host + std/runtime bằng Ivy (backend vẫn LLVM).
-1.0 (tương lai) = đóng băng đảm bảo ổn định.
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H1.1 | Identifier / keyword | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/ident` | ✅ byte-identical 10 files |
+| H1.2 | Numeric literal (dec/hex/bin/oct/float) | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/num` | ✅ byte-identical 8 files |
+| H1.3 | String / char / raw / prefix | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/str` | ✅ byte-identical 7 files |
+| H1.4 | Operator / punctuation | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/op` | ✅ byte-identical 5 files (full stream) |
+| H1.5 | Comment / whitespace / line | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/trivia` | ✅ byte-identical 7 files (full stream) |
+| H1.6 | Error cases | `lexer.cpp` | `parsing/lexer.ivy` | `corpus/lexer/err` | ✅ byte-identical 9 files (diagnostics only) |
 
-**Quy ước tên binary**: một binary duy nhất là `ivy` (Zig-style).
-Không còn tên `ivyc`.
+### H2 — Preprocessor (phạm vi 0.5: module-only)
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H2.1 | `#define` object-like | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_obj` | ☐ |
+| H2.2 | `#define` function-like + variadic | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_fn` | ☐ |
+| H2.3 | Conditional (`#if/#ifdef/#elif/#else`) | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/cond` | ☐ |
+| H2.4 | Macro expansion / paste / stringify | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/expand` | ☐ |
+| H2.5 | `#pragma`, predefined macros | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/pragma` | ☐ |
+| H2.6 | `#line`, `#error`, `#warning` | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/line` | ☐ |
+| H2.7 | E4: từ chối `#include` trong `.ivy` | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/no_include` | ☐ |
+
+### H3 — Parser / AST
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ☐ |
+| H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ☐ |
+| H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ☐ |
+| H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ☐ |
+| H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ☐ |
+| H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ☐ |
+| H3.7 | Error cases (E2/E3/E4) | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/err` | ☐ |
+
+### H4 — HIR
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ☐ |
+| H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ☐ |
+| H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ☐ |
+| H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ☐ |
+| H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ☐ |
+| H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ☐ |
+
+### H5 — MIR + Interpreter
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ☐ |
+| H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ☐ |
+| H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ☐ |
+| H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy` | suite `--run` | ☐ |
+
+### H6 — Codegen
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H6.1 | LLVM C API binding (`import c`) | — | `codegen/codegen.ivy` | build smoke | ☐ |
+| H6.2 | IR emitter | `codegen.cpp` | `codegen/codegen.ivy` | suite IR diff | ☐ |
+| H6.3 | Object emission | `codegen.cpp` | `codegen/codegen.ivy` | link smoke | ☐ |
+| H6.4 | Linker orchestration | `codegen.cpp` | `codegen/codegen.ivy` | e2e run | ☐ |
+
+### H7 — Driver
+
+| STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
+|-----|-----------|---------|----------|--------|-----------|
+| H7.1 | Arg parsing | `app/main.cpp` | `app/main.ivy` | CLI smoke | ☐ |
+| H7.2 | `import` resolve + search path | `app/main.cpp` | `app/main.ivy` | module suite | ☐ |
+| H7.3 | `.ivm` read/write | `module_io.cpp` | `parsing/module_io.ivy` | module I/O | ☐ |
+| H7.4 | Diagnostics | `diagnostic.h` | `common/diagnostic.ivy` | err suite | ☐ |
+
+### H8/H9 — Bootstrap & Std
+
+| STT | Tính năng | trạng thái |
+|-----|-----------|-----------|
+| H8.1 | `ivy` biên dịch chính nó (F2) | ☐ |
+| H8.2 | CI dogfood — output khớp bản C++-built | ☐ |
+| H9.1 | Port std/runtime (`libivyrt` + std) sang Ivy | ☐ |
 
 ---
 
-## Kiến trúc compiler (không đổi)
+## 6. Cổng kiểm chứng (gates)
 
-Pipeline giữ nguyên từ Giai đoạn 1–9:
+1. **Per-feature**: oracle diff xanh trên corpus của tính năng.
+2. **Per-layer**: `selfhost/difftest.ps1` end-to-end **byte-identical** với
+   baseline C++ trên suite đầy đủ.
+3. **Final**: H8 — binary do Ivy-built biên dịch chính nó và pass toàn suite.
+
+---
+
+## 7. Điều kiện tiên quyết & H0
+
+- [x] **H0.1** Gỡ hoàn toàn `bootstrap/` (đã xóa, không lưu trữ)
+- [ ] **H0.2** Freeze baseline C++ tại tag `0.5-baseline`
+- [x] **H0.3** Oracle cho lexer: tái dùng `ivy --lex` + lọc theo token-kind ở harness (chưa cần `extern "C"` shim)
+- [x] **H0.4** Dựng `selfhost/difftest.ps1` + `selfhost/corpus/`
+- [ ] **H0.5** Test suite baseline xanh
+
+---
+
+## 8. Liên kết
+
+- [OLD_PLAN1.md](file:///d:/project/Ivy/ivyc/OLD_PLAN1.md) — kế hoạch 0.1 (vừa bị thay)
+- [OLD_PLAN0.md](file:///d:/project/Ivy/ivyc/OLD_PLAN0.md) — kế hoạch gốc (Giai đoạn 1–10)
+- [spec/ivy05.md](file:///d:/project/Ivy/ivyc/spec/ivy05.md) — spec ngôn ngữ 0.5 (chuẩn port)
+- [README.md](file:///d:/project/Ivy/ivyc/README.md)
+
+**Kiến trúc pipeline (không đổi)**:
 
 ```
 Source (.ivy) → Lexer → Preprocessor → Parser → AST → HIR → MIR → LLVM IR → Native
                                                      ↘ IvyInterpret (--run)
 ```
-
-Thay đổi chỉ ở **nội dung** mỗi tầng (cú pháp mới, safety check mới, runtime
-mới), không thay đổi **kiến trúc** pipeline.
-
-### Cấu trúc source code
-
-```
-src/
-  app/main.cpp          — CLI driver
-  parsing/
-    lexer.cpp/.h        — token stream
-    preprocessor.cpp/.h — #include, #define, conditional
-    parser.cpp/.h       — AST builder
-    module_io.cpp/.h    — .ivm module interface
-    token.h             — token kinds
-    ast.h               — AST node definitions
-  hir/
-    hir.h               — HIR types
-    hir_builder.cpp/.h  — type check, name resolution, template
-  mir/
-    mir.h               — MIR types
-    mir_builder.cpp/.h  — CFG lowering, lifetime annotation
-    interpreter.cpp/.h  — IvyInterpret (--run)
-    interp_*.h          — interpreter internals
-  codegen/
-    codegen.cpp/.h      — LLVM IR emitter
-  common/
-    diagnostic.h        — error/warning system
-lib/
-  ivy.h                — stdlib header (sẽ thay bằng ivy module)
-examples/
-  test_*.ivy/.cpp      — test files
-```
-
----
-
-## Liên kết
-
-- [OLD_PLAN.md](file:///d:/project/Ivy/ivyc/OLD_PLAN.md) — kế hoạch cũ (Giai đoạn 1–10)
-- [README.md](file:///d:/project/Ivy/ivyc/README.md) — giới thiệu Ivy
-- **Spec**:
-  - [spec/types.md](file:///d:/project/Ivy/ivyc/spec/types.md) — kiểu số (cần update cho 0.1)
-  - [spec/cast.md](file:///d:/project/Ivy/ivyc/spec/cast.md) — cast operators
-  - [spec/ownership.md](file:///d:/project/Ivy/ivyc/spec/ownership.md) — ownership & borrow
-  - [spec/dropped.md](file:///d:/project/Ivy/ivyc/spec/dropped.md) — cấu trúc bị loại bỏ
-- **Docs** (ngôn ngữ độc lập):
-  - [docs/Getting_Started/](file:///d:/project/Ivy/ivyc/docs/Getting_Started/) — hello world
-  - [docs/Languag_ Fundamentals/](file:///d:/project/Ivy/ivyc/docs/Languag_%20Fundamentals/) — types, variables, functions, statements, structs, enums, modules, naming, comments
-  - [docs/Ownership/](file:///d:/project/Ivy/ivyc/docs/Ownership/) — ownership, borrowing, unsafe, null/error
-  - [docs/Generic_Programming/](file:///d:/project/Ivy/ivyc/docs/Generic_Programming/) — templates, concepts, compile-time, operators, macros
-  - [docs/Interoperability/](file:///d:/project/Ivy/ivyc/docs/Interoperability/) — C++ interop

@@ -1,0 +1,3 @@
+"a\"b" "back\\slash" "tab\tend" "newline\n"
+"\x41" "\0" "\'" "\"" "\{brace\}"
+"carriage\rreturn" "esc\a\b\f\v"

@@ -1,0 +1,20 @@
+alignas alignof and and_eq asm auto bitand
+bitor bool break case catch char char8_t
+char16_t char32_t class compl concept const consteval
+constexpr constinit const_cast continue co_await co_return co_yield
+decltype default delete do double dynamic_cast else
+enum explicit export extern false float for
+friend goto if inline int long mutable
+namespace new noexcept not not_eq nullptr operator
+or or_eq private protected public register reinterpret_cast
+requires return short signed sizeof static static_assert
+static_cast struct switch template this thread_local throw
+true try typedef typeid typename union unsigned
+using virtual void volatile wchar_t while xor
+xor_eq final override unsafe fn lifetime nextcase
+import module cpp int8 int16 int32 int64
+uint8 uint16 uint32 uint64 int128 uint128 float16
+float32 float64 float128 bfloat16 iptr uptr size
+int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t
+uint64_t float16_t float32_t float64_t float128_t bfloat16_t size_t
+ptrdiff_t nullptr_t max_align_t nullopt

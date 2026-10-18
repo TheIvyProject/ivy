@@ -1,0 +1,9 @@
+/* one line */ alpha
+/* multi
+line
+comment */ beta
+gamma /* inline */ delta
+/**/ epsilon
+/***/ zeta
+/* contains // line and "str" and 'c' */ eta
+/* a /* b */ c

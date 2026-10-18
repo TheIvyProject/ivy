@@ -1,0 +1,5 @@
+int x = 42; // comment
+/* c */ int y = /* mid */ 7;
+a /*x*/ + /*y*/ b
+"str" /* after string */ 'c'
+1 /* num */ 2
