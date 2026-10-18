@@ -1,0 +1,3 @@
+#define A A + 1
+#define B B
+A B

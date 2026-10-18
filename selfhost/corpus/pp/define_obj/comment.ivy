@@ -1,0 +1,3 @@
+#define N 5 // five
+#define M N*2 /* product */
+int z = N + M;

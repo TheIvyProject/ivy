@@ -17,6 +17,7 @@
 
 #pragma ivy cnumber
 export module lexer;
+import token;
 
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
@@ -31,6 +32,10 @@ export struct Lexer {
     char* path_;
     bool quiet_;
     bool had_error_;
+    bool collect_;
+    Token* toks_;
+    long tokcap_;
+    long tokcount_;
 
     void setup(char* source, uint64 len, char* path) {
         this.src_ = source;
@@ -41,6 +46,43 @@ export struct Lexer {
         this.path_ = path;
         this.quiet_ = false;
         this.had_error_ = false;
+        this.collect_ = false;
+        unsafe {
+            this.toks_ = (Token*)0;
+        }
+        this.tokcap_ = 0;
+        this.tokcount_ = 0;
+    }
+
+    // H2: lex the whole source into an owned Token[] (no stdout output). The
+    // buffer includes the lexer's trailing `eof` token (at the final lexer
+    // position); the preprocessor ignores it and appends its own 0:0 eof.
+    // Lexer diagnostics (H1.6) are still printed by err().
+    void lex_all(long cap) {
+        unsafe {
+            this.toks_ = (Token*) __ivy_alloc(cap * 32);
+        }
+        this.tokcap_ = cap;
+        this.tokcount_ = 0;
+        this.collect_ = true;
+        this.dump();
+        this.collect_ = false;
+    }
+
+    Token* tokens() {
+        return this.toks_;
+    }
+
+    long token_count() {
+        return this.tokcount_;
+    }
+
+    void release() {
+        unsafe {
+            if (this.toks_ != (Token*)0) {
+                __ivy_free(this.toks_);
+            }
+        }
     }
 
     // When quiet, token emission is suppressed but lexing (and thus error
@@ -613,8 +655,22 @@ export struct Lexer {
     }
 
     // Print one token in `ivy --lex` format: line:col<TAB>kind<TAB>'lexeme'.
-    // Suppressed in quiet mode (diagnostic pre-pass).
+    // In collect mode (H2) the token is appended to the owned buffer instead;
+    // in quiet mode (H1.6 pre-pass) it is dropped.
     void emit(uint32 line, uint32 col, const char* kind, uint64 off, uint64 n) {
+        if (this.collect_) {
+            unsafe {
+                if (this.tokcount_ < this.tokcap_) {
+                    this.toks_[this.tokcount_].kind = (char*)kind;
+                    this.toks_[this.tokcount_].line = (int)line;
+                    this.toks_[this.tokcount_].col = (int)col;
+                    this.toks_[this.tokcount_].off = (long)off;
+                    this.toks_[this.tokcount_].len = (long)n;
+                    this.tokcount_ = this.tokcount_ + 1;
+                }
+            }
+            return;
+        }
         if (this.quiet_) {
             return;
         }
@@ -634,6 +690,19 @@ export struct Lexer {
     // `ivy --lex` prints the EndOfFile token as `line:col<TAB>eof` with no
     // lexeme and no trailing newline; we emit it once after the token stream.
     void emit_eof() {
+        if (this.collect_) {
+            unsafe {
+                if (this.tokcount_ < this.tokcap_) {
+                    this.toks_[this.tokcount_].kind = (char*)"eof";
+                    this.toks_[this.tokcount_].line = (int)this.line_;
+                    this.toks_[this.tokcount_].col = (int)this.col_;
+                    this.toks_[this.tokcount_].off = 0;
+                    this.toks_[this.tokcount_].len = 0;
+                    this.tokcount_ = this.tokcount_ + 1;
+                }
+            }
+            return;
+        }
         if (this.quiet_) {
             return;
         }

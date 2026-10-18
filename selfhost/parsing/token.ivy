@@ -1,0 +1,58 @@
+// selfhost/parsing/token.ivy — Token model for the self-host port (H2+).
+//
+// Mirror of src/parsing/token.h at the resolution the port currently needs:
+// a token is its kind name (a stable string literal), source position, and the
+// half-open byte range [off, off+len) of its lexeme within the source buffer.
+// Macro-expanded tokens keep the definition-site position of the body token,
+// exactly like the C++ oracle (`ivy --tokens`).
+
+#pragma ivy cnumber
+export module token;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+
+// sizeof(Token): kind(8) + line(4) + col(4) + off(8) + len(8) = 32 bytes.
+export struct Token {
+    char* kind;
+    int line;
+    int col;
+    long off;
+    long len;
+};
+
+// Simple fixed-capacity heap-backed buffer of Tokens. `alloc` reserves
+// `capacity` records; `push` appends (silently dropping on overflow).
+export struct TokenBuffer {
+    Token* data;
+    long len;
+    long cap;
+
+    void alloc(long capacity) {
+        unsafe {
+            this.data = (Token*) __ivy_alloc(capacity * 32);
+        }
+        this.cap = capacity;
+        this.len = 0;
+    }
+
+    void push(char* kind, int line, int col, long off, long n) {
+        if (this.len >= this.cap) {
+            return;
+        }
+        unsafe {
+            this.data[this.len].kind = kind;
+            this.data[this.len].line = line;
+            this.data[this.len].col = col;
+            this.data[this.len].off = off;
+            this.data[this.len].len = n;
+        }
+        this.len = this.len + 1;
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.data);
+        }
+    }
+};

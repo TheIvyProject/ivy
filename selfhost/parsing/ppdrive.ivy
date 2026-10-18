@@ -1,0 +1,112 @@
+// selfhost/parsing/ppdrive.ivy — H2.x differential-test driver for the
+// preprocessor port.
+//
+// Reads file paths from stdin (one per line), lexes + preprocesses each with
+// the Ivy ports, and prints `=== path ===` + the post-preprocessor token
+// stream in the `ivy --tokens` format. Used by selfhost/difftest.ps1
+// (-Oracle --tokens -Module preprocessor -Driver ppdrive).
+
+#pragma ivy cnumber
+import token;
+import lexer;
+import preprocessor;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+bool kind_is_eof(Token t) {
+    unsafe {
+        char* k = t.kind;
+        if (k[0] != 'e') return false;
+        if (k[1] != 'o') return false;
+        if (k[2] != 'f') return false;
+        return k[3] == 0;
+    }
+    return false;
+}
+
+// Free functions cannot take raw-pointer parameters, so the printer is a
+// struct whose fields hold them.
+struct Printer {
+    Token* out;
+    long n;
+    char* src;
+
+    void show() {
+        long i = 0;
+        while (i < this.n) {
+            Token t;
+            unsafe {
+                t = this.out[i];
+            }
+            io::print("{}:{}\t", t.line, t.col);
+            io::print(t.kind);
+            if (kind_is_eof(t)) {
+                io::println("");
+                return;
+            }
+            if (t.len > 0) {
+                io::print("\t'");
+                unsafe {
+                    char* buf = (char*)__ivy_alloc(t.len + 1);
+                    __ivy_memcpy(buf, this.src + t.off, t.len);
+                    buf[t.len] = 0;
+                    io::print(buf);
+                    __ivy_free(buf);
+                }
+                io::print("'");
+            }
+            io::println("");
+            i = i + 1;
+        }
+    }
+};
+
+void run() {
+    while (true) {
+        unsafe {
+            char* line = io::read_line();
+            if (line == (char*)0) {
+                break;
+            }
+            uint64 np = __ivy_strlen(line);
+            if (np > 0 && line[np - 1] == 13) {
+                line[np - 1] = 0;  // strip trailing CR (read_line strips LF only)
+            }
+            io::println("=== {} ===", line);
+            char* content = io::read_file(line);
+            if (content != (char*)0) {
+                uint64 len = __ivy_strlen(content);
+                long cap = (long)len + 16;
+
+                Lexer lx;
+                lx.setup(content, len, line);
+                lx.lex_all(cap);
+
+                if (!lx.had_error()) {
+                    long in_n = lx.token_count();
+                    long out_cap = in_n * 8 + 256;
+                    Preprocessor pp;
+                    pp.setup(lx.tokens(), in_n, content, out_cap, 1024);
+                    pp.run();
+                    Printer pr;
+                    pr.out = pp.output();
+                    pr.n = pp.output_count();
+                    pr.src = content;
+                    pr.show();
+                    pp.release();
+                }
+                lx.release();
+                __ivy_free(content);
+            }
+            __ivy_free(line);
+        }
+    }
+}
+
+int32 main() {
+    run();
+    return 0;
+}

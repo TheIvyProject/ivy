@@ -1,0 +1,4 @@
+#define FOO 42
+#define BAR FOO + 1
+int x = FOO;
+BAR

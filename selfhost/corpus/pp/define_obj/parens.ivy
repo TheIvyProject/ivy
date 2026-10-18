@@ -1,0 +1,4 @@
+#define F 1
+F(2)
+#define P (a)
+P

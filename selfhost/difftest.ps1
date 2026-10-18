@@ -24,11 +24,19 @@
 #   powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/trivia -Kinds all
 #   powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/err -Kinds all
 #
+# Preprocessor features use the post-processing oracle (`--tokens`) and the
+# pp driver:
+#   H2.1 (object-like #define): -Dir selfhost/corpus/pp/define_obj -Kinds all
+#     -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
+#
 # Exit 0 = identical, 1 = mismatch or build failure.
 
 param(
-    [string]$Dir   = "selfhost/corpus/lexer/ident",
-    [string]$Kinds = "identifier,keyword,lifetime"
+    [string]$Dir     = "selfhost/corpus/lexer/ident",
+    [string]$Kinds   = "identifier,keyword,lifetime",
+    [string]$Oracle  = "--lex",
+    [string]$Modules = "token,lexer",
+    [string]$Driver  = "lexdrive"
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +46,7 @@ Set-Location $repo
 $ivy = Join-Path $repo "build\Release\ivy.exe"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "ivydiff_selfhost"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$port     = Join-Path $tmp "lexdrive.exe"
+$port     = Join-Path $tmp "$Driver.exe"
 $list     = Join-Path $tmp "files.txt"
 $one      = Join-Path $tmp "one.txt"
 $actRaw   = Join-Path $tmp "actual_raw.txt"
@@ -48,12 +56,18 @@ $actual   = Join-Path $tmp "actual.txt"
 $sh = "selfhost\parsing"
 $ascii = New-Object System.Text.ASCIIEncoding
 
-# 1. Build the port module + driver with the C++ compiler (freshness).
+# 1. Build the port modules + driver with the C++ compiler (freshness).
+# Modules are compiled in the listed order so each dependency's .ivm exists
+# before its dependents.
 Write-Output "[1/4] building selfhost modules ..."
-cmd /c "`"$ivy`" -I `"$sh`" `"$sh\lexer.ivy`" -c -o `"$sh\lexer.obj`" > NUL 2>&1"
-if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED (lexer)"; exit 1 }
-cmd /c "`"$ivy`" -I `"$sh`" `"$sh\lexdrive.ivy`" -o `"$port`" > NUL 2>&1"
-if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED (lexdrive)"; exit 1 }
+foreach ($m in $Modules.Split(",")) {
+    $m = $m.Trim()
+    if ($m -eq "") { continue }
+    cmd /c "`"$ivy`" -I `"$sh`" `"$sh\$m.ivy`" -c -o `"$sh\$m.obj`" > NUL 2>&1"
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($m)"; exit 1 }
+}
+cmd /c "`"$ivy`" -I `"$sh`" `"$sh\$Driver.ivy`" -o `"$port`" > NUL 2>&1"
+if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($Driver)"; exit 1 }
 
 # 2. Corpus file list (relative, forward slashes, sorted).
 Write-Output "[2/4] collecting corpus ..."
@@ -88,7 +102,7 @@ function Test-KeepLine([string]$ln, $kindSet, [bool]$allKinds) {
 Write-Output "[3/4] running C++ oracle + Ivy port ..."
 $exp = New-Object System.Collections.Generic.List[string]
 foreach ($f in $files) {
-    cmd /c "`"$ivy`" --lex `"$f`" > `"$one`" 2>&1"
+    cmd /c "`"$ivy`" $Oracle `"$f`" > `"$one`" 2>&1"
     $exp.Add("=== $f ===")
     $txt = ([System.IO.File]::ReadAllText($one)) -replace "`r`n", "`n"
     foreach ($ln in $txt.Split("`n")) { if (Test-KeepLine $ln $kindSet $allKinds) { $exp.Add($ln) } }

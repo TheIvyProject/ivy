@@ -1,0 +1,4 @@
+#define X 1
+X
+#define X 2
+X

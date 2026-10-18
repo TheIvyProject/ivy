@@ -108,8 +108,13 @@ src/                              selfhost/
   đoán** (không in token) khi có lỗi, giống `ivy --lex`. Corpus
   `selfhost/corpus/lexer/err/` (9 file). Lệnh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/err -Kinds all`.
+- H2.1: port `preprocessor.ivy` (object-like `#define` + macro expansion) +
+  driver `ppdrive.ivy` (lex → preprocess → in token stream). Oracle
+  `ivy --tokens`, `-Modules token,lexer,preprocessor -Driver ppdrive`. Corpus
+  `selfhost/corpus/pp/define_obj/` (10 file). Lệnh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/pp/define_obj -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive`.
 - Gate tầng H1 (H1.1–H1.6): port lex byte-identical toàn bộ token stream trên
-  95 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
+  98 file thật (`examples/`, `std/`, `selfhost/parsing/`) so với `ivy --lex`,
   gồm cả `eof`; và byte-identical chẩn đoán lỗi trên corpus `err/`. Tầng lexer
   hoàn tất.
 
@@ -134,7 +139,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H2.1 | `#define` object-like | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_obj` | ☐ |
+| H2.1 | `#define` object-like | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_obj` | ✅ byte-identical 10 files |
 | H2.2 | `#define` function-like + variadic | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/define_fn` | ☐ |
 | H2.3 | Conditional (`#if/#ifdef/#elif/#else`) | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/cond` | ☐ |
 | H2.4 | Macro expansion / paste / stringify | `preprocessor.cpp` | `parsing/preprocessor.ivy` | `corpus/pp/expand` | ☐ |
