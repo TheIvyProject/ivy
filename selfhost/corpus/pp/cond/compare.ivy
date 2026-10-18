@@ -1,0 +1,12 @@
+#if 1 < 2 && 2 <= 2 && 3 > 2 && 3 >= 3
+int c;
+#endif
+#if 1 == 1 && 1 != 2
+int d;
+#endif
+#if !0
+int e;
+#endif
+#if -1 < 0
+int f;
+#endif

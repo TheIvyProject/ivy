@@ -1,0 +1,9 @@
+#define F 1
+#ifdef NOPE
+F
+#define G 2
+#ifdef G
+int deep;
+#endif
+#endif
+F

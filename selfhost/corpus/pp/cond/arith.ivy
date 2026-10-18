@@ -1,0 +1,12 @@
+#if 1 + 2 * 3 == 7
+int ok;
+#endif
+#if (10 - 4) / 2 == 3
+int ok2;
+#endif
+#if 7 % 3 == 1
+int ok3;
+#endif
+#if -(-3) == 3
+int ok4;
+#endif

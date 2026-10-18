@@ -1,0 +1,9 @@
+#if NOPE == 0
+int zero;
+#endif
+#if NOPE
+int no;
+#endif
+#if !NOPE
+int yes;
+#endif

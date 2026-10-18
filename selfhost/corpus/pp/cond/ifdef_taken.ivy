@@ -1,0 +1,5 @@
+#define FOO 1
+#ifdef FOO
+int a;
+#endif
+int b;

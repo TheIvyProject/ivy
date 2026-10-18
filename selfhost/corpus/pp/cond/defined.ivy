@@ -1,0 +1,14 @@
+#define M 1
+#if defined(M)
+int a;
+#endif
+#if defined NOPE
+int b;
+#endif
+#if defined(M) && !defined(NOPE)
+int c;
+#endif
+#define FN(x) x
+#ifdef FN
+int d;
+#endif

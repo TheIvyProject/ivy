@@ -1,0 +1,9 @@
+#if (1 ? 2 : 3) == 2
+int t;
+#endif
+#if (0 ? 1 : 5) == 5
+int u;
+#endif
+#if 1 ? 1 : 0
+int v;
+#endif

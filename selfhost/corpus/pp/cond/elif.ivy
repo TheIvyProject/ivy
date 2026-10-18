@@ -1,0 +1,8 @@
+#define A 0
+#if A
+int a;
+#elif 1
+int b;
+#else
+int c;
+#endif

@@ -1,4 +1,4 @@
-// selfhost/parsing/preprocessor.ivy — Ivy self-host preprocessor (H2.x).
+// selfhost/parsing/preprocessor.ivy ? Ivy self-host preprocessor (H2.x).
 //
 // Feature-sliced port of src/parsing/preprocessor.cpp.
 //   H2.1: object-like `#define NAME body...` + recursive replacement with a
@@ -7,11 +7,16 @@
 //         variadic (`...` + `__VA_ARGS__`). Arguments are pre-expanded before
 //         substitution (mirrors expandFunctionLike), the substituted body is
 //         then rescanned (mirrors expandTokenVector).
+//   H2.3: conditionals `#ifdef`/`#ifndef`/`#if`/`#elif`/`#else`/`#endif` and
+//         `#undef`, with the `#if` constant-expression evaluator (precedence
+//         climbing over `long long`, `defined NAME`/`defined(NAME)`, one-level
+//         object-like macro expansion, undefined identifiers -> 0).
 //
-// Still H2.3+: conditionals, `#pragma`, predefined macros, `#`/`##`, `#line`,
-// `#error`/`#warning`, `#include`. The corpus (selfhost/corpus/pp/*) avoids
-// those. An unrecognized directive is emitted verbatim (`#` + rest of the line,
-// object-like macros expanded), exactly as the C++ generic path does.
+// Still H2.4+: `#`/`##`, `#pragma`, predefined macros, `#line`,
+// `#error`/`#warning`, `#include`, and the pp diagnostics stream. The corpus
+// (selfhost/corpus/pp/*) avoids those. An unrecognized directive is emitted
+// verbatim (`#` + rest of the line, object-like macros expanded), exactly as
+// the C++ generic path does.
 //
 // Mirrors the oracle exactly: expanded body tokens keep the *definition-site*
 // line/col of the body token; substituted arguments keep the *call-site*
@@ -41,6 +46,24 @@ export struct MacroRec {
     long is_va;
 };
 
+// sizeof(CondRec): 4 * 8 = 32 bytes. One `#if`/`#ifdef` nesting frame.
+export struct CondRec {
+    long taken;
+    long seen_else;
+    long parent_active;
+    long any_taken;
+};
+
+// sizeof(ETok): 4 * 8 = 32 bytes. One entry of the flattened `#if` expression
+// stream used by the evaluator: a kind code, a precomputed integer value, and
+// the source lexeme slice.
+export struct ETok {
+    long kind;
+    long val;
+    long off;
+    long len;
+};
+
 // Saved output-buffer state for the argument-capture swap (mirrors the
 // `std::swap(output_, out)` dance in expandFunctionLike).
 export struct Preprocessor {
@@ -60,6 +83,13 @@ export struct Preprocessor {
     long* stack_;   // (off,len) pairs for the expansion cycle guard
     long stack_n_;
     long stack_cap_;
+    CondRec* conds_;
+    long cond_cap_;
+    long cond_n_;
+    ETok* ex_;
+    long ex_cap_;
+    long ex_n_;
+    long ex_pos_;
     long next_;     // out-param: index after a consumed directive/invocation
     bool cnumber_;
     bool has_error_;
@@ -75,6 +105,8 @@ export struct Preprocessor {
             this.stack_ = (long*) __ivy_alloc(macro_cap * 16);
             this.param_off_ = (long*) __ivy_alloc(8192 * 8);
             this.param_len_ = (long*) __ivy_alloc(8192 * 8);
+            this.conds_ = (CondRec*) __ivy_alloc(256 * 32);
+            this.ex_ = (ETok*) __ivy_alloc(65536 * 32);
         }
         this.out_cap_ = out_cap;
         this.out_n_ = 0;
@@ -84,6 +116,11 @@ export struct Preprocessor {
         this.param_n_ = 0;
         this.stack_cap_ = macro_cap;
         this.stack_n_ = 0;
+        this.cond_cap_ = 256;
+        this.cond_n_ = 0;
+        this.ex_cap_ = 65536;
+        this.ex_n_ = 0;
+        this.ex_pos_ = 0;
         this.next_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
@@ -104,6 +141,8 @@ export struct Preprocessor {
             __ivy_free(this.stack_);
             __ivy_free(this.param_off_);
             __ivy_free(this.param_len_);
+            __ivy_free(this.conds_);
+            __ivy_free(this.ex_);
         }
     }
 
@@ -121,6 +160,13 @@ export struct Preprocessor {
     int tok_line(long i) {
         unsafe {
             return this.in_[i].line;
+        }
+        return 0;
+    }
+
+    int tok_col(long i) {
+        unsafe {
+            return this.in_[i].col;
         }
         return 0;
     }
@@ -390,7 +436,7 @@ export struct Preprocessor {
       unsafe {
         long p0 = pos + 1;
         if (p0 >= n || !this.kat(toks, p0, "(")) {
-            // Not invoked (no `(`) — emit the name verbatim.
+            // Not invoked (no `(`) ? emit the name verbatim.
             this.out_push(nameTok);
             this.next_ = pos + 1;
             return;
@@ -624,6 +670,711 @@ export struct Preprocessor {
       }
     }
 
+    // --- conditionals (#if / #ifdef / ...) -------------------------------
+
+    // True when every frame on the conditional stack is `taken`. Mirrors
+    // Preprocessor::active.
+    bool active() {
+        long i = 0;
+        while (i < this.cond_n_) {
+            long tk = 0;
+            unsafe {
+                tk = this.conds_[i].taken;
+            }
+            if (tk == 0) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    void push_cond(long taken, long seen_else, long parent_active, long any_taken) {
+        if (this.cond_n_ >= this.cond_cap_) {
+            return;
+        }
+        unsafe {
+            this.conds_[this.cond_n_].taken = taken;
+            this.conds_[this.cond_n_].seen_else = seen_else;
+            this.conds_[this.cond_n_].parent_active = parent_active;
+            this.conds_[this.cond_n_].any_taken = any_taken;
+        }
+        this.cond_n_ = this.cond_n_ + 1;
+    }
+
+    // True when the token at `pos + 1` is an Identifier or Keyword whose
+    // lexeme equals the NUL-terminated `s` (directive-name test).
+    bool dir_is(long pos, const char* s) {
+        if (pos + 1 >= this.in_n_) {
+            return false;
+        }
+        unsafe {
+            Token d = this.in_[pos + 1];
+            if (!this.kind_eq(d, "identifier") && !this.kind_eq(d, "keyword")) {
+                return false;
+            }
+            return this.lexeme_eq(d.off, d.len, s);
+        }
+        return false;
+    }
+
+    // Index of the first token past the line containing `pos` (skipLine).
+    long line_end(long pos) {
+        long ln = this.tok_line(pos);
+        long p = pos;
+        while (p < this.in_n_ && !this.tok_eof(p) && this.tok_line(p) == ln) {
+            p = p + 1;
+        }
+        return p;
+    }
+
+    // Remove macro slot `mi` (swap-with-last).
+    void erase_macro(long mi) {
+        if (mi < 0 || mi >= this.macro_n_) {
+            return;
+        }
+        long last = this.macro_n_ - 1;
+        if (mi != last) {
+            unsafe {
+                this.macros_[mi].name_off = this.macros_[last].name_off;
+                this.macros_[mi].name_len = this.macros_[last].name_len;
+                this.macros_[mi].body_start = this.macros_[last].body_start;
+                this.macros_[mi].body_count = this.macros_[last].body_count;
+                this.macros_[mi].param_start = this.macros_[last].param_start;
+                this.macros_[mi].param_cnt = this.macros_[last].param_cnt;
+                this.macros_[mi].is_fn = this.macros_[last].is_fn;
+                this.macros_[mi].is_va = this.macros_[last].is_va;
+            }
+        }
+        this.macro_n_ = this.macro_n_ - 1;
+    }
+
+    // Mirrors Preprocessor::parseConditional. `pos` points at `#`. Returns
+    // true and sets `next_` when it consumed a conditional directive.
+    bool parse_conditional(long pos) {
+        bool is_ifdef = this.dir_is(pos, "ifdef");
+        bool is_ifndef = this.dir_is(pos, "ifndef");
+        bool is_if = this.dir_is(pos, "if");
+        bool is_elif = this.dir_is(pos, "elif");
+        bool is_else = this.dir_is(pos, "else");
+        bool is_endif = this.dir_is(pos, "endif");
+        bool is_undef = this.dir_is(pos, "undef");
+        if (!is_ifdef && !is_ifndef && !is_if && !is_elif && !is_else &&
+            !is_endif && !is_undef) {
+            return false;
+        }
+        long hline = this.tok_line(pos);
+
+        if (is_undef) {
+            long p = pos + 2;
+            if (this.active() && p < this.in_n_ && !this.tok_eof(p) &&
+                this.kat(this.in_, p, "identifier")) {
+                Token nt;
+                unsafe {
+                    nt = this.in_[p];
+                }
+                this.erase_macro(this.find_macro(nt.off, nt.len));
+            }
+            this.next_ = this.line_end(pos);
+            return true;
+        }
+
+        if (is_if || is_elif) {
+            long p = pos + 2;
+            long es = p;
+            while (p < this.in_n_ && !this.tok_eof(p) && this.tok_line(p) == hline) {
+                p = p + 1;
+            }
+            long ee = p;
+            bool parent_active = this.active();
+            if (is_if) {
+                bool cond = false;
+                if (parent_active) {
+                    long v = this.eval_expr(es, ee, hline, this.tok_col(pos));
+                    cond = v != 0;
+                }
+                this.push_cond(parent_active && cond, false, parent_active,
+                               parent_active && cond);
+            } else {
+                if (this.cond_n_ == 0) {
+                    this.has_error_ = true;
+                } else {
+                    long idx = this.cond_n_ - 1;
+                    long seen_else = 0;
+                    long pa = 0;
+                    long anyt = 0;
+                    unsafe {
+                        seen_else = this.conds_[idx].seen_else;
+                        pa = this.conds_[idx].parent_active;
+                        anyt = this.conds_[idx].any_taken;
+                    }
+                    if (seen_else != 0) {
+                        this.has_error_ = true;
+                    } else if (pa == 0) {
+                        unsafe {
+                            this.conds_[idx].taken = 0;
+                        }
+                    } else if (anyt != 0) {
+                        unsafe {
+                            this.conds_[idx].taken = 0;
+                        }
+                    } else {
+                        long v = this.eval_expr(es, ee, hline, this.tok_col(pos));
+                        long tk = v != 0 ? 1 : 0;
+                        unsafe {
+                            this.conds_[idx].taken = tk;
+                            if (tk != 0) {
+                                this.conds_[idx].any_taken = 1;
+                            }
+                        }
+                    }
+                }
+            }
+            this.next_ = p;
+            return true;
+        }
+
+        if (is_ifdef || is_ifndef) {
+            long p = pos + 2;
+            bool cond = false;
+            bool parent_active = this.active();
+            if (p < this.in_n_ && !this.tok_eof(p) && this.kat(this.in_, p, "identifier")) {
+                Token nt;
+                unsafe {
+                    nt = this.in_[p];
+                }
+                bool def = this.find_macro(nt.off, nt.len) >= 0;
+                cond = is_ifdef ? def : !def;
+            } else {
+                this.has_error_ = true;
+            }
+            this.next_ = this.line_end(pos);
+            bool taken = parent_active && cond;
+            this.push_cond(taken, false, parent_active, taken);
+            return true;
+        }
+
+        if (is_else) {
+            this.next_ = this.line_end(pos);
+            if (this.cond_n_ == 0) {
+                this.has_error_ = true;
+                return true;
+            }
+            long idx = this.cond_n_ - 1;
+            long seen_else = 0;
+            long pa = 0;
+            long anyt = 0;
+            unsafe {
+                seen_else = this.conds_[idx].seen_else;
+                pa = this.conds_[idx].parent_active;
+                anyt = this.conds_[idx].any_taken;
+            }
+            if (seen_else != 0) {
+                this.has_error_ = true;
+            }
+            unsafe {
+                this.conds_[idx].seen_else = 1;
+                if (pa != 0 && anyt == 0) {
+                    this.conds_[idx].taken = 1;
+                    this.conds_[idx].any_taken = 1;
+                } else {
+                    this.conds_[idx].taken = 0;
+                }
+            }
+            return true;
+        }
+
+        // is_endif
+        this.next_ = this.line_end(pos);
+        if (this.cond_n_ == 0) {
+            this.has_error_ = true;
+            return true;
+        }
+        this.cond_n_ = this.cond_n_ - 1;
+        return true;
+    }
+
+    // --- #if constant-expression evaluation ------------------------------
+
+    long digit_val(long c) {
+        if (c >= 48 && c <= 57) {
+            return c - 48;
+        }
+        if (c >= 97 && c <= 102) {
+            return c - 97 + 10;
+        }
+        if (c >= 65 && c <= 70) {
+            return c - 65 + 10;
+        }
+        return 0;
+    }
+
+    // Mirrors parseIntLiteral: decimal / 0x / 0b / octal with an optional
+    // suffix (suffix stripped, value stored as a 64-bit signed integer).
+    long parse_int(long off, long len) {
+        if (len <= 0) {
+            return 0;
+        }
+        long base = 10;
+        long i = 0;
+        long c0 = 0;
+        long c1 = 0;
+        unsafe {
+            c0 = this.src_[off];
+            if (len >= 2) {
+                c1 = this.src_[off + 1];
+            }
+        }
+        if (len >= 2 && c0 == 48 && (c1 == 120 || c1 == 88)) {
+            base = 16;
+            i = 2;
+        } else if (len >= 2 && c0 == 48 && (c1 == 98 || c1 == 66)) {
+            base = 2;
+            i = 2;
+        } else if (len >= 2 && c0 == 48 && c1 != 46) {
+            base = 8;
+            i = 1;
+        }
+        long e = i;
+        while (e < len) {
+            long c = 0;
+            unsafe {
+                c = this.src_[off + e];
+            }
+            bool digit = false;
+            if (base == 10 && c >= 48 && c <= 57) {
+                digit = true;
+            } else if (base == 16 && ((c >= 48 && c <= 57) ||
+                                      (c >= 97 && c <= 102) ||
+                                      (c >= 65 && c <= 70))) {
+                digit = true;
+            } else if (base == 8 && c >= 48 && c <= 55) {
+                digit = true;
+            } else if (base == 2 && (c == 48 || c == 49)) {
+                digit = true;
+            }
+            if (!digit) {
+                break;
+            }
+            e = e + 1;
+        }
+        if (e == i) {
+            return 0;
+        }
+        long v = 0;
+        long k = i;
+        while (k < e) {
+            long c = 0;
+            unsafe {
+                c = this.src_[off + k];
+            }
+            v = v * base + this.digit_val(c);
+            k = k + 1;
+        }
+        return v;
+    }
+
+    // Map a token to a small integer kind code for the expression stream.
+    long op_code(Token t) {
+        if (this.kind_eq(t, "integer")) return 1;
+        if (this.kind_eq(t, "(")) return 2;
+        if (this.kind_eq(t, ")")) return 3;
+        if (this.kind_eq(t, "?")) return 4;
+        if (this.kind_eq(t, ":")) return 5;
+        if (this.kind_eq(t, "||")) return 6;
+        if (this.kind_eq(t, "&&")) return 7;
+        if (this.kind_eq(t, "|")) return 8;
+        if (this.kind_eq(t, "^")) return 9;
+        if (this.kind_eq(t, "&")) return 10;
+        if (this.kind_eq(t, "==")) return 11;
+        if (this.kind_eq(t, "!=")) return 12;
+        if (this.kind_eq(t, "<")) return 13;
+        if (this.kind_eq(t, ">")) return 14;
+        if (this.kind_eq(t, "<=")) return 15;
+        if (this.kind_eq(t, ">=")) return 16;
+        if (this.kind_eq(t, "<<")) return 17;
+        if (this.kind_eq(t, ">>")) return 18;
+        if (this.kind_eq(t, "+")) return 19;
+        if (this.kind_eq(t, "-")) return 20;
+        if (this.kind_eq(t, "*")) return 21;
+        if (this.kind_eq(t, "/")) return 22;
+        if (this.kind_eq(t, "%")) return 23;
+        if (this.kind_eq(t, "!")) return 24;
+        if (this.kind_eq(t, "~")) return 25;
+        return 0;
+    }
+
+    long int_val(Token t) {
+        if (!this.kind_eq(t, "integer")) {
+            return 0;
+        }
+        return this.parse_int(t.off, t.len);
+    }
+
+    void ex_push(long k, long v, long off, long len) {
+        if (this.ex_n_ >= this.ex_cap_) {
+            return;
+        }
+        unsafe {
+            this.ex_[this.ex_n_].kind = k;
+            this.ex_[this.ex_n_].val = v;
+            this.ex_[this.ex_n_].off = off;
+            this.ex_[this.ex_n_].len = len;
+        }
+        this.ex_n_ = this.ex_n_ + 1;
+    }
+
+    long ex_peek() {
+        if (this.ex_pos_ >= this.ex_n_) {
+            return -1;
+        }
+        unsafe {
+            return this.ex_[this.ex_pos_].kind;
+        }
+        return -1;
+    }
+
+    bool ex_check(long k) {
+        return this.ex_peek() == k;
+    }
+
+    bool ex_consume(long k) {
+        if (!this.ex_check(k)) {
+            return false;
+        }
+        this.ex_pos_ = this.ex_pos_ + 1;
+        return true;
+    }
+
+    long ex_expr() {
+        return this.ex_ternary();
+    }
+
+    long ex_ternary() {
+        long c = this.ex_lor();
+        if (this.ex_consume(4)) {
+            long tv = this.ex_ternary();
+            if (!this.ex_consume(5)) {
+                this.has_error_ = true;
+                return 0;
+            }
+            long ev = this.ex_ternary();
+            return c != 0 ? tv : ev;
+        }
+        return c;
+    }
+
+    long ex_lor() {
+        long v = this.ex_land();
+        while (this.ex_check(6)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_land();
+            v = (v != 0 || r != 0) ? 1 : 0;
+        }
+        return v;
+    }
+
+    long ex_land() {
+        long v = this.ex_bor();
+        while (this.ex_check(7)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_bor();
+            v = (v != 0 && r != 0) ? 1 : 0;
+        }
+        return v;
+    }
+
+    long ex_bor() {
+        long v = this.ex_bxor();
+        while (this.ex_check(8)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_bxor();
+            v = v | r;
+        }
+        return v;
+    }
+
+    long ex_bxor() {
+        long v = this.ex_band();
+        while (this.ex_check(9)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_band();
+            v = v ^ r;
+        }
+        return v;
+    }
+
+    long ex_band() {
+        long v = this.ex_eq();
+        while (this.ex_check(10)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_eq();
+            v = v & r;
+        }
+        return v;
+    }
+
+    long ex_eq() {
+        long v = this.ex_rel();
+        while (this.ex_check(11) || this.ex_check(12)) {
+            long op = this.ex_peek();
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_rel();
+            if (op == 11) {
+                v = v == r ? 1 : 0;
+            } else {
+                v = v != r ? 1 : 0;
+            }
+        }
+        return v;
+    }
+
+    long ex_rel() {
+        long v = this.ex_shift();
+        while (this.ex_check(13) || this.ex_check(14) ||
+               this.ex_check(15) || this.ex_check(16)) {
+            long op = this.ex_peek();
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_shift();
+            if (op == 13) {
+                v = v < r ? 1 : 0;
+            } else if (op == 15) {
+                v = v <= r ? 1 : 0;
+            } else if (op == 14) {
+                v = v > r ? 1 : 0;
+            } else {
+                v = v >= r ? 1 : 0;
+            }
+        }
+        return v;
+    }
+
+    long ex_shift() {
+        long v = this.ex_add();
+        while (this.ex_check(17) || this.ex_check(18)) {
+            long op = this.ex_peek();
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_add();
+            if (op == 17) {
+                v = v << r;
+            } else {
+                v = v >> r;
+            }
+        }
+        return v;
+    }
+
+    long ex_add() {
+        long v = this.ex_mul();
+        while (this.ex_check(19) || this.ex_check(20)) {
+            long op = this.ex_peek();
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_mul();
+            if (op == 19) {
+                v = v + r;
+            } else {
+                v = v - r;
+            }
+        }
+        return v;
+    }
+
+    long ex_mul() {
+        long v = this.ex_unary();
+        while (this.ex_check(21) || this.ex_check(22) || this.ex_check(23)) {
+            long op = this.ex_peek();
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long r = this.ex_unary();
+            if (op == 21) {
+                v = v * r;
+            } else if (op == 22) {
+                if (r == 0) {
+                    this.has_error_ = true;
+                    v = 0;
+                } else {
+                    v = v / r;
+                }
+            } else {
+                if (r == 0) {
+                    this.has_error_ = true;
+                    v = 0;
+                } else {
+                    v = v % r;
+                }
+            }
+        }
+        return v;
+    }
+
+    long ex_unary() {
+        if (this.ex_check(24)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            long v = this.ex_unary();
+            return v == 0 ? 1 : 0;
+        }
+        if (this.ex_check(20)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            return -this.ex_unary();
+        }
+        if (this.ex_check(19)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            return this.ex_unary();
+        }
+        if (this.ex_check(25)) {
+            this.ex_pos_ = this.ex_pos_ + 1;
+            return ~this.ex_unary();
+        }
+        return this.ex_primary();
+    }
+
+    long ex_primary() {
+        if (this.ex_consume(2)) {
+            long v = this.ex_expr();
+            if (!this.ex_consume(3)) {
+                this.has_error_ = true;
+                return 0;
+            }
+            return v;
+        }
+        if (this.ex_pos_ >= this.ex_n_) {
+            this.has_error_ = true;
+            return 0;
+        }
+        if (this.ex_peek() == 1) {
+            long v = 0;
+            unsafe {
+                v = this.ex_[this.ex_pos_].val;
+            }
+            this.ex_pos_ = this.ex_pos_ + 1;
+            return v;
+        }
+        this.has_error_ = true;
+        this.ex_pos_ = this.ex_pos_ + 1;
+        return 0;
+    }
+
+    // One non-recursive substitution pass over macro `mi`'s body, appended to
+    // the flattened expression stream. Mirrors evalConstExpr step 2 (inserted
+    // tokens are not re-examined).
+    void emit_body_one(long mi) {
+        long bs = 0;
+        long bc = 0;
+        unsafe {
+            bs = this.macros_[mi].body_start;
+            bc = this.macros_[mi].body_count;
+        }
+        long k = 0;
+        while (k < bc) {
+            Token bt;
+            unsafe {
+                bt = this.in_[bs + k];
+            }
+            if (this.kind_eq(bt, "identifier")) {
+                long mi2 = this.find_macro(bt.off, bt.len);
+                long isfn2 = 0;
+                if (mi2 >= 0) {
+                    unsafe {
+                        isfn2 = this.macros_[mi2].is_fn;
+                    }
+                }
+                if (mi2 >= 0 && isfn2 == 0 && !this.in_stack(bt.off, bt.len)) {
+                    long bs2 = 0;
+                    long bc2 = 0;
+                    unsafe {
+                        bs2 = this.macros_[mi2].body_start;
+                        bc2 = this.macros_[mi2].body_count;
+                    }
+                    long t = 0;
+                    while (t < bc2) {
+                        Token s;
+                        unsafe {
+                            s = this.in_[bs2 + t];
+                        }
+                        this.ex_push(this.op_code(s), this.int_val(s), s.off, s.len);
+                        t = t + 1;
+                    }
+                    k = k + 1;
+                    continue;
+                }
+            }
+            this.ex_push(this.op_code(bt), this.int_val(bt), bt.off, bt.len);
+            k = k + 1;
+        }
+    }
+
+    // Mirrors Preprocessor::evalConstExpr over the token slice [es, ee).
+    long eval_expr(long es, long ee, int line, int col) {
+        this.ex_n_ = 0;
+        this.ex_pos_ = 0;
+        long i = es;
+        while (i < ee) {
+            Token t;
+            unsafe {
+                t = this.in_[i];
+            }
+            bool is_ident = this.kind_eq(t, "identifier");
+            bool is_kw = this.kind_eq(t, "keyword");
+            if ((is_ident || is_kw) && this.lexeme_eq(t.off, t.len, "defined")) {
+                long j = i + 1;
+                bool have_paren = false;
+                if (j < ee && this.kat(this.in_, j, "(")) {
+                    have_paren = true;
+                    j = j + 1;
+                }
+                if (j >= ee || (!this.kat(this.in_, j, "identifier") &&
+                                !this.kat(this.in_, j, "keyword"))) {
+                    this.has_error_ = true;
+                    i = i + 1;
+                    continue;
+                }
+                Token nt;
+                unsafe {
+                    nt = this.in_[j];
+                }
+                bool def = this.find_macro(nt.off, nt.len) >= 0;
+                j = j + 1;
+                if (have_paren) {
+                    if (j >= ee || !this.kat(this.in_, j, ")")) {
+                        this.has_error_ = true;
+                    } else {
+                        j = j + 1;
+                    }
+                }
+                this.ex_push(1, def ? 1 : 0, t.off, t.len);
+                i = j;
+                continue;
+            }
+            if (is_ident) {
+                long mi = this.find_macro(t.off, t.len);
+                long isfn = 0;
+                if (mi >= 0) {
+                    unsafe {
+                        isfn = this.macros_[mi].is_fn;
+                    }
+                }
+                if (mi >= 0 && isfn == 0) {
+                    this.emit_body_one(mi);
+                } else {
+                    this.ex_push(1, 0, t.off, t.len);
+                }
+                i = i + 1;
+                continue;
+            }
+            if (is_kw) {
+                long v = 0;
+                if (this.lexeme_eq(t.off, t.len, "true")) {
+                    v = 1;
+                }
+                this.ex_push(1, v, t.off, t.len);
+                i = i + 1;
+                continue;
+            }
+            this.ex_push(this.op_code(t), this.int_val(t), t.off, t.len);
+            i = i + 1;
+        }
+        return this.ex_expr();
+    }
+
     // --- directive parsing ------------------------------------------------
 
     // `pos` points at `#`. Returns true and sets `next_` past the directive
@@ -664,7 +1415,7 @@ export struct Preprocessor {
             }
         }
         if (!have_name) {
-            // Malformed `#define` — diagnostic + skip line (H2.6 refines).
+            // Malformed `#define` ? diagnostic + skip line (H2.6 refines).
             this.has_error_ = true;
             long q = p;
             while (q < this.in_n_ && !this.tok_eof(q) && this.tok_line(q) == hline) {
@@ -675,7 +1426,7 @@ export struct Preprocessor {
         }
 
         // Function-like detection: `(` immediately after the name (no
-        // whitespace) — column adjacency (lexer dropped the trivia).
+        // whitespace) ? column adjacency (lexer dropped the trivia).
         bool function_like = false;
         if (p + 1 < this.in_n_ && !this.tok_eof(p + 1)) {
             unsafe {
@@ -719,11 +1470,11 @@ export struct Preprocessor {
                     q = q + 1;
                     continue;
                 }
-                // Unexpected token in the parameter list — skip it.
+                // Unexpected token in the parameter list ? skip it.
                 q = q + 1;
             }
             if (q >= this.in_n_ || this.tok_eof(q) || !this.kat(this.in_, q, ")")) {
-                // Unterminated macro parameter list — diagnostic + skip line.
+                // Unterminated macro parameter list ? diagnostic + skip line.
                 this.has_error_ = true;
                 long z = p;
                 while (z < this.in_n_ && !this.tok_eof(z) && this.tok_line(z) == hline) {
@@ -806,27 +1557,50 @@ export struct Preprocessor {
         this.macro_n_ = 0;
         this.param_n_ = 0;
         this.stack_n_ = 0;
+        this.cond_n_ = 0;
+        this.ex_n_ = 0;
+        this.ex_pos_ = 0;
         this.cnumber_ = false;
         this.has_error_ = false;
         long i = 0;
         while (i < this.in_n_ && !this.tok_eof(i)) {
             Token t = this.at(i);
             if (this.kind_eq(t, "#")) {
-                if (this.parse_define(i)) {
+                long before = i;
+                if (this.active() && this.parse_define(before)) {
                     i = this.next_;
                     continue;
                 }
-                // Unrecognized directive: emit `#` + rest of the line.
-                this.emit_at(i);
-                i = i + 1;
-                while (i < this.in_n_ && !this.tok_eof(i) && this.tok_line(i) == t.line) {
+                // Conditionals are processed even when inactive so nesting is
+                // tracked and the right branch is picked on #else/#endif.
+                if (this.parse_conditional(before)) {
+                    i = this.next_;
+                    continue;
+                }
+                // Unrecognized directive. If active, emit `#` + rest of the
+                // line; if inactive, skip the line.
+                if (this.active()) {
                     this.emit_at(i);
                     i = i + 1;
+                    while (i < this.in_n_ && !this.tok_eof(i) && this.tok_line(i) == t.line) {
+                        this.emit_at(i);
+                        i = i + 1;
+                    }
+                } else {
+                    i = this.line_end(before);
                 }
+                continue;
+            }
+            if (!this.active()) {
+                i = i + 1;
                 continue;
             }
             this.step(i);
             i = this.next_;
+        }
+        if (this.cond_n_ != 0) {
+            this.has_error_ = true;
+            this.cond_n_ = 0;
         }
         this.out_push_raw("eof", 0, 0, 0, 0);
     }

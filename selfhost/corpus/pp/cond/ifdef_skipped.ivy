@@ -1,0 +1,4 @@
+#ifdef BAR
+int never;
+#endif
+int after;

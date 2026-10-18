@@ -1,0 +1,7 @@
+#ifndef BAR
+int yes;
+#endif
+#define FOO
+#ifndef FOO
+int no;
+#endif

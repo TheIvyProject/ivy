@@ -1,0 +1,19 @@
+#define OUTER 1
+#ifdef OUTER
+#ifdef INNER
+int in;
+#else
+int mid;
+#endif
+#endif
+int tail;
+#if 1
+int a;
+#if 0
+int b;
+#else
+int c;
+#endif
+#else
+int d;
+#endif

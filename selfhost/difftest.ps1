@@ -30,6 +30,8 @@
 #     -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
 #   H2.2 (function-like + variadic #define): -Dir selfhost/corpus/pp/define_fn
 #     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
+#   H2.3 (conditionals #if/#ifdef/#elif/#else/#undef): -Dir selfhost/corpus/pp/cond
+#     -Kinds all -Oracle --tokens -Modules token,lexer,preprocessor -Driver ppdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 

@@ -1,0 +1,16 @@
+#if 0
+int x;
+#elif 0
+int y;
+#elif defined(NOPE)
+int z;
+#else
+int w;
+#endif
+#if 1
+int p;
+#elif 1
+int q;
+#else
+int r;
+#endif

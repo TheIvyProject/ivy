@@ -1,0 +1,10 @@
+#define N 5
+#if N > 3
+int big;
+#endif
+#undef N
+#ifdef N
+int no;
+#else
+int yes;
+#endif

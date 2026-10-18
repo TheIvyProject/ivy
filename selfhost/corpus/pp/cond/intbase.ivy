@@ -1,0 +1,12 @@
+#if 0x10 == 16
+int h;
+#endif
+#if 010 == 8
+int o;
+#endif
+#if 0b101 == 5
+int b;
+#endif
+#if 100L == 100
+int l;
+#endif

@@ -1,0 +1,11 @@
+#define FOO
+#ifdef FOO
+int taken;
+#else
+int not_taken;
+#endif
+#ifdef BAR
+int no1;
+#else
+int yes1;
+#endif

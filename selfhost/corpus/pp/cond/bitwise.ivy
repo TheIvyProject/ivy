@@ -1,0 +1,15 @@
+#if (1 << 3) == 8
+int s;
+#endif
+#if (5 & 3) == 1
+int b;
+#endif
+#if (5 | 2) == 7
+int o;
+#endif
+#if (5 ^ 1) == 4
+int x;
+#endif
+#if ~0 == -1
+int n;
+#endif
