@@ -3,10 +3,10 @@
 //
 // Reads file paths from stdin (one per line), lexes + preprocesses each with
 // the Ivy ports, parses with the Ivy parser, and prints `=== path ===` + the
-// `ivy --ast` AST dump (functions only, mirroring dumpAst). Preprocessor and
-// parser diagnostics are printed in the oracle format and gate the dump.
-// Used by selfhost/difftest.ps1
-//   (-Oracle --ast -Modules token,lexer,preprocessor,parser -Driver astdrive).
+// `ivy --ast` AST dump (functions + bodies, mirroring dumpAst/dumpStmt/dumpExpr).
+// Preprocessor and parser diagnostics are printed in the oracle format and
+// gate the dump. Used by selfhost/difftest.ps1
+//   (-Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive).
 
 #pragma ivy cnumber
 import token;
@@ -23,6 +23,11 @@ extern "C" unsigned long long __ivy_strlen(const char* s);
 // Free functions cannot take raw-pointer parameters, so the printer is a
 // struct whose fields hold them.
 struct Dumper {
+    AExpr* ep;
+    AStmt* sp;
+    long* ca;
+    long* cs;
+
     long slen(const char* s) {
         long i = 0;
         unsafe {
@@ -31,6 +36,14 @@ struct Dumper {
             }
         }
         return i;
+    }
+
+    void pad(long depth) {
+        long i = 0;
+        while (i < depth) {
+            io::print("  ");
+            i = i + 1;
+        }
     }
 
     void dump_type(AType t) {
@@ -67,6 +80,190 @@ struct Dumper {
         }
     }
 
+    void dump_expr(long idx, long depth) {
+        AExpr e;
+        unsafe {
+            e = this.ep[idx];
+        }
+        this.pad(depth);
+        if (e.kind == 1) {
+            io::print("int {}", e.ival);
+            return;
+        }
+        if (e.kind == 3) {
+            io::print("string {}", e.sval);
+            return;
+        }
+        if (e.kind == 4) {
+            io::print("char {}", e.sval);
+            return;
+        }
+        if (e.kind == 5) {
+            if (e.flag != 0) {
+                io::print("bool true");
+            } else {
+                io::print("bool false");
+            }
+            return;
+        }
+        if (e.kind == 6) {
+            io::print("nullptr");
+            return;
+        }
+        if (e.kind == 7) {
+            io::print("nullopt");
+            return;
+        }
+        if (e.kind == 8) {
+            io::print("ident {}", e.sval);
+            return;
+        }
+        if (e.kind == 9) {
+            io::print("this");
+            return;
+        }
+        if (e.kind == 10) {
+            if (e.flag != 0) {
+                io::println("prefix {}", e.sval);
+            } else {
+                io::println("postfix {}", e.sval);
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 11) {
+            io::println("binary {}", e.sval);
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 12) {
+            io::println("ternary ?:");
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            this.dump_expr(e.c, depth + 1);
+            return;
+        }
+        if (e.kind == 13) {
+            io::println("call");
+            this.dump_expr(e.a, depth + 1);
+            long j = 0;
+            while (j < e.an) {
+                long ai = 0;
+                unsafe {
+                    ai = this.ca[e.astart + j];
+                }
+                this.dump_expr(ai, depth + 1);
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 14) {
+            io::println("index");
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 15) {
+            if (e.flag != 0) {
+                io::println("member -> {}", e.sval);
+            } else {
+                io::println("member . {}", e.sval);
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 16) {
+            io::println("assign {}", e.sval);
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 17) {
+            io::println("pack-expansion");
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 18) {
+            io::println("sizeof({})", e.type.base);
+            return;
+        }
+        if (e.kind == 19) {
+            io::println("alignof({})", e.type.base);
+            return;
+        }
+        if (e.kind == 20) {
+            if (e.flag == 1) {
+                io::print("reinterpret_cast");
+            } else if (e.flag == 2) {
+                io::print("const_cast");
+            } else if (e.flag == 3) {
+                io::print("C-cast");
+            } else {
+                io::print("static_cast");
+            }
+            io::println("<{}>(", e.type.base);
+            this.dump_expr(e.a, depth + 1);
+            this.pad(depth);
+            io::println(")");
+            return;
+        }
+    }
+
+    void dump_compound(long idx, long depth) {
+        AStmt s;
+        unsafe {
+            s = this.sp[idx];
+        }
+        this.pad(depth);
+        io::println("block");
+        long j = 0;
+        while (j < s.sn) {
+            long child = 0;
+            unsafe {
+                child = this.cs[s.sstart + j];
+            }
+            this.dump_stmt(child, depth + 1);
+            j = j + 1;
+        }
+    }
+
+    void dump_stmt(long idx, long depth) {
+        AStmt s;
+        unsafe {
+            s = this.sp[idx];
+        }
+        if (s.kind == 1) {
+            this.dump_compound(idx, depth);
+            return;
+        }
+        this.pad(depth);
+        if (s.kind == 2) {
+            io::print("decl ");
+            this.dump_type(s.type);
+            io::print(" {}", s.sval);
+            if (s.a >= 0) {
+                io::println(" =");
+                this.dump_expr(s.a, depth + 1);
+            } else {
+                io::println("");
+            }
+            return;
+        }
+        if (s.kind == 8) {
+            io::println("return");
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            return;
+        }
+        if (s.kind == 12) {
+            io::println("expr");
+            this.dump_expr(s.a, depth + 1);
+            return;
+        }
+    }
+
     void emit(AFunction f) {
         io::print("function ");
         if (f.is_extern_c != 0) {
@@ -100,8 +297,8 @@ struct Dumper {
             j = j + 1;
         }
         io::println(")");
-        if (f.has_body != 0) {
-            io::println("  block");
+        if (f.body >= 0) {
+            this.dump_stmt(f.body, 1);
         } else {
             io::println("  (declaration only)");
         }
@@ -178,6 +375,10 @@ void run() {
                             }
                         } else {
                             Dumper d;
+                            d.ep = pa.exprs();
+                            d.sp = pa.stmts();
+                            d.ca = pa.call_args();
+                            d.cs = pa.stmt_children();
                             long n = pa.fn_count();
                             long i = 0;
                             while (i < n) {

@@ -36,7 +36,8 @@ export struct AParam {
     long nattrs;
 };
 
-// A top-level function declaration or definition.
+// A top-level function declaration or definition. `body` is a statement-pool
+// index for the root Compound, or -1 for a declaration only.
 export struct AFunction {
     AAttr* attrs;
     long nattrs;
@@ -45,5 +46,43 @@ export struct AFunction {
     AParam* params;
     long nparams;
     long is_extern_c;
-    long has_body;
+    long body;
+};
+
+// An expression node in the expression pool. Child fields hold pool indices
+// (-1 when absent); `astart`/`an` delimit a contiguous run of child
+// expression indices in the argument-stack pool.
+//
+// kind codes (mirror dumpExpr in src/app/main.cpp):
+//   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 nullopt
+//   8 ident  9 this  10 unary  11 binary  12 ternary  13 call  14 index
+//   15 member  16 assign  17 sizeofpack  18 sizeof  19 alignof  20 cast
+export struct AExpr {
+    long kind;
+    long ival;          // integer literal value (kind 1)
+    const char* sval;   // raw lexeme / ident / op / member name
+    long flag;          // isPrefix(10) | isArrow(15) | isScope(15) | castkind(20)
+    long a;             // operand / lhs / cond / base / callee / pattern
+    long b;             // rhs / then / index
+    long c;             // else
+    long astart;        // first call-arg / index expr index (-1 none)
+    long an;            // call-arg count
+    AType type;         // sizeof/alignof/cast/new target type
+};
+
+// A statement node in the statement pool.
+//
+// kind codes (mirror dumpStmt in src/app/main.cpp):
+//   1 compound  2 decl  3 if  4 while  5 dowhile  6 for  7 rangefor
+//   8 return  9 break  10 continue  11 nextcase  12 exprstmt  13 unsafe
+//   14 null  15 switch  16 structbind
+export struct AStmt {
+    long kind;
+    const char* sval;   // decl name / nextcase target
+    AType type;         // decl type / rangefor element type
+    long a;             // expr index (cond / return value / exprstmt value)
+    long b;             // stmt index (then / body)
+    long c;             // stmt index (else)
+    long sstart;        // first child stmt index in the stmt-stack pool
+    long sn;            // child stmt count
 };

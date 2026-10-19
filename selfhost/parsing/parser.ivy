@@ -71,10 +71,28 @@ export struct Parser {
     long sb_n_;
     long sb_cap_;
 
+    // expression pool
+    AExpr* epool_;
+    long ep_n_;
+    long ep_cap_;
+
+    // statement pool
+    AStmt* spool_;
+    long sp_n_;
+    long sp_cap_;
+
+    // child stacks: call arguments (expr indices) and compound statements
+    long* cargs_;
+    long ca_n_;
+    long ca_cap_;
+    long* cstmts_;
+    long cs_n_;
+    long cs_cap_;
+
     // diagnostics
     long* dline_;
     long* dcol_;
-    const char** dmsg_;
+    long* dmsg_;
     long dn_;
     long dcap_;
 
@@ -96,6 +114,14 @@ export struct Parser {
         this.pp_cap_ = in_count + 16;
         this.sb_n_ = 0;
         this.sb_cap_ = src_len + 8192;
+        this.ep_n_ = 0;
+        this.ep_cap_ = in_count * 8 + 256;
+        this.sp_n_ = 0;
+        this.sp_cap_ = in_count * 2 + 64;
+        this.ca_n_ = 0;
+        this.ca_cap_ = in_count + 64;
+        this.cs_n_ = 0;
+        this.cs_cap_ = in_count + 64;
         this.dn_ = 0;
         this.dcap_ = in_count + 16;
         this.ce_ = 0;
@@ -105,9 +131,13 @@ export struct Parser {
             this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 24);
             this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 64);
             this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
+            this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 112);
+            this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 96);
+            this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
+            this.cstmts_ = (long*) __ivy_alloc(this.cs_cap_ * 8);
             this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
-            this.dmsg_ = (char**) __ivy_alloc(this.dcap_ * 8);
+            this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
         }
     }
 
@@ -121,6 +151,10 @@ export struct Parser {
             __ivy_free(this.apool_);
             __ivy_free(this.ppool_);
             __ivy_free(this.sbuf_);
+            __ivy_free(this.epool_);
+            __ivy_free(this.spool_);
+            __ivy_free(this.cargs_);
+            __ivy_free(this.cstmts_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
@@ -243,7 +277,7 @@ export struct Parser {
         unsafe {
             this.dline_[this.dn_] = t.line;
             this.dcol_[this.dn_] = t.col;
-            this.dmsg_[this.dn_] = msg;
+            this.dmsg_[this.dn_] = (long) msg;
         }
         this.dn_ = this.dn_ + 1;
         this.failed_ = 1;
@@ -269,7 +303,7 @@ export struct Parser {
 
     const char* diag_msg(long i) {
         unsafe {
-            return this.dmsg_[i];
+            return reinterpret_cast<const char*>(this.dmsg_[i]);
         }
         return "";
     }
@@ -842,18 +876,524 @@ export struct Parser {
         return l;
     }
 
-    long parse_compound_empty() {
-        this.expect("{", "expected '{'");
-        long n = 0;
-        while (!this.at("}") && !this.at("eof")) {
-            // H3.1: statements are not parsed yet; consume tokens so an
-            // accidental statement body does not loop. The corpus uses empty
-            // bodies only.
+    // --- expressions ------------------------------------------------------
+
+    AType empty_type() {
+        AType t;
+        t.base = "";
+        t.is_unsigned = 0;
+        t.is_const = 0;
+        t.is_ref = 0;
+        t.ptr_depth = 0;
+        return t;
+    }
+
+    AExpr fresh(long kind) {
+        AExpr e;
+        e.kind = kind;
+        e.ival = 0;
+        e.sval = "";
+        e.flag = 0;
+        e.a = -1;
+        e.b = -1;
+        e.c = -1;
+        e.astart = -1;
+        e.an = 0;
+        e.type = this.empty_type();
+        return e;
+    }
+
+    AStmt fresh_stmt(long kind) {
+        AStmt s;
+        s.kind = kind;
+        s.sval = "";
+        s.type = this.empty_type();
+        s.a = -1;
+        s.b = -1;
+        s.c = -1;
+        s.sstart = -1;
+        s.sn = 0;
+        return s;
+    }
+
+    long push_expr(AExpr e) {
+        long i = this.ep_n_;
+        if (this.ep_n_ < this.ep_cap_) {
+            unsafe {
+                this.epool_[this.ep_n_] = e;
+            }
+            this.ep_n_ = this.ep_n_ + 1;
+        }
+        return i;
+    }
+
+    long push_stmt(AStmt s) {
+        long i = this.sp_n_;
+        if (this.sp_n_ < this.sp_cap_) {
+            unsafe {
+                this.spool_[this.sp_n_] = s;
+            }
+            this.sp_n_ = this.sp_n_ + 1;
+        }
+        return i;
+    }
+
+    void push_carg(long i) {
+        if (this.ca_n_ < this.ca_cap_) {
+            unsafe {
+                this.cargs_[this.ca_n_] = i;
+            }
+            this.ca_n_ = this.ca_n_ + 1;
+        }
+    }
+
+    void push_cstmt(long i) {
+        if (this.cs_n_ < this.cs_cap_) {
+            unsafe {
+                this.cstmts_[this.cs_n_] = i;
+            }
+            this.cs_n_ = this.cs_n_ + 1;
+        }
+    }
+
+    AExpr* exprs() {
+        unsafe {
+            return this.epool_;
+        }
+    }
+
+    AStmt* stmts() {
+        unsafe {
+            return this.spool_;
+        }
+    }
+
+    long* call_args() {
+        unsafe {
+            return this.cargs_;
+        }
+    }
+
+    long* stmt_children() {
+        unsafe {
+            return this.cstmts_;
+        }
+    }
+
+    long digit_val(char c, long base) {
+        if (c >= '0' && c <= '9') {
+            long v = c - '0';
+            if (v < base) {
+                return v;
+            }
+            return -1;
+        }
+        if (base == 16) {
+            if (c >= 'a' && c <= 'f') {
+                return 10 + (c - 'a');
+            }
+            if (c >= 'A' && c <= 'F') {
+                return 10 + (c - 'A');
+            }
+        }
+        return -1;
+    }
+
+    long parse_int_tok(Token t) {
+        long base = 10;
+        long i = 0;
+        long n = t.len;
+        unsafe {
+            if (n >= 2 && this.src_[t.off] == '0' &&
+                (this.src_[t.off + 1] == 'x' || this.src_[t.off + 1] == 'X')) {
+                base = 16;
+                i = 2;
+            } else if (n >= 2 && this.src_[t.off] == '0' &&
+                       (this.src_[t.off + 1] == 'b' || this.src_[t.off + 1] == 'B')) {
+                base = 2;
+                i = 2;
+            } else if (n > 1 && this.src_[t.off] == '0') {
+                base = 8;
+                i = 1;
+            }
+            long val = 0;
+            while (i < n) {
+                char c = this.src_[t.off + i];
+                if (c == '\'') {
+                    i = i + 1;
+                    continue;
+                }
+                long d = this.digit_val(c, base);
+                if (d < 0) {
+                    break;
+                }
+                val = val * base + d;
+                i = i + 1;
+            }
+            return val;
+        }
+        return 0;
+    }
+
+    long bin_prec() {
+        Token t = this.peek(0);
+        if (this.kind_eq(t, "||")) { return 1; }
+        if (this.kind_eq(t, "&&")) { return 2; }
+        if (this.kind_eq(t, "|")) { return 3; }
+        if (this.kind_eq(t, "^")) { return 4; }
+        if (this.kind_eq(t, "&")) { return 5; }
+        if (this.kind_eq(t, "==")) { return 6; }
+        if (this.kind_eq(t, "!=")) { return 6; }
+        if (this.kind_eq(t, "<")) { return 7; }
+        if (this.kind_eq(t, ">")) { return 7; }
+        if (this.kind_eq(t, "<=")) { return 7; }
+        if (this.kind_eq(t, ">=")) { return 7; }
+        if (this.kind_eq(t, "<<")) { return 8; }
+        if (this.kind_eq(t, ">>")) { return 8; }
+        if (this.kind_eq(t, "+")) { return 9; }
+        if (this.kind_eq(t, "-")) { return 9; }
+        if (this.kind_eq(t, "*")) { return 10; }
+        if (this.kind_eq(t, "/")) { return 10; }
+        if (this.kind_eq(t, "%")) { return 10; }
+        return -1;
+    }
+
+    bool is_assign_kind() {
+        Token t = this.peek(0);
+        return this.kind_eq(t, "=") || this.kind_eq(t, "+=") ||
+               this.kind_eq(t, "-=") || this.kind_eq(t, "*=") ||
+               this.kind_eq(t, "/=") || this.kind_eq(t, "%=") ||
+               this.kind_eq(t, "&=") || this.kind_eq(t, "|=") ||
+               this.kind_eq(t, "^=") || this.kind_eq(t, "<<=") ||
+               this.kind_eq(t, ">>=");
+    }
+
+    bool is_prefix_op(Token t) {
+        return this.kind_eq(t, "!") || this.kind_eq(t, "~") ||
+               this.kind_eq(t, "-") || this.kind_eq(t, "+") ||
+               this.kind_eq(t, "*") || this.kind_eq(t, "&") ||
+               this.kind_eq(t, "++") || this.kind_eq(t, "--");
+    }
+
+    long parse_expr() {
+        long lhs = this.parse_conditional();
+        if (this.is_assign_kind()) {
+            Token op = this.next();
+            long rhs = this.parse_expr();
+            AExpr e = this.fresh(16);
+            e.sval = this.intern_tok(op);
+            e.a = lhs;
+            e.b = rhs;
+            return this.push_expr(e);
+        }
+        return lhs;
+    }
+
+    long parse_conditional() {
+        long cond = this.parse_binary(1);
+        if (this.at("?")) {
             this.next();
-            n = n + 1;
+            long thenB = this.parse_expr();
+            this.expect(":", "expected ':' in conditional expression");
+            long elseB = this.parse_conditional();
+            AExpr e = this.fresh(12);
+            e.a = cond;
+            e.b = thenB;
+            e.c = elseB;
+            return this.push_expr(e);
+        }
+        return cond;
+    }
+
+    long parse_binary(long minprec) {
+        long lhs = this.parse_unary();
+        while (true) {
+            long prec = this.bin_prec();
+            if (prec < 0 || prec < minprec) {
+                break;
+            }
+            Token op = this.next();
+            long rhs = this.parse_binary(prec + 1);
+            AExpr e = this.fresh(11);
+            e.sval = this.intern_tok(op);
+            e.a = lhs;
+            e.b = rhs;
+            lhs = this.push_expr(e);
+        }
+        return lhs;
+    }
+
+    long parse_unary() {
+        Token t = this.peek(0);
+        if (this.is_prefix_op(t)) {
+            Token op = this.next();
+            long operand = this.parse_unary();
+            AExpr e = this.fresh(10);
+            e.sval = this.intern_tok(op);
+            e.flag = 1;
+            e.a = operand;
+            return this.push_expr(e);
+        }
+        return this.parse_postfix(this.parse_primary());
+    }
+
+    long parse_call_args() {
+        long astart = this.ca_n_;
+        while (!this.at(")") && !this.at("eof")) {
+            long arg = this.parse_expr();
+            this.push_carg(arg);
+            if (!this.at(")")) {
+                this.expect(",", "expected ',' between call arguments");
+                if (this.at(")")) {
+                    break;
+                }
+            }
+        }
+        this.expect(")", "expected ')' to close call");
+        return astart;
+    }
+
+    long parse_postfix(long lhs) {
+        while (true) {
+            if (this.at("::")) {
+                this.next();
+                if (!this.at("identifier")) {
+                    this.error_at(this.peek(0), "expected name after '::'");
+                    return lhs;
+                }
+                AExpr e = this.fresh(15);
+                e.sval = this.intern_tok(this.next());
+                e.a = lhs;
+                lhs = this.push_expr(e);
+            } else if (this.at("(")) {
+                this.next();
+                long astart = this.parse_call_args();
+                AExpr e = this.fresh(13);
+                e.a = lhs;
+                e.astart = astart;
+                e.an = this.ca_n_ - astart;
+                lhs = this.push_expr(e);
+            } else if (this.at("<")) {
+                long save = this.pos_;
+                this.next();
+                long ok = 1;
+                if (this.is_type_start() != 0) {
+                    while (!this.at(">") && !this.at("eof")) {
+                        if (this.is_type_start() == 0) {
+                            ok = 0;
+                            break;
+                        }
+                        this.parse_type();
+                        if (this.at(",")) {
+                            this.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if (ok != 0 && this.at(">")) {
+                        this.next();
+                        if (this.at("(")) {
+                            this.next();
+                            long astart2 = this.parse_call_args();
+                            AExpr e = this.fresh(13);
+                            e.a = lhs;
+                            e.astart = astart2;
+                            e.an = this.ca_n_ - astart2;
+                            lhs = this.push_expr(e);
+                            continue;
+                        }
+                    }
+                }
+                this.pos_ = save;
+                break;
+            } else if (this.at("[")) {
+                this.next();
+                long idx = this.parse_expr();
+                this.expect("]", "expected ']' after index expression");
+                AExpr e = this.fresh(14);
+                e.a = lhs;
+                e.b = idx;
+                lhs = this.push_expr(e);
+            } else if (this.at(".") || this.at("->")) {
+                long arrow = this.at("->") ? 1 : 0;
+                this.next();
+                if (!this.at("identifier")) {
+                    this.error_at(this.peek(0), "expected member name after '.' or '->'");
+                    return lhs;
+                }
+                AExpr e = this.fresh(15);
+                e.sval = this.intern_tok(this.next());
+                e.flag = arrow;
+                e.a = lhs;
+                lhs = this.push_expr(e);
+            } else if (this.at("++") || this.at("--")) {
+                Token op = this.next();
+                AExpr e = this.fresh(10);
+                e.sval = this.intern_tok(op);
+                e.a = lhs;
+                lhs = this.push_expr(e);
+            } else if (this.at("...")) {
+                this.next();
+                AExpr e = this.fresh(17);
+                e.a = lhs;
+                lhs = this.push_expr(e);
+            } else {
+                break;
+            }
+        }
+        return lhs;
+    }
+
+    long parse_primary() {
+        Token t = this.peek(0);
+        if (this.at("integer")) {
+            this.next();
+            AExpr e = this.fresh(1);
+            e.ival = this.parse_int_tok(t);
+            return this.push_expr(e);
+        }
+        if (this.at("string")) {
+            this.next();
+            AExpr e = this.fresh(3);
+            e.sval = this.intern_tok(t);
+            return this.push_expr(e);
+        }
+        if (this.at("char")) {
+            this.next();
+            AExpr e = this.fresh(4);
+            e.sval = this.intern_tok(t);
+            return this.push_expr(e);
+        }
+        if (this.kw("true") || this.kw("false")) {
+            long b = this.kw("true") ? 1 : 0;
+            this.next();
+            AExpr e = this.fresh(5);
+            e.flag = b;
+            return this.push_expr(e);
+        }
+        if (this.kw("nullptr")) {
+            this.next();
+            return this.push_expr(this.fresh(6));
+        }
+        if (this.kw("nullopt")) {
+            this.next();
+            return this.push_expr(this.fresh(7));
+        }
+        if (this.kw("sizeof")) {
+            this.next();
+            this.expect("(", "expected '(' after 'sizeof'");
+            if (this.is_type_start() == 0) {
+                this.error_at(this.peek(0),
+                              "expected type after 'sizeof(' (sizeof(expression) is not supported)");
+                this.synchronize();
+                return this.push_expr(this.fresh(18));
+            }
+            AType ty = this.parse_type();
+            this.expect(")", "expected ')' after sizeof type");
+            AExpr e = this.fresh(18);
+            e.type = ty;
+            return this.push_expr(e);
+        }
+        if (this.kw("alignof")) {
+            this.next();
+            this.expect("(", "expected '(' after 'alignof'");
+            if (this.is_type_start() == 0) {
+                this.error_at(this.peek(0), "expected type after 'alignof('");
+                this.synchronize();
+                return this.push_expr(this.fresh(19));
+            }
+            AType ty = this.parse_type();
+            this.expect(")", "expected ')' after alignof type");
+            AExpr e = this.fresh(19);
+            e.type = ty;
+            return this.push_expr(e);
+        }
+        if (this.kw("static_cast") || this.kw("reinterpret_cast") || this.kw("const_cast")) {
+            long ckind = 0;
+            if (this.lexeme_eq(t.off, t.len, "reinterpret_cast")) {
+                ckind = 1;
+            } else if (this.lexeme_eq(t.off, t.len, "const_cast")) {
+                ckind = 2;
+            }
+            this.next();
+            this.expect("<", "expected '<' after cast keyword");
+            if (this.is_type_start() == 0) {
+                this.error_at(this.peek(0), "expected type after cast keyword");
+                this.synchronize();
+                return this.push_expr(this.fresh(1));
+            }
+            AType ty = this.parse_type();
+            this.expect(">", "expected '>' after cast target type");
+            this.expect("(", "expected '(' in cast expression");
+            long operand = this.parse_expr();
+            this.expect(")", "expected ')' after cast expression");
+            AExpr e = this.fresh(20);
+            e.flag = ckind;
+            e.type = ty;
+            e.a = operand;
+            return this.push_expr(e);
+        }
+        if (this.at("identifier")) {
+            this.next();
+            AExpr e = this.fresh(8);
+            e.sval = this.intern_tok(t);
+            return this.push_expr(e);
+        }
+        if (this.kw("this")) {
+            this.next();
+            return this.push_expr(this.fresh(9));
+        }
+        if (this.at("(")) {
+            this.next();
+            long content = this.parse_conditional();
+            this.expect(")", "expected ')' to close parenthesized expression");
+            return content;
+        }
+        this.error_at(t, "unexpected token in expression");
+        this.next();
+        return this.push_expr(this.fresh(6));
+    }
+
+    // --- statements -------------------------------------------------------
+
+    long parse_statement() {
+        if (this.kw("return")) {
+            return this.parse_return_stmt();
+        }
+        if (this.at("{")) {
+            return this.parse_compound();
+        }
+        long value = this.parse_expr();
+        this.expect(";", "expected ';' after expression");
+        AStmt s = this.fresh_stmt(12);
+        s.a = value;
+        return this.push_stmt(s);
+    }
+
+    long parse_return_stmt() {
+        this.next();
+        long value = -1;
+        if (!this.at(";")) {
+            value = this.parse_expr();
+        }
+        this.expect(";", "expected ';' after return statement");
+        AStmt s = this.fresh_stmt(8);
+        s.a = value;
+        return this.push_stmt(s);
+    }
+
+    long parse_compound() {
+        long sstart = this.cs_n_;
+        this.expect("{", "expected '{'");
+        while (!this.at("}") && !this.at("eof")) {
+            long st = this.parse_statement();
+            this.push_cstmt(st);
         }
         this.expect("}", "expected '}' to close block");
-        return n;
+        AStmt s = this.fresh_stmt(1);
+        s.sstart = sstart;
+        s.sn = this.cs_n_ - sstart;
+        return this.push_stmt(s);
     }
 
     void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
@@ -869,10 +1409,9 @@ export struct Parser {
         }
         f.nparams = pl.n;
         f.is_extern_c = is_extern_c;
-        f.has_body = 0;
+        f.body = -1;
         if (this.at("{")) {
-            this.parse_compound_empty();
-            f.has_body = 1;
+            f.body = this.parse_compound();
         } else {
             this.expect(";", "expected '{' for function body or ';' for a declaration");
         }

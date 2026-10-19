@@ -46,6 +46,9 @@
 #     variadic, unnamed params, lifetime<>, cnumber c-style types, ptr returns):
 #     -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast
 #     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#   H3.2 (expressions + precedence + minimal statements; no declarations):
+#     -Dir selfhost/corpus/parser/expr -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 

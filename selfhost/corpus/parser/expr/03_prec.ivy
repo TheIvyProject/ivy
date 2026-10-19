@@ -1,0 +1,1 @@
+int32 f(int32 a, int32 b) { return a + b * 2; }
