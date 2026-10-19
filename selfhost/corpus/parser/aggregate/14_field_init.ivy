@@ -1,0 +1,8 @@
+struct Cfg {
+    int32 level = 3;
+    bool enabled = true;
+};
+
+void f() {
+    int32 x = 0;
+}

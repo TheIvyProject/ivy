@@ -1,0 +1,15 @@
+struct Base {
+    virtual int32 get() {
+        return 1;
+    }
+};
+
+struct Derived : public Base {
+    int32 get() override {
+        return 2;
+    }
+};
+
+void f() {
+    int32 x = 0;
+}

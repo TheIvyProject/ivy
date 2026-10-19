@@ -1,0 +1,9 @@
+enum Color {
+    Red,
+    Green,
+    Blue
+};
+
+void f() {
+    Color c = Red;
+}

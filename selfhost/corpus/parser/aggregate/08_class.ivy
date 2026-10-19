@@ -1,0 +1,16 @@
+class Widget {
+public:
+    int32 w;
+
+    int32 width() {
+        return 1;
+    }
+
+private:
+    int32 secret;
+};
+
+void f() {
+    Widget x;
+    x.w = 5;
+}

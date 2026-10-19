@@ -91,6 +91,12 @@ export struct Parser {
     long cp_n_;
     long cp_cap_;
 
+    // user-defined type names (struct/enum/class/using alias), stored as
+    // interned pointers in a long* pool (avoids the Ivy const char** bug)
+    long* tnames_;
+    long tn_n_;
+    long tn_cap_;
+
     // diagnostics
     long* dline_;
     long* dcol_;
@@ -124,6 +130,8 @@ export struct Parser {
         this.ca_cap_ = in_count + 64;
         this.cp_n_ = 0;
         this.cp_cap_ = in_count + 16;
+        this.tn_n_ = 0;
+        this.tn_cap_ = in_count + 16;
         this.dn_ = 0;
         this.dcap_ = in_count + 16;
         this.ce_ = 0;
@@ -140,6 +148,7 @@ export struct Parser {
             this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
         }
     }
 
@@ -160,6 +169,7 @@ export struct Parser {
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
+            __ivy_free(this.tnames_);
         }
     }
 
@@ -221,6 +231,31 @@ export struct Parser {
             return i == len;
         }
         return false;
+    }
+
+    // --- user-defined type name registry ----------------------------------
+
+    long token_is_type_name(Token t) {
+        long i = 0;
+        while (i < this.tn_n_) {
+            unsafe {
+                const char* nm = reinterpret_cast<const char*>(this.tnames_[i]);
+                if (this.lexeme_eq(t.off, t.len, nm)) {
+                    return 1;
+                }
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    void register_type_name(const char* s) {
+        if (this.tn_n_ < this.tn_cap_) {
+            unsafe {
+                this.tnames_[this.tn_n_] = (long) s;
+            }
+            this.tn_n_ = this.tn_n_ + 1;
+        }
     }
 
     Token eof_tok() {
@@ -502,6 +537,9 @@ export struct Parser {
 
     long is_type_start() {
         Token t = this.peek(0);
+        if (this.kind_eq(t, "identifier")) {
+            return this.token_is_type_name(t);
+        }
         if (!this.kind_eq(t, "keyword")) {
             return 0;
         }
@@ -542,6 +580,30 @@ export struct Parser {
             if (this.at("&")) {
                 this.next();
                 t.is_ref = 1;
+            }
+            return t;
+        }
+        if (this.at("identifier") && this.token_is_type_name(this.peek(0)) != 0) {
+            Token u = this.peek(0);
+            this.next();
+            t.base = this.intern_tok(u);
+            if (this.at("<")) {
+                this.skip_angle_args();
+            }
+            while (this.at("*")) {
+                this.next();
+                t.ptr_depth = t.ptr_depth + 1;
+                if (this.kw("const")) {
+                    this.next();
+                }
+            }
+            if (this.at("&")) {
+                this.next();
+                t.is_ref = 1;
+                if (this.kw("const")) {
+                    t.is_const = 1;
+                    this.next();
+                }
             }
             return t;
         }
@@ -1863,6 +1925,321 @@ export struct Parser {
         }
     }
 
+    // --- user-defined aggregate types (H3.4: struct / enum / class) -------
+
+    long is_enum_int_base(const char* b) {
+        if (this.cstr_eq(b, "int") || this.cstr_eq(b, "int8") || this.cstr_eq(b, "int16") ||
+            this.cstr_eq(b, "int32") || this.cstr_eq(b, "int64") || this.cstr_eq(b, "int128") ||
+            this.cstr_eq(b, "uint8") || this.cstr_eq(b, "uint16") || this.cstr_eq(b, "uint32") ||
+            this.cstr_eq(b, "uint64") || this.cstr_eq(b, "uint128") ||
+            this.cstr_eq(b, "char") || this.cstr_eq(b, "short") || this.cstr_eq(b, "long") ||
+            this.cstr_eq(b, "bool") || this.cstr_eq(b, "int8_t") || this.cstr_eq(b, "int16_t") ||
+            this.cstr_eq(b, "int32_t") || this.cstr_eq(b, "int64_t") || this.cstr_eq(b, "int128_t") ||
+            this.cstr_eq(b, "uint8_t") || this.cstr_eq(b, "uint16_t") || this.cstr_eq(b, "uint32_t") ||
+            this.cstr_eq(b, "uint64_t") || this.cstr_eq(b, "uint128_t") ||
+            this.cstr_eq(b, "size_t") || this.cstr_eq(b, "ptrdiff_t") || this.cstr_eq(b, "uptr_t")) {
+            return 1;
+        }
+        return 0;
+    }
+
+    void skip_angle_args() {
+        // Consume a balanced `< ... >` template argument list, starting at '<'.
+        this.next();
+        long depth = 1;
+        while (depth > 0 && !this.at("eof")) {
+            if (this.at("<")) {
+                depth = depth + 1;
+                this.next();
+            } else if (this.at(">")) {
+                depth = depth - 1;
+                this.next();
+            } else if (this.at(">>")) {
+                depth = depth - 2;
+                this.next();
+            } else {
+                this.next();
+            }
+        }
+    }
+
+    long skip_operator_name() {
+        // On entry, positioned at the `operator` keyword.
+        this.next();
+        if (this.at("(") && this.kind_eq(this.peek(1), ")")) {
+            this.next();
+            this.next();
+            return 1;
+        }
+        if (this.at("[") && this.kind_eq(this.peek(1), "]")) {
+            this.next();
+            this.next();
+            return 1;
+        }
+        if (this.at("+") || this.at("-") || this.at("*") || this.at("/") || this.at("%") ||
+            this.at("&") || this.at("|") || this.at("^") || this.at("~") || this.at("!") ||
+            this.at("==") || this.at("!=") || this.at("<") || this.at(">") ||
+            this.at("<=") || this.at(">=") || this.at("<<") || this.at(">>") ||
+            this.at("&&") || this.at("||") || this.at("++") || this.at("--") ||
+            this.at("->")) {
+            this.next();
+            return 1;
+        }
+        this.error_at(this.peek(0), "expected an operator symbol after 'operator'");
+        this.next();
+        return 0;
+    }
+
+    void parse_ctor_inits() {
+        this.next();  // ':'
+        while (!this.at("{") && !this.at(";") && !this.at("eof")) {
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected member name in constructor initializer list");
+                this.synchronize();
+                return;
+            }
+            this.next();
+            this.expect("(", "expected '(' after member name in initializer list");
+            this.parse_expr();
+            this.expect(")", "expected ')' to close member initializer");
+            if (this.at(",")) {
+                this.next();
+            } else {
+                return;
+            }
+        }
+    }
+
+    void parse_method_tail() {
+        if (this.kw("const")) {
+            this.next();
+        }
+        if (this.kw("override")) {
+            this.next();
+        }
+        if (this.at("{")) {
+            this.parse_compound();
+            return;
+        }
+        if (this.at("=")) {
+            this.next();
+            this.expect("integer", "expected '0' for pure virtual method");
+            this.expect(";", "expected ';' after pure virtual method");
+            return;
+        }
+        this.expect(";", "expected '{' for method body or ';' for a declaration");
+    }
+
+    void parse_struct_members(const char* bare) {
+        while (!this.at("}") && !this.at("eof")) {
+            if (this.kw("public") || this.kw("private") || this.kw("protected")) {
+                this.next();
+                if (this.at(":")) {
+                    this.next();
+                }
+                continue;
+            }
+            long is_virtual = 0;
+            if (this.kw("virtual")) {
+                is_virtual = 1;
+                this.next();
+            }
+            // Constructor: `Name(params) [: inits] { body }`.
+            if (this.at("identifier") && this.lexeme_eq(this.peek(0).off, this.peek(0).len, bare) != 0 &&
+                this.kind_eq(this.peek(1), "(")) {
+                this.next();
+                this.next();
+                this.parse_params();
+                this.expect(")", "expected ')' to close constructor parameter list");
+                if (this.at(":")) {
+                    this.parse_ctor_inits();
+                }
+                if (this.at("{")) {
+                    this.parse_compound();
+                } else {
+                    this.expect(";", "expected '{' for constructor body or ';' for a declaration");
+                }
+                continue;
+            }
+            // Destructor: `~Name() { body }`.
+            if (this.at("~") && this.kind_eq(this.peek(1), "identifier") &&
+                this.lexeme_eq(this.peek(1).off, this.peek(1).len, bare) != 0 &&
+                this.kind_eq(this.peek(2), "(")) {
+                this.next();
+                this.next();
+                this.next();
+                this.parse_params();
+                this.expect(")", "expected ')' to close destructor parameter list");
+                if (this.at("{")) {
+                    this.parse_compound();
+                } else if (this.at("=")) {
+                    this.next();
+                    this.expect("integer", "expected '0' for pure virtual destructor");
+                    this.expect(";", "expected ';' after pure virtual destructor");
+                } else {
+                    this.expect(";", "expected '{' for destructor body or ';' for a declaration");
+                }
+                continue;
+            }
+            if (this.is_type_start() == 0) {
+                this.error_at(this.peek(0), "expected field or method declaration in struct body");
+                this.synchronize();
+                break;
+            }
+            this.parse_type();
+            if (this.kw("operator")) {
+                if (this.skip_operator_name() == 0) {
+                    this.synchronize();
+                    break;
+                }
+                this.expect("(", "expected '(' after operator name");
+                this.parse_params();
+                this.expect(")", "expected ')' to close operator parameter list");
+                this.parse_method_tail();
+                continue;
+            }
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected field or method name");
+                this.synchronize();
+                break;
+            }
+            this.next();
+            if (this.at("(")) {
+                this.next();
+                this.parse_params();
+                this.expect(")", "expected ')' to close method parameter list");
+                this.parse_method_tail();
+                continue;
+            }
+            if (this.at("=")) {
+                this.next();
+                this.parse_expr();
+            }
+            this.expect(";", "expected ';' after field declaration");
+        }
+    }
+
+    void parse_struct() {
+      unsafe {
+        long is_class = this.kw("class") ? 1 : 0;
+        this.next();
+        if (!this.at("identifier")) {
+            if (is_class != 0) {
+                this.error_at(this.peek(0), "expected class name after 'class'");
+            } else {
+                this.error_at(this.peek(0), "expected struct name after 'struct'");
+            }
+            this.synchronize();
+            return;
+        }
+        const char* bare = this.intern_tok(this.next());
+        if (this.kw("final")) {
+            this.error_at(this.peek(0), "'final' is not supported in the Ivy subset");
+            this.next();
+        }
+        if (this.at(":")) {
+            this.next();
+            while (true) {
+                if (this.kw("public") || this.kw("private") || this.kw("protected")) {
+                    this.next();
+                }
+                if (this.kw("virtual")) {
+                    this.next();
+                }
+                if (this.is_type_start() == 0) {
+                    this.error_at(this.peek(0), "expected base class name after ':'");
+                    this.synchronize();
+                    break;
+                }
+                this.parse_type();
+                if (this.at(",")) {
+                    this.next();
+                    continue;
+                }
+                break;
+            }
+        }
+        this.expect("{", "expected '{' to start struct body");
+        this.register_type_name(bare);
+        this.parse_struct_members(bare);
+        this.expect("}", "expected '}' to close struct body");
+        this.expect(";", "expected ';' after struct definition");
+      }
+    }
+
+    void parse_enum() {
+      unsafe {
+        this.next();  // 'enum'
+        if (this.kw("class") || this.kw("struct")) {
+            this.next();
+        }
+        if (!this.at("identifier")) {
+            this.error_at(this.peek(0), "expected enum name after 'enum'");
+            this.synchronize();
+            return;
+        }
+        const char* name = this.intern_tok(this.next());
+        if (this.at(":")) {
+            this.next();
+            AType ut = this.parse_type();
+            if (this.is_enum_int_base(ut.base) == 0) {
+                this.error_at(this.peek(0), "enum underlying type must be an integer type");
+            }
+        }
+        this.expect("{", "expected '{' to start enum body");
+        while (!this.at("}") && !this.at("eof")) {
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected enumerator name");
+                this.synchronize();
+                break;
+            }
+            this.next();
+            if (this.at("=")) {
+                this.next();
+                this.parse_expr();
+            }
+            if (!this.at("}")) {
+                this.expect(",", "expected ',' between enumerators");
+                if (this.at("}")) {
+                    break;
+                }
+            }
+        }
+        this.expect("}", "expected '}' to close enum body");
+        this.expect(";", "expected ';' after enum definition");
+        this.register_type_name(name);
+      }
+    }
+
+    void parse_using() {
+      unsafe {
+        this.next();  // 'using'
+        if (this.kw("namespace")) {
+            this.error_at(this.peek(0), "'using namespace' is not supported in the Ivy subset");
+            this.synchronize();
+            return;
+        }
+        if (!this.at("identifier")) {
+            this.error_at(this.peek(0), "expected alias name after 'using'");
+            this.synchronize();
+            return;
+        }
+        const char* name = this.intern_tok(this.next());
+        if (this.at("=")) {
+            this.next();
+            this.parse_type();
+            this.expect(";", "expected ';' after type alias");
+            this.register_type_name(name);
+            return;
+        }
+        // using-declaration / using-enum — accepted and ignored.
+        while (!this.at(";") && !this.at("eof")) {
+            this.next();
+        }
+        this.expect(";", "expected ';' after using-declaration");
+      }
+    }
+
     void parse_extern_c(AAttrList attrs) {
         if (this.at("{")) {
             this.next();
@@ -1940,6 +2317,18 @@ export struct Parser {
                 this.next();
                 AAttrList a = this.parse_attrs();
                 this.parse_fn_trailing(a, 0, 0, 0);
+                continue;
+            }
+            if (this.kw("enum")) {
+                this.parse_enum();
+                continue;
+            }
+            if (this.kw("struct") || this.kw("class")) {
+                this.parse_struct();
+                continue;
+            }
+            if (this.kw("using")) {
+                this.parse_using();
                 continue;
             }
             AAttrList a = this.parse_attrs();

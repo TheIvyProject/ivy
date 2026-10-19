@@ -1,0 +1,5 @@
+using Index = int32;
+
+void f(Index i) {
+    Index j = i;
+}

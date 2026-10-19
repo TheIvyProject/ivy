@@ -1,0 +1,7 @@
+struct Node {
+    int32 v;
+};
+
+void init(Node& n) {
+    n.v = 0;
+}

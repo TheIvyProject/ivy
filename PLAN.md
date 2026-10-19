@@ -183,6 +183,18 @@ src/                              selfhost/
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
   Ghi chu: con cua compound/switch dung danh sach moc noi (`AStmt.next`) thay
   cho stack chung, tranh xen ke khi long nhau.
+- H3.4 (Struct / enum / class): tieu thu/khai bao aggregate + ten kieu nguoi
+  dung, dump AST byte-identical on `selfhost/corpus/parser/aggregate/` (14 file)
+  vs `ivy --ast` (struct/class field + method + ctor/dtor + operator + virtual/
+  override + access specifier, base list, enum + enum class + underlying type +
+  enumerator value, `using` alias; kieu nguoi dung trong tham so/tra ve/field,
+  member access `p.x`, member call). `--ast` KHONG dump aggregate o top-level,
+  nen byte-identical = tieu thu dung + nhan ten kieu de ham con dump giong.
+  Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/aggregate -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  Ghi chu: them registry ten kieu (`tnames_` luu `long` dia chi intern) +
+  `token_is_type_name`/`register_type_name`; `is_type_start`/`parse_type` nhan
+  identifier da dang ky. Chua ho tro namespace/template/global var.
 
 ---
 
@@ -220,7 +232,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ✅ byte-identical 15 files |
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ✅ byte-identical 13 files |
 | H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 15 files |
-| H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ☐ |
+| H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ✅ byte-identical 14 files |
 | H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ☐ |
 | H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ☐ |
 | H3.7 | Error cases (E2/E3/E4) | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/err` | ☐ |

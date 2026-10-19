@@ -1,0 +1,11 @@
+struct Res {
+    int32 id;
+
+    ~Res() {
+    }
+};
+
+void f() {
+    Res r;
+    r.id = 0;
+}

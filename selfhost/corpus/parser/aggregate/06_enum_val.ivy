@@ -1,0 +1,10 @@
+enum Flags {
+    None = 0,
+    A = 1,
+    B = 2,
+    All = 3
+};
+
+void f() {
+    int32 x = 0;
+}

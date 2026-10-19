@@ -1,0 +1,8 @@
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+void f() {
+    int32 m = 0;
+}

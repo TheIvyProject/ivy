@@ -53,6 +53,11 @@
 #     switch/case/default, nextcase, break/continue, unsafe, nested blocks):
 #     -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast
 #     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#   H3.4 (struct/enum/class: fields, methods, ctor/dtor, operator, virtual/
+#     override, access specifiers, base list, enum/enum class/underlying type,
+#     using alias, user-defined types in signatures/bodies):
+#     -Dir selfhost/corpus/parser/aggregate -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 

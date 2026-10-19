@@ -1,0 +1,15 @@
+struct Counter {
+    int32 v;
+
+    int32 get() {
+        return 1;
+    }
+
+    void set(int32 n) {
+    }
+};
+
+void f() {
+    Counter c;
+    c.v = 2;
+}

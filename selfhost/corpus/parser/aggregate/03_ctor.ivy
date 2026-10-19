@@ -1,0 +1,12 @@
+struct Pair {
+    int32 a;
+    int32 b;
+
+    Pair(int32 x, int32 y) {
+    }
+};
+
+void f() {
+    Pair p;
+    p.a = 1;
+}

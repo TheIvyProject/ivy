@@ -1,0 +1,8 @@
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+void add(Point a, Point b) {
+    a.x = b.x;
+}
