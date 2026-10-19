@@ -1,0 +1,1 @@
+void f(int32 a) { while (a) { a = 0; } }

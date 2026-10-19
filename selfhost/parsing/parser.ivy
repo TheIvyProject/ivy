@@ -81,13 +81,15 @@ export struct Parser {
     long sp_n_;
     long sp_cap_;
 
-    // child stacks: call arguments (expr indices) and compound statements
+    // child stacks: call arguments (expr indices)
     long* cargs_;
     long ca_n_;
     long ca_cap_;
-    long* cstmts_;
-    long cs_n_;
-    long cs_cap_;
+
+    // switch case pool
+    ACase* casepool_;
+    long cp_n_;
+    long cp_cap_;
 
     // diagnostics
     long* dline_;
@@ -120,8 +122,8 @@ export struct Parser {
         this.sp_cap_ = in_count * 2 + 64;
         this.ca_n_ = 0;
         this.ca_cap_ = in_count + 64;
-        this.cs_n_ = 0;
-        this.cs_cap_ = in_count + 64;
+        this.cp_n_ = 0;
+        this.cp_cap_ = in_count + 16;
         this.dn_ = 0;
         this.dcap_ = in_count + 16;
         this.ce_ = 0;
@@ -132,9 +134,9 @@ export struct Parser {
             this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 64);
             this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
             this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 112);
-            this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 96);
+            this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 112);
             this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
-            this.cstmts_ = (long*) __ivy_alloc(this.cs_cap_ * 8);
+            this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 24);
             this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
@@ -154,7 +156,7 @@ export struct Parser {
             __ivy_free(this.epool_);
             __ivy_free(this.spool_);
             __ivy_free(this.cargs_);
-            __ivy_free(this.cstmts_);
+            __ivy_free(this.casepool_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
@@ -310,6 +312,15 @@ export struct Parser {
 
     void expect(const char* kind, const char* msg) {
         if (this.at(kind)) {
+            this.next();
+            return;
+        }
+        this.error_at(this.peek(0), msg);
+        this.next();
+    }
+
+    void expect_kw(const char* word, const char* msg) {
+        if (this.kw(word)) {
             this.next();
             return;
         }
@@ -908,12 +919,27 @@ export struct Parser {
         s.kind = kind;
         s.sval = "";
         s.type = this.empty_type();
+        s.flag = 0;
         s.a = -1;
         s.b = -1;
         s.c = -1;
         s.sstart = -1;
         s.sn = 0;
+        s.next = -1;
         return s;
+    }
+
+    long push_case(long value, long sstart, long sn) {
+        long i = this.cp_n_;
+        if (this.cp_n_ < this.cp_cap_) {
+            unsafe {
+                this.casepool_[this.cp_n_].value = value;
+                this.casepool_[this.cp_n_].sstart = sstart;
+                this.casepool_[this.cp_n_].sn = sn;
+            }
+            this.cp_n_ = this.cp_n_ + 1;
+        }
+        return i;
     }
 
     long push_expr(AExpr e) {
@@ -947,12 +973,9 @@ export struct Parser {
         }
     }
 
-    void push_cstmt(long i) {
-        if (this.cs_n_ < this.cs_cap_) {
-            unsafe {
-                this.cstmts_[this.cs_n_] = i;
-            }
-            this.cs_n_ = this.cs_n_ + 1;
+    void set_next(long i, long v) {
+        unsafe {
+            this.spool_[i].next = v;
         }
     }
 
@@ -974,9 +997,9 @@ export struct Parser {
         }
     }
 
-    long* stmt_children() {
+    ACase* cases() {
         unsafe {
-            return this.cstmts_;
+            return this.casepool_;
         }
     }
 
@@ -1357,16 +1380,98 @@ export struct Parser {
     // --- statements -------------------------------------------------------
 
     long parse_statement() {
+        // A2: `unsafe { ... }` keyword block (preferred form)
+        if (this.kw("unsafe")) {
+            this.next();
+            long body = -1;
+            if (this.at("{")) {
+                body = this.parse_compound();
+            } else {
+                body = this.parse_statement();
+            }
+            AStmt s = this.fresh_stmt(13);
+            s.a = body;
+            return this.push_stmt(s);
+        }
+        if (this.kw("if")) {
+            return this.parse_if();
+        }
+        if (this.kw("while")) {
+            return this.parse_while();
+        }
+        if (this.kw("do")) {
+            return this.parse_dowhile();
+        }
+        if (this.kw("for")) {
+            return this.parse_for();
+        }
         if (this.kw("return")) {
             return this.parse_return_stmt();
+        }
+        if (this.kw("break")) {
+            this.next();
+            this.expect(";", "expected ';' after 'break'");
+            return this.push_stmt(this.fresh_stmt(9));
+        }
+        if (this.kw("continue")) {
+            this.next();
+            this.expect(";", "expected ';' after 'continue'");
+            return this.push_stmt(this.fresh_stmt(10));
+        }
+        if (this.kw("nextcase")) {
+            this.next();
+            AStmt s = this.fresh_stmt(11);
+            if (!this.at(";")) {
+                if (!this.at("identifier")) {
+                    this.error_at(this.peek(0), "expected case label after 'nextcase'");
+                } else {
+                    unsafe {
+                        s.sval = this.intern_tok(this.peek(0));
+                    }
+                }
+                this.next();
+            }
+            this.expect(";", "expected ';' after 'nextcase'");
+            return this.push_stmt(s);
+        }
+        if (this.kw("switch")) {
+            return this.parse_switch();
+        }
+        if (this.kw("goto")) {
+            this.error_at(this.peek(0), "goto is not supported in the Ivy subset");
+            this.synchronize();
+            return this.push_stmt(this.fresh_stmt(14));
+        }
+        if (this.kw("try") || this.kw("throw")) {
+            this.error_at(this.peek(0), "exceptions are not supported in the Ivy subset");
+            this.synchronize();
+            return this.push_stmt(this.fresh_stmt(14));
         }
         if (this.at("{")) {
             return this.parse_compound();
         }
-        long value = this.parse_expr();
-        this.expect(";", "expected ';' after expression");
-        AStmt s = this.fresh_stmt(12);
-        s.a = value;
+        return this.parse_decl_or_expr_stmt();
+    }
+
+    long parse_compound() {
+        this.expect("{", "expected '{'");
+        long first = -1;
+        long last = -1;
+        long count = 0;
+        while (!this.at("}") && !this.at("eof")) {
+            long st = this.parse_statement();
+            if (first < 0) {
+                first = st;
+            } else {
+                this.set_next(last, st);
+            }
+            last = st;
+            count = count + 1;
+        }
+        this.expect("}", "expected '}' to close block");
+        AStmt s = this.fresh_stmt(1);
+        s.sstart = first;
+        s.sn = count;
         return this.push_stmt(s);
     }
 
@@ -1382,17 +1487,297 @@ export struct Parser {
         return this.push_stmt(s);
     }
 
-    long parse_compound() {
-        long sstart = this.cs_n_;
-        this.expect("{", "expected '{'");
-        while (!this.at("}") && !this.at("eof")) {
-            long st = this.parse_statement();
-            this.push_cstmt(st);
+    long parse_if() {
+        this.next();  // if
+        long is_constexpr = 0;
+        if (this.kw("constexpr")) {
+            is_constexpr = 1;
+            this.next();
         }
-        this.expect("}", "expected '}' to close block");
+        this.expect("(", "expected '(' after 'if'");
+        long cond = this.parse_expr();
+        this.expect(")", "expected ')' after if condition");
+        long thenb = this.parse_statement();
+        long elseb = -1;
+        if (this.kw("else")) {
+            this.next();
+            elseb = this.parse_statement();
+        }
+        AStmt s = this.fresh_stmt(3);
+        s.a = cond;
+        s.b = thenb;
+        s.c = elseb;
+        s.flag = is_constexpr;
+        return this.push_stmt(s);
+    }
+
+    long parse_while() {
+        this.next();
+        this.expect("(", "expected '(' after 'while'");
+        long cond = this.parse_expr();
+        this.expect(")", "expected ')' after while condition");
+        long body = this.parse_statement();
+        AStmt s = this.fresh_stmt(4);
+        s.a = cond;
+        s.b = body;
+        return this.push_stmt(s);
+    }
+
+    long parse_dowhile() {
+        this.next();
+        long body = this.parse_statement();
+        this.expect_kw("while", "expected 'while' after do-while body");
+        this.expect("(", "expected '(' after 'while'");
+        long cond = this.parse_expr();
+        this.expect(")", "expected ')' after do-while condition");
+        this.expect(";", "expected ';' after do-while");
+        AStmt s = this.fresh_stmt(5);
+        s.a = body;
+        s.b = cond;
+        return this.push_stmt(s);
+    }
+
+    long parse_for() {
+        this.next();
+        this.expect("(", "expected '(' after 'for'");
+
+        // Range-based for: `for (T x : range)` / `for (T& x : range)`.
+        if (this.is_type_start() != 0) {
+            long save = this.pos_;
+            AType type = this.parse_type();
+            long is_ref = type.is_ref;
+            if (this.at("identifier") && this.kind_eq(this.peek(1), ":")) {
+                AStmt s = this.fresh_stmt(7);
+                s.type = type;
+                s.sval = this.intern_tok(this.next());
+                this.next();  // ':'
+                s.a = this.parse_expr();
+                this.expect(")", "expected ')' after range-for range");
+                s.b = this.parse_statement();
+                s.flag = is_ref;
+                return this.push_stmt(s);
+            }
+            this.pos_ = save;
+        }
+
+        long init = -1;
+        if (this.at(";")) {
+            init = this.push_stmt(this.fresh_stmt(14));
+        } else if (this.is_type_start() != 0) {
+            init = this.parse_decl(0);
+        } else {
+            AStmt si = this.fresh_stmt(12);
+            si.a = this.parse_expr();
+            init = this.push_stmt(si);
+        }
+        this.expect(";", "expected ';' after for-loop init");
+        long cond = -1;
+        if (!this.at(";")) {
+            cond = this.parse_expr();
+        }
+        this.expect(";", "expected ';' after for-loop condition");
+        long incr = -1;
+        if (!this.at(")")) {
+            incr = this.parse_expr();
+        }
+        this.expect(")", "expected ')' after for-loop increment");
+        long body = this.parse_statement();
+        AStmt s = this.fresh_stmt(6);
+        s.a = init;
+        s.b = cond;
+        s.c = incr;
+        s.sstart = body;
+        return this.push_stmt(s);
+    }
+
+    long parse_switch() {
+        this.next();
+        // A6: optional switch label — `switch LABEL: (cond) { }`
+        if (!this.at("(")) {
+            if (this.at("identifier") && this.kind_eq(this.peek(1), ":")) {
+                this.next();
+                this.next();
+            } else {
+                this.error_at(this.peek(0), "expected '(' after 'switch'");
+            }
+        }
+        this.expect("(", "expected '(' after 'switch'");
+        long cond = this.parse_expr();
+        this.expect(")", "expected ')' after switch condition");
+        this.expect("{", "expected '{' to start switch body");
+
+        long cstart = this.cp_n_;
+        while (!this.at("}") && !this.at("eof")) {
+            long value = -1;
+            if (this.kw("case")) {
+                this.next();
+                // A6: optional case label — `case LABEL: value:` (two colons).
+                if (this.at("identifier") && this.kind_eq(this.peek(1), ":")) {
+                    long two = 0;
+                    long cc = 0;
+                    long i = 0;
+                    while (i < 10 && !this.kind_eq(this.peek(i), "eof")) {
+                        if (this.kind_eq(this.peek(i), ":")) {
+                            cc = cc + 1;
+                            if (cc >= 2) {
+                                two = 1;
+                                break;
+                            }
+                        }
+                        if (this.kind_eq(this.peek(i), ";") || this.kind_eq(this.peek(i), "{")) {
+                            break;
+                        }
+                        i = i + 1;
+                    }
+                    if (two != 0) {
+                        this.next();
+                        this.next();
+                    }
+                }
+                value = this.parse_expr();
+                this.expect(":", "expected ':' after case value");
+            } else if (this.kw("default")) {
+                this.next();
+                this.expect(":", "expected ':' after 'default'");
+                value = -1;
+            } else {
+                this.error_at(this.peek(0), "expected 'case' or 'default' inside switch");
+                this.synchronize();
+                break;
+            }
+            long first = -1;
+            long last = -1;
+            long count = 0;
+            while (!this.at("}") && !this.at("eof") && !this.kw("case") && !this.kw("default")) {
+                long st = this.parse_statement();
+                if (first < 0) {
+                    first = st;
+                } else {
+                    this.set_next(last, st);
+                }
+                last = st;
+                count = count + 1;
+            }
+            this.push_case(value, first, count);
+        }
+        this.expect("}", "expected '}' to close switch");
+        AStmt s = this.fresh_stmt(15);
+        s.a = cond;
+        s.sstart = cstart;
+        s.sn = this.cp_n_ - cstart;
+        return this.push_stmt(s);
+    }
+
+    long parse_decl_or_expr_stmt() {
+        if (this.kw("constexpr")) {
+            this.parse_constexpr_spec();
+            if (this.is_type_start() == 0) {
+                this.error_at(this.peek(0), "expected a type after constexpr");
+                this.synchronize();
+                return this.push_stmt(this.fresh_stmt(14));
+            }
+            return this.parse_decl(1);
+        }
+        if (this.is_type_start() != 0) {
+            return this.parse_decl(1);
+        }
+        return this.parse_expr_stmt();
+    }
+
+    long parse_expr_stmt() {
+        long value = this.parse_expr();
+        this.expect(";", "expected ';' after expression");
+        AStmt s = this.fresh_stmt(12);
+        s.a = value;
+        return this.push_stmt(s);
+    }
+
+    long parse_decl(long expect_semi) {
+        AType type = this.parse_type();
+        if (this.cstr_len(type.base) == 0) {
+            this.synchronize();
+            return this.push_stmt(this.fresh_stmt(14));
+        }
+        long first = this.parse_declarator(type);
+        if (!this.at(",")) {
+            if (expect_semi != 0) {
+                this.expect(";", "expected ';' after declaration");
+            }
+            return first;
+        }
+        long last = first;
+        long count = 1;
+        while (this.at(",")) {
+            this.next();
+            AType t2 = type;
+            while (this.at("*")) {
+                this.next();
+                t2.ptr_depth = t2.ptr_depth + 1;
+            }
+            long d = this.parse_declarator(t2);
+            this.set_next(last, d);
+            last = d;
+            count = count + 1;
+        }
+        if (expect_semi != 0) {
+            this.expect(";", "expected ';' after declaration");
+        }
         AStmt s = this.fresh_stmt(1);
-        s.sstart = sstart;
-        s.sn = this.cs_n_ - sstart;
+        s.sstart = first;
+        s.sn = count;
+        return this.push_stmt(s);
+    }
+
+    long parse_declarator(AType t) {
+        AStmt s = this.fresh_stmt(2);
+        s.type = t;
+        if (!this.at("identifier")) {
+            this.error_at(this.peek(0), "expected variable name");
+            return this.push_stmt(s);
+        }
+        s.sval = this.intern_tok(this.next());
+        if (this.at("[")) {
+            this.next();
+            if (this.at("integer")) {
+                Token it = this.peek(0);
+                long n = this.parse_int_tok(it);
+                this.next();
+                if (n <= 0) {
+                    this.error_at(it, "array size must be a positive integer");
+                }
+            } else {
+                this.error_at(this.peek(0),
+                              "array size must be an integer constant (variable-length arrays are not supported)");
+                this.synchronize();
+            }
+            this.expect("]", "expected ']' after array size");
+        }
+        if (this.at("=")) {
+            this.next();
+            s.a = this.parse_expr();
+        } else if (this.at("{")) {
+            s.a = this.parse_primary();
+        } else if (this.at("(")) {
+            this.next();
+            AExpr call = this.fresh(13);
+            AExpr callee = this.fresh(8);
+            callee.sval = t.base;
+            call.a = this.push_expr(callee);
+            long argstart = this.ca_n_;
+            call.astart = argstart;
+            while (!this.at(")") && !this.at("eof")) {
+                long arg = this.parse_expr();
+                this.push_carg(arg);
+                if (this.at(",")) {
+                    this.next();
+                } else {
+                    break;
+                }
+            }
+            call.an = this.ca_n_ - argstart;
+            this.expect(")", "expected ')' after constructor arguments");
+            s.a = this.push_expr(call);
+        }
         return this.push_stmt(s);
     }
 

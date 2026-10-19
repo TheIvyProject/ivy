@@ -174,6 +174,15 @@ src/                              selfhost/
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/expr -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
   Ghi chu: mang `const char**` (chan doan) bi loi codegen Ivy khi ghi >=2 phan
   tu, nen `Parser.dmsg_` dung `long*` + `reinterpret_cast<const char*>`.
+- H3.3 (Statement / control flow): port parser statement + control flow, dump
+  body AST byte-identical on `selfhost/corpus/parser/stmt/` (15 file) vs
+  `ivy --ast` (decl + multi-declarator (desugar compound), if/else, if
+  constexpr, while, do-while, for (init decl/expr/null, cond, incr), break,
+  continue, switch/case/default, nextcase, unsafe, nested block). Con cho
+  range-for (can mang/struct). Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  Ghi chu: con cua compound/switch dung danh sach moc noi (`AStmt.next`) thay
+  cho stack chung, tranh xen ke khi long nhau.
 
 ---
 
@@ -210,7 +219,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 |-----|-----------|---------|----------|--------|-----------|
 | H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ✅ byte-identical 15 files |
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ✅ byte-identical 13 files |
-| H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ☐ |
+| H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 15 files |
 | H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ☐ |
 | H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ☐ |
 | H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ☐ |

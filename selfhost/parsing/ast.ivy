@@ -80,9 +80,22 @@ export struct AStmt {
     long kind;
     const char* sval;   // decl name / nextcase target
     AType type;         // decl type / rangefor element type
+    long flag;          // rangefor isRef (7) | if isConstexpr (3)
     long a;             // expr index (cond / return value / exprstmt value)
-    long b;             // stmt index (then / body)
-    long c;             // stmt index (else)
-    long sstart;        // first child stmt index in the stmt-stack pool
+                        // or stmt index (for init(6) / unsafe body(13))
+    long b;             // stmt index (then / body / for cond is expr)
+    long c;             // stmt index (else) / for incr is expr
+    long sstart;        // first child stmt index (compound(1) children walk via
+                        // `next`; for(6) body is a stmt; switch(15) first case)
     long sn;            // child stmt count
+    long next;          // next sibling stmt index (-1) for linked child lists
+};
+
+// A `case`/`default` clause of a switch statement. `value` is the case
+// expression pool index, or -1 for `default`. `sstart`/`sn` delimit the
+// clause body stmt indices in the stmt-stack pool.
+export struct ACase {
+    long value;
+    long sstart;
+    long sn;
 };

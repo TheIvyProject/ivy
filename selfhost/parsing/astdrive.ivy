@@ -26,7 +26,7 @@ struct Dumper {
     AExpr* ep;
     AStmt* sp;
     long* ca;
-    long* cs;
+    ACase* cp;
 
     long slen(const char* s) {
         long i = 0;
@@ -217,14 +217,12 @@ struct Dumper {
         }
         this.pad(depth);
         io::println("block");
-        long j = 0;
-        while (j < s.sn) {
-            long child = 0;
+        long k = s.sstart;
+        while (k >= 0) {
+            this.dump_stmt(k, depth + 1);
             unsafe {
-                child = this.cs[s.sstart + j];
+                k = this.sp[k].next;
             }
-            this.dump_stmt(child, depth + 1);
-            j = j + 1;
         }
     }
 
@@ -250,6 +248,67 @@ struct Dumper {
             }
             return;
         }
+        if (s.kind == 3) {
+            io::println("if");
+            this.dump_expr(s.a, depth + 1);
+            this.pad(depth);
+            io::println("  then");
+            if (s.b >= 0) {
+                this.dump_stmt(s.b, depth + 1);
+            }
+            if (s.c >= 0) {
+                this.pad(depth);
+                io::println("  else");
+                this.dump_stmt(s.c, depth + 1);
+            }
+            return;
+        }
+        if (s.kind == 4) {
+            io::println("while");
+            this.dump_expr(s.a, depth + 1);
+            this.dump_stmt(s.b, depth + 1);
+            return;
+        }
+        if (s.kind == 5) {
+            io::println("do-while");
+            this.dump_stmt(s.a, depth + 1);
+            this.dump_expr(s.b, depth + 1);
+            return;
+        }
+        if (s.kind == 6) {
+            io::println("for");
+            this.pad(depth);
+            io::println("  init");
+            this.dump_stmt(s.a, depth + 1);
+            this.pad(depth);
+            io::println("  cond");
+            if (s.b >= 0) {
+                this.dump_expr(s.b, depth + 1);
+            }
+            this.pad(depth);
+            io::println("  incr");
+            if (s.c >= 0) {
+                this.dump_expr(s.c, depth + 1);
+            }
+            this.pad(depth);
+            io::println("  body");
+            this.dump_stmt(s.sstart, depth + 1);
+            return;
+        }
+        if (s.kind == 7) {
+            if (s.flag != 0) {
+                io::println("range-for ref");
+            } else {
+                io::println("range-for");
+            }
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            if (s.b >= 0) {
+                this.dump_stmt(s.b, depth + 1);
+            }
+            return;
+        }
         if (s.kind == 8) {
             io::println("return");
             if (s.a >= 0) {
@@ -257,9 +316,64 @@ struct Dumper {
             }
             return;
         }
+        if (s.kind == 9) {
+            io::println("break");
+            return;
+        }
+        if (s.kind == 10) {
+            io::println("continue");
+            return;
+        }
+        if (s.kind == 11) {
+            if (this.slen(s.sval) > 0) {
+                io::println("nextcase {}", s.sval);
+            } else {
+                io::println("nextcase");
+            }
+            return;
+        }
         if (s.kind == 12) {
             io::println("expr");
             this.dump_expr(s.a, depth + 1);
+            return;
+        }
+        if (s.kind == 13) {
+            io::println("unsafe");
+            this.dump_stmt(s.a, depth + 1);
+            return;
+        }
+        if (s.kind == 14) {
+            io::println("null");
+            return;
+        }
+        if (s.kind == 15) {
+            io::println("switch");
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            long j = 0;
+            while (j < s.sn) {
+                ACase c;
+                unsafe {
+                    c = this.cp[s.sstart + j];
+                }
+                if (c.value >= 0) {
+                    this.pad(depth);
+                    io::println("  case");
+                    this.dump_expr(c.value, depth + 2);
+                } else {
+                    this.pad(depth);
+                    io::println("  default");
+                }
+                long k = c.sstart;
+                while (k >= 0) {
+                    this.dump_stmt(k, depth + 2);
+                    unsafe {
+                        k = this.sp[k].next;
+                    }
+                }
+                j = j + 1;
+            }
             return;
         }
     }
@@ -378,7 +492,7 @@ void run() {
                             d.ep = pa.exprs();
                             d.sp = pa.stmts();
                             d.ca = pa.call_args();
-                            d.cs = pa.stmt_children();
+                            d.cp = pa.cases();
                             long n = pa.fn_count();
                             long i = 0;
                             while (i < n) {
