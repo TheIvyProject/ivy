@@ -1,0 +1,4 @@
+// `alignof` needs a type.
+void f() {
+    int32 a = alignof();
+}

@@ -1,0 +1,10 @@
+// A constexpr function whose body calls another function is not folded.
+constexpr int32 inner(int32 x) {
+    return x + 1;
+}
+constexpr int32 outer(int32 x) {
+    return inner(x);
+}
+void f() {
+    int32 a = outer(1);
+}

@@ -1,0 +1,10 @@
+// The discarded branch of an `if constexpr` is not built at all: it is
+// neither resolved nor type checked.
+void f() {
+    if constexpr (0) {
+        undeclared_name();
+        int32 a = "not an int";
+    } else {
+        int32 b = 1;
+    }
+}

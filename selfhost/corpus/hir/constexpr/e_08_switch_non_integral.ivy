@@ -1,0 +1,7 @@
+// The condition of a switch must have an integral type.
+void f(float64 x) {
+    switch (x) {
+        case 1: x = 2; break;
+        default: break;
+    }
+}

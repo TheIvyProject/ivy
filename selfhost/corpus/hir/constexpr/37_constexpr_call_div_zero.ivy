@@ -1,0 +1,8 @@
+// A division by zero is not a constant, so the call is not folded.
+constexpr int32 div(int32 x) {
+    return 10 / x;
+}
+void f() {
+    int32 a = div(0);
+    int32 b = div(2);
+}

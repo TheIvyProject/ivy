@@ -1,0 +1,6 @@
+// `if constexpr (false)` without an else branch keeps neither branch.
+void f() {
+    if constexpr (0) {
+        int32 a = 1;
+    }
+}

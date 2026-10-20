@@ -1,0 +1,8 @@
+// A bool result of a constexpr call folds to a boolean literal.
+constexpr bool is_pos(int32 x) {
+    return x > 0;
+}
+void f() {
+    bool a = is_pos(4);
+    bool b = is_pos(0);
+}

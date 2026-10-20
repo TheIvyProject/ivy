@@ -1,0 +1,7 @@
+// A constexpr call with a non-literal argument is not folded.
+constexpr int32 sq(int32 x) {
+    return x * x;
+}
+void f(int32 v) {
+    int32 a = sq(v);
+}

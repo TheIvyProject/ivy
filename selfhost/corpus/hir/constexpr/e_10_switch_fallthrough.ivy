@@ -1,0 +1,7 @@
+// Ivy has no implicit fallthrough: a case must end with a terminator.
+void f(int32 x) {
+    switch (x) {
+        case 1: x = 2;
+        default: break;
+    }
+}

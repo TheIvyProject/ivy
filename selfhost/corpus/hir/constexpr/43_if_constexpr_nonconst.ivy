@@ -1,0 +1,8 @@
+// A condition that is not a compile-time constant keeps both branches.
+void f(int32 c) {
+    if constexpr (c) {
+        int32 a = 1;
+    } else {
+        int32 b = 2;
+    }
+}

@@ -1,0 +1,4 @@
+// The size of an array must be an integer constant.
+void f(int32 n) {
+    int32 a[n];
+}

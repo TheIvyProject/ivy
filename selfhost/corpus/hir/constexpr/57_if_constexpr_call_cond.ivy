@@ -1,0 +1,12 @@
+// A call is not a constant, so it does not fold the condition of an
+// `if constexpr`.
+constexpr int32 one(int32 x) {
+    return 1;
+}
+void f() {
+    if constexpr (one(0)) {
+        int32 a = 1;
+    } else {
+        int32 b = 2;
+    }
+}

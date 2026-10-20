@@ -1,0 +1,14 @@
+// A float literal is printed with six significant digits, like the oracle
+// prints it with operator<<(ostream&, double).
+#pragma ivy cnumber
+void f() {
+    auto a = 2.5;
+    auto b = 2.50;
+    auto c = 1e10;
+    auto d = 100000.0;
+    auto e = 1000000.0;
+    auto g = 0.1;
+    auto h = 1.0e-5;
+    auto i = 1234567.0;
+    auto j = 999999.5;
+}

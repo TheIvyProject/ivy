@@ -1,0 +1,12 @@
+// The size of a struct follows the field layout: every field is aligned to
+// its natural alignment and the size is rounded up to the alignment.
+#pragma ivy cnumber
+struct S {
+    int a;
+    char b;
+    int c;
+};
+void f() {
+    int a = sizeof(S);
+    int b = alignof(S);
+}

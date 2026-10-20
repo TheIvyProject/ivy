@@ -1,0 +1,6 @@
+// A binary expression is a valid constant enumerator value: it is folded to
+// the value of the expression.
+enum E { A = 1 + 2 };
+void f() {
+    int32 b = A;
+}

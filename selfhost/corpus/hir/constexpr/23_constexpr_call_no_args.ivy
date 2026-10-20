@@ -1,0 +1,7 @@
+// A constexpr call without arguments is not folded.
+constexpr int32 three() {
+    return 3;
+}
+void f() {
+    int32 a = three();
+}

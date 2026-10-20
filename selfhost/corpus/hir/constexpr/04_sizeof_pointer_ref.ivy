@@ -1,0 +1,12 @@
+// Pointers and references are 8 bytes; an enum and `void` fall back to the
+// size of an int.
+enum E { A, B };
+void f() {
+    int32 a = sizeof(int32*);
+    int32 b = alignof(int32*);
+    int32 c = sizeof(int32&);
+    int32 d = alignof(int32&);
+    int32 e = sizeof(E);
+    int32 g = sizeof(void);
+    int32 h = alignof(void);
+}

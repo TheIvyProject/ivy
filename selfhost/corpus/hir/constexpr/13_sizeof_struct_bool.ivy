@@ -1,0 +1,9 @@
+// The size of a struct with a bool field.
+struct S {
+    bool a;
+    bool b;
+};
+void f() {
+    int32 a = sizeof(S);
+    int32 b = alignof(S);
+}

@@ -1,0 +1,6 @@
+// A `constexpr` variable at the top level is not a declaration the parser
+// accepts.
+constexpr int32 a = 8;
+void f() {
+    int32 b = 0;
+}

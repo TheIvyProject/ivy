@@ -58,6 +58,8 @@ export struct AFunction {
     long body;
     long line;
     long col;
+    long is_constexpr;   // `constexpr` / `consteval` function
+    long is_virtual;     // `virtual` or pure-virtual method
 };
 
 // A struct/class field declaration.
@@ -134,6 +136,7 @@ export struct AExpr {
     long is_scope;      // member(15): `::` scope resolution (vs `.`/`->`)
     long line;
     long col;
+    double fval;        // exact value of a float literal (kind 2)
 };
 
 // A statement node in the statement pool.

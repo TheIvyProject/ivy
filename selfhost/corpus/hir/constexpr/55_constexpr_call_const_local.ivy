@@ -1,0 +1,8 @@
+// A `const` variable inside a constexpr body is not a constant.
+constexpr int32 use_const(int32 x) {
+    const int32 y = 4;
+    return x + y;
+}
+void f() {
+    int32 a = use_const(3);
+}

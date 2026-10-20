@@ -1,0 +1,8 @@
+// A boolean literal is accepted as an argument of a constexpr call.
+constexpr int32 neg(bool b) {
+    return b ? 0 - 1 : 1;
+}
+void f() {
+    int32 a = neg(true);
+    int32 b = neg(false);
+}

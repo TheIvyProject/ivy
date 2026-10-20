@@ -36,6 +36,39 @@ export struct HirBuilder {
     long ec_n_;
     long ec_cap_;
 
+    // struct layout (size / alignment / polymorphism) per struct index
+    long* ssize_;
+    long* salign_;
+    long* spoly_;
+
+    // compile-time constant evaluation state (evalConstExpr in
+    // hir_builder.cpp): the last evaluated constant value
+    long cst_is_int_;
+    long cst_i_;
+    double cst_f_;
+
+    // the parameters bound to the arguments of the constexpr call that is
+    // currently being folded
+    long* cst_bname_;
+    long* cst_bint_;
+    long* cst_bi_;
+    double* cst_bf_;
+    long cst_bn_;
+
+    // The pool of rendered float texts and the scratch buffer they are
+    // built in.  The pool is a list of fixed-size chunks: a chunk is never
+    // reallocated (a folded literal keeps the pointer to its text), so a
+    // full chunk is not reused but a new one is added.
+    char** fchunks_;
+    long fchunk_n_;
+    long fchunk_cap_;
+    char* fcur_;
+    long fcur_n_;
+    long fchunk_size_;
+    long fok_;            // 1 when the current chunk is usable
+    char* fbuf_;
+    long fbuf_cap_;
+
     // all enumerator values (parallel to parser enumerator pool order)
     long* evnm_;
     long* evval_;
@@ -96,10 +129,10 @@ export struct HirBuilder {
             this.ep_ = p.exprs();
             this.sp_ = p.stmts();
             this.u.fn_cap = ntoks + 64;
-            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 88);
+            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 96);
             this.u.fn_n = 0;
             this.u.ex_cap = ntoks * 8 + 256;
-            this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 136);
+            this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 144);
             this.u.ex_n = 0;
             this.u.st_cap = ntoks * 3 + 128;
             this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 120);
@@ -126,6 +159,39 @@ export struct HirBuilder {
             this.ecnm_ = (long*) __ivy_alloc(this.ec_cap_ * 8);
             this.ecval_ = (long*) __ivy_alloc(this.ec_cap_ * 8);
             this.ec_n_ = 0;
+
+            long nstructs = this.pa.struct_count();
+            this.ssize_ = (long*) __ivy_alloc((nstructs + 1) * 8);
+            this.salign_ = (long*) __ivy_alloc((nstructs + 1) * 8);
+            this.spoly_ = (long*) __ivy_alloc((nstructs + 1) * 8);
+            // The allocator does not zero its memory: initialise the layout
+            // tables so that a struct without a computed layout never reads
+            // an undefined size or alignment.
+            long li = 0;
+            while (li <= nstructs) {
+                unsafe {
+                    this.ssize_[li] = 0;
+                    this.salign_[li] = 0;
+                    this.spoly_[li] = 0;
+                }
+                li = li + 1;
+            }
+
+            this.cst_bname_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.cst_bint_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.cst_bi_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.cst_bf_ = (double*) __ivy_alloc((ntoks + 16) * 8);
+            this.cst_bn_ = 0;
+
+            this.fchunk_size_ = 4096;
+            this.fchunk_cap_ = 16;
+            this.fchunks_ = (char**) __ivy_alloc(this.fchunk_cap_ * 8);
+            this.fchunk_n_ = 0;
+            this.fcur_ = (char*)0;
+            this.fcur_n_ = 0;
+            this.fok_ = 0;
+            this.fbuf_cap_ = 64;
+            this.fbuf_ = (char*) __ivy_alloc(this.fbuf_cap_);
 
             this.ev_cap_ = ntoks * 2 + 64;
             this.evnm_ = (long*) __ivy_alloc(this.ev_cap_ * 8);
@@ -179,6 +245,22 @@ export struct HirBuilder {
             __ivy_free(this.scope_);
             __ivy_free(this.ecnm_);
             __ivy_free(this.ecval_);
+            __ivy_free(this.ssize_);
+            __ivy_free(this.salign_);
+            __ivy_free(this.spoly_);
+            __ivy_free(this.cst_bname_);
+            __ivy_free(this.cst_bint_);
+            __ivy_free(this.cst_bi_);
+            __ivy_free(this.cst_bf_);
+            long fc = 0;
+            while (fc < this.fchunk_n_) {
+                unsafe {
+                    __ivy_free(this.fchunks_[fc]);
+                }
+                fc = fc + 1;
+            }
+            __ivy_free((void*)this.fchunks_);
+            __ivy_free(this.fbuf_);
             __ivy_free(this.evnm_);
             __ivy_free(this.evval_);
             __ivy_free(this.evstart_);
@@ -243,6 +325,32 @@ export struct HirBuilder {
                 i = i + 1;
             }
             return b[i] == 0;
+        }
+        return false;
+    }
+
+    // True when `hay` contains `needle` (an empty needle is contained).
+    bool has_sub(const char* hay, const char* needle) {
+        long nl = this.slen(needle);
+        if (nl == 0) {
+            return true;
+        }
+        long hl = this.slen(hay);
+        long i = 0;
+        while (i + nl <= hl) {
+            long j = 0;
+            while (j < nl) {
+                unsafe {
+                    if (hay[i + j] != needle[j]) {
+                        break;
+                    }
+                }
+                j = j + 1;
+            }
+            if (j == nl) {
+                return true;
+            }
+            i = i + 1;
         }
         return false;
     }
@@ -681,6 +789,23 @@ export struct HirBuilder {
         this.diag(line, col, this.db_end());
     }
 
+    // The switch condition must have an integral type (buildStmt in
+    // hir_builder.cpp).
+    void err_switch_cond_type(long line, long col) {
+        this.diag(line, col, "switch condition must be an integral type");
+    }
+
+    // A switch may have at most one `default` case.
+    void err_switch_dup_default(long line, long col) {
+        this.diag(line, col, "switch has more than one 'default' case");
+    }
+
+    // Ivy has no implicit fallthrough: every case must end with a
+    // terminator statement.
+    void err_switch_fallthrough(long line, long col) {
+        this.diag(line, col, "Ivy forbids implicit fallthrough: case must end with break, return, continue, or nextcase");
+    }
+
 
     // type printing for diagnostics (mirrors typeToString: no '&')
     void db_type_name(AType t) {
@@ -741,11 +866,182 @@ export struct HirBuilder {
         return t;
     }
 
+    AType ty_int64() {
+        AType t = this.ty_empty();
+        t.base = "int64_t";
+        return t;
+    }
+
     AType ty_nullptr() {
         AType t = this.ty_empty();
         t.base = "nullptr";
         return t;
     }
+
+    // --- struct layout (8.3 in hir_builder.cpp) ---------------------------
+
+    // Round `v` up to a multiple of the alignment `a`.
+    long align_up(long v, long a) {
+        if (a <= 1) {
+            return v;
+        }
+        long r = v % a;
+        if (r == 0) {
+            return v;
+        }
+        return v + (a - r);
+    }
+
+    // typeSize in hir_builder.cpp: the byte size of a type.  Pointers and
+    // references are 8 bytes; the primitive sizes follow the same table as
+    // the code generator; a struct uses its computed layout.
+    long type_size(AType t) {
+        if (t.ptr_depth > 0 || t.is_ref != 0) {
+            return 8;
+        }
+        if (this.seq(t.base, "bool") || this.seq(t.base, "char") ||
+            this.seq(t.base, "int8_t") || this.seq(t.base, "uint8_t")) {
+            return 1;
+        }
+        if (this.seq(t.base, "short") || this.seq(t.base, "int16_t") ||
+            this.seq(t.base, "uint16_t") || this.seq(t.base, "float16_t") ||
+            this.seq(t.base, "bfloat16_t")) {
+            return 2;
+        }
+        if (this.seq(t.base, "int") || this.seq(t.base, "unsigned") ||
+            this.seq(t.base, "int32_t") || this.seq(t.base, "uint32_t") ||
+            this.seq(t.base, "float") || this.seq(t.base, "float32_t")) {
+            return 4;
+        }
+        if (this.seq(t.base, "size_t") || this.seq(t.base, "ptrdiff_t") ||
+            this.seq(t.base, "uptr_t")) {
+            return 8;
+        }
+        if (this.seq(t.base, "long") || this.seq(t.base, "long long") ||
+            this.seq(t.base, "int64_t") || this.seq(t.base, "uint64_t") ||
+            this.seq(t.base, "double") || this.seq(t.base, "long double") ||
+            this.seq(t.base, "float64_t")) {
+            return 8;
+        }
+        if (this.seq(t.base, "float128_t") || this.seq(t.base, "int128_t") ||
+            this.seq(t.base, "uint128_t")) {
+            return 16;
+        }
+        long si = this.find_struct(t.base);
+        if (si >= 0) {
+            unsafe {
+                return this.ssize_[si];
+            }
+        }
+        if (t.array_size > 0) {
+            AType elem = t;
+            elem.array_size = 0;
+            return this.type_size(elem) * t.array_size;
+        }
+        return 4;
+    }
+
+    // typeAlign in hir_builder.cpp: the alignment of a type.  A struct uses
+    // its computed alignment, an array the alignment of its element type and
+    // a scalar its own size.
+    long type_align(AType t) {
+        if (t.ptr_depth > 0 || t.is_ref != 0) {
+            return 8;
+        }
+        long si = this.find_struct(t.base);
+        if (si >= 0) {
+            unsafe {
+                return this.salign_[si];
+            }
+        }
+        if (t.array_size > 0) {
+            AType elem = t;
+            elem.array_size = 0;
+            return this.type_align(elem);
+        }
+        return this.type_size(t);
+    }
+
+    // Compute the field layout of a struct (buildStruct in hir_builder.cpp):
+    // an optional vptr, then the base subobjects, then the fields.  Every
+    // component is aligned to its natural alignment and the size is rounded
+    // up to the alignment of the struct.
+    void layout_struct(long si) {
+        AStruct sd = this.pa.get_struct(si);
+        long offset = 0;
+        long align = 1;
+        long poly = 0;
+        long j = 0;
+        while (j < sd.nmethods) {
+            AFunction mf;
+            unsafe {
+                mf = sd.methods[j];
+            }
+            if (mf.is_virtual != 0) {
+                poly = 1;
+            }
+            j = j + 1;
+        }
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                unsafe {
+                    if (this.spoly_[bi] != 0) {
+                        poly = 1;
+                    }
+                }
+            }
+            k = k + 1;
+        }
+        if (poly != 0) {
+            offset = 8;
+            align = 8;
+        }
+        k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                long bsize = 0;
+                long balign = 0;
+                unsafe {
+                    bsize = this.ssize_[bi];
+                    balign = this.salign_[bi];
+                }
+                offset = this.align_up(offset, balign);
+                offset = offset + bsize;
+                if (balign > align) {
+                    align = balign;
+                }
+            }
+            k = k + 1;
+        }
+        long i = 0;
+        while (i < sd.nfields) {
+            AField f;
+            unsafe {
+                f = sd.fields[i];
+            }
+            AType ft = this.resolve_alias(f.type);
+            long fsz = this.type_size(ft);
+            long fal = this.type_align(ft);
+            offset = this.align_up(offset, fal);
+            offset = offset + fsz;
+            if (fal > align) {
+                align = fal;
+            }
+            i = i + 1;
+        }
+        long total = this.align_up(offset, align);
+        unsafe {
+            this.ssize_[si] = total;
+            this.salign_[si] = align;
+            this.spoly_[si] = poly;
+        }
+    }
+
 
     AType ty_dummy() {
         return this.ty_int();
@@ -1294,6 +1590,17 @@ export struct HirBuilder {
         return i;
     }
 
+    long push_hcase(HCase c) {
+        long i = this.u.c_n;
+        if (i < this.u.c_cap) {
+            unsafe {
+                this.u.cases[i] = c;
+            }
+            this.u.c_n = i + 1;
+        }
+        return i;
+    }
+
     HExpr new_expr(long kind, long line, long col) {
         HExpr e;
         e.kind = kind;
@@ -1308,6 +1615,7 @@ export struct HirBuilder {
         e.an = 0;
         e.line = line;
         e.col = col;
+        e.fval = 0.0;
         return e;
     }
 
@@ -1344,6 +1652,7 @@ export struct HirBuilder {
         e.is_scope = 0;
         e.line = 0;
         e.col = 0;
+        e.fval = 0.0;
         return e;
     }
 
@@ -1668,7 +1977,7 @@ export struct HirBuilder {
         }
     }
 
-    long add_function(const char* name, AType ret, long is_ext) {
+    long add_function(const char* name, AType ret, long is_ext, long is_constexpr) {
         HFunction f;
         f.name = name;
         f.ret = ret;
@@ -1676,6 +1985,7 @@ export struct HirBuilder {
         f.body = -1;
         f.pstart = this.u.p_n;
         f.pn = 0;
+        f.is_constexpr = is_constexpr;
         long idx = this.u.fn_n;
         if (this.u.fn_n < this.u.fn_cap) {
             unsafe {
@@ -1700,7 +2010,7 @@ export struct HirBuilder {
 
     void build_free_signature(AFunction af) {
         AType ret = this.resolve_alias(af.ret);
-        long idx = this.add_function(af.name, ret, af.is_extern_c);
+        long idx = this.add_function(af.name, ret, af.is_extern_c, af.is_constexpr);
         long j = 0;
         while (j < af.nparams) {
             AParam p;
@@ -1720,7 +2030,7 @@ export struct HirBuilder {
 
     void build_method_signature(AStruct sd, AFunction mf) {
         AType ret = this.resolve_alias(mf.ret);
-        long idx = this.add_function(mf.name, ret, 0);
+        long idx = this.add_function(mf.name, ret, 0, mf.is_constexpr);
         AType tt = this.ty_empty();
         tt.base = sd.name;
         tt.is_ref = 1;
@@ -1759,6 +2069,8 @@ export struct HirBuilder {
                 i = i + 1;
                 continue;
             }
+            // The field layout is needed by `sizeof` / `alignof`.
+            this.layout_struct(i);
             long j = 0;
             while (j < sd.nmethods) {
                 AFunction mf;
@@ -2065,6 +2377,126 @@ export struct HirBuilder {
         return this.push_stmt(s);
     }
 
+    // True when the statement ends a case clause: `break`, `return`,
+    // `continue` or `nextcase` (a block ending with one of them counts
+    // too, like the oracle's isTerminator helper).
+    bool is_terminator(long idx) {
+        if (idx < 0) {
+            return false;
+        }
+        HStmt s;
+        unsafe {
+            s = this.u.stmts[idx];
+        }
+        if (s.kind == 7 || s.kind == 8 || s.kind == 9 || s.kind == 10) {
+            return true;
+        }
+        if (s.kind == 1) {
+            long k = s.sstart;
+            long last = -1;
+            while (k >= 0) {
+                last = k;
+                unsafe {
+                    k = this.u.stmts[k].next;
+                }
+            }
+            if (last < 0) {
+                return false;
+            }
+            return this.is_terminator(last);
+        }
+        return false;
+    }
+
+    // The switch condition must have an integral type (buildStmt in
+    // hir_builder.cpp): `bool`, `char`, the C-style integer types and every
+    // fixed-width integer type.  The floating-point and pointer types are
+    // not integral.
+    bool is_switch_integral(AType t) {
+        if (t.ptr_depth > 0 || t.is_ref != 0) {
+            return false;
+        }
+        if (this.seq(t.base, "")) {
+            return false;
+        }
+        if (this.seq(t.base, "bool") || this.seq(t.base, "char") ||
+            this.seq(t.base, "short") || this.seq(t.base, "int") ||
+            this.seq(t.base, "long") || this.seq(t.base, "long long") ||
+            this.seq(t.base, "unsigned") || this.seq(t.base, "unsigned long") ||
+            this.seq(t.base, "unsigned long long")) {
+            return true;
+        }
+        return this.has_sub(t.base, "int") || this.has_sub(t.base, "char");
+    }
+
+    // buildStmt in hir_builder.cpp: a switch statement.  The condition must
+    // have an integral type, there may be at most one `default` case and
+    // every case must end with a terminator statement (Ivy has no implicit
+    // fallthrough).
+    long build_switch(AStmt a) {
+        long cond = this.build_expr(a.a);
+        if (cond >= 0) {
+            HExpr ce;
+            unsafe {
+                ce = this.u.exprs[cond];
+            }
+            if (this.is_switch_integral(ce.type) == 0) {
+                this.err_switch_cond_type(a.line, a.col);
+            }
+        }
+        long cstart = this.u.c_n;
+        long ncases = 0;
+        long has_default = 0;
+        long j = 0;
+        while (j < a.sn) {
+            ACase ac = this.pa.get_case(a.sstart + j);
+            long value = -1;
+            if (ac.value >= 0) {
+                value = this.build_expr(ac.value);
+            } else {
+                if (has_default != 0) {
+                    this.err_switch_dup_default(a.line, a.col);
+                }
+                has_default = 1;
+            }
+            // The statements of the case, in source order.
+            long first = -1;
+            long last = -1;
+            long count = 0;
+            long cur = ac.sstart;
+            while (cur >= 0) {
+                AStmt child = this.get_stmt(cur);
+                long nxt = child.next;
+                long h = this.build_stmt(cur);
+                if (first < 0) {
+                    first = h;
+                } else if (last >= 0) {
+                    unsafe {
+                        this.u.stmts[last].next = h;
+                    }
+                }
+                last = h;
+                count = count + 1;
+                cur = nxt;
+            }
+            if (count > 0 && this.is_terminator(last) == 0) {
+                this.err_switch_fallthrough(a.line, a.col);
+            }
+            HCase hc;
+            hc.value = value;
+            hc.sstart = first;
+            hc.sn = count;
+            this.push_hcase(hc);
+            ncases = ncases + 1;
+            j = j + 1;
+        }
+        HStmt s = this.new_stmt(14, a.line, a.col);
+        s.a = cond;
+        s.sstart = cstart;
+        s.sn = ncases;
+        return this.push_stmt(s);
+    }
+
     long build_stmt(long idx) {
         AStmt a = this.get_stmt(idx);
         if (a.kind == 1) {
@@ -2077,8 +2509,32 @@ export struct HirBuilder {
             long cond = this.build_expr(a.a);
             this.check_condition(cond);
             long thenb = -1;
-            if (a.b >= 0) { thenb = this.build_stmt(a.b); }
             long elseb = -1;
+            // `if constexpr`: evaluate the condition at compile time and
+            // build only the taken branch.  The discarded branch is not
+            // built at all, so it is neither resolved nor type checked.
+            if (a.flag != 0 && cond >= 0) {
+                this.cst_reset();
+            }
+            if (a.flag != 0 && cond >= 0 && this.eval_const_expr(cond)) {
+                long taken = 0;
+                if (this.cst_is_int_ != 0) {
+                    taken = this.cst_i_ != 0 ? 1 : 0;
+                } else {
+                    taken = this.cst_f_ != 0.0 ? 1 : 0;
+                }
+                if (taken != 0) {
+                    if (a.b >= 0) { thenb = this.build_stmt(a.b); }
+                } else {
+                    if (a.c >= 0) { elseb = this.build_stmt(a.c); }
+                }
+                HStmt sc = this.new_stmt(3, a.line, a.col);
+                sc.a = cond;
+                sc.b = thenb;
+                sc.c = elseb;
+                return this.push_stmt(sc);
+            }
+            if (a.b >= 0) { thenb = this.build_stmt(a.b); }
             if (a.c >= 0) { elseb = this.build_stmt(a.c); }
             HStmt s = this.new_stmt(3, a.line, a.col);
             s.a = cond;
@@ -2161,6 +2617,9 @@ export struct HirBuilder {
         if (a.kind == 14) {
             HStmt s = this.new_stmt(13, a.line, a.col);
             return this.push_stmt(s);
+        }
+        if (a.kind == 15) {
+            return this.build_switch(a);
         }
         HStmt s = this.new_stmt(13, a.line, a.col);
         return this.push_stmt(s);
@@ -2651,6 +3110,12 @@ export struct HirBuilder {
                 e.sval = hf.name;
                 e.type = hf.ret;
                 e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
+                // --- constexpr folding ---
+                long folded = this.try_fold_constexpr_call(fi, e.astart, e.an,
+                                                          a.line, a.col);
+                if (folded >= 0) {
+                    return folded;
+                }
                 return this.push_expr(e);
             }
             if (this.count_fns(ca.sval) != 0) {
@@ -2735,6 +3200,7 @@ export struct HirBuilder {
         if (a.kind == 2) {
             HExpr e = this.new_expr(2, a.line, a.col);
             e.sval = a.sval;
+            e.fval = a.fval;
             e.type = this.ty_double();
             return this.push_expr(e);
         }
@@ -2801,13 +3267,19 @@ export struct HirBuilder {
             return this.build_assign(a);
         }
         if (a.kind == 18) {
-            HExpr e = this.new_expr(16, a.line, a.col);
-            e.type = this.ty_int();
+            // 8.3: sizeof(type) folds to an integer literal at build time.
+            AType t = this.resolve_alias(a.type);
+            HExpr e = this.new_expr(1, a.line, a.col);
+            e.ival = this.type_size(t);
+            e.type = this.ty_int64();
             return this.push_expr(e);
         }
         if (a.kind == 19) {
-            HExpr e = this.new_expr(17, a.line, a.col);
-            e.type = this.ty_int();
+            // 8.3: alignof(type) folds to an integer literal at build time.
+            AType t = this.resolve_alias(a.type);
+            HExpr e = this.new_expr(1, a.line, a.col);
+            e.ival = this.type_align(t);
+            e.type = this.ty_int64();
             return this.push_expr(e);
         }
         if (a.kind == 20) {
@@ -3308,6 +3780,685 @@ export struct HirBuilder {
         }
         if (ok == 0) {
             this.err_cast_convert(a.line, a.col, "static_cast", from, target);
+        }
+        return this.push_expr(e);
+    }
+
+    // --- compile-time constant evaluation ---------------------------------
+    //
+    // evalConstExpr / tryEvalConstexprCall in hir_builder.cpp: a tree
+    // walking evaluator over the HIR expressions.  Only integer and float
+    // literals, unary/binary arithmetic, the conditional operator and the
+    // parameters of the constexpr function being folded are constants;
+    // everything else (pointers, structs, strings, calls) fails gracefully.
+
+    // IEEE negation of a double.  The code generator lowers the unary '-'
+    // operator on a float to `0.0 - x`, which turns a negative zero into a
+    // positive one; multiplying by -1.0 is the exact negation and keeps the
+    // sign of zero (the oracle's constant folder negates the value).
+    double neg_double(double v) {
+        return v * -1.0;
+    }
+
+    // Add a chunk to the float text pool and make it the current one.
+    void fchunk_add() {
+        if (this.fchunk_n_ >= this.fchunk_cap_) {
+            long ncap = this.fchunk_cap_ * 2;
+            unsafe {
+                char** np = (char**) __ivy_alloc(ncap * 8);
+                if (np != (char**)0) {
+                    __ivy_memcpy((void*)np, (void*)this.fchunks_,
+                                 (unsigned long long)(this.fchunk_n_ * 8));
+                    __ivy_free((void*)this.fchunks_);
+                    this.fchunks_ = np;
+                    this.fchunk_cap_ = ncap;
+                }
+            }
+            if (this.fchunk_n_ >= this.fchunk_cap_) {
+                this.fok_ = 0;
+                return;
+            }
+        }
+        unsafe {
+            char* c = (char*) __ivy_alloc(this.fchunk_size_);
+            if (c == (char*)0) {
+                this.fok_ = 0;
+                return;
+            }
+            this.fchunks_[this.fchunk_n_] = c;
+            this.fchunk_n_ = this.fchunk_n_ + 1;
+            this.fcur_ = c;
+            this.fcur_n_ = 0;
+            this.fok_ = 1;
+        }
+    }
+
+    // Copy `n` bytes of `s` into the float text pool and return the copy.
+    // The pool grows by adding a chunk: a truncated text would silently
+    // change the folded value in the HIR dump.
+    const char* intern_float_text(const char* s, long n) {
+        if (this.fok_ == 0 || this.fcur_n_ + n + 1 > this.fchunk_size_) {
+            this.fchunk_add();
+            if (this.fok_ == 0) {
+                return "";
+            }
+        }
+        unsafe {
+            __ivy_memcpy(this.fcur_ + this.fcur_n_, s, (unsigned long long)n);
+            this.fcur_[this.fcur_n_ + n] = 0;
+        }
+        long start = this.fcur_n_;
+        this.fcur_n_ = this.fcur_n_ + n + 1;
+        unsafe {
+            return this.fcur_ + start;
+        }
+        return "";
+    }
+
+    // The `i`-th digit (0 = most significant) of the six-digit number `d`.
+    long digit_at(long d, long i) {
+        if (i < 0 || i >= 6) {
+            return 0;
+        }
+        long p = 100000;
+        long k = 0;
+        while (k < i) {
+            p = p / 10;
+            k = k + 1;
+        }
+        return (d / p) % 10;
+    }
+
+    // Render a double the way the oracle prints a float literal
+    // (operator<<(ostream&, double), i.e. printf("%g") with six significant
+    // digits in the C locale).  The result is interned in the float text
+    // pool.
+    const char* fmt_double(double v) {
+        long n = 0;
+        long neg = 0;
+        if (v < 0.0) {
+            neg = 1;
+            v = -v;
+        }
+        if (v == 0.0) {
+            // A negative zero keeps its sign: the C library prints "-0" for
+            // it, and `-0.0 < 0.0` is false, so the sign is recovered from
+            // 1.0 / v (which is -inf for a negative zero).
+            if (neg == 0 && (1.0 / v) < 0.0) {
+                neg = 1;
+            }
+            unsafe {
+                if (neg != 0) {
+                    this.fbuf_[0] = 45;
+                    this.fbuf_[1] = 48;
+                    this.fbuf_[2] = 0;
+                } else {
+                    this.fbuf_[0] = 48;
+                    this.fbuf_[1] = 0;
+                }
+            }
+            n = neg != 0 ? 2 : 1;
+        } else {
+            // The decimal exponent: 10^e <= v < 10^(e + 1).
+            long e = 0;
+            double p = 1.0;
+            if (v >= 1.0) {
+                while (v >= p * 10.0) {
+                    p = p * 10.0;
+                    e = e + 1;
+                }
+            } else {
+                while (v < p) {
+                    p = p * 0.1;
+                    e = e - 1;
+                }
+            }
+            // Scale the value to six significant digits.  The power of ten
+            // is exact for the common exponents, so the scaled value carries
+            // the full precision of the double.
+            long k = 5 - e;
+            double f = 1.0;
+            if (k >= 0) {
+                while (k > 0) {
+                    f = f * 10.0;
+                    k = k - 1;
+                }
+            } else {
+                while (k < 0) {
+                    f = f * 0.1;
+                    k = k + 1;
+                }
+            }
+            double scaled = v * f;
+            // Round to the nearest integer, ties to even (like the C
+            // library that formats the oracle's float literals).
+            long d = static_cast<long>(scaled);
+            double frac = scaled - static_cast<double>(d);
+            if (frac > 0.5) {
+                d = d + 1;
+            } else if (frac == 0.5 && (d % 2) != 0) {
+                d = d + 1;
+            }
+            if (d >= 1000000) {
+                d = 100000;
+                e = e + 1;
+            }
+            unsafe {
+                if (neg != 0) {
+                    this.fbuf_[n] = 45;
+                    n = n + 1;
+                }
+                if (e < -4 || e >= 6) {
+                    // Scientific layout: d.ddde+XX
+                    this.fbuf_[n] = 48 + this.digit_at(d, 0);
+                    n = n + 1;
+                    long last = 5;
+                    while (last > 1 && this.digit_at(d, last) == 0) {
+                        last = last - 1;
+                    }
+                    if (last > 1) {
+                        this.fbuf_[n] = 46;
+                        n = n + 1;
+                        long i = 1;
+                        while (i <= last) {
+                            this.fbuf_[n] = 48 + this.digit_at(d, i);
+                            n = n + 1;
+                            i = i + 1;
+                        }
+                    }
+                    this.fbuf_[n] = 101;
+                    n = n + 1;
+                    if (e < 0) {
+                        this.fbuf_[n] = 45;
+                        n = n + 1;
+                        e = 0 - e;
+                    } else {
+                        this.fbuf_[n] = 43;
+                        n = n + 1;
+                    }
+                    if (e < 10) {
+                        this.fbuf_[n] = 48;
+                        n = n + 1;
+                        this.fbuf_[n] = 48 + e;
+                        n = n + 1;
+                    } else if (e < 100) {
+                        this.fbuf_[n] = 48 + (e / 10);
+                        n = n + 1;
+                        this.fbuf_[n] = 48 + (e % 10);
+                        n = n + 1;
+                    } else {
+                        this.fbuf_[n] = 48 + (e / 100);
+                        n = n + 1;
+                        this.fbuf_[n] = 48 + ((e / 10) % 10);
+                        n = n + 1;
+                        this.fbuf_[n] = 48 + (e % 10);
+                        n = n + 1;
+                    }
+                } else {
+                    // Fixed layout: the point follows the first (e + 1) digits.
+                    long point = e + 1;
+                    if (point <= 0) {
+                        this.fbuf_[n] = 48;
+                        n = n + 1;
+                        this.fbuf_[n] = 46;
+                        n = n + 1;
+                        long z = 0 - point;
+                        while (z > 0) {
+                            this.fbuf_[n] = 48;
+                            n = n + 1;
+                            z = z - 1;
+                        }
+                        long last = 5;
+                        while (last >= 0 && this.digit_at(d, last) == 0) {
+                            last = last - 1;
+                        }
+                        long i = 0;
+                        while (i <= last) {
+                            this.fbuf_[n] = 48 + this.digit_at(d, i);
+                            n = n + 1;
+                            i = i + 1;
+                        }
+                    } else if (point >= 6) {
+                        long i = 0;
+                        while (i < 6) {
+                            this.fbuf_[n] = 48 + this.digit_at(d, i);
+                            n = n + 1;
+                            i = i + 1;
+                        }
+                    } else {
+                        long i = 0;
+                        while (i < point) {
+                            this.fbuf_[n] = 48 + this.digit_at(d, i);
+                            n = n + 1;
+                            i = i + 1;
+                        }
+                        long last = 5;
+                        while (last >= point && this.digit_at(d, last) == 0) {
+                            last = last - 1;
+                        }
+                        if (last >= point) {
+                            this.fbuf_[n] = 46;
+                            n = n + 1;
+                            i = point;
+                            while (i <= last) {
+                                this.fbuf_[n] = 48 + this.digit_at(d, i);
+                                n = n + 1;
+                                i = i + 1;
+                            }
+                        }
+                    }
+                }
+                this.fbuf_[n] = 0;
+            }
+        }
+        unsafe {
+            return this.intern_float_text(this.fbuf_, n);
+        }
+        return "";
+    }
+
+    // Look up `name` in the parameters bound to the constexpr call that is
+    // being folded.  Returns false when the name is not a bound parameter.
+    bool eval_bound_param(const char* name) {
+        long i = 0;
+        while (i < this.cst_bn_) {
+            unsafe {
+                const char* nm = (char*)this.cst_bname_[i];
+                if (this.seq(nm, name)) {
+                    if (this.cst_bint_[i] != 0) {
+                        this.cst_is_int_ = 1;
+                        this.cst_i_ = this.cst_bi_[i];
+                        this.cst_f_ = 0.0;
+                    } else {
+                        // A float keeps the integer field of the value it
+                        // replaces (the oracle's ConstValue does the same).
+                        this.cst_is_int_ = 0;
+                        this.cst_f_ = this.cst_bf_[i];
+                    }
+                    return true;
+                }
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // Reset the constant value.  The oracle evaluates every value that is
+    // not shared with the caller in a fresh `ConstValue`, whose integer
+    // field starts at zero.
+    void cst_reset() {
+        this.cst_is_int_ = 0;
+        this.cst_i_ = 0;
+        this.cst_f_ = 0.0;
+    }
+
+    // Evaluate the HIR expression `idx` as a compile-time constant.  The
+    // value is left in cst_is_int_ / cst_i_ / cst_f_.
+    bool eval_const_expr(long idx) {
+        if (idx < 0) {
+            return false;
+        }
+        HExpr e;
+        unsafe {
+            e = this.u.exprs[idx];
+        }
+        if (e.kind == 1) {
+            this.cst_is_int_ = 1;
+            this.cst_i_ = e.ival;
+            this.cst_f_ = 0.0;
+            return true;
+        }
+        if (e.kind == 2) {
+            // A float literal keeps the integer field of the value it
+            // replaces: the oracle's ConstValue is a single value that is
+            // reused, and its integer field is only written by an integer
+            // operation.  `!` and the condition of a conditional operator
+            // read that field, so the two must agree.
+            this.cst_is_int_ = 0;
+            this.cst_f_ = e.fval;
+            return true;
+        }
+        if (e.kind == 5) {
+            this.cst_is_int_ = 1;
+            this.cst_i_ = e.ival != 0 ? 1 : 0;
+            this.cst_f_ = 0.0;
+            return true;
+        }
+        if (e.kind == 6) {
+            this.cst_is_int_ = 1;
+            this.cst_i_ = 0;
+            this.cst_f_ = 0.0;
+            return true;
+        }
+        if (e.kind == 8) {
+            // An identifier is only a constant when it is a parameter of the
+            // constexpr function being folded; enum constants are folded to
+            // integer literals by the builder.
+            return this.eval_bound_param(e.sval);
+        }
+        if (e.kind == 9) {
+            if (this.eval_const_expr(e.a) == 0) {
+                return false;
+            }
+            if (e.flag != 0 && (this.seq(e.sval, "++") || this.seq(e.sval, "--"))) {
+                return false;
+            }
+            if (this.seq(e.sval, "-")) {
+                // Negate the value itself: the sign of a zero must be kept
+                // (the oracle folds `-0.0` to a negative zero).
+                this.cst_i_ = 0 - this.cst_i_;
+                this.cst_f_ = this.neg_double(this.cst_f_);
+                return true;
+            }
+            if (this.seq(e.sval, "+")) {
+                return true;
+            }
+            if (this.seq(e.sval, "!")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = this.cst_i_ != 0 ? 0 : 1;
+                return true;
+            }
+            if (this.seq(e.sval, "~")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = ~this.cst_i_;
+                this.cst_f_ = 0.0;
+                return true;
+            }
+            return false;
+        }
+        if (e.kind == 10) {
+            if (this.seq(e.sval, "&&") || this.seq(e.sval, "||")) {
+                // The left operand is evaluated in a fresh value (the
+                // oracle's `lhs`), so its integer field starts at zero; the
+                // right operand is evaluated in the value of the operator.
+                long keep_int = this.cst_is_int_;
+                long keep_i = this.cst_i_;
+                double keep_f = this.cst_f_;
+                this.cst_is_int_ = 0;
+                this.cst_i_ = 0;
+                this.cst_f_ = 0.0;
+                long lok = this.eval_const_expr(e.a);
+                long lb = this.cst_i_;
+                this.cst_is_int_ = keep_int;
+                this.cst_i_ = keep_i;
+                this.cst_f_ = keep_f;
+                if (lok == 0) {
+                    return false;
+                }
+                if (this.seq(e.sval, "&&") && lb == 0) {
+                    this.cst_is_int_ = 1;
+                    this.cst_i_ = 0;
+                    this.cst_f_ = 0.0;
+                    return true;
+                }
+                if (this.seq(e.sval, "||") && lb != 0) {
+                    this.cst_is_int_ = 1;
+                    this.cst_i_ = 1;
+                    this.cst_f_ = 0.0;
+                    return true;
+                }
+                if (this.eval_const_expr(e.b) == 0) {
+                    return false;
+                }
+                this.cst_is_int_ = 1;
+                this.cst_i_ = this.cst_i_ != 0 ? 1 : 0;
+                this.cst_f_ = 0.0;
+                return true;
+            }
+            if (this.eval_const_expr(e.a) == 0) {
+                return false;
+            }
+            long li = this.cst_i_;
+            double lf = this.cst_f_;
+            long lint = this.cst_is_int_;
+            if (this.eval_const_expr(e.b) == 0) {
+                return false;
+            }
+            long ri = this.cst_i_;
+            double rf = this.cst_f_;
+            long rint = this.cst_is_int_;
+            if (lint != 0 && rint != 0) {
+                this.cst_is_int_ = 1;
+                this.cst_f_ = 0.0;
+                if (this.seq(e.sval, "+")) { this.cst_i_ = li + ri; return true; }
+                if (this.seq(e.sval, "-")) { this.cst_i_ = li - ri; return true; }
+                if (this.seq(e.sval, "*")) { this.cst_i_ = li * ri; return true; }
+                if (this.seq(e.sval, "/")) {
+                    if (ri == 0) { return false; }
+                    this.cst_i_ = li / ri;
+                    return true;
+                }
+                if (this.seq(e.sval, "%")) {
+                    if (ri == 0) { return false; }
+                    this.cst_i_ = li % ri;
+                    return true;
+                }
+                if (this.seq(e.sval, "==")) { this.cst_i_ = li == ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, "!=")) { this.cst_i_ = li != ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, "<")) { this.cst_i_ = li < ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, "<=")) { this.cst_i_ = li <= ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, ">")) { this.cst_i_ = li > ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, ">=")) { this.cst_i_ = li >= ri ? 1 : 0; return true; }
+                if (this.seq(e.sval, "&")) { this.cst_i_ = li & ri; return true; }
+                if (this.seq(e.sval, "|")) { this.cst_i_ = li | ri; return true; }
+                if (this.seq(e.sval, "^")) { this.cst_i_ = li ^ ri; return true; }
+                if (this.seq(e.sval, "<<")) { this.cst_i_ = li << ri; return true; }
+                if (this.seq(e.sval, ">>")) { this.cst_i_ = li >> ri; return true; }
+                return false;
+            }
+            double lv = lint != 0 ? static_cast<double>(li) : lf;
+            double rv = rint != 0 ? static_cast<double>(ri) : rf;
+            // A float result keeps the integer field of the value it
+            // replaces (the oracle's ConstValue is reused).
+            this.cst_is_int_ = 0;
+            if (this.seq(e.sval, "+")) { this.cst_f_ = lv + rv; return true; }
+            if (this.seq(e.sval, "-")) { this.cst_f_ = lv - rv; return true; }
+            if (this.seq(e.sval, "*")) { this.cst_f_ = lv * rv; return true; }
+            if (this.seq(e.sval, "/")) {
+                if (rv == 0.0) { return false; }
+                this.cst_f_ = lv / rv;
+                return true;
+            }
+            if (this.seq(e.sval, "==")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv == rv ? 1 : 0;
+                return true;
+            }
+            if (this.seq(e.sval, "!=")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv != rv ? 1 : 0;
+                return true;
+            }
+            if (this.seq(e.sval, "<")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv < rv ? 1 : 0;
+                return true;
+            }
+            if (this.seq(e.sval, "<=")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv <= rv ? 1 : 0;
+                return true;
+            }
+            if (this.seq(e.sval, ">")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv > rv ? 1 : 0;
+                return true;
+            }
+            if (this.seq(e.sval, ">=")) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = lv >= rv ? 1 : 0;
+                return true;
+            }
+            return false;
+        }
+        if (e.kind == 11) {
+            if (this.eval_const_expr(e.a) == 0) {
+                return false;
+            }
+            if (this.cst_i_ != 0) {
+                return this.eval_const_expr(e.b);
+            }
+            return this.eval_const_expr(e.c);
+        }
+        // A call inside a constexpr body is never folded.
+        return false;
+    }
+
+    // Evaluate the HIR statement `idx` looking for the return statement of a
+    // constexpr function body.
+    bool eval_const_stmt(long idx) {
+        HStmt s;
+        unsafe {
+            s = this.u.stmts[idx];
+        }
+        if (s.kind == 1) {
+            long k = s.sstart;
+            while (k >= 0) {
+                if (this.eval_const_stmt(k)) {
+                    return true;
+                }
+                unsafe {
+                    k = this.u.stmts[k].next;
+                }
+            }
+            return false;
+        }
+        if (s.kind == 7) {
+            if (s.a < 0) {
+                this.cst_is_int_ = 1;
+                this.cst_i_ = 0;
+                this.cst_f_ = 0.0;
+                return true;
+            }
+            return this.eval_const_expr(s.a);
+        }
+        if (s.kind == 3) {
+            // The condition is evaluated in a fresh value (the oracle's
+            // `cond`), so its integer field starts at zero.
+            long keep_int = this.cst_is_int_;
+            long keep_i = this.cst_i_;
+            double keep_f = this.cst_f_;
+            this.cst_is_int_ = 0;
+            this.cst_i_ = 0;
+            this.cst_f_ = 0.0;
+            long cok = this.eval_const_expr(s.a);
+            long cond_i = this.cst_i_;
+            this.cst_is_int_ = keep_int;
+            this.cst_i_ = keep_i;
+            this.cst_f_ = keep_f;
+            if (cok == 0) {
+                return false;
+            }
+            if (cond_i != 0) {
+                if (s.b >= 0) {
+                    return this.eval_const_stmt(s.b);
+                }
+                return false;
+            }
+            if (s.c >= 0) {
+                return this.eval_const_stmt(s.c);
+            }
+            return false;
+        }
+        return false;
+    }
+
+    // tryEvalConstexprCall in hir_builder.cpp: evaluate a call to a
+    // constexpr function at compile time and replace it with the resulting
+    // literal.  Returns the index of the folded expression or -1.
+    long try_fold_constexpr_call(long fnIdx, long argstart, long argcount,
+                                  long line, long col) {
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[fnIdx];
+        }
+        if (hf.is_constexpr == 0 || hf.body < 0 || argcount <= 0) {
+            return -1;
+        }
+        // Every argument must be a literal.
+        long i = 0;
+        while (i < argcount) {
+            long ai = -1;
+            unsafe {
+                ai = this.u.args[argstart + i];
+            }
+            HExpr ae;
+            unsafe {
+                ae = this.u.exprs[ai];
+            }
+            if (ae.kind != 1 && ae.kind != 2 && ae.kind != 5) {
+                return -1;
+            }
+            i = i + 1;
+        }
+        // Bind the parameters to the argument values.
+        long np = hf.pn;
+        if (argcount < np) {
+            np = argcount;
+        }
+        long save_bn = this.cst_bn_;
+        this.cst_bn_ = 0;
+        i = 0;
+        while (i < np) {
+            long ai = -1;
+            unsafe {
+                ai = this.u.args[argstart + i];
+            }
+            HExpr ae;
+            unsafe {
+                ae = this.u.exprs[ai];
+            }
+            HParam p;
+            unsafe {
+                p = this.u.params[hf.pstart + i];
+                this.cst_bname_[this.cst_bn_] = (long)p.name;
+                if (ae.kind == 2) {
+                    this.cst_bint_[this.cst_bn_] = 0;
+                    this.cst_bi_[this.cst_bn_] = 0;
+                    this.cst_bf_[this.cst_bn_] = ae.fval;
+                } else {
+                    this.cst_bint_[this.cst_bn_] = 1;
+                    if (ae.kind == 5) {
+                        this.cst_bi_[this.cst_bn_] = ae.ival != 0 ? 1 : 0;
+                    } else {
+                        this.cst_bi_[this.cst_bn_] = ae.ival;
+                    }
+                    this.cst_bf_[this.cst_bn_] = 0.0;
+                }
+            }
+            this.cst_bn_ = this.cst_bn_ + 1;
+            i = i + 1;
+        }
+        // Look for the return statement in the body.  The value of the fold
+        // starts fresh (the oracle's `result`).
+        this.cst_reset();
+        HStmt root;
+        unsafe {
+            root = this.u.stmts[hf.body];
+        }
+        long ok = 0;
+        long k = root.sstart;
+        while (k >= 0) {
+            if (this.eval_const_stmt(k)) {
+                ok = 1;
+                break;
+            }
+            unsafe {
+                k = this.u.stmts[k].next;
+            }
+        }
+        this.cst_bn_ = save_bn;
+        if (ok == 0) {
+            return -1;
+        }
+        HExpr e = this.new_expr(1, line, col);
+        e.type = hf.ret;
+        if (this.cst_is_int_ != 0) {
+            e.ival = this.cst_i_;
+        } else {
+            e.kind = 2;
+            e.sval = this.fmt_double(this.cst_f_);
+            e.fval = this.cst_f_;
         }
         return this.push_expr(e);
     }

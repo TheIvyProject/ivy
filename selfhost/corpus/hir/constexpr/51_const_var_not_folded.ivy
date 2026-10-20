@@ -1,0 +1,5 @@
+// The value of a `const` variable is not folded: the reference stays.
+void f() {
+    const int32 a = 7;
+    int32 b = a;
+}

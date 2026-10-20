@@ -1,0 +1,14 @@
+// sizeof of the C-style primitive types (the oracle folds them to integer
+// literals at build time).
+#pragma ivy cnumber
+void f() {
+    int a = sizeof(char);
+    int b = sizeof(short);
+    int c = sizeof(int);
+    int d = sizeof(long);
+    int e = sizeof(float);
+    int g = sizeof(double);
+    int h = sizeof(bool);
+    int i = sizeof(long long);
+    int j = sizeof(long double);
+}

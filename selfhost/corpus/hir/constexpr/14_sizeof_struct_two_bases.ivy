@@ -1,0 +1,15 @@
+// A struct with two base classes.
+#pragma ivy cnumber
+struct A {
+    int32 a;
+};
+struct B {
+    char b;
+};
+struct C : public A, public B {
+    int32 c;
+};
+void f() {
+    int32 a = sizeof(C);
+    int32 b = alignof(C);
+}

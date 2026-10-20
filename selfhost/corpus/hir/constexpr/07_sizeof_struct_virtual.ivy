@@ -1,0 +1,12 @@
+// A polymorphic struct carries a vptr (8 bytes) at offset 0.
+#pragma ivy cnumber
+struct Poly {
+    virtual int32 get() {
+        return 1;
+    }
+    int x;
+};
+void f() {
+    int a = sizeof(Poly);
+    int b = alignof(Poly);
+}

@@ -1,0 +1,11 @@
+// An `if constexpr` inside a constexpr body folds as well.
+constexpr int32 pick(int32 x) {
+    if constexpr (1) {
+        return 10;
+    } else {
+        return 20;
+    }
+}
+void f() {
+    int32 a = pick(0);
+}

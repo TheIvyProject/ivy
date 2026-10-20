@@ -1,0 +1,5 @@
+// The value of a `constexpr` variable is not folded either.
+void f() {
+    constexpr int32 a = 8;
+    int32 b = a;
+}

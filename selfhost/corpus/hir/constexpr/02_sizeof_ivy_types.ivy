@@ -1,0 +1,16 @@
+// sizeof of the Ivy fixed-width types.
+void f() {
+    int32 a = sizeof(int8);
+    int32 b = sizeof(int16);
+    int32 c = sizeof(int32);
+    int32 d = sizeof(int64);
+    int32 e = sizeof(uint8);
+    int32 g = sizeof(uint16);
+    int32 h = sizeof(uint32);
+    int32 i = sizeof(uint64);
+    int32 j = sizeof(float32);
+    int32 k = sizeof(float64);
+    int32 l = sizeof(size);
+    int32 m = sizeof(iptr);
+    int32 n = sizeof(uptr);
+}

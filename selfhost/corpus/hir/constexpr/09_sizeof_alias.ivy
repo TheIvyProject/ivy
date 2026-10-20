@@ -1,0 +1,6 @@
+// `sizeof` of a `using` alias resolves the alias first.
+using MyInt = int32;
+void f() {
+    int32 a = sizeof(MyInt);
+    int32 b = alignof(MyInt);
+}

@@ -1,0 +1,9 @@
+// The negation of a zero keeps its sign: the folded value is a negative zero
+// and is printed as "-0" (like the C library prints it).
+constexpr float64 neg(float64 x) {
+    return -x;
+}
+void f() {
+    float64 a = neg(0.0);
+    float64 b = neg(2.5);
+}

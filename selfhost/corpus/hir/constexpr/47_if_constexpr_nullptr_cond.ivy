@@ -1,0 +1,10 @@
+// `nullptr` is the constant zero, so the else branch is kept.
+void f() {
+    unsafe {
+        if constexpr (nullptr) {
+            int32 a = 1;
+        } else {
+            int32 b = 2;
+        }
+    }
+}

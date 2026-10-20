@@ -1,0 +1,8 @@
+// A constexpr function whose body uses a local variable is not folded.
+constexpr int32 sq(int32 x) {
+    int32 y = x;
+    return y * y;
+}
+void f() {
+    int32 a = sq(3);
+}

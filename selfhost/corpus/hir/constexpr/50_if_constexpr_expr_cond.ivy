@@ -1,0 +1,9 @@
+// A constant expression folds the condition of an `if constexpr`.
+void f() {
+    if constexpr (1 + 1) {
+        int32 a = 1;
+    }
+    if constexpr (sizeof(int32)) {
+        int32 b = 2;
+    }
+}

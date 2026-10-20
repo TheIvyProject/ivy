@@ -1,0 +1,11 @@
+// The statements of a case clause are part of the HIR, and a constexpr call
+// inside a case body is still folded.
+constexpr int32 twice(int32 x) {
+    return x * 2;
+}
+void f(int32 x) {
+    switch (x) {
+        case 1: x = twice(3); break;
+        default: break;
+    }
+}

@@ -1,0 +1,6 @@
+// `if constexpr` with a true condition keeps the then branch only.
+void f() {
+    if constexpr (1) {
+        int32 a = 1;
+    }
+}

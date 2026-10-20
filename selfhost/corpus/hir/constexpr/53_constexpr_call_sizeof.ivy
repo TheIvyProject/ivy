@@ -1,0 +1,9 @@
+// A `sizeof` in a constexpr body is folded to an integer literal, but the
+// call is not folded: the constant evaluator only knows literal
+// expressions.
+constexpr int32 size_of_int(int32 x) {
+    return sizeof(int32) + x;
+}
+void f() {
+    int32 a = size_of_int(1);
+}

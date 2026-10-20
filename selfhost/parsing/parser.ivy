@@ -27,6 +27,10 @@ import ast;
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+// The C library's decimal-to-double conversion: the oracle parses float
+// literals with std::stod, which is correctly rounded, so the port needs
+// the same value for compile-time constant folding.
+extern "C" double strtod(const char* s, char** end);
 
 // A parsed attribute list (slice of the parser attribute pool).
 export struct AAttrList {
@@ -42,7 +46,8 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 96, AFunction 120) so `__ivy_alloc` can be used.
+// sizes (AAttr 40, AParam 96, AFunction 136, AExpr 152) so `__ivy_alloc` can
+// be used.
 export struct Parser {
     Token* toks_;
     long n_;
@@ -70,6 +75,13 @@ export struct Parser {
     char* sbuf_;
     long sb_n_;
     long sb_cap_;
+
+    // float-literal scratch buffer (cleaned text) and the exact value of
+    // the last float literal
+    char* fbuf_;
+    long fb_n_;
+    long fb_cap_;
+    double fval_;
 
     // expression pool
     AExpr* epool_;
@@ -160,6 +172,7 @@ export struct Parser {
 
     long ce_;   // constexpr flag (scratch, set by parse_constexpr_spec)
     long cv_;   // consteval flag
+    long pure_virtual_;  // set by parse_method_tail for `= 0` methods
 
     void setup(Token* input, long in_count, char* arena, long src_len) {
         this.toks_ = input;
@@ -210,12 +223,20 @@ export struct Parser {
         this.dcap_ = in_count + 16;
         this.ce_ = 0;
         this.cv_ = 0;
+        this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 120);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 136);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
         this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 96);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
-        this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 144);
+        // The float scratch buffer holds the cleaned text of a float
+        // literal: it must be able to hold the whole literal, otherwise the
+        // value of the literal would be computed from a truncated text.
+        this.fb_cap_ = src_len + 16;
+        this.fbuf_ = (char*) __ivy_alloc(this.fb_cap_);
+        this.fb_n_ = 0;
+        this.fval_ = 0.0;
+        this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 152);
         this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 136);
         this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
         this.argn_idx_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
@@ -228,7 +249,7 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 80);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 120);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 136);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
@@ -246,6 +267,7 @@ export struct Parser {
             __ivy_free(this.apool_);
             __ivy_free(this.ppool_);
             __ivy_free(this.sbuf_);
+            __ivy_free(this.fbuf_);
             __ivy_free(this.epool_);
             __ivy_free(this.spool_);
             __ivy_free(this.cargs_);
@@ -476,6 +498,20 @@ export struct Parser {
         this.next();
     }
 
+    // Build the "expected '(' after function name '<name>'" message in the
+    // intern buffer (the oracle names the function in the diagnostic).
+    const char* fn_name_msg(const char* name) {
+        long start = this.sb_n_;
+        this.sb_put_raw("expected '(' after function name '",
+                       this.cstr_len("expected '(' after function name '"));
+        this.sb_put_raw(name, this.cstr_len(name));
+        this.sb_put_char(39);
+        this.sb_end();
+        unsafe {
+            return this.sbuf_ + start;
+        }
+        return "";
+    }
     void synchronize() {
         if (this.at("eof")) {
             return;
@@ -601,7 +637,21 @@ export struct Parser {
         }
     }
 
+    // Append one character to the float-literal scratch buffer.
+    void fb_put_char(char c) {
+        if (this.fb_n_ + 2 > this.fb_cap_) {
+            return;
+        }
+        unsafe {
+            this.fbuf_[this.fb_n_] = c;
+        }
+        this.fb_n_ = this.fb_n_ + 1;
+    }
+
     // Render the floating-point literal `t` and return the interned text.
+    // The exact double value of the literal is left in `this.fval_` (the
+    // oracle parses the literal with std::stod, so the value must be the
+    // correctly rounded one, not the 6-digit rendering).
     const char* format_float(Token t) {
         long dig_start = this.sb_n_;
         long neg = 0;
@@ -612,6 +662,7 @@ export struct Parser {
         long seen_dot = 0;
         long ndig = 0;
         long i = 0;
+        this.fb_n_ = 0;
         unsafe {
             while (i < t.len) {
                 char c = this.src_[t.off + i];
@@ -625,19 +676,23 @@ export struct Parser {
                 if (in_exp != 0) {
                     if (c == '-') {
                         expneg = 1;
+                        this.fb_put_char(c);
                         continue;
                     }
                     if (c == '+') {
+                        this.fb_put_char(c);
                         continue;
                     }
                     if (c < '0' || c > '9') {
                         break;
                     }
                     expv = expv * 10 + (c - 48);
+                    this.fb_put_char(c);
                     continue;
                 }
                 if (c == 'e' || c == 'E') {
                     in_exp = 1;
+                    this.fb_put_char(c);
                     continue;
                 }
                 if (c == '.') {
@@ -645,11 +700,13 @@ export struct Parser {
                         break;
                     }
                     seen_dot = 1;
+                    this.fb_put_char(c);
                     continue;
                 }
                 if (c == '-') {
                     if (ndig == 0 && seen_dot == 0) {
                         neg = 1;
+                        this.fb_put_char(c);
                     }
                     continue;
                 }
@@ -660,11 +717,20 @@ export struct Parser {
                     break;
                 }
                 this.sb_put_char(c);
+                this.fb_put_char(c);
                 ndig = ndig + 1;
                 if (seen_dot != 0) {
                     frac = frac + 1;
                 }
             }
+        }
+        // The exact value of the literal (the oracle parses it with
+        // std::stod, which is correctly rounded).
+        unsafe {
+            this.fbuf_[this.fb_n_] = 0;
+        }
+        unsafe {
+            this.fval_ = strtod(this.fbuf_, (char**)0);
         }
         if (expneg != 0) {
             expv = -expv;
@@ -715,6 +781,15 @@ export struct Parser {
                         }
                     }
                     k = k + 1;
+                }
+                if (roundup == 0) {
+                    // An exact tie is rounded to even, like the C library
+                    // that formats the oracle's float literals.
+                    unsafe {
+                        if ((this.sbuf_[dig_start + lead + 5] - 48) % 2 != 0) {
+                            roundup = 1;
+                        }
+                    }
                 }
             }
             if (roundup != 0) {
@@ -1641,6 +1716,7 @@ export struct Parser {
         e.is_scope = 0;
         e.line = 0;
         e.col = 0;
+        e.fval = 0.0;
         return e;
     }
 
@@ -1733,6 +1809,18 @@ export struct Parser {
         unsafe {
             return this.casepool_;
         }
+    }
+
+    // The `i`-th case clause of a switch statement.
+    ACase get_case(long i) {
+        unsafe {
+            return this.casepool_[i];
+        }
+        ACase c;
+        c.value = -1;
+        c.sstart = -1;
+        c.sn = 0;
+        return c;
     }
 
     long digit_val(char c, long base) {
@@ -2067,6 +2155,7 @@ export struct Parser {
             this.next();
             AExpr e = this.fresh(2);
             e.sval = this.format_float(t);
+            e.fval = this.fval_;
             e.line = t.line;
             e.col = t.col;
             return this.push_expr(e);
@@ -2199,6 +2288,59 @@ export struct Parser {
             long content = this.parse_conditional();
             this.expect(")", "expected ')' to close parenthesized expression");
             return content;
+        }
+        // Keywords that are unsupported in the Ivy subset get a targeted
+        // message (the kUnsupported table of parser.cpp).
+        if (this.kind_eq(t, "keyword")) {
+            if (this.lexeme_eq(t.off, t.len, "union")) {
+                this.error_at(t, "unions are not supported in the Ivy subset");
+                this.next();
+                AExpr eu = this.fresh(6);
+                eu.line = t.line;
+                eu.col = t.col;
+                return this.push_expr(eu);
+            }
+            if (this.lexeme_eq(t.off, t.len, "constinit")) {
+                this.error_at(t, "constinit is not supported in the Ivy subset yet");
+                this.next();
+                AExpr ec = this.fresh(6);
+                ec.line = t.line;
+                ec.col = t.col;
+                return this.push_expr(ec);
+            }
+            if (this.lexeme_eq(t.off, t.len, "typedef")) {
+                this.error_at(t, "use 'using' instead of 'typedef' in the Ivy subset");
+                this.next();
+                AExpr et = this.fresh(6);
+                et.line = t.line;
+                et.col = t.col;
+                return this.push_expr(et);
+            }
+            if (this.lexeme_eq(t.off, t.len, "static_assert")) {
+                this.error_at(t, "static_assert is not supported in the Ivy subset");
+                this.next();
+                AExpr es = this.fresh(6);
+                es.line = t.line;
+                es.col = t.col;
+                return this.push_expr(es);
+            }
+            if (this.lexeme_eq(t.off, t.len, "try") || this.lexeme_eq(t.off, t.len, "catch") ||
+                this.lexeme_eq(t.off, t.len, "throw")) {
+                this.error_at(t, "exceptions are not supported in the Ivy subset");
+                this.next();
+                AExpr ex = this.fresh(6);
+                ex.line = t.line;
+                ex.col = t.col;
+                return this.push_expr(ex);
+            }
+            if (this.lexeme_eq(t.off, t.len, "goto")) {
+                this.error_at(t, "goto is not supported in the Ivy subset");
+                this.next();
+                AExpr eg = this.fresh(6);
+                eg.line = t.line;
+                eg.col = t.col;
+                return this.push_expr(eg);
+            }
         }
         this.error_at(t, "unexpected token in expression");
         this.next();
@@ -2690,7 +2832,7 @@ export struct Parser {
     }
 
     void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
-                        AParamList pl, long is_extern_c, long line, long col) {
+                        AParamList pl, long is_extern_c, long is_constexpr, long line, long col) {
         unsafe {
             f.attrs = this.apool_ + a_start;
         }
@@ -2705,6 +2847,8 @@ export struct Parser {
         f.body = -1;
         f.line = line;
         f.col = col;
+        f.is_constexpr = is_constexpr;
+        f.is_virtual = 0;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -2737,11 +2881,11 @@ export struct Parser {
                 return;
             }
             const char* name = this.intern_tok(this.next());
-            this.expect("(", "expected '(' after function name");
+            this.expect("(", this.fn_name_msg(name));
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c,
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
                                 fstart.line, fstart.col);
         }
     }
@@ -2756,7 +2900,7 @@ export struct Parser {
                 return;
             }
             const char* name = this.intern_tok(this.next());
-            this.expect("(", "expected '(' after function name");
+            this.expect("(", this.fn_name_msg(name));
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
             if (!this.at("->")) {
@@ -2780,7 +2924,7 @@ export struct Parser {
             all.n = a_end - a_start;
             this.validate_list(all, "lt_def", "lt_ret");
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c,
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
                                 fstart.line, fstart.col);
         }
     }
@@ -2877,6 +3021,7 @@ export struct Parser {
     }
 
     long parse_method_tail() {
+        this.pure_virtual_ = 0;
         if (this.kw("const")) {
             this.next();
         }
@@ -2890,6 +3035,7 @@ export struct Parser {
             this.next();
             this.expect("integer", "expected '0' for pure virtual method");
             this.expect(";", "expected ';' after pure virtual method");
+            this.pure_virtual_ = 1;
             return -1;
         }
         this.expect(";", "expected '{' for method body or ';' for a declaration");
@@ -2897,7 +3043,7 @@ export struct Parser {
     }
 
     void push_method_record(const char* name, AType ret, AParamList pl, long body,
-                            long line, long col) {
+                            long is_virtual, long line, long col) {
         AFunction m;
         m.attrs = this.apool_;
         m.nattrs = 0;
@@ -2909,6 +3055,8 @@ export struct Parser {
         m.body = body;
         m.line = line;
         m.col = col;
+        m.is_constexpr = 0;
+        m.is_virtual = is_virtual;
         this.push_method(m);
     }
 
@@ -2947,7 +3095,7 @@ export struct Parser {
                     this.expect(";", "expected '{' for constructor body or ';' for a declaration");
                 }
                 const char* qn = this.intern_join3(bare, "::", bare);
-                this.push_method_record(qn, ret, pl, body, mstart.line, mstart.col);
+                this.push_method_record(qn, ret, pl, body, is_virtual, mstart.line, mstart.col);
                 continue;
             }
             // Destructor: `~Name() { body }`.
@@ -2973,7 +3121,7 @@ export struct Parser {
                     this.expect(";", "expected '{' for destructor body or ';' for a declaration");
                 }
                 const char* qn = this.intern_join3(bare, "::~", bare);
-                this.push_method_record(qn, ret, pl, body, mstart.line, mstart.col);
+                this.push_method_record(qn, ret, pl, body, is_virtual, mstart.line, mstart.col);
                 continue;
             }
             if (this.is_type_start() == 0) {
@@ -2994,7 +3142,9 @@ export struct Parser {
                 this.expect(")", "expected ')' to close operator parameter list");
                 long body = this.parse_method_tail();
                 const char* qn = this.intern_join3(bare, "::operator", op);
-                this.push_method_record(qn, ftype, pl, body, mstart.line, mstart.col);
+                this.push_method_record(qn, ftype, pl, body,
+                                        is_virtual != 0 ? 1 : this.pure_virtual_,
+                                        mstart.line, mstart.col);
                 continue;
             }
             if (!this.at("identifier")) {
@@ -3010,7 +3160,9 @@ export struct Parser {
                 this.expect(")", "expected ')' to close method parameter list");
                 long body = this.parse_method_tail();
                 const char* qn = this.intern_join3(bare, "::", member);
-                this.push_method_record(qn, ftype, pl, body, nametok.line, nametok.col);
+                this.push_method_record(qn, ftype, pl, body,
+                                        is_virtual != 0 ? 1 : this.pure_virtual_,
+                                        nametok.line, nametok.col);
                 continue;
             }
             if (this.at("=")) {

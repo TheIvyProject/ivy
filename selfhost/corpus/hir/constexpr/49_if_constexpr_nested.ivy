@@ -1,0 +1,12 @@
+// Nested `if constexpr` statements fold independently.
+void f() {
+    if constexpr (1) {
+        if constexpr (0) {
+            int32 a = 1;
+        } else {
+            int32 b = 2;
+        }
+    } else {
+        int32 c = 3;
+    }
+}

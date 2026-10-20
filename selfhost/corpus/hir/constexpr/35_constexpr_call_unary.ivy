@@ -1,0 +1,19 @@
+// The unary operators of a constexpr body are evaluated at compile time.
+constexpr int32 neg(int32 x) {
+    return -x;
+}
+constexpr int32 invert(int32 x) {
+    return ~x;
+}
+constexpr bool negate(int32 x) {
+    return !x;
+}
+constexpr int32 plus(int32 x) {
+    return +x;
+}
+void f() {
+    int32 a = neg(3);
+    int32 b = invert(3);
+    bool c = negate(0);
+    int32 d = plus(3);
+}

@@ -1,0 +1,9 @@
+// An enum constant is an integer literal, so it folds the condition.
+enum E { A = 1, B = 2 };
+void f() {
+    if constexpr (A) {
+        int32 a = 1;
+    } else {
+        int32 b = 2;
+    }
+}

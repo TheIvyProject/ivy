@@ -1,0 +1,14 @@
+// A nested struct contributes its own (padded) size.
+#pragma ivy cnumber
+struct Inner {
+    int a;
+    char b;
+};
+struct Outer {
+    Inner inner;
+    char c;
+};
+void f() {
+    int a = sizeof(Inner);
+    int b = sizeof(Outer);
+}

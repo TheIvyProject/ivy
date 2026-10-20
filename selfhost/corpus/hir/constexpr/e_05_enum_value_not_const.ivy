@@ -1,0 +1,7 @@
+// An enumerator value must be a constant expression.
+enum E : int32 {
+    A = 1 == 1
+};
+void f() {
+    int32 b = 0;
+}

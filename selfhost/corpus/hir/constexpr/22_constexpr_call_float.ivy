@@ -1,0 +1,8 @@
+// A float result of a constexpr call folds to a float literal.
+#pragma ivy cnumber
+constexpr double half(int32 x) {
+    return x * 0.5;
+}
+void f() {
+    double a = half(3);
+}

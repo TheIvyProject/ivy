@@ -293,9 +293,68 @@ src/                              selfhost/
   ke ca ke thua); method/operator cua base class cung duoc tim thay;
   (5) parser tu choi kieu `signed` don le (oracle: "expected a type"),
   dung nhu `unsigned`/`const` don le.
-  Corpus bo sung 9 file (120 file tong). Con lai: `switch`, `sizeof`/
-  `alignof`, aggregate init, ctor/dtor, `new`/`delete`, template, lambda,
-  range-for, move-tracking, namespace van chua port (de milestone sau).
+  Corpus bo sung 9 file (120 file tong). Con lai: aggregate init, ctor/dtor,
+  `new`/`delete`, template, lambda, range-for, move-tracking, namespace van
+  chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3).
+- H4.3 (Constexpr folding): port phan fold hang so cua `hir_builder.cpp`
+  sang `hir/hir_builder.ivy` (va `hir/hir.ivy`):
+  (1) `sizeof`/`alignof` fold thanh integer literal (`typeSize`/
+  `typeAlign`): bang kieu kich thuoc cua codegen (pointer/ref = 8 byte,
+  `bool`/`char`/`int8_t`/`uint8_t` = 1, `short`/`int16_t`/`uint16_t`/
+  `float16_t`/`bfloat16_t` = 2, `int`/`uint`/`float` = 4, `size_t`/
+  `ptrdiff_t`/`uptr_t` = 8, `long`/`double` = 8, kieu 128 bit = 16,
+  fallback 4) + layout struct (vptr 8 byte neu polymorphic, cac base
+  subobject, cac field; moi thanh duoc can vao alignment cua no, size lam
+  tron len alignment cua struct) + mang (`T[N]` = sizeof(T) * N) + alias;
+  (2) goi ham `constexpr` fold thanh literal (`tryEvalConstexprCall`): chi
+  fold khi co argument (khong co argument thi khong fold), argument phai la
+  literal (int/float/bool), body chi dung duoc literal + unary/binary/
+  ternary, tham so duoc the bang gia tri cua argument, ket qua la integer
+  literal hoac float literal (in bang `%g` 6 chu so nhu `ostream << double`);
+  (3) `if constexpr`: dieu kien duoc fold truoc, chi build nhanh duoc chon
+  (nhanh bi bo qua khong duoc resolve hay kiem tra kieu);
+  (4) gia tri chinh xac cua float literal (`strtod`, lam tron dung nhu
+  `std::stod`) de fold dung, va `switch` statement (dieu kien phai la kieu
+  integral, toi da mot `default`, moi case phai ket thuc bang `break`/
+  `return`/`continue`/`nextcase`).
+  Corpus `selfhost/corpus/hir/constexpr/` (70 file) byte-identical vs
+  `ivy --hir`. Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/constexpr -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+- H4.3 (giai chinh va xac minh lap lai): xac minh lai toan bo 23 suite
+  (H1.1-H4.3, 475 file) va them fixture rieng (ngoai corpus) de kiem tra
+  oracle parity byte-for-byte (sizeof/alignof moi kieu, constexpr call,
+  `if constexpr`, switch, loi):
+  (1) fold `-0.0` ra `-0`: codegen ha unary `-` tren float thanh `0.0 - x`
+  nen dau cua zero bi mat — dung `x * -1.0` (phep IEEE) va `fmt_double` kiem
+  tra dau cua zero bang `1.0 / v`;
+  (2) pool van ban float bi cat im lang khi tran (trai ve chuoi rong, sai
+  gia tri folded) — doi thanh pool chia chunk (chunk khong bao gio di chuyen
+  nen con tro cua literal da fold van hieu luc);
+  (3) `switch` chua duoc build (HIR in ra `null`) — port them
+  `build_switch` + 3 chan doan cua oracle (dieu kien integral, `default`
+  trung, khong cho fallthrough);
+  (4) buffer float literal cua parser bi cat ngam (gia tri sai khi literal
+  dai > 254 ky tu) — buffer co kich thuoc theo do dai source;
+  (5) dem layout cua struct doc bo nho chua khoi tao (`__ivy_alloc` khong
+  zero) — khoi tao bang 0; truong `HExpr.fval` cua node HIR khac kind 2
+  cung chua duoc khoi tao — khoi tao bang 0.0;
+  (6) gia tri hang cua oracle la mot `ConstValue` duoc dung lai: khi ket
+  qua la mot so thuc thi truong integer giu nguyen gia tri cu (khong duoc
+  reset), va `!`, `~`, dieu kien cua toan tu dieu kien va toan hang `&&`/
+  `||` doc truong do — port theo dung quy tac do (truoc do port reset
+  truong integer, nen `!x` tren float cho ket qua khac oracle);
+  (7) corpus: 5 file khong test duoc dung quy tac (khong parse duoc: `int*`,
+  `double`, `char` thieu `#pragma ivy cnumber`; ten ham `not` la keyword;
+  `1 + 2` la mot enumerator value hop le nen khong co loi) — sua lai
+  (doi ten 3 file) va them 8 file: regression cho `-0`, gia tri hang cua
+  float, `switch` (2 file), pool float va 3 loi cua `switch`.
+  Ghi chu: oracle crash (access violation) khi body cua ham `constexpr` co
+  goi toi ham `constexpr` khac nam trong bieu thuc nhi phan (vd
+  `return sq(x) * x;`) — `substituteParams` tra null roi `evalConstExpr`
+  dereference null; corpus tranh case do.
+  Con lai (de milestone sau): aggregate init `{...}`, ctor/dtor, `new`/
+  `delete`, template, lambda, range-for, structured binding, move-tracking,
+  namespace.
 
 
 ---
@@ -345,7 +404,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 |-----|-----------|---------|----------|--------|-----------|
 | H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ✅ byte-identical 27 files |
 | H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 120 files |
-| H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ☐ |
+| H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ✅ byte-identical 70 files |
 | H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ☐ |
 | H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ☐ |
 | H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ☐ |

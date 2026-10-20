@@ -1,0 +1,8 @@
+// A character literal is not a literal the folding accepts.
+#pragma ivy cnumber
+constexpr int32 ident(char c) {
+    return 1;
+}
+void f() {
+    int32 a = ident('a');
+}

@@ -1,0 +1,7 @@
+// An empty struct has size 0 and alignment 1.
+struct Empty {
+};
+void f() {
+    int32 a = sizeof(Empty);
+    int32 b = alignof(Empty);
+}

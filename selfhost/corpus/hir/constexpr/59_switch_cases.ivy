@@ -1,0 +1,9 @@
+// A switch statement keeps its case clauses (and their values) in the HIR.
+enum E { A = 1, B = 2 };
+void f(int32 x) {
+    switch (x) {
+        case 1: x = 10; break;
+        case A: x = 20; break;
+        default: x = 30; break;
+    }
+}

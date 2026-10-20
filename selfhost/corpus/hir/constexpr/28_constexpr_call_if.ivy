@@ -1,0 +1,11 @@
+// The `if` of a constexpr body is evaluated at compile time.
+constexpr int32 sign(int32 x) {
+    if (x > 0) {
+        return 1;
+    }
+    return 0;
+}
+void f() {
+    int32 a = sign(5);
+    int32 b = sign(0);
+}

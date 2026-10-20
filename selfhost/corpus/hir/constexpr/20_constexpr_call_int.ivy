@@ -1,0 +1,8 @@
+// A call to a constexpr function with a literal argument is folded to the
+// value of its return statement.
+constexpr int32 sq(int32 x) {
+    return x * x;
+}
+void f() {
+    int32 a = sq(4);
+}

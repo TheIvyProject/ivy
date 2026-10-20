@@ -1,0 +1,9 @@
+// The folded `sizeof` has the type `int64_t`, so it widens the usual
+// arithmetic conversions of the expression it appears in.
+void f() {
+    auto a = sizeof(int32);
+    auto b = alignof(int32);
+    int32 c = sizeof(int32) + 1;
+    int32 d = sizeof(int32) * 2;
+    bool e = sizeof(int32) == 4;
+}

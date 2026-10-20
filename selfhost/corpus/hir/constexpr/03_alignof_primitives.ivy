@@ -1,0 +1,11 @@
+// alignof of the primitive types: the alignment of a scalar is its size.
+#pragma ivy cnumber
+void f() {
+    int a = alignof(char);
+    int b = alignof(short);
+    int c = alignof(int);
+    int d = alignof(long);
+    int e = alignof(float);
+    int g = alignof(double);
+    int h = alignof(bool);
+}

@@ -26,6 +26,7 @@ export struct HExpr {
     long an;            // call-argument count
     long line;          // source line (for diagnostics)
     long col;           // source column (for diagnostics)
+    double fval;        // exact value of a float literal (2)
 };
 
 // Statement kinds (mirror dumpHirStmt in src/app/main.cpp):
@@ -67,6 +68,7 @@ export struct HFunction {
     long body;          // root HStmt index, or -1 for declaration only
     long pstart;        // first HParam index
     long pn;            // HParam count
+    long is_constexpr;  // `constexpr` / `consteval` function
 };
 
 // A whole HIR translation unit. Flat pools are owned by HirBuilder.

@@ -1,0 +1,15 @@
+// A derived class of a polymorphic class is polymorphic as well.
+#pragma ivy cnumber
+struct Base {
+    virtual int32 get() {
+        return 1;
+    }
+    int32 x;
+};
+struct Derived : public Base {
+    int32 y;
+};
+void f() {
+    int32 a = sizeof(Base);
+    int32 b = sizeof(Derived);
+}

@@ -1,0 +1,9 @@
+// A character literal is not a constant the folding accepts, so both
+// branches are kept.
+void f() {
+    if constexpr ('a') {
+        int32 a = 1;
+    } else {
+        int32 b = 2;
+    }
+}

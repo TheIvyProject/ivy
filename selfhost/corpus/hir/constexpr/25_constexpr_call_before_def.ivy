@@ -1,0 +1,8 @@
+// A constexpr function that is defined after its caller has no body yet, so
+// the call is not folded.
+void caller() {
+    int32 a = later(2);
+}
+constexpr int32 later(int32 x) {
+    return x + 1;
+}

@@ -1,0 +1,8 @@
+// Only the call is folded; the surrounding expression keeps its shape.
+constexpr int32 sq(int32 x) {
+    return x * x;
+}
+void f() {
+    int32 a = sq(2) + 1;
+    int32 b = 1 + sq(2);
+}

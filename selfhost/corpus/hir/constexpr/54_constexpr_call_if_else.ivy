@@ -1,0 +1,13 @@
+// The `if`/`else` of a constexpr body is evaluated at compile time: the
+// branch that is taken is folded.
+constexpr int32 pick(int32 x) {
+    if (x > 0) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+void f() {
+    int32 a = pick(3);
+    int32 b = pick(-1);
+}

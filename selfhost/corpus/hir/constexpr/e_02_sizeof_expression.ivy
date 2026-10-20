@@ -1,0 +1,5 @@
+// `sizeof` of an expression is not supported.
+void f() {
+    int32 a = 1;
+    int32 b = sizeof(a);
+}

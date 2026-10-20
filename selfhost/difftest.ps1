@@ -89,6 +89,14 @@
 #     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
 #     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
 #     -Driver hirdrive
+#   H4.3 (constexpr folding: `sizeof`/`alignof` folded to integer literals
+#     with the struct layout, constexpr calls folded to literals, `if
+#     constexpr` keeping only the taken branch, and the `switch` statement
+#     with its diagnostics):
+#     -Dir selfhost/corpus/hir/constexpr -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 

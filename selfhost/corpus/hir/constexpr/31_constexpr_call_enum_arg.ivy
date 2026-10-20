@@ -1,0 +1,9 @@
+// An enum constant is an integer literal, so it can be folded as an
+// argument of a constexpr call.
+enum E { A = 4 };
+constexpr int32 sq(int32 x) {
+    return x * x;
+}
+void f() {
+    int32 a = sq(A);
+}

@@ -1,0 +1,13 @@
+// A float literal folds the condition of an `if constexpr`.
+void f() {
+    if constexpr (1.5) {
+        int32 a = 1;
+    } else {
+        int32 b = 2;
+    }
+    if constexpr (0.0) {
+        int32 c = 3;
+    } else {
+        int32 d = 4;
+    }
+}

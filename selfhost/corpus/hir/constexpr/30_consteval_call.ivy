@@ -1,0 +1,7 @@
+// `consteval` implies `constexpr`: the call is folded as well.
+consteval int32 twice(int32 x) {
+    return x * 2;
+}
+void f() {
+    int32 a = twice(3);
+}

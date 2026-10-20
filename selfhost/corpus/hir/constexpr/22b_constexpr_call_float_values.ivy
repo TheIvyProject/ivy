@@ -1,0 +1,14 @@
+// The folded float value is printed with six significant digits as well.
+#pragma ivy cnumber
+constexpr double a(int32 x) { return 1.0 / 3.0; }
+constexpr double b(int32 x) { return 0.1 + 0.2; }
+constexpr double c(int32 x) { return 999999.5; }
+constexpr double d(int32 x) { return 1.0e100; }
+constexpr double e(int32 x) { return 1.0e-100; }
+void f() {
+    double v1 = a(0);
+    double v2 = b(0);
+    double v3 = c(0);
+    double v4 = d(0);
+    double v5 = e(0);
+}

@@ -1,0 +1,20 @@
+// The alignment of a struct follows its most aligned field.
+#pragma ivy cnumber
+struct A {
+    char c;
+};
+struct B {
+    double d;
+};
+struct C {
+    char c;
+    int32 i;
+};
+void f() {
+    int32 a = sizeof(A);
+    int32 b = alignof(A);
+    int32 c = sizeof(B);
+    int32 d = alignof(B);
+    int32 e = sizeof(C);
+    int32 g = alignof(C);
+}

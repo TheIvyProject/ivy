@@ -1,0 +1,8 @@
+// A switch may have at most one `default` case.
+void f(int32 x) {
+    switch (x) {
+        case 1: x = 2; break;
+        default: x = 3; break;
+        default: x = 4; break;
+    }
+}

@@ -1,0 +1,14 @@
+// A derived struct starts with its base subobject.
+#pragma ivy cnumber
+struct Base {
+    int a;
+    char b;
+};
+struct Derived : public Base {
+    int c;
+};
+void f() {
+    int a = sizeof(Base);
+    int b = sizeof(Derived);
+    int c = alignof(Derived);
+}

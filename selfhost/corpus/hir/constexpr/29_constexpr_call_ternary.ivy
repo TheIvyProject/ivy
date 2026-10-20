@@ -1,0 +1,7 @@
+// The conditional operator of a constexpr body is evaluated at compile time.
+constexpr int32 pick(int32 x) {
+    return x > 0 ? 1 : 0;
+}
+void f() {
+    int32 a = pick(2);
+}

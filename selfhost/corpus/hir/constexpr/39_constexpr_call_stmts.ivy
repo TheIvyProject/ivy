@@ -1,0 +1,9 @@
+// A constexpr body with several statements folds the return statement.
+constexpr int32 add(int32 x) {
+    int32 y = x + 1;
+    int32 z = y * 2;
+    return z;
+}
+void f() {
+    int32 a = add(3);
+}

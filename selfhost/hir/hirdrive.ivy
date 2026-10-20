@@ -349,9 +349,11 @@ struct HDumper {
                     c = this.cp[s.sstart + j];
                 }
                 this.pad(depth);
-                io::println("  case");
                 if (c.value >= 0) {
+                    io::println("  case");
                     this.dump_expr(c.value, depth + 2);
+                } else {
+                    io::println("  default");
                 }
                 long k = c.sstart;
                 while (k >= 0) {

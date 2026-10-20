@@ -1,0 +1,14 @@
+// The value of a constant expression keeps the integer field of the value
+// it replaces: `!` reads that field, so `!x` on a float depends on the
+// value that was computed before it.
+constexpr bool not_float(float64 x) {
+    return !x;
+}
+constexpr bool cond_not(float64 x, int32 y) {
+    return y > 0 ? !x : false;
+}
+void f() {
+    bool a = not_float(0.5);
+    bool b = cond_not(0.5, 1);
+    bool c = cond_not(0.5, 0);
+}

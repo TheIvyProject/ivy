@@ -1,0 +1,5 @@
+// An enumerator value may only refer to a constant of the same enum.
+enum E { A = 1, B = UNDEFINED };
+void f() {
+    int32 b = 0;
+}

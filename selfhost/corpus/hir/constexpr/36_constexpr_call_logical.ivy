@@ -1,0 +1,13 @@
+// The logical operators of a constexpr body short-circuit.
+constexpr bool both(bool a, bool b) {
+    return a && b;
+}
+constexpr bool either(bool a, bool b) {
+    return a || b;
+}
+void f() {
+    bool a = both(true, false);
+    bool b = both(true, true);
+    bool c = either(false, true);
+    bool d = either(false, false);
+}
