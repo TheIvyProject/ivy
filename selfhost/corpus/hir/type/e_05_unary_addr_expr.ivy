@@ -1,0 +1,7 @@
+// `&` only accepts variables.
+void f() {
+    unsafe {
+        int32 x = 1;
+        auto a = &(x + 1);
+    }
+}

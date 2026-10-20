@@ -1,0 +1,4 @@
+// The `nullptr` literal requires an unsafe block.
+void f() {
+    auto p = nullptr;
+}

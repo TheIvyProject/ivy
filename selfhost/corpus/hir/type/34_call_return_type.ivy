@@ -1,0 +1,13 @@
+// The call type is the return type of the callee.
+int32 f(int32 a) {
+    return a;
+}
+
+float64 g() {
+    return 1.5;
+}
+
+void h() {
+    auto a = f(1);
+    auto b = g();
+}

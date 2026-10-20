@@ -237,6 +237,66 @@ src/                              selfhost/
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/err -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: thu tu build phai la `ast` truoc `parser` (parser `import ast;`);
   cac lenh H3.x da cap nhat theo thu tu nay.
+- H4.1 (Name resolution): port buoc phan giai ten cua `hir_builder.cpp` sang
+  `hir/hir.ivy`, `hir/hir_builder.ivy`, `hir/hirdrive.ivy`: khai bao scope
+  (function/compound/for), shadowing, lookup local/param, enum constant
+  (unscoped inject global, `Enum::X`, enum class, explicit values), struct
+  field `.`/`->`, method `Struct::method` voi `this`, free/method call,
+  using alias, va cac chan doan ten (`undeclared identifier`,
+  `redefinition of variable`, `struct ... has no member/method`,
+  `enum ... has no enumerator`, `'this' is only valid...`,
+  `... is not a struct type`, `'->' requires...`, `call to undeclared`).
+  Parser bo sung metadata `AStruct`/`AEnum`/`AAlias`/`line`/`col` va sua
+  child-stack call args de nested call khong lan vao run cua call ngoai.
+  Corpus `selfhost/corpus/hir/name/` (27 file) byte-identical vs `ivy --hir`.
+  Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/name -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+  Ghi chu: driver in chan doan HIR theo format oracle va chi dump khi khong
+  co chan doan; corpus tranh float literal, sizeof/alignof, switch, ctor/dtor/
+  operator (chua thuoc H4.1). `difftest.ps1` them `-ModuleDirs`/`-DriverDir`
+  (mac dinh giu nguyen `selfhost/parsing`).
+- H4.2 (Type checking): port phep kiem tra kieu cua `hir_builder.cpp` sang
+  `hir/hir_builder.ivy` (va `hir/hir.ivy`): he thong kieu (bang kieu primitive
+  + `const`/`unsigned`/`&`/con tro, `cnumber`, struct/class, enum/enum class,
+  using-alias, `void`), kieu cua literal (int/float/char/bool/string/nullptr/
+  nullopt), integer promotion + usual arithmetic conversion (`promoteTypes`),
+  phep toan nhan (`+ - * / %`, `& | ^`, `<< >>`, so sanh, `&& ||`, unary
+  `+ - ! ~ * & ++ --`), gan/initialization (`isAssignable`), chuyen doi ngam
+  (int<->float, enum->int, alias->underlying, derived->base qua reference),
+  kiem tra tham so va gia tri tra ve cua ham (`checkCall`), chon overload
+  (`resolveOverload`), dieu kien dieu khien (`checkCondition`), `return` va
+  "may reach the end without returning a value", con tro/mang (`&`, `*`,
+  pointer arithmetic, so sanh con tro, `nullptr`), va tap khop chan doan
+  `file:line:col: error: <message>` theo thu tu build (file co chan doan thi
+  khong dump HIR). Bo sung `AType.array_size` + `AStruct.bases` (ke thua),
+  `HExpr.line/col`, va float literal trong parser (render `%g` 6 chu so
+  nhu `ostream << double`). Corpus `selfhost/corpus/hir/type/` (120 file)
+  byte-identical vs `ivy --hir`. Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/type -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+  Ghi chu: oracle crash khi toan nhan tren struct (dang ky dung `lt` sau
+  `std::move`) nen corpus tranh case do; `sizeof`/`alignof` (fold hang so),
+  `if constexpr`, template/lambda/new/delete, aggregate init `{...}` va
+  constructor injection de cho H4.3-H4.4 (hoac cac milestone sau).
+- H4.2 (giai chinh va xac minh lap lai): kiem tra lai bang fixture rieng
+  (ngoai corpus) cho mo ra cac lech doi oracle, va sua port:
+  (1) `isAssignable` thieu khoi B5/B6 (`expected<T,E>` / `optional<T>`) —
+  bo sung `is_expected_struct`/`is_optional_struct` + wrap thanh `init-list`
+  (node HIR moi, kind 19) cho ca khai bao va gan;
+  (2) thieu kiem tra khai bao trong `buildEnum`/`buildStruct`:
+  `redefinition of struct|enum|enumerator`, `enumerator ... must be a
+  constant expression`, `enumerator ... references undefined constant`;
+  (3) parser bo sung default argument (`= expr`) cho tham so, `checkCall`
+  dien gia tri mac dinh tai call site va `rank_overload` chap nhan ung vien
+  co default;
+  (4) parser giu ten toan tu (`operator+` thay vi `operator`) va HIR builder
+  viet lai `base op rhs` thanh goi `Struct::operator<op>` (unary/binary/index,
+  ke ca ke thua); method/operator cua base class cung duoc tim thay;
+  (5) parser tu choi kieu `signed` don le (oracle: "expected a type"),
+  dung nhu `unsigned`/`const` don le.
+  Corpus bo sung 9 file (120 file tong). Con lai: `switch`, `sizeof`/
+  `alignof`, aggregate init, ctor/dtor, `new`/`delete`, template, lambda,
+  range-for, move-tracking, namespace van chua port (de milestone sau).
+
 
 ---
 
@@ -283,8 +343,8 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ☐ |
-| H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ☐ |
+| H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ✅ byte-identical 27 files |
+| H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 120 files |
 | H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ☐ |
 | H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ☐ |
 | H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ☐ |

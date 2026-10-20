@@ -1,0 +1,6 @@
+// Assignment of the same type is allowed.
+void f() {
+    int32 a = 1;
+    a = 2;
+    a = a;
+}

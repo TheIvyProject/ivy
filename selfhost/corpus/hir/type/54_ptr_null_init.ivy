@@ -1,0 +1,7 @@
+// `nullptr` initializes a pointer.
+void f() {
+    unsafe {
+        int32* p = nullptr;
+        int32** q = nullptr;
+    }
+}

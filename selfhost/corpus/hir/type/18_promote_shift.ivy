@@ -1,0 +1,9 @@
+// Shifts promote the left operand; the right operand is separate.
+void f() {
+    int32 a = 1;
+    int64 b = 2;
+    auto c = a << b;
+    auto d = b << a;
+    auto e = a >> 1;
+    auto g = b >> 1;
+}

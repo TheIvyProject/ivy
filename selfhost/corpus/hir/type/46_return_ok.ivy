@@ -1,0 +1,11 @@
+// The returned value must match the return type.
+int32 f() {
+    return 1;
+}
+
+float64 g() {
+    return 1.5;
+}
+
+void h() {
+}

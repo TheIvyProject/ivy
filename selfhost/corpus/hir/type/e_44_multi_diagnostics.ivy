@@ -1,0 +1,7 @@
+// Several diagnostics are reported in build order.
+void f() {
+    int32 x = 1;
+    x = "text";
+    int32 y = "text";
+    int32 z;
+}

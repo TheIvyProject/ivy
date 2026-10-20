@@ -1,0 +1,11 @@
+// A `void` value does not match an integer parameter.
+void g() {
+}
+
+int32 f(int32 a) {
+    return a;
+}
+
+void h() {
+    auto b = f(g());
+}

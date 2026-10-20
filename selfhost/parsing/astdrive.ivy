@@ -90,6 +90,10 @@ struct Dumper {
             io::print("int {}", e.ival);
             return;
         }
+        if (e.kind == 2) {
+            io::print("float {}", e.sval);
+            return;
+        }
         if (e.kind == 3) {
             io::print("string {}", e.sval);
             return;

@@ -1,0 +1,13 @@
+// Two different struct types are not interchangeable.
+struct A {
+    int32 x;
+};
+
+struct B {
+    int32 x;
+};
+
+void f() {
+    A a;
+    B b = a;
+}

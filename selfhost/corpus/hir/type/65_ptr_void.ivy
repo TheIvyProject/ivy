@@ -1,0 +1,8 @@
+// Any object pointer converts to `void*`.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        void* v = p;
+    }
+}

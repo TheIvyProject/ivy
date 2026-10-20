@@ -1,0 +1,10 @@
+// Arithmetic on equal types keeps the type.
+void f() {
+    int32 a = 1;
+    int32 b = 2;
+    auto c = a + b;
+    auto d = a - b;
+    auto e = a * b;
+    auto g = a / b;
+    auto h = a % b;
+}

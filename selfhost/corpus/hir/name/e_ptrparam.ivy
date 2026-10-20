@@ -1,0 +1,3 @@
+int32 f(int32* p) {
+    return 0;
+}

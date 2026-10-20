@@ -1,0 +1,14 @@
+// No overload matches the argument types.
+int32 f(int32 a) {
+    return a;
+}
+
+float64 f(float64 a) {
+    return a;
+}
+
+void g() {
+    unsafe {
+        auto b = f("text");
+    }
+}

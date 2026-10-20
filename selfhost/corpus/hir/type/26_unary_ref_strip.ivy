@@ -1,0 +1,5 @@
+// A reference operand is stripped for unary arithmetic.
+void f(int32& r) {
+    auto a = -r;
+    auto b = ~r;
+}

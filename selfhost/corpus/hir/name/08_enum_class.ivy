@@ -1,0 +1,9 @@
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+void f() {
+    Mode m = Mode::On;
+    int32 v = Mode::Off;
+}

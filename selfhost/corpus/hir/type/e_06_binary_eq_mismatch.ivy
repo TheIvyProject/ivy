@@ -1,0 +1,6 @@
+// `==` rejects incomparable operand types.
+void f() {
+    unsafe {
+        auto a = 1 == "text";
+    }
+}

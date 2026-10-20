@@ -1,0 +1,10 @@
+// A struct is not a valid condition.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    Point p;
+    if (p) {
+    }
+}

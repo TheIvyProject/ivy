@@ -1,0 +1,6 @@
+// `bool` is an integer type of the lowest rank.
+void f() {
+    bool a = true;
+    auto b = a + 1;
+    auto c = 1 + a;
+}

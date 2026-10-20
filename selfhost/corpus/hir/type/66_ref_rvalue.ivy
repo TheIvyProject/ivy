@@ -1,0 +1,5 @@
+// A reference to a scalar binds to a convertible value.
+void f() {
+    int32& r = 1;
+    auto a = r;
+}

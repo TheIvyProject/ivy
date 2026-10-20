@@ -1,0 +1,8 @@
+// The wider operand wins the usual arithmetic conversion.
+void f() {
+    int32 a = 1;
+    int64 b = 2;
+    auto c = a + b;
+    auto d = b + a;
+    auto e = b * a;
+}

@@ -1,0 +1,5 @@
+// Boolean literals have type `bool`.
+void f() {
+    auto a = true;
+    auto b = false;
+}

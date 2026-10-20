@@ -1,0 +1,9 @@
+// Pointer subtraction is not supported.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32* q = &x;
+        auto a = p - q;
+    }
+}

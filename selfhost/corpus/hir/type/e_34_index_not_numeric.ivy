@@ -1,0 +1,8 @@
+// The index expression must be numeric.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        auto b = p["text"];
+    }
+}

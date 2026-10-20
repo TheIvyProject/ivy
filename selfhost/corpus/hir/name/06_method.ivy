@@ -1,0 +1,23 @@
+struct Counter {
+    int32 v;
+
+    void set(int32 n) {
+        this.v = n;
+    }
+
+    int32 get() {
+        return this.v;
+    }
+};
+
+void f() {
+    Counter c;
+    c.set(4);
+    int32 x = c.get();
+    unsafe {
+        Counter* p = nullptr;
+        p->set(5);
+        x = p->get();
+    }
+}
+

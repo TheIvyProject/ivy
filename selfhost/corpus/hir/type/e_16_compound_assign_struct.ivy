@@ -1,0 +1,9 @@
+// Compound assignment requires numeric operands.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    Point p;
+    p += 1;
+}

@@ -1,0 +1,4 @@
+// Character literals have type `char`.
+void f() {
+    auto a = 'x';
+}

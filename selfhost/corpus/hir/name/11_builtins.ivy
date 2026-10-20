@@ -1,0 +1,6 @@
+void f() {
+    ivy::print("a");
+    io::println("b");
+    int32 x = 1;
+    int32 y = move(x);
+}

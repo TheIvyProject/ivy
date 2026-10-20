@@ -1,0 +1,6 @@
+// Unary `!` yields `bool`.
+void f() {
+    bool a = true;
+    auto b = !a;
+    auto c = !1;
+}

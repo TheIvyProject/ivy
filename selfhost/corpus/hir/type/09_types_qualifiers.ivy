@@ -1,0 +1,5 @@
+// `const` and `&` qualifiers are part of the type.
+void f(const int32 c, int32& r) {
+    auto a = c;
+    auto b = r;
+}

@@ -1,0 +1,4 @@
+// The left-hand side of an assignment must be assignable.
+void f() {
+    1 = 2;
+}

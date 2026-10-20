@@ -1,0 +1,7 @@
+// Indexing an array yields the element type.
+void f() {
+    int32 a[4];
+    a[0] = 1;
+    auto b = a[0];
+    auto c = a[1];
+}

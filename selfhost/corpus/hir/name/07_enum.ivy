@@ -1,0 +1,18 @@
+enum Color {
+    Red,
+    Green,
+    Blue
+};
+
+enum Level {
+    Low = 3,
+    Mid,
+    High = 10
+};
+
+void f() {
+    Color c = Green;
+    int32 v = Blue;
+    Level l = High;
+    v = Mid;
+}

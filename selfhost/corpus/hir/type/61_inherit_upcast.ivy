@@ -1,0 +1,17 @@
+// A derived value binds to a base reference.
+struct Base {
+    int32 a;
+};
+
+struct Derived : public Base {
+    int32 b;
+};
+
+void g(Base& r) {
+    auto a = r.a;
+}
+
+void f() {
+    Derived d;
+    g(d);
+}

@@ -1,0 +1,9 @@
+// Unary `-`, `+` and `~` keep the operand type.
+void f() {
+    int32 a = 1;
+    auto b = -a;
+    auto c = +a;
+    auto d = ~a;
+    auto e = -1;
+    auto g = ~1;
+}

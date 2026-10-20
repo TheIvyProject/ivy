@@ -1,0 +1,92 @@
+// selfhost/hir/hir.ivy - HIR model for the self-host port (H4.1).
+//
+// Mirror of the parts of src/hir/hir.h needed to reproduce the `ivy --hir`
+// dump: functions, params, statements and expressions. Expressions are stored
+// in a flat pool; child fields are pool indices (-1 when absent). Call
+// arguments are a contiguous run of expression indices in `args`.
+
+#pragma ivy cnumber
+export module hir;
+import ast;
+
+// Expression kinds (internal codes used by the port):
+//   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 this  8 ident
+//   9 unary  10 binary  11 ternary  12 call  13 index  14 member  15 assign
+//   16 sizeof  17 alignof  18 cast
+export struct HExpr {
+    long kind;
+    long ival;          // integer literal value (1) / bool value (5)
+    const char* sval;   // string/char raw, ident name, operator, member name
+    long flag;          // unary isPrefix (9) | member isArrow (14)
+    AType type;
+    long a;             // operand / lhs / cond / base / callee
+    long b;             // rhs / then / index
+    long c;             // else
+    long astart;        // first call-argument index in HUnit.args (-1 none)
+    long an;            // call-argument count
+    long line;          // source line (for diagnostics)
+    long col;           // source column (for diagnostics)
+};
+
+// Statement kinds (mirror dumpHirStmt in src/app/main.cpp):
+//   1 compound  2 decl  3 if  4 while  5 dowhile  6 for  7 return
+//   8 break  9 continue  10 nextcase  11 exprstmt  12 unsafe  13 null
+//   14 switch
+export struct HStmt {
+    long kind;
+    const char* sval;   // decl name / nextcase target
+    AType type;         // decl type
+    long flag;
+    long a;             // expr index or stmt index (kind-dependent)
+    long b;             // stmt/expr index
+    long c;             // expr index
+    long sstart;        // first child stmt index
+    long sn;            // child stmt count
+    long next;          // next sibling stmt index (-1)
+};
+
+// A switch case clause: `value` is an expression index or -1 for default.
+export struct HCase {
+    long value;
+    long sstart;
+    long sn;
+};
+
+export struct HParam {
+    AType type;
+    const char* name;
+    long line;
+    long col;
+    long default_value;   // AST expression index of the default value (-1 none)
+};
+
+export struct HFunction {
+    const char* name;
+    AType ret;
+    long is_extern_c;
+    long body;          // root HStmt index, or -1 for declaration only
+    long pstart;        // first HParam index
+    long pn;            // HParam count
+};
+
+// A whole HIR translation unit. Flat pools are owned by HirBuilder.
+export struct HUnit {
+    HFunction* fns;
+    long fn_n;
+    long fn_cap;
+    HExpr* exprs;
+    long ex_n;
+    long ex_cap;
+    HStmt* stmts;
+    long st_n;
+    long st_cap;
+    HParam* params;
+    long p_n;
+    long p_cap;
+    HCase* cases;
+    long c_n;
+    long c_cap;
+    long* args;
+    long a_n;
+    long a_cap;
+};

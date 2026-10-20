@@ -42,7 +42,7 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 64, AFunction 96) so `__ivy_alloc` can be used.
+// sizes (AAttr 40, AParam 96, AFunction 120) so `__ivy_alloc` can be used.
 export struct Parser {
     Token* toks_;
     long n_;
@@ -86,6 +86,13 @@ export struct Parser {
     long ca_n_;
     long ca_cap_;
 
+    // staging for call-argument indices: a linked list so nested calls do not
+    // interleave their arguments with this call's contiguous slice
+    long* argn_idx_;
+    long* argn_next_;
+    long argn_n_;
+    long argn_cap_;
+
     // switch case pool
     ACase* casepool_;
     long cp_n_;
@@ -102,6 +109,41 @@ export struct Parser {
     long* tpnames_;
     long tp_n_;
     long tp_cap_;
+
+    // struct/class pool (H4.1 name resolution metadata)
+    AStruct* stpool_;
+    long st_n_;
+    long st_cap_;
+
+    // struct field pool
+    AField* fldpool_;
+    long fld_n_;
+    long fld_cap_;
+
+    // method pool (AFunction records owned by their struct)
+    AFunction* mpool_;
+    long m_n_;
+    long m_cap_;
+
+    // enum pool
+    AEnum* enpool_;
+    long en_n_;
+    long en_cap_;
+
+    // enumerator pool
+    AEnumerator* enupool_;
+    long enu_n_;
+    long enu_cap_;
+
+    // using-alias pool
+    AAlias* alpool_;
+    long al_n_;
+    long al_cap_;
+
+    // base-class name pool (struct inheritance)
+    long* bpool_;
+    long b_n_;
+    long b_cap_;
 
     // H3.6 module state: `export module NAME;` interface unit + name.
     // module_name_ is an interned pointer (or ""), for the driver's
@@ -140,12 +182,28 @@ export struct Parser {
         this.sp_cap_ = in_count * 2 + 64;
         this.ca_n_ = 0;
         this.ca_cap_ = in_count + 64;
+        this.argn_n_ = 0;
+        this.argn_cap_ = in_count * 4 + 64;
         this.cp_n_ = 0;
         this.cp_cap_ = in_count + 16;
         this.tn_n_ = 0;
         this.tn_cap_ = in_count + 16;
         this.tp_n_ = 0;
         this.tp_cap_ = in_count + 16;
+        this.st_n_ = 0;
+        this.st_cap_ = in_count + 16;
+        this.fld_n_ = 0;
+        this.fld_cap_ = in_count * 2 + 64;
+        this.m_n_ = 0;
+        this.m_cap_ = in_count + 16;
+        this.en_n_ = 0;
+        this.en_cap_ = in_count + 16;
+        this.enu_n_ = 0;
+        this.enu_cap_ = in_count * 2 + 64;
+        this.al_n_ = 0;
+        this.al_cap_ = in_count + 16;
+        this.b_n_ = 0;
+        this.b_cap_ = in_count + 16;
         this.module_name_ = "";
         this.is_module_export_ = 0;
         this.dn_ = 0;
@@ -153,19 +211,28 @@ export struct Parser {
         this.ce_ = 0;
         this.cv_ = 0;
         unsafe {
-            this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 96);
-            this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
-            this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 64);
-            this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
-            this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 112);
-            this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 112);
-            this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
-            this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 24);
-            this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
-            this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
-            this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
-            this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
-            this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 120);
+        this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
+        this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 96);
+        this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
+        this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 144);
+        this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 136);
+        this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
+        this.argn_idx_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
+        this.argn_next_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
+        this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 24);
+        this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
+        this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
+        this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
+        this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
+        this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
+        this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 80);
+        this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 120);
+        this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
+        this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
+        this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
+        this.bpool_ = (long*) __ivy_alloc(this.b_cap_ * 8);
         }
     }
 
@@ -182,12 +249,21 @@ export struct Parser {
             __ivy_free(this.epool_);
             __ivy_free(this.spool_);
             __ivy_free(this.cargs_);
+        __ivy_free(this.argn_idx_);
+        __ivy_free(this.argn_next_);
             __ivy_free(this.casepool_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
             __ivy_free(this.tnames_);
             __ivy_free(this.tpnames_);
+            __ivy_free(this.stpool_);
+            __ivy_free(this.fldpool_);
+            __ivy_free(this.mpool_);
+            __ivy_free(this.enpool_);
+            __ivy_free(this.enupool_);
+            __ivy_free(this.alpool_);
+            __ivy_free((void*)this.bpool_);
         }
     }
 
@@ -476,6 +552,327 @@ export struct Parser {
         return "";
     }
 
+    // --- floating-point literals -----------------------------------------
+    //
+    // The oracle prints a float literal with `operator<<(ostream&, double)`,
+    // i.e. printf("%g") with 6 significant digits (C locale).  The Ivy
+    // runtime formats doubles differently, so the port renders the literal
+    // itself: the mantissa digits are rounded to 6 significant decimal
+    // digits and then printed in %g layout (fixed when -4 <= exp < 6,
+    // scientific otherwise).
+
+    // Append one character to the intern buffer.
+    void sb_put_char(char c) {
+        if (this.sb_n_ + 1 > this.sb_cap_) {
+            return;
+        }
+        unsafe {
+            this.sbuf_[this.sb_n_] = c;
+        }
+        this.sb_n_ = this.sb_n_ + 1;
+    }
+
+    // Append a non-negative integer in decimal, padded to `minw` digits.
+    void sb_put_uint_pad(long v, long minw) {
+        long start = this.sb_n_;
+        if (v == 0) {
+            this.sb_put_char(48);
+        }
+        while (v > 0) {
+            this.sb_put_char(48 + (v % 10));
+            v = v / 10;
+        }
+        long len = this.sb_n_ - start;
+        while (len < minw) {
+            this.sb_put_char(48);
+            len = len + 1;
+        }
+        // reverse the digits in place
+        long i = this.sb_n_ - 1;
+        long j = start;
+        while (i > j) {
+            unsafe {
+                char swtmp = this.sbuf_[i];
+                this.sbuf_[i] = this.sbuf_[j];
+                this.sbuf_[j] = swtmp;
+            }
+            i = i - 1;
+            j = j + 1;
+        }
+    }
+
+    // Render the floating-point literal `t` and return the interned text.
+    const char* format_float(Token t) {
+        long dig_start = this.sb_n_;
+        long neg = 0;
+        long frac = 0;
+        long expv = 0;
+        long expneg = 0;
+        long in_exp = 0;
+        long seen_dot = 0;
+        long ndig = 0;
+        long i = 0;
+        unsafe {
+            while (i < t.len) {
+                char c = this.src_[t.off + i];
+                i = i + 1;
+                if (c == 39) {
+                    continue;
+                }
+                if (c == 'f' || c == 'F' || c == 'l' || c == 'L') {
+                    break;
+                }
+                if (in_exp != 0) {
+                    if (c == '-') {
+                        expneg = 1;
+                        continue;
+                    }
+                    if (c == '+') {
+                        continue;
+                    }
+                    if (c < '0' || c > '9') {
+                        break;
+                    }
+                    expv = expv * 10 + (c - 48);
+                    continue;
+                }
+                if (c == 'e' || c == 'E') {
+                    in_exp = 1;
+                    continue;
+                }
+                if (c == '.') {
+                    if (seen_dot != 0) {
+                        break;
+                    }
+                    seen_dot = 1;
+                    continue;
+                }
+                if (c == '-') {
+                    if (ndig == 0 && seen_dot == 0) {
+                        neg = 1;
+                    }
+                    continue;
+                }
+                if (c == '+') {
+                    continue;
+                }
+                if (c < '0' || c > '9') {
+                    break;
+                }
+                this.sb_put_char(c);
+                ndig = ndig + 1;
+                if (seen_dot != 0) {
+                    frac = frac + 1;
+                }
+            }
+        }
+        if (expneg != 0) {
+            expv = -expv;
+        }
+        // Locate the first significant digit.
+        long lead = 0;
+        while (lead < ndig) {
+            unsafe {
+                if (this.sbuf_[dig_start + lead] != 48) {
+                    break;
+                }
+            }
+            lead = lead + 1;
+        }
+        long out_start = this.sb_n_;
+        if (lead >= ndig) {
+            // The value is zero.
+            if (neg != 0) {
+                this.sb_put_char(45);
+            }
+            this.sb_put_char(48);
+            this.sb_end();
+            unsafe {
+                return this.sbuf_ + out_start;
+            }
+            return "";
+        }
+        long sig = ndig - lead;
+        long exp10 = (ndig - frac) - lead - 1 + expv;
+        if (sig > 6) {
+            // Round to 6 significant digits (round half away from zero on the
+            // exact decimal value).
+            long roundup = 0;
+            long d7 = 0;
+            unsafe {
+                d7 = this.sbuf_[dig_start + lead + 6] - 48;
+            }
+            if (d7 > 5) {
+                roundup = 1;
+            } else if (d7 == 5) {
+                roundup = 0;
+                long k = lead + 7;
+                while (k < ndig) {
+                    unsafe {
+                        if (this.sbuf_[dig_start + k] != 48) {
+                            roundup = 1;
+                            break;
+                        }
+                    }
+                    k = k + 1;
+                }
+            }
+            if (roundup != 0) {
+                long p = lead + 5;
+                long overflow = 0;
+                while (p >= lead) {
+                    long d = 0;
+                    unsafe {
+                        d = this.sbuf_[dig_start + p] - 48 + 1;
+                    }
+                    if (d <= 9) {
+                        unsafe {
+                            this.sbuf_[dig_start + p] = 48 + d;
+                        }
+                        break;
+                    }
+                    unsafe {
+                        this.sbuf_[dig_start + p] = 48;
+                    }
+                    p = p - 1;
+                }
+                if (p < lead) {
+                    // 999999 + 1 -> 1000000
+                    overflow = 1;
+                    unsafe {
+                        this.sbuf_[dig_start + lead] = 49;
+                        this.sbuf_[dig_start + lead + 1] = 48;
+                        this.sbuf_[dig_start + lead + 2] = 48;
+                        this.sbuf_[dig_start + lead + 3] = 48;
+                        this.sbuf_[dig_start + lead + 4] = 48;
+                        this.sbuf_[dig_start + lead + 5] = 48;
+                    }
+                    exp10 = exp10 + 1;
+                }
+                if (overflow != 0) {
+                    sig = 6;
+                }
+            }
+            sig = 6;
+        }
+        if (neg != 0) {
+            this.sb_put_char(45);
+        }
+        if (exp10 < -4 || exp10 >= 6) {
+            // Scientific layout: d.dddde+XX
+            unsafe {
+                this.sb_put_char(this.sbuf_[dig_start + lead]);
+            }
+            long frac_digits = sig - 1;
+            while (frac_digits > 0) {
+                long d = 0;
+                unsafe {
+                    d = this.sbuf_[dig_start + lead + frac_digits] - 48;
+                }
+                if (d != 0) {
+                    break;
+                }
+                frac_digits = frac_digits - 1;
+            }
+            if (frac_digits > 0) {
+                this.sb_put_char(46);
+                long k = 1;
+                while (k <= frac_digits) {
+                    unsafe {
+                        this.sb_put_char(this.sbuf_[dig_start + lead + k]);
+                    }
+                    k = k + 1;
+                }
+            }
+            this.sb_put_char(101);
+            if (exp10 < 0) {
+                this.sb_put_char(45);
+                this.sb_put_uint_pad(0 - exp10, 2);
+            } else {
+                this.sb_put_char(43);
+                this.sb_put_uint_pad(exp10, 2);
+            }
+        } else {
+            // Fixed layout: ddd.ddd — the fraction carries 5-exp10 digits.
+            long int_digits = exp10 + 1;
+            if (int_digits <= 0) {
+                this.sb_put_char(48);
+            } else {
+                long k = 0;
+                while (k < int_digits) {
+                    if (k < sig) {
+                        unsafe {
+                            this.sb_put_char(this.sbuf_[dig_start + lead + k]);
+                        }
+                    } else {
+                        this.sb_put_char(48);
+                    }
+                    k = k + 1;
+                }
+            }
+            long want = 5 - exp10;
+            long frac_start = exp10 + 1;
+            long keep = want;
+            while (keep > 0) {
+                long idx = frac_start + keep - 1;
+                long d = 0;
+                if (idx >= 0 && idx < sig) {
+                    unsafe {
+                        d = this.sbuf_[dig_start + lead + idx] - 48;
+                    }
+                }
+                if (d != 0) {
+                    break;
+                }
+                keep = keep - 1;
+            }
+            if (keep > 0) {
+                this.sb_put_char(46);
+                long k = 0;
+                while (k < keep) {
+                    long idx = frac_start + k;
+                    if (idx >= 0 && idx < sig) {
+                        unsafe {
+                            this.sb_put_char(this.sbuf_[dig_start + lead + idx]);
+                        }
+                    } else {
+                        this.sb_put_char(48);
+                    }
+                    k = k + 1;
+                }
+            }
+        }
+        this.sb_end();
+        unsafe {
+            return this.sbuf_ + out_start;
+        }
+        return "";
+    }
+
+    // Concatenate two NUL-terminated strings into the intern buffer.
+    const char* intern_join2(const char* a, const char* b) {
+        long start = this.sb_n_;
+        this.sb_put(a, this.cstr_len(a));
+        this.sb_put(b, this.cstr_len(b));
+        this.sb_end();
+        unsafe {
+            return this.sbuf_ + start;
+        }
+        return "";
+    }
+
+    const char* intern_join3(const char* a, const char* b, const char* c) {
+        long start = this.sb_n_;
+        this.sb_put(a, this.cstr_len(a));
+        this.sb_put(b, this.cstr_len(b));
+        this.sb_put(c, this.cstr_len(c));
+        this.sb_end();
+        unsafe {
+            return this.sbuf_ + start;
+        }
+        return "";
+    }
+
     // --- type predicates --------------------------------------------------
 
     // Ivy-native type keyword -> canonical `_t` name ("" if not one).
@@ -615,6 +1012,7 @@ export struct Parser {
         t.is_const = 0;
         t.is_ref = 0;
         t.ptr_depth = 0;
+        t.array_size = 0;
         if (this.kw("const")) {
             t.is_const = 1;
             this.next();
@@ -781,7 +1179,10 @@ export struct Parser {
         }
         if (this.cstr_len(t.base) == 0) {
             if (e3 == 0) {
-                if (saw == 0 && t.is_const == 0) {
+                // The oracle rejects a bare `signed` (only `unsigned` and
+                // `const` alone are accepted), so the check follows the
+                // resulting unsigned flag, not the presence of the keyword.
+                if (t.is_unsigned == 0 && t.is_const == 0) {
                     this.error_at(this.peek(0),
                                   "expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)");
                 } else {
@@ -981,6 +1382,136 @@ export struct Parser {
         }
     }
 
+    long expr_count() {
+        return this.ep_n_;
+    }
+
+    long stmt_count() {
+        return this.sp_n_;
+    }
+
+    long carg_count() {
+        return this.ca_n_;
+    }
+
+    long struct_count() {
+        return this.st_n_;
+    }
+
+    AStruct get_struct(long i) {
+        unsafe {
+            if (i < this.st_n_) {
+                return this.stpool_[i];
+            }
+            return this.stpool_[0];
+        }
+    }
+
+    long enum_count() {
+        return this.en_n_;
+    }
+
+    AEnum get_enum(long i) {
+        unsafe {
+            if (i < this.en_n_) {
+                return this.enpool_[i];
+            }
+            return this.enpool_[0];
+        }
+    }
+
+    long alias_count() {
+        return this.al_n_;
+    }
+
+    AAlias get_alias(long i) {
+        unsafe {
+            if (i < this.al_n_) {
+                return this.alpool_[i];
+            }
+            return this.alpool_[0];
+        }
+    }
+
+    void push_field(AField f) {
+        if (this.fld_n_ >= this.fld_cap_) {
+            return;
+        }
+        unsafe {
+            this.fldpool_[this.fld_n_] = f;
+        }
+        this.fld_n_ = this.fld_n_ + 1;
+    }
+
+    long push_method(AFunction m) {
+        long i = this.m_n_;
+        if (this.m_n_ < this.m_cap_) {
+            unsafe {
+                this.mpool_[this.m_n_] = m;
+            }
+            this.m_n_ = this.m_n_ + 1;
+        }
+        return i;
+    }
+
+    void push_struct(AStruct s) {
+        if (this.st_n_ >= this.st_cap_) {
+            return;
+        }
+        unsafe {
+            this.stpool_[this.st_n_] = s;
+        }
+        this.st_n_ = this.st_n_ + 1;
+    }
+
+    void push_base(const char* name) {
+        if (this.b_n_ >= this.b_cap_) {
+            return;
+        }
+        unsafe {
+            this.bpool_[this.b_n_] = (long) name;
+        }
+        this.b_n_ = this.b_n_ + 1;
+    }
+
+    const char* base_at(long i) {
+        unsafe {
+            return (char*)this.bpool_[i];
+        }
+        return "";
+    }
+
+    long push_enum(AEnum e) {
+        long i = this.en_n_;
+        if (this.en_n_ < this.en_cap_) {
+            unsafe {
+                this.enpool_[this.en_n_] = e;
+            }
+            this.en_n_ = this.en_n_ + 1;
+        }
+        return i;
+    }
+
+    void push_enumerator(AEnumerator e) {
+        if (this.enu_n_ >= this.enu_cap_) {
+            return;
+        }
+        unsafe {
+            this.enupool_[this.enu_n_] = e;
+        }
+        this.enu_n_ = this.enu_n_ + 1;
+    }
+
+    void push_alias(AAlias a) {
+        if (this.al_n_ >= this.al_cap_) {
+            return;
+        }
+        unsafe {
+            this.alpool_[this.al_n_] = a;
+        }
+        this.al_n_ = this.al_n_ + 1;
+    }
+
     // --- declarations -----------------------------------------------------
 
     void parse_constexpr_spec() {
@@ -1029,7 +1560,11 @@ export struct Parser {
                 return this.make_param_list(start, va);
             }
             AParam p;
+            Token pstart = this.peek(0);
+            p.line = pstart.line;
+            p.col = pstart.col;
             p.name = "";
+            p.default_value = -1;
             unsafe {
                 p.attrs = this.apool_;
             }
@@ -1051,6 +1586,12 @@ export struct Parser {
             }
             p.nattrs = this.ap_n_ - pa_start;
             this.validate_list(pa, "lt", "");
+            // Default argument: `= expr` — fills in the missing argument
+            // at the call site.
+            if (this.at("=")) {
+                this.next();
+                p.default_value = this.parse_expr();
+            }
             this.push_param(p);
             if (!this.at(")")) {
                 this.expect(",", "expected ',' between parameters");
@@ -1081,6 +1622,7 @@ export struct Parser {
         t.is_const = 0;
         t.is_ref = 0;
         t.ptr_depth = 0;
+        t.array_size = 0;
         return t;
     }
 
@@ -1096,6 +1638,9 @@ export struct Parser {
         e.astart = -1;
         e.an = 0;
         e.type = this.empty_type();
+        e.is_scope = 0;
+        e.line = 0;
+        e.col = 0;
         return e;
     }
 
@@ -1111,6 +1656,8 @@ export struct Parser {
         s.sstart = -1;
         s.sn = 0;
         s.next = -1;
+        s.line = 0;
+        s.col = 0;
         return s;
     }
 
@@ -1284,6 +1831,7 @@ export struct Parser {
     }
 
     long parse_expr() {
+        Token start = this.peek(0);
         long lhs = this.parse_conditional();
         if (this.is_assign_kind()) {
             Token op = this.next();
@@ -1292,12 +1840,15 @@ export struct Parser {
             e.sval = this.intern_tok(op);
             e.a = lhs;
             e.b = rhs;
+            e.line = start.line;
+            e.col = start.col;
             return this.push_expr(e);
         }
         return lhs;
     }
 
     long parse_conditional() {
+        Token start = this.peek(0);
         long cond = this.parse_binary(1);
         if (this.at("?")) {
             this.next();
@@ -1308,6 +1859,8 @@ export struct Parser {
             e.a = cond;
             e.b = thenB;
             e.c = elseB;
+            e.line = start.line;
+            e.col = start.col;
             return this.push_expr(e);
         }
         return cond;
@@ -1326,6 +1879,8 @@ export struct Parser {
             e.sval = this.intern_tok(op);
             e.a = lhs;
             e.b = rhs;
+            e.line = op.line;
+            e.col = op.col;
             lhs = this.push_expr(e);
         }
         return lhs;
@@ -1340,16 +1895,34 @@ export struct Parser {
             e.sval = this.intern_tok(op);
             e.flag = 1;
             e.a = operand;
+            e.line = op.line;
+            e.col = op.col;
             return this.push_expr(e);
         }
         return this.parse_postfix(this.parse_primary());
     }
 
     long parse_call_args() {
-        long astart = this.ca_n_;
+        long head = -1;
+        long tail = -1;
         while (!this.at(")") && !this.at("eof")) {
             long arg = this.parse_expr();
-            this.push_carg(arg);
+            if (this.argn_n_ < this.argn_cap_) {
+                long node = this.argn_n_;
+                unsafe {
+                    this.argn_idx_[node] = arg;
+                    this.argn_next_[node] = -1;
+                }
+                if (tail >= 0) {
+                    unsafe {
+                        this.argn_next_[tail] = node;
+                    }
+                } else {
+                    head = node;
+                }
+                tail = node;
+                this.argn_n_ = node + 1;
+            }
             if (!this.at(")")) {
                 this.expect(",", "expected ',' between call arguments");
                 if (this.at(")")) {
@@ -1358,11 +1931,24 @@ export struct Parser {
             }
         }
         this.expect(")", "expected ')' to close call");
+        long astart = this.ca_n_;
+        long cur = head;
+        while (cur >= 0) {
+            long idx = -1;
+            long nxt = -1;
+            unsafe {
+                idx = this.argn_idx_[cur];
+                nxt = this.argn_next_[cur];
+            }
+            this.push_carg(idx);
+            cur = nxt;
+        }
         return astart;
     }
 
     long parse_postfix(long lhs) {
         while (true) {
+            Token start = this.peek(0);
             if (this.at("::")) {
                 this.next();
                 if (!this.at("identifier")) {
@@ -1372,6 +1958,9 @@ export struct Parser {
                 AExpr e = this.fresh(15);
                 e.sval = this.intern_tok(this.next());
                 e.a = lhs;
+                e.is_scope = 1;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else if (this.at("(")) {
                 this.next();
@@ -1380,6 +1969,8 @@ export struct Parser {
                 e.a = lhs;
                 e.astart = astart;
                 e.an = this.ca_n_ - astart;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else if (this.at("<")) {
                 long save = this.pos_;
@@ -1407,6 +1998,8 @@ export struct Parser {
                             e.a = lhs;
                             e.astart = astart2;
                             e.an = this.ca_n_ - astart2;
+                            e.line = start.line;
+                            e.col = start.col;
                             lhs = this.push_expr(e);
                             continue;
                         }
@@ -1421,6 +2014,8 @@ export struct Parser {
                 AExpr e = this.fresh(14);
                 e.a = lhs;
                 e.b = idx;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else if (this.at(".") || this.at("->")) {
                 long arrow = this.at("->") ? 1 : 0;
@@ -1433,17 +2028,23 @@ export struct Parser {
                 e.sval = this.intern_tok(this.next());
                 e.flag = arrow;
                 e.a = lhs;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else if (this.at("++") || this.at("--")) {
                 Token op = this.next();
                 AExpr e = this.fresh(10);
                 e.sval = this.intern_tok(op);
                 e.a = lhs;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else if (this.at("...")) {
                 this.next();
                 AExpr e = this.fresh(17);
                 e.a = lhs;
+                e.line = start.line;
+                e.col = start.col;
                 lhs = this.push_expr(e);
             } else {
                 break;
@@ -1458,18 +2059,32 @@ export struct Parser {
             this.next();
             AExpr e = this.fresh(1);
             e.ival = this.parse_int_tok(t);
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
+        }
+        if (this.at("float")) {
+            this.next();
+            AExpr e = this.fresh(2);
+            e.sval = this.format_float(t);
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.at("string")) {
             this.next();
             AExpr e = this.fresh(3);
             e.sval = this.intern_tok(t);
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.at("char")) {
             this.next();
             AExpr e = this.fresh(4);
             e.sval = this.intern_tok(t);
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.kw("true") || this.kw("false")) {
@@ -1477,15 +2092,23 @@ export struct Parser {
             this.next();
             AExpr e = this.fresh(5);
             e.flag = b;
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.kw("nullptr")) {
             this.next();
-            return this.push_expr(this.fresh(6));
+            AExpr e = this.fresh(6);
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
         }
         if (this.kw("nullopt")) {
             this.next();
-            return this.push_expr(this.fresh(7));
+            AExpr e = this.fresh(7);
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
         }
         if (this.kw("sizeof")) {
             this.next();
@@ -1494,12 +2117,17 @@ export struct Parser {
                 this.error_at(this.peek(0),
                               "expected type after 'sizeof(' (sizeof(expression) is not supported)");
                 this.synchronize();
-                return this.push_expr(this.fresh(18));
+                AExpr e0 = this.fresh(18);
+                e0.line = t.line;
+                e0.col = t.col;
+                return this.push_expr(e0);
             }
             AType ty = this.parse_type();
             this.expect(")", "expected ')' after sizeof type");
             AExpr e = this.fresh(18);
             e.type = ty;
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.kw("alignof")) {
@@ -1508,12 +2136,17 @@ export struct Parser {
             if (this.is_type_start() == 0) {
                 this.error_at(this.peek(0), "expected type after 'alignof('");
                 this.synchronize();
-                return this.push_expr(this.fresh(19));
+                AExpr e0 = this.fresh(19);
+                e0.line = t.line;
+                e0.col = t.col;
+                return this.push_expr(e0);
             }
             AType ty = this.parse_type();
             this.expect(")", "expected ')' after alignof type");
             AExpr e = this.fresh(19);
             e.type = ty;
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.kw("static_cast") || this.kw("reinterpret_cast") || this.kw("const_cast")) {
@@ -1528,7 +2161,10 @@ export struct Parser {
             if (this.is_type_start() == 0) {
                 this.error_at(this.peek(0), "expected type after cast keyword");
                 this.synchronize();
-                return this.push_expr(this.fresh(1));
+                AExpr e0 = this.fresh(1);
+                e0.line = t.line;
+                e0.col = t.col;
+                return this.push_expr(e0);
             }
             AType ty = this.parse_type();
             this.expect(">", "expected '>' after cast target type");
@@ -1539,17 +2175,24 @@ export struct Parser {
             e.flag = ckind;
             e.type = ty;
             e.a = operand;
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.at("identifier")) {
             this.next();
             AExpr e = this.fresh(8);
             e.sval = this.intern_tok(t);
+            e.line = t.line;
+            e.col = t.col;
             return this.push_expr(e);
         }
         if (this.kw("this")) {
             this.next();
-            return this.push_expr(this.fresh(9));
+            AExpr e = this.fresh(9);
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
         }
         if (this.at("(")) {
             this.next();
@@ -1559,12 +2202,16 @@ export struct Parser {
         }
         this.error_at(t, "unexpected token in expression");
         this.next();
-        return this.push_expr(this.fresh(6));
+        AExpr e = this.fresh(6);
+        e.line = t.line;
+        e.col = t.col;
+        return this.push_expr(e);
     }
 
     // --- statements -------------------------------------------------------
 
     long parse_statement() {
+        Token start = this.peek(0);
         // A2: `unsafe { ... }` keyword block (preferred form)
         if (this.kw("unsafe")) {
             this.next();
@@ -1576,6 +2223,8 @@ export struct Parser {
             }
             AStmt s = this.fresh_stmt(13);
             s.a = body;
+            s.line = start.line;
+            s.col = start.col;
             return this.push_stmt(s);
         }
         if (this.at("[") && this.kind_eq(this.peek(1), "[")) {
@@ -1612,12 +2261,18 @@ export struct Parser {
         if (this.kw("break")) {
             this.next();
             this.expect(";", "expected ';' after 'break'");
-            return this.push_stmt(this.fresh_stmt(9));
+            AStmt s = this.fresh_stmt(9);
+            s.line = start.line;
+            s.col = start.col;
+            return this.push_stmt(s);
         }
         if (this.kw("continue")) {
             this.next();
             this.expect(";", "expected ';' after 'continue'");
-            return this.push_stmt(this.fresh_stmt(10));
+            AStmt s = this.fresh_stmt(10);
+            s.line = start.line;
+            s.col = start.col;
+            return this.push_stmt(s);
         }
         if (this.kw("nextcase")) {
             this.next();
@@ -1632,6 +2287,8 @@ export struct Parser {
                 }
                 this.next();
             }
+            s.line = start.line;
+            s.col = start.col;
             this.expect(";", "expected ';' after 'nextcase'");
             return this.push_stmt(s);
         }
@@ -1641,12 +2298,18 @@ export struct Parser {
         if (this.kw("goto")) {
             this.error_at(this.peek(0), "goto is not supported in the Ivy subset");
             this.synchronize();
-            return this.push_stmt(this.fresh_stmt(14));
+            AStmt s = this.fresh_stmt(14);
+            s.line = start.line;
+            s.col = start.col;
+            return this.push_stmt(s);
         }
         if (this.kw("try") || this.kw("throw")) {
             this.error_at(this.peek(0), "exceptions are not supported in the Ivy subset");
             this.synchronize();
-            return this.push_stmt(this.fresh_stmt(14));
+            AStmt s = this.fresh_stmt(14);
+            s.line = start.line;
+            s.col = start.col;
+            return this.push_stmt(s);
         }
         if (this.at("{")) {
             return this.parse_compound();
@@ -1655,6 +2318,7 @@ export struct Parser {
     }
 
     long parse_compound() {
+        Token start = this.peek(0);
         this.expect("{", "expected '{'");
         long first = -1;
         long last = -1;
@@ -1673,10 +2337,13 @@ export struct Parser {
         AStmt s = this.fresh_stmt(1);
         s.sstart = first;
         s.sn = count;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_return_stmt() {
+        Token start = this.peek(0);
         this.next();
         long value = -1;
         if (!this.at(";")) {
@@ -1685,10 +2352,13 @@ export struct Parser {
         this.expect(";", "expected ';' after return statement");
         AStmt s = this.fresh_stmt(8);
         s.a = value;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_if() {
+        Token start = this.peek(0);
         this.next();  // if
         long is_constexpr = 0;
         if (this.kw("constexpr")) {
@@ -1709,10 +2379,13 @@ export struct Parser {
         s.b = thenb;
         s.c = elseb;
         s.flag = is_constexpr;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_while() {
+        Token start = this.peek(0);
         this.next();
         this.expect("(", "expected '(' after 'while'");
         long cond = this.parse_expr();
@@ -1721,10 +2394,13 @@ export struct Parser {
         AStmt s = this.fresh_stmt(4);
         s.a = cond;
         s.b = body;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_dowhile() {
+        Token start = this.peek(0);
         this.next();
         long body = this.parse_statement();
         this.expect_kw("while", "expected 'while' after do-while body");
@@ -1735,10 +2411,13 @@ export struct Parser {
         AStmt s = this.fresh_stmt(5);
         s.a = body;
         s.b = cond;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_for() {
+        Token start = this.peek(0);
         this.next();
         this.expect("(", "expected '(' after 'for'");
 
@@ -1756,6 +2435,8 @@ export struct Parser {
                 this.expect(")", "expected ')' after range-for range");
                 s.b = this.parse_statement();
                 s.flag = is_ref;
+                s.line = start.line;
+                s.col = start.col;
                 return this.push_stmt(s);
             }
             this.pos_ = save;
@@ -1763,12 +2444,17 @@ export struct Parser {
 
         long init = -1;
         if (this.at(";")) {
-            init = this.push_stmt(this.fresh_stmt(14));
+            AStmt sn = this.fresh_stmt(14);
+            sn.line = start.line;
+            sn.col = start.col;
+            init = this.push_stmt(sn);
         } else if (this.is_type_start() != 0) {
             init = this.parse_decl(0);
         } else {
             AStmt si = this.fresh_stmt(12);
             si.a = this.parse_expr();
+            si.line = start.line;
+            si.col = start.col;
             init = this.push_stmt(si);
         }
         this.expect(";", "expected ';' after for-loop init");
@@ -1788,10 +2474,13 @@ export struct Parser {
         s.b = cond;
         s.c = incr;
         s.sstart = body;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_switch() {
+        Token start = this.peek(0);
         this.next();
         // A6: optional switch label — `switch LABEL: (cond) { }`
         if (!this.at("(")) {
@@ -1866,16 +2555,22 @@ export struct Parser {
         s.a = cond;
         s.sstart = cstart;
         s.sn = this.cp_n_ - cstart;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_decl_or_expr_stmt() {
         if (this.kw("constexpr")) {
+            Token start = this.peek(0);
             this.parse_constexpr_spec();
             if (this.is_type_start() == 0) {
                 this.error_at(this.peek(0), "expected a type after constexpr");
                 this.synchronize();
-                return this.push_stmt(this.fresh_stmt(14));
+                AStmt s = this.fresh_stmt(14);
+                s.line = start.line;
+                s.col = start.col;
+                return this.push_stmt(s);
             }
             return this.parse_decl(1);
         }
@@ -1886,20 +2581,27 @@ export struct Parser {
     }
 
     long parse_expr_stmt() {
+        Token start = this.peek(0);
         long value = this.parse_expr();
         this.expect(";", "expected ';' after expression");
         AStmt s = this.fresh_stmt(12);
         s.a = value;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
     long parse_decl(long expect_semi) {
+        Token start = this.peek(0);
         AType type = this.parse_type();
         if (this.cstr_len(type.base) == 0) {
             this.synchronize();
-            return this.push_stmt(this.fresh_stmt(14));
+            AStmt sn = this.fresh_stmt(14);
+            sn.line = start.line;
+            sn.col = start.col;
+            return this.push_stmt(sn);
         }
-        long first = this.parse_declarator(type);
+        long first = this.parse_declarator(type, start.line, start.col);
         if (!this.at(",")) {
             if (expect_semi != 0) {
                 this.expect(";", "expected ';' after declaration");
@@ -1915,7 +2617,7 @@ export struct Parser {
                 this.next();
                 t2.ptr_depth = t2.ptr_depth + 1;
             }
-            long d = this.parse_declarator(t2);
+            long d = this.parse_declarator(t2, start.line, start.col);
             this.set_next(last, d);
             last = d;
             count = count + 1;
@@ -1926,12 +2628,16 @@ export struct Parser {
         AStmt s = this.fresh_stmt(1);
         s.sstart = first;
         s.sn = count;
+        s.line = start.line;
+        s.col = start.col;
         return this.push_stmt(s);
     }
 
-    long parse_declarator(AType t) {
+    long parse_declarator(AType t, long line, long col) {
         AStmt s = this.fresh_stmt(2);
         s.type = t;
+        s.line = line;
+        s.col = col;
         if (!this.at("identifier")) {
             this.error_at(this.peek(0), "expected variable name");
             return this.push_stmt(s);
@@ -1946,6 +2652,7 @@ export struct Parser {
                 if (n <= 0) {
                     this.error_at(it, "array size must be a positive integer");
                 }
+                s.type.array_size = n > 0 ? n : 1;
             } else {
                 this.error_at(this.peek(0),
                               "array size must be an integer constant (variable-length arrays are not supported)");
@@ -1983,7 +2690,7 @@ export struct Parser {
     }
 
     void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
-                        AParamList pl, long is_extern_c) {
+                        AParamList pl, long is_extern_c, long line, long col) {
         unsafe {
             f.attrs = this.apool_ + a_start;
         }
@@ -1996,6 +2703,8 @@ export struct Parser {
         f.nparams = pl.n;
         f.is_extern_c = is_extern_c;
         f.body = -1;
+        f.line = line;
+        f.col = col;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -2006,6 +2715,7 @@ export struct Parser {
 
     void parse_function(AAttrList caller, long is_extern_c, long ce, long cv) {
         unsafe {
+            Token fstart = this.peek(0);
             long a_start = this.copy_attrs(caller);
             AType ret = this.parse_type();
             if (this.cstr_len(ret.base) == 0) {
@@ -2031,12 +2741,14 @@ export struct Parser {
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c);
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c,
+                                fstart.line, fstart.col);
         }
     }
 
     void parse_fn_trailing(AAttrList caller, long is_extern_c, long ce, long cv) {
         unsafe {
+            Token fstart = this.peek(0);
             long a_start = this.copy_attrs(caller);
             if (!this.at("identifier")) {
                 this.error_at(this.peek(0), "expected function name after 'fn'");
@@ -2068,7 +2780,8 @@ export struct Parser {
             all.n = a_end - a_start;
             this.validate_list(all, "lt_def", "lt_ret");
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c);
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c,
+                                fstart.line, fstart.col);
         }
     }
 
@@ -2110,19 +2823,23 @@ export struct Parser {
         }
     }
 
-    long skip_operator_name() {
+    // parseOperatorName in parser.cpp: consume the operator symbol and
+    // return its canonical spelling.  The lexer names an operator token
+    // after the symbol itself, so the token kind is the symbol.
+    const char* skip_operator_name() {
         // On entry, positioned at the `operator` keyword.
         this.next();
         if (this.at("(") && this.kind_eq(this.peek(1), ")")) {
             this.next();
             this.next();
-            return 1;
+            return "()";
         }
         if (this.at("[") && this.kind_eq(this.peek(1), "]")) {
             this.next();
             this.next();
-            return 1;
+            return "[]";
         }
+        Token t = this.peek(0);
         if (this.at("+") || this.at("-") || this.at("*") || this.at("/") || this.at("%") ||
             this.at("&") || this.at("|") || this.at("^") || this.at("~") || this.at("!") ||
             this.at("==") || this.at("!=") || this.at("<") || this.at(">") ||
@@ -2130,11 +2847,13 @@ export struct Parser {
             this.at("&&") || this.at("||") || this.at("++") || this.at("--") ||
             this.at("->")) {
             this.next();
-            return 1;
+            unsafe {
+                return t.kind;
+            }
         }
         this.error_at(this.peek(0), "expected an operator symbol after 'operator'");
         this.next();
-        return 0;
+        return "";
     }
 
     void parse_ctor_inits() {
@@ -2157,7 +2876,7 @@ export struct Parser {
         }
     }
 
-    void parse_method_tail() {
+    long parse_method_tail() {
         if (this.kw("const")) {
             this.next();
         }
@@ -2165,19 +2884,36 @@ export struct Parser {
             this.next();
         }
         if (this.at("{")) {
-            this.parse_compound();
-            return;
+            return this.parse_compound();
         }
         if (this.at("=")) {
             this.next();
             this.expect("integer", "expected '0' for pure virtual method");
             this.expect(";", "expected ';' after pure virtual method");
-            return;
+            return -1;
         }
         this.expect(";", "expected '{' for method body or ';' for a declaration");
+        return -1;
+    }
+
+    void push_method_record(const char* name, AType ret, AParamList pl, long body,
+                            long line, long col) {
+        AFunction m;
+        m.attrs = this.apool_;
+        m.nattrs = 0;
+        m.ret = ret;
+        m.name = name;
+        m.params = pl.items;
+        m.nparams = pl.n;
+        m.is_extern_c = 0;
+        m.body = body;
+        m.line = line;
+        m.col = col;
+        this.push_method(m);
     }
 
     void parse_struct_members(const char* bare) {
+      unsafe {
         while (!this.at("}") && !this.at("eof")) {
             if (this.kw("public") || this.kw("private") || this.kw("protected")) {
                 this.next();
@@ -2194,31 +2930,41 @@ export struct Parser {
             // Constructor: `Name(params) [: inits] { body }`.
             if (this.at("identifier") && this.lexeme_eq(this.peek(0).off, this.peek(0).len, bare) != 0 &&
                 this.kind_eq(this.peek(1), "(")) {
+                Token mstart = this.peek(0);
                 this.next();
                 this.next();
-                this.parse_params();
+                AParamList pl = this.parse_params();
                 this.expect(")", "expected ')' to close constructor parameter list");
                 if (this.at(":")) {
                     this.parse_ctor_inits();
                 }
+                AType ret = this.empty_type();
+                ret.base = "void";
+                long body = -1;
                 if (this.at("{")) {
-                    this.parse_compound();
+                    body = this.parse_compound();
                 } else {
                     this.expect(";", "expected '{' for constructor body or ';' for a declaration");
                 }
+                const char* qn = this.intern_join3(bare, "::", bare);
+                this.push_method_record(qn, ret, pl, body, mstart.line, mstart.col);
                 continue;
             }
             // Destructor: `~Name() { body }`.
             if (this.at("~") && this.kind_eq(this.peek(1), "identifier") &&
                 this.lexeme_eq(this.peek(1).off, this.peek(1).len, bare) != 0 &&
                 this.kind_eq(this.peek(2), "(")) {
+                Token mstart = this.peek(0);
                 this.next();
                 this.next();
                 this.next();
-                this.parse_params();
+                AParamList pl = this.parse_params();
                 this.expect(")", "expected ')' to close destructor parameter list");
+                AType ret = this.empty_type();
+                ret.base = "void";
+                long body = -1;
                 if (this.at("{")) {
-                    this.parse_compound();
+                    body = this.parse_compound();
                 } else if (this.at("=")) {
                     this.next();
                     this.expect("integer", "expected '0' for pure virtual destructor");
@@ -2226,6 +2972,8 @@ export struct Parser {
                 } else {
                     this.expect(";", "expected '{' for destructor body or ';' for a declaration");
                 }
+                const char* qn = this.intern_join3(bare, "::~", bare);
+                this.push_method_record(qn, ret, pl, body, mstart.line, mstart.col);
                 continue;
             }
             if (this.is_type_start() == 0) {
@@ -2233,16 +2981,20 @@ export struct Parser {
                 this.synchronize();
                 break;
             }
-            this.parse_type();
+            AType ftype = this.parse_type();
             if (this.kw("operator")) {
-                if (this.skip_operator_name() == 0) {
+                Token mstart = this.peek(0);
+                const char* op = this.skip_operator_name();
+                if (this.cstr_len(op) == 0) {
                     this.synchronize();
                     break;
                 }
                 this.expect("(", "expected '(' after operator name");
-                this.parse_params();
+                AParamList pl = this.parse_params();
                 this.expect(")", "expected ')' to close operator parameter list");
-                this.parse_method_tail();
+                long body = this.parse_method_tail();
+                const char* qn = this.intern_join3(bare, "::operator", op);
+                this.push_method_record(qn, ftype, pl, body, mstart.line, mstart.col);
                 continue;
             }
             if (!this.at("identifier")) {
@@ -2250,12 +3002,15 @@ export struct Parser {
                 this.synchronize();
                 break;
             }
-            this.next();
+            Token nametok = this.peek(0);
+            const char* member = this.intern_tok(this.next());
             if (this.at("(")) {
                 this.next();
-                this.parse_params();
+                AParamList pl = this.parse_params();
                 this.expect(")", "expected ')' to close method parameter list");
-                this.parse_method_tail();
+                long body = this.parse_method_tail();
+                const char* qn = this.intern_join3(bare, "::", member);
+                this.push_method_record(qn, ftype, pl, body, nametok.line, nametok.col);
                 continue;
             }
             if (this.at("=")) {
@@ -2263,11 +3018,19 @@ export struct Parser {
                 this.parse_expr();
             }
             this.expect(";", "expected ';' after field declaration");
+            AField f;
+            f.type = ftype;
+            f.name = member;
+            f.line = nametok.line;
+            f.col = nametok.col;
+            this.push_field(f);
         }
+      }
     }
 
     void parse_struct() {
       unsafe {
+        Token sstart = this.peek(0);
         long is_class = this.kw("class") ? 1 : 0;
         this.next();
         if (!this.at("identifier")) {
@@ -2284,6 +3047,7 @@ export struct Parser {
             this.error_at(this.peek(0), "'final' is not supported in the Ivy subset");
             this.next();
         }
+        long bstart = this.b_n_;
         if (this.at(":")) {
             this.next();
             while (true) {
@@ -2298,7 +3062,8 @@ export struct Parser {
                     this.synchronize();
                     break;
                 }
-                this.parse_type();
+                AType bt = this.parse_type();
+                this.push_base(bt.base);
                 if (this.at(",")) {
                     this.next();
                     continue;
@@ -2308,16 +3073,33 @@ export struct Parser {
         }
         this.expect("{", "expected '{' to start struct body");
         this.register_type_name(bare);
+        long fstart = this.fld_n_;
+        long mstart = this.m_n_;
         this.parse_struct_members(bare);
         this.expect("}", "expected '}' to close struct body");
         this.expect(";", "expected ';' after struct definition");
+        AStruct sd;
+        sd.name = bare;
+        sd.is_class = is_class;
+        sd.fields = this.fldpool_ + fstart;
+        sd.nfields = this.fld_n_ - fstart;
+        sd.methods = this.mpool_ + mstart;
+        sd.nmethods = this.m_n_ - mstart;
+        sd.bstart = bstart;
+        sd.nbases = this.b_n_ - bstart;
+        sd.line = sstart.line;
+        sd.col = sstart.col;
+        this.push_struct(sd);
       }
     }
 
     void parse_enum() {
       unsafe {
+        Token estart = this.peek(0);
         this.next();  // 'enum'
+        long is_scoped = 0;
         if (this.kw("class") || this.kw("struct")) {
+            is_scoped = 1;
             this.next();
         }
         if (!this.at("identifier")) {
@@ -2325,26 +3107,37 @@ export struct Parser {
             this.synchronize();
             return;
         }
+        Token nametok = this.peek(0);
         const char* name = this.intern_tok(this.next());
+        AType ut = this.empty_type();
         if (this.at(":")) {
             this.next();
-            AType ut = this.parse_type();
+            ut = this.parse_type();
             if (this.is_enum_int_base(ut.base) == 0) {
                 this.error_at(this.peek(0), "enum underlying type must be an integer type");
             }
         }
         this.expect("{", "expected '{' to start enum body");
+        long enustart = this.enu_n_;
         while (!this.at("}") && !this.at("eof")) {
             if (!this.at("identifier")) {
                 this.error_at(this.peek(0), "expected enumerator name");
                 this.synchronize();
                 break;
             }
-            this.next();
+            Token etok = this.peek(0);
+            const char* ename = this.intern_tok(this.next());
+            long eval = -1;
             if (this.at("=")) {
                 this.next();
-                this.parse_expr();
+                eval = this.parse_expr();
             }
+            AEnumerator en;
+            en.name = ename;
+            en.value = eval;
+            en.line = etok.line;
+            en.col = etok.col;
+            this.push_enumerator(en);
             if (!this.at("}")) {
                 this.expect(",", "expected ',' between enumerators");
                 if (this.at("}")) {
@@ -2355,9 +3148,17 @@ export struct Parser {
         this.expect("}", "expected '}' to close enum body");
         this.expect(";", "expected ';' after enum definition");
         this.register_type_name(name);
+        AEnum ed;
+        ed.name = name;
+        ed.is_scoped = is_scoped;
+        ed.underlying = ut;
+        ed.enumerators = this.enupool_ + enustart;
+        ed.nenumerators = this.enu_n_ - enustart;
+        ed.line = estart.line;
+        ed.col = estart.col;
+        this.push_enum(ed);
       }
     }
-
     void parse_using() {
       unsafe {
         this.next();  // 'using'
@@ -2374,9 +3175,13 @@ export struct Parser {
         const char* name = this.intern_tok(this.next());
         if (this.at("=")) {
             this.next();
-            this.parse_type();
+            AType target = this.parse_type();
             this.expect(";", "expected ';' after type alias");
             this.register_type_name(name);
+            AAlias al;
+            al.name = name;
+            al.target = target;
+            this.push_alias(al);
             return;
         }
         // using-declaration / using-enum — accepted and ignored.

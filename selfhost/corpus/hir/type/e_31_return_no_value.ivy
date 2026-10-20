@@ -1,0 +1,4 @@
+// A non-void function must return a value.
+int32 f() {
+    return;
+}

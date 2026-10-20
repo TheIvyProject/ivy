@@ -1,0 +1,9 @@
+// An enumerator value may only refer to a constant of the same enum.
+enum Mode : int32 {
+    Off = Later,
+    Later = 1
+};
+
+void f() {
+    auto a = Off;
+}

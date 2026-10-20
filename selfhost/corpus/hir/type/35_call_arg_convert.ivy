@@ -1,0 +1,9 @@
+// Numeric arguments are converted to the parameter type.
+float64 f(float64 a) {
+    return a;
+}
+
+void g() {
+    auto b = f(1);
+    auto c = f(2.5);
+}

@@ -1,0 +1,5 @@
+// Indexing requires an array or a pointer.
+void f() {
+    int32 a = 1;
+    auto b = a[0];
+}

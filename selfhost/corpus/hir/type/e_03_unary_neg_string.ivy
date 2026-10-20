@@ -1,0 +1,6 @@
+// Unary `-` rejects a non-numeric operand.
+void f() {
+    unsafe {
+        auto a = -"text";
+    }
+}

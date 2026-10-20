@@ -1,0 +1,6 @@
+// A string literal cannot initialize an integer.
+void f() {
+    unsafe {
+        int32 a = "text";
+    }
+}

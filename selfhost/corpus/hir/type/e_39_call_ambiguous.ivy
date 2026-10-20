@@ -1,0 +1,12 @@
+// Two overloads match the argument types equally well.
+int32 f(int32 a) {
+    return a;
+}
+
+int32 f(uint32 a) {
+    return a;
+}
+
+void g() {
+    auto b = f(1);
+}

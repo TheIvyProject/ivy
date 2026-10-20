@@ -1,0 +1,9 @@
+// `!` rejects an operand that is neither numeric nor a pointer.
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+void f() {
+    auto a = !Mode::On;
+}

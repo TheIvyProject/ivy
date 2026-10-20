@@ -1,0 +1,4 @@
+// The `nullopt` literal has type `nullopt`.
+void f() {
+    auto a = nullopt;
+}

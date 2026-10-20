@@ -1,0 +1,5 @@
+// `*` rejects a non-pointer operand.
+void f() {
+    int32 x = 1;
+    auto a = *x;
+}

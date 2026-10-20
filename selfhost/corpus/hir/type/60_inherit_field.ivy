@@ -1,0 +1,16 @@
+// A base-class field is reachable through the derived type.
+struct Base {
+    int32 a;
+};
+
+struct Derived : public Base {
+    int32 b;
+};
+
+void f() {
+    Derived d;
+    d.a = 1;
+    d.b = 2;
+    auto e = d.a;
+    auto g = d.b;
+}

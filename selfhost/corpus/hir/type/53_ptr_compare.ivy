@@ -1,0 +1,13 @@
+// Pointers compare with pointers and with `nullptr`.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32* q = &x;
+        auto a = p == q;
+        auto b = p != q;
+        auto c = p == nullptr;
+        auto d = nullptr == p;
+        auto e = p < q;
+    }
+}

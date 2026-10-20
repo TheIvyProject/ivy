@@ -1,0 +1,18 @@
+// An unscoped enumerator has type `int`, a scoped one the enum type.
+enum Color {
+    Red,
+    Green
+};
+
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+void f() {
+    auto a = Red;
+    auto b = Color::Red;
+    auto c = Mode::On;
+    Color d = Red;
+    Mode e = Mode::On;
+}

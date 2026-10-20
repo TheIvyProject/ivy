@@ -1,0 +1,5 @@
+// Taking an address requires an unsafe block.
+void f() {
+    int32 x = 1;
+    auto p = &x;
+}

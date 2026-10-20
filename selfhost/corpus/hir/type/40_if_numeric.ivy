@@ -1,0 +1,7 @@
+// A condition may be numeric.
+void f() {
+    if (1) {
+    }
+    while (1) {
+    }
+}

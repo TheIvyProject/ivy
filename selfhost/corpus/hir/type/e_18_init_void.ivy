@@ -1,0 +1,4 @@
+// A variable cannot have type `void`.
+void f() {
+    void a;
+}

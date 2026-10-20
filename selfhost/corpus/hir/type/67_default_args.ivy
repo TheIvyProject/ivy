@@ -1,0 +1,10 @@
+// A missing trailing argument is filled in from the parameter's default
+// value.
+int32 add(int32 a, int32 b = 2) {
+    return a + b;
+}
+
+void f() {
+    auto x = add(1);
+    auto y = add(1, 3);
+}

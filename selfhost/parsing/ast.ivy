@@ -11,12 +11,14 @@ export module ast;
 
 // A resolved type: canonical base name plus const/unsigned/reference/pointer
 // qualifiers. `base` is "" when no type could be parsed.
+// `array_size` is 0 for a scalar/pointer type and > 0 for `T[N]`.
 export struct AType {
     const char* base;
     long is_unsigned;
     long is_const;
     long is_ref;
     long ptr_depth;
+    long array_size;
 };
 
 // An `[[ivy::name(args)]]` attribute. `args` is the argument list already
@@ -31,11 +33,16 @@ export struct AAttr {
 };
 
 // A function parameter: type, optional name, and attributes.
+// `default_value` is the expression-pool index of the parameter's default
+// value, or -1 when the parameter has none.
 export struct AParam {
     AType type;
     const char* name;
     AAttr* attrs;
     long nattrs;
+    long line;
+    long col;
+    long default_value;
 };
 
 // A top-level function declaration or definition. `body` is a statement-pool
@@ -49,6 +56,60 @@ export struct AFunction {
     long nparams;
     long is_extern_c;
     long body;
+    long line;
+    long col;
+};
+
+// A struct/class field declaration.
+export struct AField {
+    AType type;
+    const char* name;
+    long line;
+    long col;
+};
+
+// An enum enumerator. `value` is an expression-pool index for an explicit
+// value, or -1 when the value is implicit.
+export struct AEnumerator {
+    const char* name;
+    long value;
+    long line;
+    long col;
+};
+
+// A struct/class definition. `fields` and `methods` point into contiguous
+// runs of the parser's field/method pools. Method names are qualified as
+// `StructName::methodName`. `bstart`/`nbases` delimit the base-class names
+// in the parser's base-name pool.
+export struct AStruct {
+    const char* name;
+    long is_class;
+    AField* fields;
+    long nfields;
+    AFunction* methods;
+    long nmethods;
+    long bstart;
+    long nbases;
+    long line;
+    long col;
+};
+
+// An enum definition. `enumerators` points into a contiguous run of the
+// parser's enumerator pool.
+export struct AEnum {
+    const char* name;
+    long is_scoped;     // `enum class` / `enum struct`
+    AType underlying;
+    AEnumerator* enumerators;
+    long nenumerators;
+    long line;
+    long col;
+};
+
+// A `using Name = Type;` alias.
+export struct AAlias {
+    const char* name;
+    AType target;
 };
 
 // An expression node in the expression pool. Child fields hold pool indices
@@ -70,6 +131,9 @@ export struct AExpr {
     long astart;        // first call-arg / index expr index (-1 none)
     long an;            // call-arg count
     AType type;         // sizeof/alignof/cast/new target type
+    long is_scope;      // member(15): `::` scope resolution (vs `.`/`->`)
+    long line;
+    long col;
 };
 
 // A statement node in the statement pool.
@@ -91,6 +155,8 @@ export struct AStmt {
                         // `next`; for(6) body is a stmt; switch(15) first case)
     long sn;            // child stmt count
     long next;          // next sibling stmt index (-1) for linked child lists
+    long line;
+    long col;
 };
 
 // A `case`/`default` clause of a switch statement. `value` is the case

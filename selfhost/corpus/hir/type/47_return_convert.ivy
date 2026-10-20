@@ -1,0 +1,8 @@
+// Numeric return values are converted.
+float64 f() {
+    return 1;
+}
+
+int32 g() {
+    return 1.5;
+}

@@ -1,0 +1,6 @@
+// The `nullptr` literal has type `nullptr`.
+void f() {
+    unsafe {
+        auto a = nullptr;
+    }
+}

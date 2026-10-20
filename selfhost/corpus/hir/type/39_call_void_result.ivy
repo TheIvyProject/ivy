@@ -1,0 +1,7 @@
+// A `void` call has type `void`.
+void g() {
+}
+
+void f() {
+    auto a = g();
+}

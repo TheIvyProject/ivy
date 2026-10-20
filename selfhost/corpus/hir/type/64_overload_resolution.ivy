@@ -1,0 +1,13 @@
+// Overloads are resolved by the argument types.
+int32 f(int32 a) {
+    return a;
+}
+
+float64 f(float64 a) {
+    return a;
+}
+
+void g() {
+    auto a = f(1);
+    auto b = f(1.5);
+}

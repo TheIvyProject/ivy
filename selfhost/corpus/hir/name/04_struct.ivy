@@ -1,0 +1,10 @@
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+void f() {
+    Point p;
+    p.x = 1;
+    p.y = p.x + 2;
+}

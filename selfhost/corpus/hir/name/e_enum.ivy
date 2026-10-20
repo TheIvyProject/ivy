@@ -1,0 +1,8 @@
+enum class E {
+    A,
+    B
+};
+
+void f() {
+    int32 x = E::C;
+}

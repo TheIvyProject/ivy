@@ -1,0 +1,9 @@
+// A scoped enum value converts to an integer return type as well.
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+int32 f() {
+    return Mode::On;
+}

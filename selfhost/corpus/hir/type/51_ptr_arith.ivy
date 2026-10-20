@@ -1,0 +1,10 @@
+// Pointer arithmetic keeps the pointer type.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        auto a = p + 1;
+        auto b = 1 + p;
+        auto c = p - 1;
+    }
+}

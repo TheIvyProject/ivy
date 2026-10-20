@@ -1,0 +1,19 @@
+// A binary operator on a struct is rewritten into a call of the
+// struct's `operator+` method.
+struct Vec {
+    int32 x;
+    int32 y;
+
+    Vec operator+(Vec o) {
+        Vec r;
+        r.x = this.x + o.x;
+        r.y = this.y + o.y;
+        return r;
+    }
+};
+
+void f() {
+    Vec a;
+    Vec b;
+    auto c = a + b;
+}

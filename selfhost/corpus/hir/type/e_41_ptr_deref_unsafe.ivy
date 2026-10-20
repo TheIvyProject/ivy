@@ -1,0 +1,4 @@
+// A raw pointer parameter and its dereference require an unsafe block.
+int32 f(int32* p) {
+    return *p;
+}

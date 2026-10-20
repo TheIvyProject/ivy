@@ -1,0 +1,8 @@
+// An explicit enumerator value must be a constant expression.
+enum Mode : int32 {
+    Off = 1 == 1
+};
+
+void f() {
+    auto a = Off;
+}

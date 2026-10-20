@@ -1,0 +1,4 @@
+// `%` requires integer operands.
+void f() {
+    auto a = 1.5 % 2;
+}

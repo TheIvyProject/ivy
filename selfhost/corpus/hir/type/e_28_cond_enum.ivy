@@ -1,0 +1,10 @@
+// A scoped enum value is not a valid condition.
+enum class Mode : int32 {
+    Off,
+    On
+};
+
+void f() {
+    if (Mode::On) {
+    }
+}

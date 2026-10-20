@@ -1,0 +1,9 @@
+// An enum value converts to an integer return type.
+enum Color {
+    Red
+};
+
+int32 f() {
+    Color c = Red;
+    return c;
+}

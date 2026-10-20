@@ -1,0 +1,12 @@
+// An enum name may only be declared once.
+enum Mode : int32 {
+    Off
+};
+
+enum Mode : int32 {
+    On
+};
+
+void f() {
+    auto a = Off;
+}

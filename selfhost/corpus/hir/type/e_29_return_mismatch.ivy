@@ -1,0 +1,4 @@
+// A string cannot be returned from an integer function.
+int32 f() {
+    return "text";
+}

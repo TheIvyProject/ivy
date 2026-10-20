@@ -1,0 +1,4 @@
+// `~` rejects a floating-point operand.
+void f() {
+    auto a = ~1.5;
+}

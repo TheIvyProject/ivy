@@ -1,0 +1,5 @@
+// A `const` variable cannot be assigned to.
+void f() {
+    const int32 a = 1;
+    a = 2;
+}

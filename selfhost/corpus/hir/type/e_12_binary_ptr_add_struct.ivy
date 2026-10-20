@@ -1,0 +1,12 @@
+// Pointer arithmetic requires a numeric operand.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    unsafe {
+        int32* p = nullptr;
+        Point q;
+        auto a = p + q;
+    }
+}

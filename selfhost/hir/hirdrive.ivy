@@ -1,0 +1,520 @@
+// selfhost/hir/hirdrive.ivy - H4.1 differential-test driver for the HIR
+// builder port.
+//
+// Reads file paths from stdin (one per line), lexes + preprocesses + parses
+// each with the Ivy ports, runs the Ivy HIR builder, and prints `=== path ===`
+// + the `ivy --hir` dump (or the builder diagnostics, in the oracle format).
+// Used by selfhost/difftest.ps1
+//   (-Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+//    -Driver hirdrive).
+
+#pragma ivy cnumber
+import token;
+import lexer;
+import preprocessor;
+import ast;
+import parser;
+import hir;
+import hir_builder;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+// Free functions cannot take raw-pointer parameters, so the printer is a
+// struct whose fields hold them.
+struct HDumper {
+    HFunction* fp;
+    HExpr* ep;
+    HStmt* sp;
+    HParam* pp;
+    HCase* cp;
+    long* ap;
+
+    long slen(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    void pad(long depth) {
+        long i = 0;
+        while (i < depth) {
+            io::print("  ");
+            i = i + 1;
+        }
+    }
+
+    void dump_type(AType t) {
+        if (t.is_const != 0) {
+            io::print("const ");
+        }
+        if (t.is_unsigned != 0) {
+            io::print("unsigned ");
+        }
+        io::print(t.base);
+        long i = 0;
+        while (i < t.ptr_depth) {
+            io::print("*");
+            i = i + 1;
+        }
+        if (t.is_ref != 0) {
+            io::print("&");
+        }
+    }
+
+    void header_plain(HExpr e, long depth, const char* kind) {
+        io::print(kind);
+        io::print(" : ");
+        this.dump_type(e.type);
+        io::println("");
+    }
+
+    void header_op(HExpr e, long depth, const char* kind, const char* op) {
+        io::print(kind);
+        io::print(" '");
+        io::print(op);
+        io::print("' : ");
+        this.dump_type(e.type);
+        io::println("");
+    }
+
+    void dump_expr(long idx, long depth) {
+        HExpr e;
+        unsafe {
+            e = this.ep[idx];
+        }
+        this.pad(depth);
+        if (e.kind == 1) {
+            io::println("int {}", e.ival);
+            return;
+        }
+        if (e.kind == 2) {
+            io::println("float {}", e.sval);
+            return;
+        }
+        if (e.kind == 3) {
+            io::println("string {}", e.sval);
+            return;
+        }
+        if (e.kind == 4) {
+            io::println("char {}", e.sval);
+            return;
+        }
+        if (e.kind == 5) {
+            if (e.ival != 0) {
+                io::println("bool true");
+            } else {
+                io::println("bool false");
+            }
+            return;
+        }
+        if (e.kind == 6) {
+            io::println("nullptr");
+            return;
+        }
+        if (e.kind == 7) {
+            io::println("this");
+            return;
+        }
+        if (e.kind == 8) {
+            io::println("ident {}", e.sval);
+            return;
+        }
+        if (e.kind == 9) {
+            if (e.flag != 0) {
+                this.header_op(e, depth, "prefix", e.sval);
+            } else {
+                this.header_op(e, depth, "postfix", e.sval);
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 10) {
+            this.header_op(e, depth, "binary", e.sval);
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 11) {
+            this.header_plain(e, depth, "ternary ?:");
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            this.dump_expr(e.c, depth + 1);
+            return;
+        }
+        if (e.kind == 12) {
+            this.header_op(e, depth, "call", e.sval);
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.ap[e.astart + j];
+                }
+                this.dump_expr(ai, depth + 1);
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 13) {
+            this.header_plain(e, depth, "index");
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 14) {
+            if (e.flag != 0) {
+                io::println("member -> {}", e.sval);
+            } else {
+                io::println("member . {}", e.sval);
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 15) {
+            this.header_op(e, depth, "assign", e.sval);
+            this.dump_expr(e.a, depth + 1);
+            this.dump_expr(e.b, depth + 1);
+            return;
+        }
+        if (e.kind == 16) {
+            io::println("sizeof = {}", e.ival);
+            return;
+        }
+        if (e.kind == 17) {
+            io::println("alignof = {}", e.ival);
+            return;
+        }
+        if (e.kind == 18) {
+            if (e.flag == 1) {
+                io::println("reinterpret_cast");
+            } else if (e.flag == 2) {
+                io::println("const_cast");
+            } else if (e.flag == 3) {
+                io::println("C-cast");
+            } else {
+                io::println("static_cast");
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 19) {
+            io::print("init-list : ");
+            this.dump_type(e.type);
+            io::print(" ({})", e.an);
+            io::println("");
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.ap[e.astart + j];
+                }
+                if (ai >= 0) {
+                    this.dump_expr(ai, depth + 1);
+                } else {
+                    this.pad(depth + 1);
+                    io::println("<zero-init>");
+                }
+                j = j + 1;
+            }
+            return;
+        }
+    }
+
+    void dump_compound(long idx, long depth) {
+        HStmt s;
+        unsafe {
+            s = this.sp[idx];
+        }
+        this.pad(depth);
+        io::println("block");
+        long k = s.sstart;
+        while (k >= 0) {
+            this.dump_stmt(k, depth + 1);
+            unsafe {
+                k = this.sp[k].next;
+            }
+        }
+    }
+
+    void dump_stmt(long idx, long depth) {
+        HStmt s;
+        unsafe {
+            s = this.sp[idx];
+        }
+        if (s.kind == 1) {
+            this.dump_compound(idx, depth);
+            return;
+        }
+        this.pad(depth);
+        if (s.kind == 2) {
+            io::print("decl ");
+            this.dump_type(s.type);
+            io::print(" {}", s.sval);
+            if (s.a >= 0) {
+                io::println(" =");
+                this.dump_expr(s.a, depth + 1);
+            } else {
+                io::println("");
+            }
+            return;
+        }
+        if (s.kind == 3) {
+            io::println("if");
+            this.dump_expr(s.a, depth + 1);
+            if (s.b >= 0) {
+                this.dump_stmt(s.b, depth + 1);
+            }
+            if (s.c >= 0) {
+                this.dump_stmt(s.c, depth + 1);
+            }
+            return;
+        }
+        if (s.kind == 4) {
+            io::println("while");
+            this.dump_expr(s.a, depth + 1);
+            this.dump_stmt(s.b, depth + 1);
+            return;
+        }
+        if (s.kind == 5) {
+            io::println("do-while");
+            this.dump_stmt(s.a, depth + 1);
+            this.dump_expr(s.b, depth + 1);
+            return;
+        }
+        if (s.kind == 6) {
+            io::println("for");
+            if (s.a >= 0) {
+                this.dump_stmt(s.a, depth + 1);
+            }
+            if (s.b >= 0) {
+                this.dump_expr(s.b, depth + 1);
+            }
+            if (s.c >= 0) {
+                this.dump_expr(s.c, depth + 1);
+            }
+            this.dump_stmt(s.sstart, depth + 1);
+            return;
+        }
+        if (s.kind == 7) {
+            io::println("return");
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            return;
+        }
+        if (s.kind == 8) {
+            io::println("break");
+            return;
+        }
+        if (s.kind == 9) {
+            io::println("continue");
+            return;
+        }
+        if (s.kind == 10) {
+            if (this.slen(s.sval) > 0) {
+                io::println("nextcase {}", s.sval);
+            } else {
+                io::println("nextcase");
+            }
+            return;
+        }
+        if (s.kind == 11) {
+            io::println("expr");
+            this.dump_expr(s.a, depth + 1);
+            return;
+        }
+        if (s.kind == 12) {
+            io::println("unsafe");
+            this.dump_stmt(s.a, depth + 1);
+            return;
+        }
+        if (s.kind == 13) {
+            io::println("null");
+            return;
+        }
+        if (s.kind == 14) {
+            io::println("switch");
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            long j = 0;
+            while (j < s.sn) {
+                HCase c;
+                unsafe {
+                    c = this.cp[s.sstart + j];
+                }
+                this.pad(depth);
+                io::println("  case");
+                if (c.value >= 0) {
+                    this.dump_expr(c.value, depth + 2);
+                }
+                long k = c.sstart;
+                while (k >= 0) {
+                    this.dump_stmt(k, depth + 2);
+                    unsafe {
+                        k = this.sp[k].next;
+                    }
+                }
+                j = j + 1;
+            }
+            return;
+        }
+    }
+
+    void emit(HFunction f) {
+        io::print("function {}", f.name);
+        if (f.is_extern_c != 0) {
+            io::print(" [extern \"C\"]");
+        }
+        io::println("");
+        io::print("  return ");
+        this.dump_type(f.ret);
+        io::print("(");
+        long j = 0;
+        while (j < f.pn) {
+            if (j > 0) {
+                io::print(", ");
+            }
+            HParam p;
+            unsafe {
+                p = this.pp[f.pstart + j];
+            }
+            this.dump_type(p.type);
+            if (this.slen(p.name) > 0) {
+                io::print(" {}", p.name);
+            }
+            j = j + 1;
+        }
+        io::println(")");
+        if (f.body >= 0) {
+            this.dump_compound(f.body, 1);
+        } else {
+            io::println("  (declaration only)");
+        }
+        io::println("");
+    }
+};
+
+void run() {
+    while (true) {
+        unsafe {
+            char* line = io::read_line();
+            if (line == (char*)0) {
+                break;
+            }
+            uint64 np = __ivy_strlen(line);
+            if (np > 0 && line[np - 1] == 13) {
+                line[np - 1] = 0;
+            }
+            io::println("=== {} ===", line);
+            char* content = io::read_file(line);
+            if (content != (char*)0) {
+                uint64 len = __ivy_strlen(content);
+                long cap = (long)len + 16;
+
+                Lexer lx;
+                lx.setup(content, len, line);
+                lx.lex_all(cap);
+
+                if (!lx.had_error()) {
+                    long in_n = lx.token_count();
+                    long out_cap = in_n * 8 + 256;
+                    Preprocessor pp;
+                    pp.setup(lx.tokens(), in_n, content, (long)len, line, (long)np,
+                             out_cap, 1024);
+                    pp.run();
+                    long dc = pp.diag_count();
+                    long di = 0;
+                    bool pp_failed = false;
+                    char* fname = line;
+                    if (pp.has_line_file() != 0) {
+                        fname = pp.line_file();
+                    }
+                    while (di < dc) {
+                        long w = pp.diag_warn(di);
+                        if (w == 0) {
+                            pp_failed = true;
+                        }
+                        io::print(fname);
+                        io::print(":{}", pp.diag_line(di));
+                        io::print(":{}", pp.diag_col(di));
+                        if (w != 0) {
+                            io::print(": warning: ");
+                        } else {
+                            io::print(": error: ");
+                        }
+                        io::println("{}", pp.diag_msg(di));
+                        di = di + 1;
+                    }
+                    if (!pp_failed) {
+                        Parser pa;
+                        pa.setup(pp.output(), pp.output_count(), pp.arena(), (long)len);
+                        pa.set_cnumber(pp.cnumber_enabled());
+                        pa.parse();
+                        if (pa.failed() != 0) {
+                            long nd = pa.diag_count();
+                            long k = 0;
+                            while (k < nd) {
+                                io::print(fname);
+                                io::print(":{}", pa.diag_line(k));
+                                io::print(":{}", pa.diag_col(k));
+                                io::print(": error: ");
+                                io::println("{}", pa.diag_msg(k));
+                                k = k + 1;
+                            }
+                        } else {
+                            HirBuilder hb;
+                            hb.setup(pa, pp.output_count());
+                            hb.build();
+                            long hd = hb.diag_count();
+                            long k = 0;
+                            while (k < hd) {
+                                io::print(fname);
+                                io::print(":{}", hb.diag_line(k));
+                                io::print(":{}", hb.diag_col(k));
+                                io::print(": error: ");
+                                io::println("{}", hb.diag_msg(k));
+                                k = k + 1;
+                            }
+                            if (hd == 0) {
+                                HUnit u = hb.unit();
+                                HDumper d;
+                                d.fp = u.fns;
+                                d.ep = u.exprs;
+                                d.sp = u.stmts;
+                                d.pp = u.params;
+                                d.cp = u.cases;
+                                d.ap = u.args;
+                                long i = 0;
+                                while (i < u.fn_n) {
+                                    HFunction f;
+                                    unsafe {
+                                        f = d.fp[i];
+                                    }
+                                    d.emit(f);
+                                    i = i + 1;
+                                }
+                            }
+                            hb.release();
+                        }
+                        pa.release();
+                    }
+                    pp.release();
+                }
+                lx.release();
+                __ivy_free(content);
+            }
+            __ivy_free(line);
+        }
+    }
+}
+
+int32 main() {
+    run();
+    return 0;
+}

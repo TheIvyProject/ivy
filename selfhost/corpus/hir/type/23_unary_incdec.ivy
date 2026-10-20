@@ -1,0 +1,9 @@
+// `++` and `--` keep the operand type.
+void f() {
+    int32 a = 1;
+    a++;
+    ++a;
+    a--;
+    --a;
+    auto b = a++;
+}

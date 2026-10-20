@@ -1,0 +1,10 @@
+// A string argument does not match an integer parameter.
+int32 f(int32 a) {
+    return a;
+}
+
+void g() {
+    unsafe {
+        auto b = f("text");
+    }
+}

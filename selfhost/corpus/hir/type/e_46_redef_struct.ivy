@@ -1,0 +1,13 @@
+// A struct name may only be declared once.
+struct Point {
+    int32 x;
+};
+
+struct Point {
+    int32 y;
+};
+
+void f() {
+    Point p;
+    auto a = p.x;
+}

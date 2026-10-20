@@ -1,0 +1,13 @@
+// C-style types require `#pragma ivy cnumber`.
+#pragma ivy cnumber
+void f() {
+    int a = 1;
+    unsigned int b = 2;
+    long c = 3;
+    long long d = 4;
+    unsigned char e = 5;
+    short g = 6;
+    float h = 1.5;
+    double i = 2.5;
+    char j = 7;
+}

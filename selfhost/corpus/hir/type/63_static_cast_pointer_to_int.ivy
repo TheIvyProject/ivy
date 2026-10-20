@@ -1,0 +1,8 @@
+// `static_cast` also converts a pointer to an integer.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        auto a = static_cast<int32>(p);
+    }
+}

@@ -1,0 +1,5 @@
+// Floating-point literals have type `double`.
+void f() {
+    auto a = 1.5;
+    auto b = 2.0;
+}

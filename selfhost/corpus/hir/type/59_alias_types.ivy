@@ -1,0 +1,10 @@
+// A `using` alias expands to the aliased type.
+using Index = int32;
+using Alias = Index;
+
+void f() {
+    Index a = 1;
+    Alias b = 2;
+    auto c = a;
+    auto d = b;
+}

@@ -1,0 +1,7 @@
+// Relational operators reject a pointer/non-pointer mix.
+void f() {
+    unsafe {
+        int32* p = nullptr;
+        auto a = p < 1;
+    }
+}

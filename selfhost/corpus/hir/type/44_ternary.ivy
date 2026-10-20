@@ -1,0 +1,8 @@
+// `?:` promotes the two branch types.
+void f() {
+    int32 a = 1;
+    float64 b = 2.5;
+    auto c = 1 ? 2 : 3;
+    auto d = 1 ? a : b;
+    auto e = 1 ? b : a;
+}

@@ -1,0 +1,4 @@
+// A raw pointer declaration requires an unsafe block.
+void f() {
+    int32* p = nullptr;
+}

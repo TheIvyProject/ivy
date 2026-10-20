@@ -1,0 +1,8 @@
+// A `const` pointer does not convert to a mutable pointer.
+void f() {
+    unsafe {
+        const int32 x = 1;
+        const int32* p = &x;
+        int32* q = p;
+    }
+}

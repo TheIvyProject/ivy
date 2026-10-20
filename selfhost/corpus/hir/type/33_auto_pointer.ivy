@@ -1,0 +1,5 @@
+// `auto*` and `auto&` keep the declared qualifiers.
+void f(int32& r) {
+    auto a = r;
+    auto& b = r;
+}

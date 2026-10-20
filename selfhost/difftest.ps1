@@ -71,14 +71,35 @@
 #     -Dir selfhost/corpus/parser/err -Kinds all -Oracle --ast
 #     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 #
+# HIR features use the HIR oracle (`--hir`) and the hir driver:
+#   H4.1 (name resolution: locals/shadowing, free/method calls, `this`, struct
+#     fields `.`/`->`, enums scoped/unscoped, using aliases, and the related
+#     diagnostics):
+#     -Dir selfhost/corpus/hir/name -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
+#   H4.2 (type checking: literal types, the primitive type universe, integer
+#     promotions / usual arithmetic conversions, unary and binary operator
+#     rules, assignment and initialization compatibility, implicit conversions,
+#     call argument checking and overload resolution, control-flow conditions,
+#     return statements, pointers/arrays, structs/enums/aliases and the
+#     matching diagnostics):
+#     -Dir selfhost/corpus/hir/type -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
+#
 # Exit 0 = identical, 1 = mismatch or build failure.
 
 param(
-    [string]$Dir     = "selfhost/corpus/lexer/ident",
-    [string]$Kinds   = "identifier,keyword,lifetime",
-    [string]$Oracle  = "--lex",
-    [string]$Modules = "token,lexer",
-    [string]$Driver  = "lexdrive"
+    [string]$Dir       = "selfhost/corpus/lexer/ident",
+    [string]$Kinds     = "identifier,keyword,lifetime",
+    [string]$Oracle    = "--lex",
+    [string]$Modules   = "token,lexer",
+    [string]$ModuleDirs = "",
+    [string]$DriverDir  = "",
+    [string]$Driver     = "lexdrive"
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,6 +119,11 @@ $actual   = Join-Path $tmp "actual.txt"
 $sh = "selfhost\parsing"
 $ascii = New-Object System.Text.ASCIIEncoding
 
+if ($ModuleDirs -eq "") { $ModuleDirs = "selfhost/parsing" }
+if ($DriverDir -eq "") { $DriverDir = "selfhost/parsing" }
+$mds = @($ModuleDirs.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+$inc = (($mds | ForEach-Object { "-I `"$_`"" }) -join " ")
+
 # 1. Build the port modules + driver with the C++ compiler (freshness).
 # Modules are compiled in the listed order so each dependency's .ivm exists
 # before its dependents.
@@ -105,10 +131,18 @@ Write-Output "[1/4] building selfhost modules ..."
 foreach ($m in $Modules.Split(",")) {
     $m = $m.Trim()
     if ($m -eq "") { continue }
-    cmd /c "`"$ivy`" -I `"$sh`" `"$sh\$m.ivy`" -c -o `"$sh\$m.obj`" > NUL 2>&1"
+    $src = $null
+    foreach ($md in $mds) {
+        $cand = Join-Path $md "$m.ivy"
+        if (Test-Path $cand) { $src = $cand; break }
+    }
+    if ($src -eq $null) { Write-Output "BUILD FAILED (${m}: source not found)"; exit 1 }
+    $obj = [System.IO.Path]::ChangeExtension($src, ".obj")
+    cmd /c "`"$ivy`" $inc `"$src`" -c -o `"$obj`" > NUL 2>&1"
     if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($m)"; exit 1 }
 }
-cmd /c "`"$ivy`" -I `"$sh`" `"$sh\$Driver.ivy`" -o `"$port`" > NUL 2>&1"
+$dsrc = Join-Path $DriverDir "$Driver.ivy"
+cmd /c "`"$ivy`" $inc `"$dsrc`" -o `"$port`" > NUL 2>&1"
 if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($Driver)"; exit 1 }
 
 # 2. Corpus file list (relative, forward slashes, sorted).
@@ -144,7 +178,7 @@ function Test-KeepLine([string]$ln, $kindSet, [bool]$allKinds) {
 Write-Output "[3/4] running C++ oracle + Ivy port ..."
 $exp = New-Object System.Collections.Generic.List[string]
 foreach ($f in $files) {
-    cmd /c "`"$ivy`" -I `"$sh`" $Oracle `"$f`" > `"$one`" 2>&1"
+    cmd /c "`"$ivy`" $inc $Oracle `"$f`" > `"$one`" 2>&1"
     $exp.Add("=== $f ===")
     $txt = ([System.IO.File]::ReadAllText($one)) -replace "`r`n", "`n"
     foreach ($ln in $txt.Split("`n")) { if (Test-KeepLine $ln $kindSet $allKinds) { $exp.Add($ln) } }

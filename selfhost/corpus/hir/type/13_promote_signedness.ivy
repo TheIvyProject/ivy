@@ -1,0 +1,8 @@
+// Mixing signed and unsigned makes the result unsigned.
+void f() {
+    int32 a = 1;
+    uint32 b = 2;
+    auto c = a + b;
+    auto d = b + a;
+    auto e = a - b;
+}

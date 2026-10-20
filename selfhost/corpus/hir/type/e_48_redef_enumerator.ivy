@@ -1,0 +1,11 @@
+// An enumerator name may only be used once per enum.
+enum Mode : int32 {
+    Off,
+    On,
+    Off
+};
+
+void f() {
+    auto a = Off;
+    auto b = On;
+}

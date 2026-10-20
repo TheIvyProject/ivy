@@ -1,0 +1,12 @@
+struct P {
+    int32 v;
+};
+
+void f() {
+    unsafe {
+        P* p = nullptr;
+        p->v = 3;
+        int32 x = p->v;
+    }
+}
+

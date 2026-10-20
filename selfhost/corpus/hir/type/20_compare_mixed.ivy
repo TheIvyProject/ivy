@@ -1,0 +1,8 @@
+// Mixed numeric comparisons are allowed and yield `bool`.
+void f() {
+    int32 a = 1;
+    float64 b = 2.5;
+    auto c = a < b;
+    auto d = b > a;
+    auto e = a == b;
+}

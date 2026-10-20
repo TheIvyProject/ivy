@@ -1,0 +1,13 @@
+// A field access has the type of the field.
+struct Point {
+    int32 x;
+    float64 y;
+};
+
+void f() {
+    Point p;
+    p.x = 1;
+    p.y = 2.5;
+    auto a = p.x;
+    auto b = p.y;
+}

@@ -1,0 +1,10 @@
+// A floating-point operand wins over an integer operand.
+void f() {
+    int32 a = 1;
+    float64 b = 2.5;
+    float32 c = 3.5;
+    auto d = a + b;
+    auto e = b + a;
+    auto g = c + b;
+    auto h = b + c;
+}

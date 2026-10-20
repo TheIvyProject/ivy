@@ -1,0 +1,6 @@
+// A floating-point value may be assigned to an integer variable.
+void f() {
+    int32 a = 1;
+    float64 b = 2.5;
+    a = b;
+}

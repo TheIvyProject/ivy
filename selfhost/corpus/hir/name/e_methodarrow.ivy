@@ -1,0 +1,12 @@
+struct P {
+    int32 x;
+
+    int32 get() {
+        return this.x;
+    }
+};
+
+void f() {
+    P p;
+    int32 y = p->get();
+}

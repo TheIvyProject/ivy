@@ -1,0 +1,23 @@
+// A method and an operator declared by a base class are inherited.
+struct Base {
+    int32 a;
+
+    int32 get() {
+        return this.a;
+    }
+
+    Base operator+(Base o) {
+        return o;
+    }
+};
+
+struct Derived : public Base {
+    int32 b;
+};
+
+void f() {
+    Derived d;
+    Base e;
+    auto x = d.get();
+    auto y = d + e;
+}

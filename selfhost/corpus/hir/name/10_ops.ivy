@@ -1,0 +1,10 @@
+void f() {
+    int32 a = 1;
+    int32 b = 2;
+    bool c = a < b;
+    int32 d = c ? a : b;
+    int32 e = -a;
+    bool g = !c;
+    a = a << 1;
+    a += b;
+}

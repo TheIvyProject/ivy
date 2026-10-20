@@ -1,0 +1,12 @@
+// A pointer argument does not match an integer parameter.
+int32 f(int32 a) {
+    return a;
+}
+
+void g() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        auto b = f(p);
+    }
+}

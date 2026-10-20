@@ -1,0 +1,4 @@
+// A scalar variable must be initialized.
+void f() {
+    int32 a;
+}

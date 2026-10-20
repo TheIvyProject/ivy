@@ -1,0 +1,10 @@
+// A `class` behaves like a `struct` for typing.
+class Point {
+    int32 x;
+};
+
+void f() {
+    Point p;
+    p.x = 1;
+    auto a = p.x;
+}

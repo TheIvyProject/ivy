@@ -1,0 +1,6 @@
+// Initialization applies the same conversions as assignment.
+void f() {
+    float64 a = 1;
+    float64 b = 2.5;
+    int32 c = 3;
+}

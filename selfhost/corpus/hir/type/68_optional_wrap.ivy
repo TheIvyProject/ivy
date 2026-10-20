@@ -1,0 +1,11 @@
+// A value of the element type is wrapped into an `optional<T>`-shaped
+// struct.
+struct optional {
+    bool hasValue;
+    int32 value;
+};
+
+void f() {
+    optional o;
+    o = 2;
+}

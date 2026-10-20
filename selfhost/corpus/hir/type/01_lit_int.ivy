@@ -1,0 +1,4 @@
+// Integer literals have type `int`.
+void f() {
+    auto a = 42;
+}

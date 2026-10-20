@@ -1,0 +1,3418 @@
+// selfhost/hir/hir_builder.ivy - HIR builder for the self-host port (H4.1).
+//
+// Name-resolution subset of src/hir/hir_builder.cpp: signatures, local
+// scopes, shadowing, enum constants (folded to integer literals), struct
+// fields, methods/`this`, calls, and the name-related diagnostics. Types are
+// propagated just far enough to reproduce the `ivy --hir` dump.
+
+#pragma ivy cnumber
+export module hir_builder;
+import ast;
+import parser;
+import hir;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+
+export struct HirBuilder {
+    Parser pa;
+    HUnit u;
+    AExpr* ep_;
+    AStmt* sp_;
+
+    // variable scopes: flat symbol stack + scope start markers
+    long* snm_;          // (long) const char* names
+    AType* sty_;
+    long* scope_;
+    long s_n_;
+    long s_cap_;
+    long sc_n_;
+    long sc_cap_;
+
+    // unscoped enum constants
+    long* ecnm_;
+    long* ecval_;
+    long ec_n_;
+    long ec_cap_;
+
+    // all enumerator values (parallel to parser enumerator pool order)
+    long* evnm_;
+    long* evval_;
+    long* evstart_;      // first ev index for each enum
+    long* evend_;        // one past the last ev index for each enum
+    long ev_n_;
+    long ev_cap_;
+
+    // enumerator value evaluation (buildEnum in hir_builder.cpp)
+    long enum_val_;          // value of the last evaluated constant expression
+    long enum_found_;        // 1 when the last constant lookup succeeded
+    long enum_missing_;      // 1 when an undefined constant was referenced
+    const char* enum_missing_name_;
+
+    // expected<T, E> / optional<T> field types (B5 / B6 in
+    // hir_builder.cpp); filled in by is_expected_struct / is_optional_struct.
+    AType expected_t_;
+    AType expected_e_;
+    AType optional_t_;
+
+    // the struct that declares a matched `operator<op>` method and the
+    // qualified name of that method
+    const char* op_owner_;
+    const char* op_name_;
+
+    // diagnostics
+    long* dline_;
+    long* dcol_;
+    long* dmsg_;
+    long dn_;
+    long dcap_;
+    long failed_;
+
+    // message scratch buffer
+    char* dbuf_;
+    long db_n_;
+    long db_cap_;
+    long db_start_;
+
+    long cur_fn_;
+    const char* cur_fn_name_;
+    AType cur_ret_;
+    long eval_hit_;
+    const char* tmp_;
+    long* abuf_;
+    long ab_n_;
+    long unsafe_depth_;   // nesting depth of `unsafe` blocks
+    long has_return_;     // current function body contains a `return`
+    AField found_field_;  // last field matched by lookup_field
+    const char* base_name_;  // scratch: current base-class name
+    long* ovl_;           // scratch: overload candidate indices
+    long ovl_cap_;
+
+
+    void setup(Parser p, long ntoks) {
+        unsafe {
+            this.pa = p;
+            this.ep_ = p.exprs();
+            this.sp_ = p.stmts();
+            this.u.fn_cap = ntoks + 64;
+            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 88);
+            this.u.fn_n = 0;
+            this.u.ex_cap = ntoks * 8 + 256;
+            this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 136);
+            this.u.ex_n = 0;
+            this.u.st_cap = ntoks * 3 + 128;
+            this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 120);
+            this.u.st_n = 0;
+            this.u.p_cap = ntoks * 2 + 64;
+            this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * 80);
+            this.u.p_n = 0;
+            this.u.c_cap = ntoks + 16;
+            this.u.cases = (HCase*) __ivy_alloc(this.u.c_cap * 24);
+            this.u.c_n = 0;
+            this.u.a_cap = ntoks * 4 + 64;
+            this.u.args = (long*) __ivy_alloc(this.u.a_cap * 8);
+            this.u.a_n = 0;
+
+            this.s_cap_ = ntoks * 4 + 64;
+            this.snm_ = (long*) __ivy_alloc(this.s_cap_ * 8);
+            this.sty_ = (AType*) __ivy_alloc(this.s_cap_ * 48);
+            this.s_n_ = 0;
+            this.sc_cap_ = ntoks + 64;
+            this.scope_ = (long*) __ivy_alloc(this.sc_cap_ * 8);
+            this.sc_n_ = 0;
+
+            this.ec_cap_ = ntoks * 2 + 64;
+            this.ecnm_ = (long*) __ivy_alloc(this.ec_cap_ * 8);
+            this.ecval_ = (long*) __ivy_alloc(this.ec_cap_ * 8);
+            this.ec_n_ = 0;
+
+            this.ev_cap_ = ntoks * 2 + 64;
+            this.evnm_ = (long*) __ivy_alloc(this.ev_cap_ * 8);
+            this.evval_ = (long*) __ivy_alloc(this.ev_cap_ * 8);
+            this.ev_n_ = 0;
+            this.evstart_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.evend_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.abuf_ = (long*) __ivy_alloc((ntoks * 4 + 64) * 8);
+            this.ab_n_ = 0;
+
+            this.dcap_ = ntoks + 64;
+            this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dn_ = 0;
+            this.failed_ = 0;
+
+            this.db_cap_ = ntoks * 16 + 16384;
+            this.dbuf_ = (char*) __ivy_alloc(this.db_cap_);
+            this.db_n_ = 0;
+            this.db_start_ = 0;
+
+        this.cur_fn_ = -1;
+        this.cur_fn_name_ = "";
+        this.tmp_ = "";
+        this.cur_ret_ = this.ty_void();
+        this.eval_hit_ = 0;
+        this.enum_val_ = 0;
+        this.enum_found_ = 0;
+        this.enum_missing_ = 0;
+        this.enum_missing_name_ = "";
+        this.op_owner_ = "";
+        this.op_name_ = "";
+            this.unsafe_depth_ = 0;
+            this.has_return_ = 0;
+            this.ovl_cap_ = ntoks + 64;
+            this.ovl_ = (long*) __ivy_alloc(this.ovl_cap_ * 8);
+        }
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.u.fns);
+            __ivy_free(this.u.exprs);
+            __ivy_free(this.u.stmts);
+            __ivy_free(this.u.params);
+            __ivy_free(this.u.cases);
+            __ivy_free(this.u.args);
+            __ivy_free(this.snm_);
+            __ivy_free(this.sty_);
+            __ivy_free(this.scope_);
+            __ivy_free(this.ecnm_);
+            __ivy_free(this.ecval_);
+            __ivy_free(this.evnm_);
+            __ivy_free(this.evval_);
+            __ivy_free(this.evstart_);
+            __ivy_free(this.evend_);
+            __ivy_free(this.abuf_);
+            __ivy_free(this.dline_);
+            __ivy_free(this.dcol_);
+            __ivy_free((void*)this.dmsg_);
+            __ivy_free(this.dbuf_);
+            __ivy_free(this.ovl_);
+        }
+    }
+
+    HUnit unit() {
+        return this.u;
+    }
+
+    long diag_count() {
+        return this.dn_;
+    }
+
+    long diag_line(long i) {
+        unsafe {
+            return this.dline_[i];
+        }
+        return 0;
+    }
+
+    long diag_col(long i) {
+        unsafe {
+            return this.dcol_[i];
+        }
+        return 0;
+    }
+
+    const char* diag_msg(long i) {
+        unsafe {
+            return (char*)this.dmsg_[i];
+        }
+        return "";
+    }
+
+    // --- strings / diagnostics -------------------------------------------
+
+    long slen(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    bool seq(const char* a, const char* b) {
+        unsafe {
+            long i = 0;
+            while (a[i] != 0) {
+                if (b[i] != a[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return b[i] == 0;
+        }
+        return false;
+    }
+
+    bool is_builtin_fn(const char* name) {
+        return this.seq(name, "move") ||
+               this.seq(name, "printf") || this.seq(name, "puts") ||
+               this.seq(name, "putchar") || this.seq(name, "exit") ||
+               this.seq(name, "abort") || this.seq(name, "malloc") ||
+               this.seq(name, "free") ||
+               this.seq(name, "ivy::print") || this.seq(name, "ivy::println") ||
+               this.seq(name, "ivy::print_int") || this.seq(name, "ivy::print_float") ||
+               this.seq(name, "ivy::print_str") || this.seq(name, "ivy::print_char") ||
+               this.seq(name, "ivy::println_int") || this.seq(name, "ivy::println_float") ||
+               this.seq(name, "ivy::println_str") || this.seq(name, "ivy::println_char") ||
+               this.seq(name, "io::print") || this.seq(name, "io::println") ||
+               this.seq(name, "io::eprint") || this.seq(name, "io::eprintln") ||
+               this.seq(name, "io::read_line") || this.seq(name, "io::read_file") ||
+               this.seq(name, "io::write_file");
+    }
+
+    AType builtin_ret(const char* name) {
+        if (this.seq(name, "printf") || this.seq(name, "puts") ||
+            this.seq(name, "putchar") || this.seq(name, "io::write_file")) {
+            return this.ty_int();
+        }
+        if (this.seq(name, "io::read_line") || this.seq(name, "io::read_file")) {
+            AType t = this.ty_char();
+            t.ptr_depth = 1;
+            return t;
+        }
+        return this.ty_void();
+    }
+
+    void db_put(const char* s) {
+        long n = this.slen(s);
+        if (this.db_n_ + n + 1 > this.db_cap_) {
+            return;
+        }
+        unsafe {
+            __ivy_memcpy(this.dbuf_ + this.db_n_, s, (unsigned long long)n);
+        }
+        this.db_n_ = this.db_n_ + n;
+    }
+
+    const char* db_end() {
+        if (this.db_n_ + 1 <= this.db_cap_) {
+            unsafe {
+                this.dbuf_[this.db_n_] = 0;
+            }
+            this.db_n_ = this.db_n_ + 1;
+        }
+        unsafe {
+            return this.dbuf_ + this.db_start_;
+        }
+        return "";
+    }
+
+    void diag(long line, long col, const char* msg) {
+        if (this.dn_ >= this.dcap_) {
+            return;
+        }
+        unsafe {
+            this.dline_[this.dn_] = line;
+            this.dcol_[this.dn_] = col;
+            this.dmsg_[this.dn_] = (long) msg;
+        }
+        this.dn_ = this.dn_ + 1;
+        this.failed_ = 1;
+    }
+
+    void err_undeclared(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("undeclared identifier '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_redef(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("redefinition of variable '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // buildStruct in hir_builder.cpp: a struct name may be declared once.
+    void err_redef_struct(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("redefinition of struct '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // buildEnum in hir_builder.cpp: an enum name may be declared once.
+    void err_redef_enum(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("redefinition of enum '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // buildEnum in hir_builder.cpp: an enumerator name may be used once
+    // per enum.
+    void err_redef_enumerator(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("redefinition of enumerator '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // buildEnum in hir_builder.cpp: an explicit enumerator value must be a
+    // compile-time constant.
+    void err_enum_not_const(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("enumerator '");
+        this.db_put(name);
+        this.db_put("' value must be a constant expression");
+        this.diag(line, col, this.db_end());
+    }
+
+    // buildEnum in hir_builder.cpp: an enumerator value may only refer to a
+    // constant declared earlier in the same enum.
+    void err_enum_undef_const(long line, long col, const char* name,
+                              const char* ref) {
+        this.db_start_ = this.db_n_;
+        this.db_put("enumerator '");
+        this.db_put(name);
+        this.db_put("' references undefined constant '");
+        this.db_put(ref);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+
+    void err_no_member(long line, long col, const char* sname, const char* fname) {
+        this.db_start_ = this.db_n_;
+        this.db_put("struct '");
+        this.db_put(sname);
+        this.db_put("' has no member '");
+        this.db_put(fname);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_no_method(long line, long col, const char* sname, const char* mname) {
+        this.db_start_ = this.db_n_;
+        this.db_put("struct '");
+        this.db_put(sname);
+        this.db_put("' has no method '");
+        this.db_put(mname);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_no_enumerator(long line, long col, const char* ename, const char* cname) {
+        this.db_start_ = this.db_n_;
+        this.db_put("enum '");
+        this.db_put(ename);
+        this.db_put("' has no enumerator '");
+        this.db_put(cname);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_not_struct(long line, long col, AType t, const char* what, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_type_name(t);
+        this.db_put("' is not a struct type — cannot ");
+        this.db_put(what);
+        this.db_put(" '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_arrow(long line, long col, AType t) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'->' requires a pointer to struct (got '");
+        this.db_type_name(t);
+        this.db_put("')");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_arrow_operand(long line, long col) {
+        this.diag(line, col, "'->' requires a pointer operand");
+    }
+
+    void err_call_undeclared(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("call to undeclared function '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_this(long line, long col) {
+        this.diag(line, col, "'this' is only valid inside a method body");
+    }
+
+    void err_fn_value(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("function '");
+        this.db_put(name);
+        this.db_put("' cannot be used as a value (no function pointers)");
+        this.diag(line, col, this.db_end());
+    }
+
+    // Append a single character to the message scratch buffer.
+    void db_put_char(char c) {
+        if (this.db_n_ + 2 > this.db_cap_) {
+            return;
+        }
+        unsafe {
+            this.dbuf_[this.db_n_] = c;
+        }
+        this.db_n_ = this.db_n_ + 1;
+    }
+
+    // Append a decimal integer to the message scratch buffer.
+    void db_put_num(long v) {
+        long x = v;
+        if (x < 0) {
+            this.db_put_char('-');
+            x = -x;
+        }
+        if (x == 0) {
+            this.db_put_char('0');
+            return;
+        }
+        long start = this.db_n_;
+        while (x > 0) {
+            this.db_put_char(48 + (x % 10));
+            x = x / 10;
+        }
+        long i = this.db_n_ - 1;
+        long j = start;
+        while (i > j) {
+            unsafe {
+                char t = this.dbuf_[i];
+                this.dbuf_[i] = this.dbuf_[j];
+                this.dbuf_[j] = t;
+            }
+            i = i - 1;
+            j = j + 1;
+        }
+    }
+
+    // requireUnsafe in hir_builder.cpp: report `what` when not inside an
+    // `unsafe` block.
+    void require_unsafe(long line, long col, const char* what) {
+        if (this.unsafe_depth_ == 0) {
+            this.db_start_ = this.db_n_;
+            this.db_put(what);
+            this.db_put(" requires an unsafe block");
+            this.diag(line, col, this.db_end());
+        }
+    }
+
+    void err_unary_op(long line, long col, const char* what, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("unary '");
+        this.db_put(op);
+        this.db_put("' expects a numeric operand");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_unary_operand(long line, long col, const char* msg) {
+        this.diag(line, col, msg);
+    }
+
+    void err_binary_incompatible(long line, long col, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(op);
+        this.db_put("' between incompatible types");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_binary_ptr_mixed(long line, long col, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(op);
+        this.db_put("' between pointer and non-pointer");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_binary_expects(long line, long col, const char* op, const char* what) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(op);
+        this.db_put("' expects ");
+        this.db_put(what);
+        this.db_put(" operands");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_ptr_non_numeric(long line, long col, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(op);
+        this.db_put("' with pointer and non-numeric operand");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_condition(long line, long col, AType t) {
+        this.db_start_ = this.db_n_;
+        this.db_put("condition must be numeric, a pointer, or nullptr (got '");
+        this.db_type_name(t);
+        this.db_put("')");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_assign_types(long line, long col, AType to, AType from) {
+        this.db_start_ = this.db_n_;
+        this.db_put("cannot assign value of type '");
+        this.db_type_name(from);
+        this.db_put("' to '");
+        this.db_type_name(to);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_init_types(long line, long col, const char* name, AType to, AType from) {
+        this.db_start_ = this.db_n_;
+        this.db_put("cannot initialize variable '");
+        this.db_put(name);
+        this.db_put("' of type '");
+        this.db_type_name(to);
+        this.db_put("' with a value of type '");
+        this.db_type_name(from);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_compound_assign(long line, long col, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("compound assignment '");
+        this.db_put(op);
+        this.db_put("' expects numeric operands");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_return_types(long line, long col, AType to, AType from) {
+        this.db_start_ = this.db_n_;
+        this.db_put("cannot return value of type '");
+        this.db_type_name(from);
+        this.db_put("' from function returning '");
+        this.db_type_name(to);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_call_arity(long line, long col, const char* callee, long expected, long got) {
+        this.db_start_ = this.db_n_;
+        this.db_put("call to '");
+        this.db_put(callee);
+        this.db_put("' expects ");
+        this.db_put_num(expected);
+        this.db_put(" argument(s), got ");
+        this.db_put_num(got);
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_call_arg_type(long line, long col, const char* callee, long idx,
+                           AType expected, AType got) {
+        this.db_start_ = this.db_n_;
+        this.db_put("argument ");
+        this.db_put_num(idx);
+        this.db_put(" of '");
+        this.db_put(callee);
+        this.db_put("' expects '");
+        this.db_type_name(expected);
+        this.db_put("', got '");
+        this.db_type_name(got);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_call_missing_arg(long line, long col, const char* callee, long idx,
+                              const char* pname) {
+        this.db_start_ = this.db_n_;
+        this.db_put("call to '");
+        this.db_put(callee);
+        this.db_put("' missing argument ");
+        this.db_put_num(idx);
+        this.db_put(" (parameter '");
+        this.db_put(pname);
+        this.db_put("' has no default value)");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_must_return_value(long line, long col, const char* fname, AType rt) {
+        this.db_start_ = this.db_n_;
+        this.db_put("function '");
+        this.db_put(fname);
+        this.db_put("' must return a value of type '");
+        this.db_type_name(rt);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_may_reach_end(long line, long col, const char* fname) {
+        this.db_start_ = this.db_n_;
+        this.db_put("function '");
+        this.db_put(fname);
+        this.db_put("' may reach the end without returning a value");
+        this.diag(line, col, this.db_end());
+    }
+
+    void err_cast_convert(long line, long col, const char* kind, AType from, AType to) {
+        this.db_start_ = this.db_n_;
+        this.db_put(kind);
+        this.db_put(": cannot convert from '");
+        this.db_put(from.base);
+        this.db_put("' to '");
+        this.db_put(to.base);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // Operator overloading (7.4) is not implemented by the port: a struct
+    // operand always reports the missing operator.
+    void err_no_operator(long line, long col, AType t, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put("struct '");
+        this.db_put(t.base);
+        this.db_put("' has no matching operator '");
+        this.db_put(op);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+
+    // type printing for diagnostics (mirrors typeToString: no '&')
+    void db_type_name(AType t) {
+        if (t.is_const != 0) {
+            this.db_put("const ");
+        }
+        if (t.is_unsigned != 0) {
+            this.db_put("unsigned ");
+        }
+        this.db_put(t.base);
+        long i = 0;
+        while (i < t.ptr_depth) {
+            this.db_put("*");
+            i = i + 1;
+        }
+    }
+
+    // --- types -----------------------------------------------------------
+
+    AType ty_empty() {
+        AType t;
+        t.base = "";
+        t.is_unsigned = 0;
+        t.is_const = 0;
+        t.is_ref = 0;
+        t.ptr_depth = 0;
+        t.array_size = 0;
+        return t;
+    }
+
+    AType ty_void() {
+        AType t = this.ty_empty();
+        t.base = "void";
+        return t;
+    }
+
+    AType ty_int() {
+        AType t = this.ty_empty();
+        t.base = "int";
+        return t;
+    }
+
+    AType ty_double() {
+        AType t = this.ty_empty();
+        t.base = "double";
+        return t;
+    }
+
+    AType ty_bool() {
+        AType t = this.ty_empty();
+        t.base = "bool";
+        return t;
+    }
+
+    AType ty_char() {
+        AType t = this.ty_empty();
+        t.base = "char";
+        return t;
+    }
+
+    AType ty_nullptr() {
+        AType t = this.ty_empty();
+        t.base = "nullptr";
+        return t;
+    }
+
+    AType ty_dummy() {
+        return this.ty_int();
+    }
+
+    bool is_integer_base(const char* b) {
+        return this.seq(b, "bool") || this.seq(b, "char") || this.seq(b, "short") ||
+               this.seq(b, "int") || this.seq(b, "long") || this.seq(b, "long long") ||
+               this.seq(b, "int8_t") || this.seq(b, "int16_t") || this.seq(b, "int32_t") ||
+               this.seq(b, "int64_t") || this.seq(b, "int128_t") ||
+               this.seq(b, "uint8_t") || this.seq(b, "uint16_t") || this.seq(b, "uint32_t") ||
+               this.seq(b, "uint64_t") || this.seq(b, "uint128_t") ||
+               this.seq(b, "size_t") || this.seq(b, "ptrdiff_t") || this.seq(b, "uptr_t");
+    }
+
+    bool is_float_base(const char* b) {
+        return this.seq(b, "float") || this.seq(b, "double") ||
+               this.seq(b, "long double") || this.seq(b, "float16_t") ||
+               this.seq(b, "float32_t") || this.seq(b, "float64_t") ||
+               this.seq(b, "float128_t") || this.seq(b, "bfloat16_t");
+    }
+
+    bool is_numeric(AType t) {
+        if (t.ptr_depth > 0) {
+            return false;
+        }
+        if (this.seq(t.base, "void") || this.seq(t.base, "nullptr")) {
+            return false;
+        }
+        return this.is_integer_base(t.base) || this.is_float_base(t.base);
+    }
+
+    long type_rank(const char* b) {
+        if (this.seq(b, "bool")) { return 0; }
+        if (this.seq(b, "char")) { return 1; }
+        if (this.seq(b, "int8_t") || this.seq(b, "uint8_t")) { return 1; }
+        if (this.seq(b, "short")) { return 2; }
+        if (this.seq(b, "int16_t") || this.seq(b, "uint16_t")) { return 2; }
+        if (this.seq(b, "int") || this.seq(b, "unsigned")) { return 3; }
+        if (this.seq(b, "int32_t") || this.seq(b, "uint32_t")) { return 3; }
+        if (this.seq(b, "long") || this.seq(b, "int64_t") || this.seq(b, "uint64_t")) { return 4; }
+        if (this.seq(b, "long long")) { return 4; }
+        if (this.seq(b, "size_t") || this.seq(b, "ptrdiff_t") || this.seq(b, "uptr_t")) { return 4; }
+        if (this.seq(b, "float16_t") || this.seq(b, "bfloat16_t")) { return 5; }
+        if (this.seq(b, "float") || this.seq(b, "float32_t")) { return 6; }
+        if (this.seq(b, "double") || this.seq(b, "long double") || this.seq(b, "float64_t")) { return 7; }
+        if (this.seq(b, "float128_t")) { return 8; }
+        if (this.seq(b, "int128_t") || this.seq(b, "uint128_t")) { return 9; }
+        return -1;
+    }
+
+    bool is_ivy_unsigned(const char* b) {
+        return this.seq(b, "uint8_t") || this.seq(b, "uint16_t") ||
+               this.seq(b, "uint32_t") || this.seq(b, "uint64_t") ||
+               this.seq(b, "uint128_t") || this.seq(b, "size_t") ||
+               this.seq(b, "uptr_t");
+    }
+
+    AType strip_ref(AType t) {
+        t.is_ref = 0;
+        return t;
+    }
+
+    AType resolve_alias(AType t) {
+        long guard = 0;
+        while (guard < 16) {
+            if (this.slen(t.base) == 0) {
+                return t;
+            }
+            long found = -1;
+            long n = this.pa.alias_count();
+            long i = 0;
+            while (i < n) {
+                AAlias a = this.pa.get_alias(i);
+                if (this.seq(a.name, t.base)) {
+                    found = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if (found < 0) {
+                return t;
+            }
+            AAlias al = this.pa.get_alias(found);
+            AType exp = al.target;
+            if (t.is_const != 0) { exp.is_const = 1; }
+            if (t.is_ref != 0) { exp.is_ref = 1; }
+            exp.ptr_depth = exp.ptr_depth + t.ptr_depth;
+            t = exp;
+            guard = guard + 1;
+        }
+        return t;
+    }
+
+    // Usual arithmetic conversions (promoteTypes in hir_builder.cpp).
+    // Aliases are NOT expanded here — the oracle relies on operands
+    // already carrying resolved types (declare() expands them).
+    AType promote(AType aIn, AType bIn) {
+        AType a = this.strip_ref(aIn);
+        AType b = this.strip_ref(bIn);
+        if (a.ptr_depth > 0 && b.ptr_depth > 0 && !this.seq(a.base, b.base)) { return a; }
+        if (a.ptr_depth > 0 && b.ptr_depth == 0) { return a; }
+        if (b.ptr_depth > 0 && a.ptr_depth == 0) { return b; }
+        if (this.seq(a.base, "nullptr")) { return b; }
+        if (this.seq(b.base, "nullptr")) { return a; }
+        bool af = this.is_float_base(a.base);
+        bool bf = this.is_float_base(b.base);
+        if (af || bf) {
+            if (af && bf) {
+                if (this.type_rank(a.base) >= this.type_rank(b.base)) { return a; }
+                return b;
+            }
+            if (af) { return a; }
+            return b;
+        }
+        if (this.is_integer_base(a.base) && this.is_integer_base(b.base)) {
+            long ra = this.type_rank(a.base);
+            long rb = this.type_rank(b.base);
+            bool au = a.is_unsigned != 0 || this.is_ivy_unsigned(a.base);
+            bool bu = b.is_unsigned != 0 || this.is_ivy_unsigned(b.base);
+            AType r = a;
+            if (rb > ra) { r = b; }
+            r.is_unsigned = 0;
+            if (au || bu) { r.is_unsigned = 1; }
+            return r;
+        }
+        return a;
+    }
+
+    // isIntegerLike in hir_builder.cpp: integer base and not a pointer.
+    bool is_integer_like(AType t) {
+        if (t.ptr_depth > 0) {
+            return false;
+        }
+        return this.is_integer_base(t.base);
+    }
+
+    // True when `name` names a struct/class known to the translation unit.
+    bool is_struct_name(const char* name) {
+        return this.find_struct(name) >= 0;
+    }
+
+    // isExpectedStruct in hir_builder.cpp: a struct with the field layout
+    // [hasValue: bool, value: T, error: E] behaves like expected<T, E>.
+    // The field types are returned in `expected_t_` / `expected_e_`.
+    bool is_expected_struct(AType t) {
+        if (t.ptr_depth > 0) {
+            return false;
+        }
+        long si = this.find_struct(t.base);
+        if (si < 0) {
+            return false;
+        }
+        AStruct sd = this.pa.get_struct(si);
+        if (sd.nfields != 3) {
+            return false;
+        }
+        AField f0;
+        AField f1;
+        AField f2;
+        unsafe {
+            f0 = sd.fields[0];
+            f1 = sd.fields[1];
+            f2 = sd.fields[2];
+        }
+        if (!this.seq(f0.name, "hasValue") || !this.seq(f1.name, "value") ||
+            !this.seq(f2.name, "error")) {
+            return false;
+        }
+        this.expected_t_ = this.resolve_alias(f1.type);
+        this.expected_e_ = this.resolve_alias(f2.type);
+        return true;
+    }
+
+    // isOptionalStruct in hir_builder.cpp: a struct with the field layout
+    // [hasValue: bool, value: T] behaves like optional<T>.  The field type
+    // is returned in `optional_t_`.
+    bool is_optional_struct(AType t) {
+        if (t.ptr_depth > 0) {
+            return false;
+        }
+        long si = this.find_struct(t.base);
+        if (si < 0) {
+            return false;
+        }
+        AStruct sd = this.pa.get_struct(si);
+        if (sd.nfields != 2) {
+            return false;
+        }
+        AField f0;
+        AField f1;
+        unsafe {
+            f0 = sd.fields[0];
+            f1 = sd.fields[1];
+        }
+        if (!this.seq(f0.name, "hasValue") || !this.seq(f1.name, "value")) {
+            return false;
+        }
+        this.optional_t_ = this.resolve_alias(f1.type);
+        return true;
+    }
+
+    // True when `name` names an enum known to the translation unit.
+    bool is_enum_name(const char* name) {
+        return this.find_enum(name) >= 0;
+    }
+
+    // Load the name of base class `i` of struct `sd` into `base_name_`.
+    void load_base(AStruct sd, long i) {
+        unsafe {
+            this.base_name_ = this.pa.base_at(sd.bstart + i);
+        }
+    }
+
+    // True when `name` is a direct base class of the struct `from` (the
+    // derived-to-base reference binding rule of isAssignable only looks at
+    // the direct base list).
+    bool derives_from(const char* from, const char* name) {
+        long si = this.find_struct(from);
+        if (si < 0) {
+            return false;
+        }
+        AStruct sd = this.pa.get_struct(si);
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            if (this.seq(this.base_name_, name)) {
+                return true;
+            }
+            k = k + 1;
+        }
+        return false;
+    }
+
+    // isAssignable in hir_builder.cpp: can a value of type `from` be
+    // stored in a location of type `to`?
+    bool is_assignable(AType to, AType from) {
+        if (this.seq(from.base, "nullptr")) {
+            return to.ptr_depth > 0 || to.is_ref != 0;
+        }
+        // B5: implicit conversion T -> expected<T, E> and E -> expected<T, E>.
+        if (to.ptr_depth == 0 && !this.seq(to.base, from.base)) {
+            if (this.is_expected_struct(to)) {
+                AType tArg = this.expected_t_;
+                AType eArg = this.expected_e_;
+                bool tExact = this.seq(tArg.base, from.base) &&
+                              tArg.ptr_depth == from.ptr_depth;
+                bool eExact = this.seq(eArg.base, from.base) &&
+                              eArg.ptr_depth == from.ptr_depth;
+                if (eExact && !tExact && !this.seq(eArg.base, tArg.base)) {
+                    return true;
+                }
+                if (tExact) {
+                    return true;
+                }
+                if (this.is_assignable(tArg, from)) {
+                    return true;
+                }
+                if (this.is_assignable(eArg, from)) {
+                    return true;
+                }
+            }
+        }
+        // B6: implicit conversion T -> optional<T>.
+        if (to.ptr_depth == 0 && !this.seq(to.base, from.base)) {
+            if (this.is_optional_struct(to)) {
+                AType tArg = this.optional_t_;
+                if (this.is_assignable(tArg, from)) {
+                    return true;
+                }
+            }
+        }
+        // B6: nullopt -> optional<T> (an empty optional).
+        if (this.seq(from.base, "nullopt") && to.ptr_depth == 0) {
+            if (this.is_optional_struct(to)) {
+                return true;
+            }
+        }
+        if (from.is_ref != 0) {
+            if (to.is_ref != 0 && this.seq(to.base, from.base) &&
+                (to.is_const != 0 || from.is_const == 0) &&
+                to.ptr_depth == from.ptr_depth) {
+                return true;
+            }
+        }
+        if (to.is_ref != 0) {
+            if (to.ptr_depth == 0 && from.ptr_depth == 0) {
+                if (this.is_numeric(to) && this.is_numeric(from)) {
+                    return true;
+                }
+                if (this.is_struct_name(to.base) && this.seq(to.base, from.base)) {
+                    return true;
+                }
+                if (this.is_struct_name(from.base) && this.derives_from(from.base, to.base)) {
+                    return true;
+                }
+            }
+            if (to.ptr_depth == from.ptr_depth && this.seq(to.base, from.base) &&
+                (to.is_const != 0 || from.is_const == 0)) {
+                return true;
+            }
+        }
+        if (to.ptr_depth == 0 && from.ptr_depth == 0) {
+            if (this.is_struct_name(to.base) && this.seq(to.base, from.base) &&
+                (to.is_const == 0) == (from.is_const == 0)) {
+                return true;
+            }
+            if (this.is_enum_name(to.base)) {
+                return this.seq(to.base, from.base) || this.is_numeric(from);
+            }
+            if (this.is_enum_name(from.base) && this.is_numeric(to)) {
+                return true;
+            }
+            return this.is_numeric(to) && this.is_numeric(from);
+        }
+        if (to.ptr_depth != from.ptr_depth) {
+            return false;
+        }
+        if (to.ptr_depth > 0 && this.seq(to.base, "void")) {
+            return true;
+        }
+        if (!this.seq(to.base, from.base)) {
+            return false;
+        }
+        if (to.is_const == 0 && from.is_const != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    // --- struct/enum/function lookup -------------------------------------
+
+    long find_struct(const char* name) {
+        long n = this.pa.struct_count();
+        long i = 0;
+        while (i < n) {
+            AStruct sd = this.pa.get_struct(i);
+            if (this.seq(sd.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    long find_enum(const char* name) {
+        long n = this.pa.enum_count();
+        long i = 0;
+        while (i < n) {
+            AEnum ed = this.pa.get_enum(i);
+            if (this.seq(ed.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // Look up a field in a struct or in any of its base classes (the
+    // oracle merges inherited fields into the derived struct's field map).
+    // The matching field is stored in `found_field_`.
+    bool lookup_field(AStruct sd, const char* name) {
+        long i = 0;
+        while (i < sd.nfields) {
+            AField f;
+            unsafe {
+                f = sd.fields[i];
+            }
+            if (this.seq(f.name, name)) {
+                this.found_field_ = f;
+                return true;
+            }
+            i = i + 1;
+        }
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                AStruct bs = this.pa.get_struct(bi);
+                if (this.lookup_field(bs, name)) {
+                    return true;
+                }
+            }
+            k = k + 1;
+        }
+        return false;
+    }
+
+    long find_fn(const char* name) {
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.seq(f.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // Number of HIR functions registered under `name` (overload set size).
+    long count_fns(const char* name) {
+        long n = 0;
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.seq(f.name, name)) {
+                n = n + 1;
+            }
+            i = i + 1;
+        }
+        return n;
+    }
+
+    // --- scopes ----------------------------------------------------------
+
+    void enter_scope() {
+        if (this.sc_n_ >= this.sc_cap_) {
+            return;
+        }
+        unsafe {
+            this.scope_[this.sc_n_] = this.s_n_;
+        }
+        this.sc_n_ = this.sc_n_ + 1;
+    }
+
+    void leave_scope() {
+        if (this.sc_n_ <= 0) {
+            return;
+        }
+        this.sc_n_ = this.sc_n_ - 1;
+        unsafe {
+            this.s_n_ = this.scope_[this.sc_n_];
+        }
+    }
+
+    long find_sym(const char* name) {
+        long i = this.s_n_;
+        while (i > 0) {
+            i = i - 1;
+            unsafe {
+                const char* nm = (char*)this.snm_[i];
+                if (this.seq(nm, name)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    AType sym_type(long i) {
+        unsafe {
+            return this.sty_[i];
+        }
+        return this.ty_dummy();
+    }
+
+    void declare(const char* name, AType t, long line, long col) {
+        long start = 0;
+        if (this.sc_n_ > 0) {
+            unsafe {
+                start = this.scope_[this.sc_n_ - 1];
+            }
+        }
+        long i = start;
+        while (i < this.s_n_) {
+            unsafe {
+                const char* nm = (char*)this.snm_[i];
+                if (this.seq(nm, name)) {
+                    this.err_redef(line, col, name);
+                    return;
+                }
+            }
+            i = i + 1;
+        }
+        t = this.resolve_alias(t);
+        if (this.s_n_ < this.s_cap_) {
+            unsafe {
+                this.snm_[this.s_n_] = (long) name;
+                this.sty_[this.s_n_] = t;
+            }
+            this.s_n_ = this.s_n_ + 1;
+        }
+    }
+
+    long find_global_enum(const char* name) {
+        long i = this.ec_n_;
+        while (i > 0) {
+            i = i - 1;
+            unsafe {
+                const char* nm = (char*)this.ecnm_[i];
+                if (this.seq(nm, name)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    long global_enum_value(long i) {
+        unsafe {
+            return this.ecval_[i];
+        }
+        return 0;
+    }
+
+    // --- HIR pool helpers ------------------------------------------------
+
+    long push_expr(HExpr e) {
+        long i = this.u.ex_n;
+        if (i < this.u.ex_cap) {
+            unsafe {
+                this.u.exprs[i] = e;
+            }
+            this.u.ex_n = i + 1;
+        }
+        return i;
+    }
+
+    long push_stmt(HStmt s) {
+        long i = this.u.st_n;
+        if (i < this.u.st_cap) {
+            unsafe {
+                this.u.stmts[i] = s;
+            }
+            this.u.st_n = i + 1;
+        }
+        return i;
+    }
+
+    long push_arg(long e) {
+        long i = this.u.a_n;
+        if (i < this.u.a_cap) {
+            unsafe {
+                this.u.args[i] = e;
+            }
+            this.u.a_n = i + 1;
+        }
+        return i;
+    }
+
+    HExpr new_expr(long kind, long line, long col) {
+        HExpr e;
+        e.kind = kind;
+        e.ival = 0;
+        e.sval = "";
+        e.flag = 0;
+        e.type = this.ty_dummy();
+        e.a = -1;
+        e.b = -1;
+        e.c = -1;
+        e.astart = -1;
+        e.an = 0;
+        e.line = line;
+        e.col = col;
+        return e;
+    }
+
+    HStmt new_stmt(long kind, long line, long col) {
+        HStmt s;
+        s.kind = kind;
+        s.sval = "";
+        s.type = this.ty_empty();
+        s.flag = 0;
+        s.a = -1;
+        s.b = -1;
+        s.c = -1;
+        s.sstart = -1;
+        s.sn = 0;
+        s.next = -1;
+        return s;
+    }
+
+    AExpr get_expr(long i) {
+        unsafe {
+            return this.ep_[i];
+        }
+        AExpr e;
+        e.kind = 6;
+        e.ival = 0;
+        e.sval = "";
+        e.flag = 0;
+        e.a = -1;
+        e.b = -1;
+        e.c = -1;
+        e.astart = -1;
+        e.an = 0;
+        e.type = this.ty_empty();
+        e.is_scope = 0;
+        e.line = 0;
+        e.col = 0;
+        return e;
+    }
+
+    AStmt get_stmt(long i) {
+        unsafe {
+            return this.sp_[i];
+        }
+        AStmt s;
+        s.kind = 14;
+        s.sval = "";
+        s.type = this.ty_empty();
+        s.flag = 0;
+        s.a = -1;
+        s.b = -1;
+        s.c = -1;
+        s.sstart = -1;
+        s.sn = 0;
+        s.next = -1;
+        s.line = 0;
+        s.col = 0;
+        return s;
+    }
+
+    // --- enum registration ----------------------------------------------
+
+    // --- enumerator constant evaluation (buildEnum in hir_builder.cpp) ----
+
+    // Look up an enumerator constant of the enum currently being built
+    // (indices >= cur_start).  Sets `enum_found_`; returns the value.
+    long enum_lookup_local(const char* name, long cur_start) {
+        this.enum_found_ = 0;
+        long i = this.ev_n_;
+        while (i > cur_start) {
+            i = i - 1;
+            unsafe {
+                const char* nm = (char*)this.evnm_[i];
+                if (this.seq(nm, name)) {
+                    this.enum_found_ = 1;
+                    return this.evval_[i];
+                }
+            }
+        }
+        return 0;
+    }
+
+    // Look up an enumerator constant of the enum currently being built or
+    // of any unscoped enum declared before it (the oracle's `def.constants`
+    // and `enumConstants_` lookups).
+    long enum_lookup_any(const char* name, long cur_start) {
+        this.enum_found_ = 0;
+        long i = this.ev_n_;
+        while (i > cur_start) {
+            i = i - 1;
+            unsafe {
+                const char* nm = (char*)this.evnm_[i];
+                if (this.seq(nm, name)) {
+                    this.enum_found_ = 1;
+                    return this.evval_[i];
+                }
+            }
+        }
+        long k = 0;
+        while (k < this.ec_n_) {
+            unsafe {
+                const char* nm = (char*)this.ecnm_[k];
+                if (this.seq(nm, name)) {
+                    this.enum_found_ = 1;
+                    return this.ecval_[k];
+                }
+            }
+            k = k + 1;
+        }
+        return 0;
+    }
+
+    // Evaluate a nested constant expression: integer literals, enumerator
+    // constants, unary -/+/~ and the binary arithmetic/bitwise operators.
+    // Returns 1 on success; the value is left in `enum_val_`.
+    bool eval_enum_operand(long eidx, long cur_start) {
+        AExpr e = this.get_expr(eidx);
+        if (e.kind == 1) {
+            this.enum_val_ = e.ival;
+            return true;
+        }
+        if (e.kind == 8) {
+            long v = this.enum_lookup_any(e.sval, cur_start);
+            if (this.enum_found_ == 0) {
+                return false;
+            }
+            this.enum_val_ = v;
+            return true;
+        }
+        if (e.kind == 10) {
+            long v = 0;
+            if (this.eval_enum_operand(e.a, cur_start) == 0) {
+                return false;
+            }
+            v = this.enum_val_;
+            if (this.seq(e.sval, "-")) { this.enum_val_ = -v; return true; }
+            if (this.seq(e.sval, "+")) { this.enum_val_ = v; return true; }
+            if (this.seq(e.sval, "~")) { this.enum_val_ = ~v; return true; }
+            return false;
+        }
+        if (e.kind == 11) {
+            long l = 0;
+            long r = 0;
+            if (this.eval_enum_operand(e.a, cur_start) == 0) {
+                return false;
+            }
+            l = this.enum_val_;
+            if (this.eval_enum_operand(e.b, cur_start) == 0) {
+                return false;
+            }
+            r = this.enum_val_;
+            if (this.seq(e.sval, "+")) { this.enum_val_ = l + r; return true; }
+            if (this.seq(e.sval, "-")) { this.enum_val_ = l - r; return true; }
+            if (this.seq(e.sval, "*")) { this.enum_val_ = l * r; return true; }
+            if (this.seq(e.sval, "/")) {
+                if (r == 0) { return false; }
+                this.enum_val_ = l / r;
+                return true;
+            }
+            if (this.seq(e.sval, "%")) {
+                if (r == 0) { return false; }
+                this.enum_val_ = l % r;
+                return true;
+            }
+            if (this.seq(e.sval, "|")) { this.enum_val_ = l | r; return true; }
+            if (this.seq(e.sval, "&")) { this.enum_val_ = l & r; return true; }
+            if (this.seq(e.sval, "^")) { this.enum_val_ = l ^ r; return true; }
+            if (this.seq(e.sval, "<<")) { this.enum_val_ = l << r; return true; }
+            if (this.seq(e.sval, ">>")) { this.enum_val_ = l >> r; return true; }
+            return false;
+        }
+        return false;
+    }
+
+    // Evaluate an enumerator's explicit value.  The oracle accepts an
+    // integer literal, a unary -/+ of an integer literal, a unary - of a
+    // constant of the same enum, a reference to a constant of the same enum
+    // and a binary constant expression.  Returns 1 when the value is a
+    // constant; otherwise the matching diagnostic is reported.
+    bool eval_enum_value(long eidx, long cur_start, long line, long col,
+                         const char* ename) {
+        this.enum_missing_ = 0;
+        AExpr e = this.get_expr(eidx);
+        if (e.kind == 1) {
+            this.enum_val_ = e.ival;
+            return true;
+        }
+        if (e.kind == 10) {
+            AExpr o = this.get_expr(e.a);
+            if (o.kind == 1) {
+                if (this.seq(e.sval, "-")) { this.enum_val_ = -o.ival; return true; }
+                if (this.seq(e.sval, "+")) { this.enum_val_ = o.ival; return true; }
+                this.err_enum_not_const(line, col, ename);
+                return false;
+            }
+            if (o.kind == 8 && this.seq(e.sval, "-")) {
+                long v = this.enum_lookup_local(o.sval, cur_start);
+                if (this.enum_found_ != 0) {
+                    this.enum_val_ = -v;
+                    return true;
+                }
+                this.err_enum_not_const(line, col, ename);
+                return false;
+            }
+            this.err_enum_not_const(line, col, ename);
+            return false;
+        }
+        if (e.kind == 8) {
+            long v = this.enum_lookup_local(e.sval, cur_start);
+            if (this.enum_found_ != 0) {
+                this.enum_val_ = v;
+                return true;
+            }
+            this.err_enum_undef_const(line, col, ename, e.sval);
+            return false;
+        }
+        if (e.kind == 11) {
+            if (this.eval_enum_operand(eidx, cur_start) == 0) {
+                this.err_enum_not_const(line, col, ename);
+                return false;
+            }
+            return true;
+        }
+        this.err_enum_not_const(line, col, ename);
+        return false;
+    }
+
+
+    void build_enums() {
+        long n = this.pa.enum_count();
+        long ei = 0;
+        while (ei < n) {
+            AEnum ed = this.pa.get_enum(ei);
+            unsafe {
+                this.evstart_[ei] = this.ev_n_;
+                this.evend_[ei] = this.ev_n_;
+            }
+            // Reject a duplicate enum name: the oracle skips the whole
+            // declaration, so none of its enumerators are registered.
+            long prev = 0;
+            long dup = 0;
+            while (prev < ei) {
+                AEnum pe = this.pa.get_enum(prev);
+                if (this.seq(pe.name, ed.name)) {
+                    dup = 1;
+                }
+                prev = prev + 1;
+            }
+            if (dup != 0) {
+                this.err_redef_enum(ed.line, ed.col, ed.name);
+                ei = ei + 1;
+                continue;
+            }
+            long start = this.ev_n_;
+            long next = 0;
+            long j = 0;
+            while (j < ed.nenumerators) {
+                AEnumerator en;
+                unsafe {
+                    en = ed.enumerators[j];
+                }
+                long val = next;
+                if (en.value >= 0) {
+                    if (this.eval_enum_value(en.value, start, en.line, en.col, en.name)) {
+                        val = this.enum_val_;
+                    }
+                }
+                // Reject a duplicate enumerator name inside the same enum:
+                // the oracle keeps the first declaration and does not
+                // advance the implicit value.
+                long k = 0;
+                long seen = 0;
+                while (k < j) {
+                    AEnumerator pe;
+                    unsafe {
+                        pe = ed.enumerators[k];
+                    }
+                    if (this.seq(pe.name, en.name)) {
+                        seen = 1;
+                    }
+                    k = k + 1;
+                }
+                if (seen != 0) {
+                    this.err_redef_enumerator(en.line, en.col, en.name);
+                    j = j + 1;
+                    continue;
+                }
+                if (this.ev_n_ < this.ev_cap_) {
+                    unsafe {
+                        this.evnm_[this.ev_n_] = (long) en.name;
+                        this.evval_[this.ev_n_] = val;
+                    }
+                    this.ev_n_ = this.ev_n_ + 1;
+                }
+                if (ed.is_scoped == 0 && this.ec_n_ < this.ec_cap_) {
+                    unsafe {
+                        this.ecnm_[this.ec_n_] = (long) en.name;
+                        this.ecval_[this.ec_n_] = val;
+                    }
+                    this.ec_n_ = this.ec_n_ + 1;
+                }
+                next = val + 1;
+                j = j + 1;
+            }
+            unsafe {
+                this.evend_[ei] = this.ev_n_;
+            }
+            ei = ei + 1;
+        }
+    }
+
+    long enum_const_value(long ei, const char* name) {
+        this.eval_hit_ = 0;
+        long base = 0;
+        long end = 0;
+        unsafe {
+            base = this.evstart_[ei];
+            end = this.evend_[ei];
+        }
+        long i = base;
+        while (i < end) {
+            unsafe {
+                const char* nm = (char*)this.evnm_[i];
+                if (this.seq(nm, name)) {
+                    this.eval_hit_ = 1;
+                    return this.evval_[i];
+                }
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+
+    // --- signatures ------------------------------------------------------
+
+    void push_param(AType t, const char* name, long line, long col) {
+        if (this.u.p_n >= this.u.p_cap) {
+            return;
+        }
+        unsafe {
+            this.u.params[this.u.p_n].type = t;
+            this.u.params[this.u.p_n].name = name;
+            this.u.params[this.u.p_n].line = line;
+            this.u.params[this.u.p_n].col = col;
+            this.u.params[this.u.p_n].default_value = -1;
+        }
+        this.u.p_n = this.u.p_n + 1;
+    }
+
+    // Record the default-value expression of a parameter (the AST expression
+    // index, -1 when the parameter has no default).
+    void set_param_default(long idx, long def) {
+        if (idx < 0 || idx >= this.u.p_n) {
+            return;
+        }
+        unsafe {
+            this.u.params[idx].default_value = def;
+        }
+    }
+
+    long add_function(const char* name, AType ret, long is_ext) {
+        HFunction f;
+        f.name = name;
+        f.ret = ret;
+        f.is_extern_c = is_ext;
+        f.body = -1;
+        f.pstart = this.u.p_n;
+        f.pn = 0;
+        long idx = this.u.fn_n;
+        if (this.u.fn_n < this.u.fn_cap) {
+            unsafe {
+                this.u.fns[this.u.fn_n] = f;
+            }
+            this.u.fn_n = this.u.fn_n + 1;
+        }
+        return idx;
+    }
+
+    void finish_function(long idx) {
+        if (idx < this.u.fn_n) {
+            long start = 0;
+            unsafe {
+                start = this.u.fns[idx].pstart;
+            }
+            unsafe {
+                this.u.fns[idx].pn = this.u.p_n - start;
+            }
+        }
+    }
+
+    void build_free_signature(AFunction af) {
+        AType ret = this.resolve_alias(af.ret);
+        long idx = this.add_function(af.name, ret, af.is_extern_c);
+        long j = 0;
+        while (j < af.nparams) {
+            AParam p;
+            unsafe {
+                p = af.params[j];
+            }
+            AType pt = this.resolve_alias(p.type);
+            if (af.body >= 0 && pt.ptr_depth > 0) {
+                this.diag(p.line, p.col, "raw pointer parameter type requires an unsafe block");
+            }
+            this.push_param(pt, p.name, p.line, p.col);
+            this.set_param_default(this.u.p_n - 1, p.default_value);
+            j = j + 1;
+        }
+        this.finish_function(idx);
+    }
+
+    void build_method_signature(AStruct sd, AFunction mf) {
+        AType ret = this.resolve_alias(mf.ret);
+        long idx = this.add_function(mf.name, ret, 0);
+        AType tt = this.ty_empty();
+        tt.base = sd.name;
+        tt.is_ref = 1;
+        this.push_param(tt, "this", mf.line, mf.col);
+        long j = 0;
+        while (j < mf.nparams) {
+            AParam p;
+            unsafe {
+                p = mf.params[j];
+            }
+            this.push_param(this.resolve_alias(p.type), p.name, p.line, p.col);
+            this.set_param_default(this.u.p_n - 1, p.default_value);
+            j = j + 1;
+        }
+        this.finish_function(idx);
+    }
+
+    void build_structs() {
+        long n = this.pa.struct_count();
+        long i = 0;
+        while (i < n) {
+            AStruct sd = this.pa.get_struct(i);
+            // Reject a duplicate struct name: the oracle skips the whole
+            // declaration, so none of its methods are registered.
+            long prev = 0;
+            long dup = 0;
+            while (prev < i) {
+                AStruct ps = this.pa.get_struct(prev);
+                if (this.seq(ps.name, sd.name)) {
+                    dup = 1;
+                }
+                prev = prev + 1;
+            }
+            if (dup != 0) {
+                this.err_redef_struct(sd.line, sd.col, sd.name);
+                i = i + 1;
+                continue;
+            }
+            long j = 0;
+            while (j < sd.nmethods) {
+                AFunction mf;
+                unsafe {
+                    mf = sd.methods[j];
+                }
+                this.build_method_signature(sd, mf);
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+    }
+
+
+    // --- statements ------------------------------------------------------
+
+    void build_body(long fnidx, AFunction af) {
+        this.s_n_ = 0;
+        this.sc_n_ = 0;
+        this.cur_fn_ = fnidx;
+        this.has_return_ = 0;
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[fnidx];
+        }
+        this.cur_ret_ = hf.ret;
+        this.cur_fn_name_ = hf.name;
+        this.enter_scope();
+        long i = 0;
+        while (i < hf.pn) {
+            HParam p;
+            unsafe {
+                p = this.u.params[hf.pstart + i];
+            }
+            if (this.slen(p.name) > 0) {
+                this.declare(p.name, p.type, p.line, p.col);
+            }
+            i = i + 1;
+        }
+        long root = this.build_stmt(af.body);
+        this.leave_scope();
+        unsafe {
+            this.u.fns[fnidx].body = root;
+        }
+        // A non-void function must not fall off the end of its body.
+        if (hf.ret.is_const == 0 && hf.ret.ptr_depth == 0 &&
+            !this.seq(hf.ret.base, "void") && this.has_return_ == 0) {
+            this.err_may_reach_end(af.line, af.col, hf.name);
+        }
+        this.cur_fn_ = -1;
+    }
+
+    long build_compound(long idx) {
+        AStmt a = this.get_stmt(idx);
+        this.enter_scope();
+        long first = -1;
+        long last = -1;
+        long count = 0;
+        long cur = a.sstart;
+        while (cur >= 0) {
+            AStmt child = this.get_stmt(cur);
+            long nxt = child.next;
+            long h = this.build_stmt(cur);
+            if (first < 0) {
+                first = h;
+            } else if (last >= 0) {
+                unsafe {
+                    this.u.stmts[last].next = h;
+                }
+            }
+            last = h;
+            count = count + 1;
+            cur = nxt;
+        }
+        this.leave_scope();
+        HStmt s = this.new_stmt(1, a.line, a.col);
+        s.sstart = first;
+        s.sn = count;
+        return this.push_stmt(s);
+    }
+
+    // B5 / B6 in buildDeclaration and buildExpr(Assign): materialise an
+    // expected<T, E> / optional<T> target from a plain value.  Returns the
+    // expression index of the value to store (unchanged when no wrapping
+    // applies).
+    long wrap_value(AType to, long initIdx, long line, long col) {
+        HExpr ie;
+        unsafe {
+            ie = this.u.exprs[initIdx];
+        }
+        AType from = ie.type;
+        if (this.seq(to.base, from.base)) {
+            return initIdx;
+        }
+        // B5: expected<T, E>.
+        if (this.is_expected_struct(to)) {
+            AType tArg = this.expected_t_;
+            AType eArg = this.expected_e_;
+            bool tExact = this.seq(tArg.base, from.base) &&
+                          tArg.ptr_depth == from.ptr_depth;
+            bool eExact = this.seq(eArg.base, from.base) &&
+                          eArg.ptr_depth == from.ptr_depth;
+            if (eExact && !tExact && !this.seq(eArg.base, tArg.base)) {
+                return this.build_expected_list(to, initIdx, 2, line, col);
+            }
+            if (tExact) {
+                return this.build_expected_list(to, initIdx, 1, line, col);
+            }
+            if (this.is_assignable(tArg, from)) {
+                return this.build_expected_list(to, initIdx, 1, line, col);
+            }
+            if (this.is_assignable(eArg, from)) {
+                return this.build_expected_list(to, initIdx, 2, line, col);
+            }
+        }
+        // B6: optional<T>.
+        if (this.is_optional_struct(to)) {
+            AType tArg = this.optional_t_;
+            if (this.seq(from.base, "nullopt")) {
+                return this.build_optional_list(to, -1, 0, line, col);
+            }
+            if (this.is_assignable(tArg, from)) {
+                return this.build_optional_list(to, initIdx, 1, line, col);
+            }
+        }
+        return initIdx;
+    }
+
+    // Build a bool literal expression (hir::Expr::BoolLit).
+    long build_bool_literal(long v, long line, long col) {
+        HExpr e = this.new_expr(5, line, col);
+        e.ival = v;
+        e.type = this.ty_bool();
+        return this.push_expr(e);
+    }
+
+    // Build an `init-list` expression (hir::Expr::InitList).  The elements
+    // are stored as a run of expression indices in the args pool; an element
+    // index of -1 marks a zero-initialized field.
+    long build_init_list(AType t, long line, long col, long n,
+                         long e0, long e1, long e2) {
+        HExpr e = this.new_expr(19, line, col);
+        e.type = t;
+        long start = this.u.a_n;
+        this.push_arg(e0);
+        if (n > 1) {
+            this.push_arg(e1);
+        }
+        if (n > 2) {
+            this.push_arg(e2);
+        }
+        e.astart = start;
+        e.an = n;
+        return this.push_expr(e);
+    }
+
+    // wrapExpectedValue in hir_builder.cpp: the list is
+    // [hasValue, value, error] with the wrapped value in the `value`
+    // (mode 1) or `error` (mode 2) slot.
+    long build_expected_list(AType to, long valueIdx, long mode, long line, long col) {
+        long has = this.build_bool_literal(mode == 1, line, col);
+        long val = -1;
+        long err = -1;
+        if (mode == 1) {
+            val = valueIdx;
+        } else {
+            err = valueIdx;
+        }
+        return this.build_init_list(to, line, col, 3, has, val, err);
+    }
+
+    // wrapOptionalValue in hir_builder.cpp: the list is [hasValue, value];
+    // a value index of -1 leaves the value field zero-initialized.
+    long build_optional_list(AType to, long valueIdx, long hasValue, long line, long col) {
+        long has = this.build_bool_literal(hasValue, line, col);
+        return this.build_init_list(to, line, col, 2, has, valueIdx, -1);
+    }
+
+    long build_decl(AStmt a) {
+        AType t = this.resolve_alias(a.type);
+        long init = -1;
+        if (t.ptr_depth == 0 && this.seq(t.base, "void")) {
+            this.db_start_ = this.db_n_;
+            this.db_put("variable '");
+            this.db_put(a.sval);
+            this.db_put("' cannot have type void");
+            this.diag(a.line, a.col, this.db_end());
+        }
+        if (t.ptr_depth > 0) {
+            this.require_unsafe(a.line, a.col, "raw pointer variable declaration");
+        }
+        if (this.seq(t.base, "nullptr_t")) {
+            this.require_unsafe(a.line, a.col, "type 'nullptr_t'");
+        }
+        if (this.seq(t.base, "auto")) {
+            if (a.a < 0) {
+                this.db_start_ = this.db_n_;
+                this.db_put("'auto' variable '");
+                this.db_put(a.sval);
+                this.db_put("' must have an initializer");
+                this.diag(a.line, a.col, this.db_end());
+                this.declare(a.sval, t, a.line, a.col);
+                HStmt s0 = this.new_stmt(2, a.line, a.col);
+                s0.type = t;
+                s0.sval = a.sval;
+                s0.a = -1;
+                return this.push_stmt(s0);
+            }
+            init = this.build_expr(a.a);
+            if (init >= 0) {
+                HExpr ie;
+                unsafe {
+                    ie = this.u.exprs[init];
+                }
+                t = ie.type;
+                t.ptr_depth = t.ptr_depth + a.type.ptr_depth;
+                if (a.type.is_ref != 0) { t.is_ref = 1; }
+                if (a.type.is_const != 0) { t.is_const = 1; }
+                if (a.type.is_ref == 0) { t.is_ref = 0; }
+            }
+            if (t.ptr_depth > 0) {
+                this.require_unsafe(a.line, a.col, "raw pointer variable declaration");
+            }
+            this.declare(a.sval, t, a.line, a.col);
+            HStmt s = this.new_stmt(2, a.line, a.col);
+            s.type = t;
+            s.sval = a.sval;
+            s.a = init;
+            return this.push_stmt(s);
+        }
+        if (a.a >= 0) {
+            init = this.build_expr(a.a);
+            if (init >= 0) {
+                HExpr ie;
+                unsafe {
+                    ie = this.u.exprs[init];
+                }
+                if (this.is_assignable(t, ie.type) == 0) {
+                    this.err_init_types(a.line, a.col, a.sval, t, ie.type);
+                } else {
+                    init = this.wrap_value(t, init, a.line, a.col);
+                }
+            }
+        } else {
+            if (t.array_size == 0 && this.is_struct_name(t.base) == 0) {
+                this.db_start_ = this.db_n_;
+                this.db_put("variable '");
+                this.db_put(a.sval);
+                this.db_put("' must be initialized (uninitialized variables are not allowed)");
+                this.diag(a.line, a.col, this.db_end());
+            }
+        }
+        this.declare(a.sval, t, a.line, a.col);
+        HStmt s = this.new_stmt(2, a.line, a.col);
+        s.type = t;
+        s.sval = a.sval;
+        s.a = init;
+        return this.push_stmt(s);
+    }
+
+    // checkCondition in hir_builder.cpp: a condition must be numeric, a
+    // pointer, or nullptr.
+    void check_condition(long exprIdx) {
+        if (exprIdx < 0) {
+            return;
+        }
+        HExpr e;
+        unsafe {
+            e = this.u.exprs[exprIdx];
+        }
+        AType t = e.type;
+        if (this.is_numeric(t) || t.ptr_depth > 0 || this.seq(t.base, "nullptr")) {
+            return;
+        }
+        this.err_condition(e.line, e.col, t);
+    }
+
+    // buildReturn in hir_builder.cpp: check the returned value against the
+    // declared return type.
+    long build_return(AStmt a) {
+        this.has_return_ = 1;
+        long val = -1;
+        AType rt = this.cur_ret_;
+        if (a.a >= 0) {
+            val = this.build_expr(a.a);
+            if (rt.ptr_depth == 0 && this.seq(rt.base, "void")) {
+                this.diag(a.line, a.col, "void function cannot return a value");
+            } else if (val >= 0) {
+                HExpr ve;
+                unsafe {
+                    ve = this.u.exprs[val];
+                }
+                if (this.is_assignable(rt, ve.type) == 0) {
+                    this.err_return_types(a.line, a.col, rt, ve.type);
+                }
+            }
+        } else {
+            if (rt.ptr_depth == 0 && !this.seq(rt.base, "void")) {
+                this.err_must_return_value(a.line, a.col, this.cur_fn_name_, rt);
+            }
+        }
+        HStmt s = this.new_stmt(7, a.line, a.col);
+        s.a = val;
+        return this.push_stmt(s);
+    }
+
+    long build_stmt(long idx) {
+        AStmt a = this.get_stmt(idx);
+        if (a.kind == 1) {
+            return this.build_compound(idx);
+        }
+        if (a.kind == 2) {
+            return this.build_decl(a);
+        }
+        if (a.kind == 3) {
+            long cond = this.build_expr(a.a);
+            this.check_condition(cond);
+            long thenb = -1;
+            if (a.b >= 0) { thenb = this.build_stmt(a.b); }
+            long elseb = -1;
+            if (a.c >= 0) { elseb = this.build_stmt(a.c); }
+            HStmt s = this.new_stmt(3, a.line, a.col);
+            s.a = cond;
+            s.b = thenb;
+            s.c = elseb;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 4) {
+            long cond = this.build_expr(a.a);
+            this.check_condition(cond);
+            long body = this.build_stmt(a.b);
+            HStmt s = this.new_stmt(4, a.line, a.col);
+            s.a = cond;
+            s.b = body;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 5) {
+            long body = this.build_stmt(a.a);
+            long cond = this.build_expr(a.b);
+            this.check_condition(cond);
+            HStmt s = this.new_stmt(5, a.line, a.col);
+            s.a = body;
+            s.b = cond;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 6) {
+            this.enter_scope();
+            long init = -1;
+            if (a.a >= 0) { init = this.build_stmt(a.a); }
+            long cond = -1;
+            if (a.b >= 0) {
+                cond = this.build_expr(a.b);
+                this.check_condition(cond);
+            }
+            long incr = -1;
+            if (a.c >= 0) { incr = this.build_expr(a.c); }
+            long body = this.build_stmt(a.sstart);
+            this.leave_scope();
+            HStmt s = this.new_stmt(6, a.line, a.col);
+            s.a = init;
+            s.b = cond;
+            s.c = incr;
+            s.sstart = body;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 7) {
+            HStmt s = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(s);
+        }
+        if (a.kind == 8) {
+            return this.build_return(a);
+        }
+        if (a.kind == 9) {
+            HStmt s = this.new_stmt(8, a.line, a.col);
+            return this.push_stmt(s);
+        }
+        if (a.kind == 10) {
+            HStmt s = this.new_stmt(9, a.line, a.col);
+            return this.push_stmt(s);
+        }
+        if (a.kind == 11) {
+            HStmt s = this.new_stmt(10, a.line, a.col);
+            s.sval = a.sval;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 12) {
+            long val = this.build_expr(a.a);
+            HStmt s = this.new_stmt(11, a.line, a.col);
+            s.a = val;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 13) {
+            this.unsafe_depth_ = this.unsafe_depth_ + 1;
+            long body = this.build_stmt(a.a);
+            this.unsafe_depth_ = this.unsafe_depth_ - 1;
+            HStmt s = this.new_stmt(12, a.line, a.col);
+            s.a = body;
+            return this.push_stmt(s);
+        }
+        if (a.kind == 14) {
+            HStmt s = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(s);
+        }
+        HStmt s = this.new_stmt(13, a.line, a.col);
+        return this.push_stmt(s);
+    }
+
+    // --- expressions -----------------------------------------------------
+
+    long build_ident(AExpr a) {
+        long si = this.find_sym(a.sval);
+        HExpr e = this.new_expr(8, a.line, a.col);
+        e.sval = a.sval;
+        if (si >= 0) {
+            e.type = this.sym_type(si);
+            return this.push_expr(e);
+        }
+        long gi = this.find_global_enum(a.sval);
+        if (gi >= 0) {
+            HExpr lit = this.new_expr(1, a.line, a.col);
+            lit.ival = this.global_enum_value(gi);
+            lit.type = this.ty_int();
+            return this.push_expr(lit);
+        }
+        if (this.find_fn(a.sval) >= 0) {
+            this.err_fn_value(a.line, a.col, a.sval);
+        } else {
+            this.err_undeclared(a.line, a.col, a.sval);
+        }
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    long build_this(AExpr a) {
+        long si = this.find_sym("this");
+        HExpr e = this.new_expr(7, a.line, a.col);
+        if (si >= 0) {
+            e.type = this.sym_type(si);
+            return this.push_expr(e);
+        }
+        this.err_this(a.line, a.col);
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    long build_member(AExpr a) {
+        if (a.flag == 0 && a.is_scope != 0) {
+            this.db_start_ = this.db_n_;
+            if (this.flatten_chain(a.a) != 0) {
+                this.tmp_ = this.db_end();
+                long ei = this.find_enum(this.tmp_);
+                if (ei >= 0) {
+                    long val = this.enum_const_value(ei, a.sval);
+                    if (this.eval_hit_ != 0) {
+                        HExpr lit = this.new_expr(1, a.line, a.col);
+                        lit.ival = val;
+                        AType t = this.ty_empty();
+                        AEnum ed = this.pa.get_enum(ei);
+                        t.base = ed.name;
+                        lit.type = t;
+                        return this.push_expr(lit);
+                    }
+                    this.err_no_enumerator(a.line, a.col, this.tmp_, a.sval);
+                    HExpr bad = this.new_expr(1, a.line, a.col);
+                    bad.type = this.ty_dummy();
+                    return this.push_expr(bad);
+                }
+            }
+        }
+
+        long base = this.build_expr(a.a);
+        HExpr be;
+        unsafe {
+            be = this.u.exprs[base];
+        }
+        AType bt = be.type;
+        if (a.flag != 0) {
+            if (bt.ptr_depth == 0) {
+                this.err_arrow(a.line, a.col, bt);
+                HExpr bad = this.new_expr(14, a.line, a.col);
+                bad.sval = a.sval;
+                bad.flag = a.flag;
+                bad.a = base;
+                bad.type = this.ty_dummy();
+                return this.push_expr(bad);
+            }
+            bt.ptr_depth = bt.ptr_depth - 1;
+        } else {
+            bt.is_ref = 0;
+        }
+        long si = this.find_struct(bt.base);
+        if (si < 0) {
+            this.err_not_struct(a.line, a.col, bt, "access member", a.sval);
+            HExpr bad = this.new_expr(14, a.line, a.col);
+            bad.sval = a.sval;
+            bad.flag = a.flag;
+            bad.a = base;
+            bad.type = this.ty_dummy();
+            return this.push_expr(bad);
+        }
+        AStruct sd = this.pa.get_struct(si);
+        if (this.lookup_field(sd, a.sval) == 0) {
+            this.err_no_member(a.line, a.col, sd.name, a.sval);
+            HExpr bad = this.new_expr(14, a.line, a.col);
+            bad.sval = a.sval;
+            bad.flag = a.flag;
+            bad.a = base;
+            bad.type = this.ty_dummy();
+            return this.push_expr(bad);
+        }
+        AField f = this.found_field_;
+        HExpr e = this.new_expr(14, a.line, a.col);
+        e.sval = a.sval;
+        e.flag = a.flag;
+        e.a = base;
+        e.type = this.resolve_alias(f.type);
+        return this.push_expr(e);
+    }
+
+    long flatten_chain(long idx) {
+        AExpr e = this.get_expr(idx);
+        if (e.kind == 8) {
+            this.db_put(e.sval);
+            return 1;
+        }
+        if (e.kind == 15 && e.is_scope != 0) {
+            if (this.flatten_chain(e.a) == 0) {
+                return 0;
+            }
+            this.db_put("::");
+            this.db_put(e.sval);
+            return 1;
+        }
+        return 0;
+    }
+
+    // Type identity (Type::operator== in ast.h, minus template arguments).
+    bool same_type(AType a, AType b) {
+        if (!this.seq(a.base, b.base)) { return false; }
+        if (a.is_unsigned != b.is_unsigned) { return false; }
+        if (a.is_const != b.is_const) { return false; }
+        if (a.ptr_depth != b.ptr_depth) { return false; }
+        if (a.array_size != b.array_size) { return false; }
+        return true;
+    }
+
+    // Approximate bit width of a numeric base name (typeWidth in
+    // hir_builder.cpp) — used to rank overload candidates.
+    long type_width(const char* b) {
+        if (this.seq(b, "bool") || this.seq(b, "char") || this.seq(b, "int8_t") ||
+            this.seq(b, "uint8_t") || this.seq(b, "signed char") ||
+            this.seq(b, "unsigned char")) { return 8; }
+        if (this.seq(b, "short") || this.seq(b, "int16_t") || this.seq(b, "uint16_t")) { return 16; }
+        if (this.seq(b, "int") || this.seq(b, "int32_t") || this.seq(b, "uint32_t") ||
+            this.seq(b, "float") || this.seq(b, "float32_t") || this.seq(b, "bfloat16_t") ||
+            this.seq(b, "float16_t")) { return 32; }
+        if (this.seq(b, "long") || this.seq(b, "int64_t") || this.seq(b, "uint64_t") ||
+            this.seq(b, "size_t") || this.seq(b, "ptrdiff_t") || this.seq(b, "uptr_t") ||
+            this.seq(b, "long long") || this.seq(b, "double") || this.seq(b, "float64_t")) { return 64; }
+        if (this.seq(b, "long double") || this.seq(b, "float128_t") ||
+            this.seq(b, "int128_t") || this.seq(b, "uint128_t")) { return 128; }
+        return 0;
+    }
+
+    AType arg_type(long argIdx) {
+        long ai = -1;
+        unsafe {
+            ai = this.u.args[argIdx];
+        }
+        HExpr ae;
+        unsafe {
+            ae = this.u.exprs[ai];
+        }
+        return ae.type;
+    }
+
+    // Rank an overload candidate against the argument types
+    // (resolveOverload in hir_builder.cpp).  0 means "does not match".
+    long rank_overload(long fi, long argstart, long argcount) {
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[fi];
+        }
+        long expected = hf.pn;
+        long actual = argcount;
+        if (expected > actual) {
+            // A candidate can only take the call when every missing
+            // parameter has a default value.
+            long m = actual;
+            while (m < expected) {
+                HParam mp;
+                unsafe {
+                    mp = this.u.params[hf.pstart + m];
+                }
+                if (mp.default_value < 0) {
+                    return 0;
+                }
+                m = m + 1;
+            }
+        } else if (hf.is_extern_c == 0 && expected != actual) {
+            return 0;
+        }
+        long score = 0;
+        long i = 0;
+        while (i < expected) {
+            HParam p;
+            unsafe {
+                p = this.u.params[hf.pstart + i];
+            }
+            if (i >= actual) {
+                score = score + 80;
+                i = i + 1;
+                continue;
+            }
+            AType pt = p.type;
+            pt.is_ref = 0;
+            AType at = this.arg_type(argstart + i);
+            at.is_ref = 0;
+            if (this.same_type(pt, at)) {
+                score = score + 100;
+            } else if (this.is_numeric(pt) && this.is_numeric(at)) {
+                long pw = this.type_width(pt.base);
+                long aw = this.type_width(at.base);
+                if (pw > 0 && aw > 0) {
+                    long d = 0;
+                    if (pw > aw) { d = pw - aw; } else { d = aw - pw; }
+                    score = score + (90 - d);
+                } else {
+                    score = score + 50;
+                }
+            } else if (this.is_assignable(pt, at)) {
+                score = score + 1;
+            } else {
+                return 0;
+            }
+            i = i + 1;
+        }
+        return score;
+    }
+
+    // Resolve a call to one of the overloads named `name`
+    // (resolveOverload in hir_builder.cpp).  Returns the HIR function index
+    // or -1 when no candidate matches.
+    long resolve_overload(const char* name, long argstart, long argcount, long line, long col) {
+        long n = 0;
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.seq(f.name, name)) {
+                if (n < this.ovl_cap_) {
+                    unsafe {
+                        this.ovl_[n] = i;
+                    }
+                    n = n + 1;
+                }
+            }
+            i = i + 1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        if (n == 1) {
+            long only = -1;
+            unsafe {
+                only = this.ovl_[0];
+            }
+            return only;
+        }
+        long best = -1;
+        long best_score = 0;
+        long ambiguous = 0;
+        long k = 0;
+        while (k < n) {
+            long fi = -1;
+            unsafe {
+                fi = this.ovl_[k];
+            }
+            long score = this.rank_overload(fi, argstart, argcount);
+            if (score > best_score) {
+                best_score = score;
+                best = fi;
+                ambiguous = 0;
+            } else if (score == best_score && score > 0) {
+                ambiguous = 1;
+            }
+            k = k + 1;
+        }
+        if (ambiguous != 0) {
+            this.diag(line, col, "ambiguous call to overloaded function");
+            return -1;
+        }
+        if (best < 0) {
+            this.diag(line, col, "no matching overload for argument types");
+            return -1;
+        }
+        return best;
+    }
+
+    // checkCall in hir_builder.cpp: verify the argument count and the
+    // argument types against the callee signature.  Missing arguments with
+    // a default value are filled in at the call site; the new argument
+    // count is returned.
+    long check_call(long fnIdx, long argstart, long argcount, long line, long col) {
+        if (fnIdx < 0) {
+            return argcount;
+        }
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[fnIdx];
+        }
+        long expected = hf.pn;
+        long actual = argcount;
+        long variadic = hf.is_extern_c;
+        if (actual < expected && variadic == 0) {
+            long i = actual;
+            while (i < expected) {
+                HParam p;
+                unsafe {
+                    p = this.u.params[hf.pstart + i];
+                }
+                if (p.default_value < 0) {
+                    this.err_call_missing_arg(line, col, hf.name, i + 1, p.name);
+                    return actual;
+                }
+                long de = this.build_expr(p.default_value);
+                this.push_arg(de);
+                actual = actual + 1;
+                i = i + 1;
+            }
+        }
+        if (expected > actual || (variadic == 0 && expected != actual)) {
+            this.err_call_arity(line, col, hf.name, expected, actual);
+            return actual;
+        }
+        long i = 0;
+        while (i < expected && i < actual) {
+            HParam p;
+            unsafe {
+                p = this.u.params[hf.pstart + i];
+            }
+            long ai = -1;
+            unsafe {
+                ai = this.u.args[argstart + i];
+            }
+            HExpr ae;
+            unsafe {
+                ae = this.u.exprs[ai];
+            }
+            if (this.is_assignable(p.type, ae.type) == 0) {
+                this.err_call_arg_type(ae.line, ae.col, hf.name, i + 1, p.type, ae.type);
+            }
+            i = i + 1;
+        }
+        return actual;
+    }
+
+    long build_call(AExpr a) {
+        HExpr e = this.new_expr(12, a.line, a.col);
+        AExpr ca = this.get_expr(a.a);
+
+        if (ca.kind == 15 && ca.is_scope == 0) {
+            // Method call: obj.method(args) / obj->method(args).
+            // Arguments are built before the receiver (matches the oracle).
+            long total = a.an + 1;
+            long slot = this.ab_n_;
+            this.ab_n_ = this.ab_n_ + total;
+            long j = 0;
+            while (j < a.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.pa.call_args()[a.astart + j];
+                }
+                long he = this.build_expr(ai);
+                unsafe {
+                    this.abuf_[slot + 1 + j] = he;
+                }
+                j = j + 1;
+            }
+            long base = this.build_expr(ca.a);
+            long recv = base;
+            HExpr be;
+            unsafe {
+                be = this.u.exprs[base];
+            }
+            AType bt = be.type;
+            long arrow_bad = 0;
+            long mfn = -1;
+            long si = -1;
+            if (ca.flag == 0) {
+                bt.is_ref = 0;
+            } else if (bt.ptr_depth > 0) {
+                bt.ptr_depth = bt.ptr_depth - 1;
+            } else {
+                this.err_arrow_operand(a.line, a.col);
+                arrow_bad = 1;
+            }
+            if (arrow_bad == 0) {
+                if (ca.flag != 0) {
+                    HExpr r = this.new_expr(14, ca.line, ca.col);
+                    r.sval = ca.sval;
+                    r.flag = 1;
+                    r.a = base;
+                    r.type = bt;
+                    recv = this.push_expr(r);
+                }
+                long si2 = this.find_struct(bt.base);
+                si = si2;
+                if (si < 0) {
+                    this.err_not_struct(a.line, a.col, bt, "call method", ca.sval);
+                } else {
+                    AStruct sd = this.pa.get_struct(si);
+                    this.find_method_owner(sd, ca.sval);
+                }
+            }
+            unsafe {
+                this.abuf_[slot] = recv;
+            }
+            e.astart = this.u.a_n;
+            long k = 0;
+            while (k < total) {
+                long ix = -1;
+                unsafe {
+                    ix = this.abuf_[slot + k];
+                }
+                this.push_arg(ix);
+                k = k + 1;
+            }
+            e.an = total;
+            if (arrow_bad == 0 && si >= 0) {
+                // Resolve the method once the argument list is complete: the
+                // receiver is passed as the implicit `this` argument.
+                long fi = this.resolve_overload(this.tmp_, e.astart, e.an, a.line, a.col);
+                if (fi >= 0) {
+                    mfn = fi;
+                    HFunction hf;
+                    unsafe {
+                        hf = this.u.fns[fi];
+                    }
+                    e.sval = hf.name;
+                    e.type = hf.ret;
+                } else if (this.count_fns(this.tmp_) == 0) {
+                    AStruct sd = this.pa.get_struct(si);
+                    this.err_no_method(a.line, a.col, sd.name, ca.sval);
+                }
+            }
+            if (mfn >= 0) {
+                e.an = this.check_call(mfn, e.astart, e.an, a.line, a.col);
+            }
+            return this.push_expr(e);
+        }
+
+        // Arguments are built before callee resolution (matches the oracle).
+        long total = a.an;
+        long slot = this.ab_n_;
+        this.ab_n_ = this.ab_n_ + total;
+        long j = 0;
+        while (j < a.an) {
+            long ai = -1;
+            unsafe {
+                ai = this.pa.call_args()[a.astart + j];
+            }
+            long he = this.build_expr(ai);
+            unsafe {
+                this.abuf_[slot + j] = he;
+            }
+            j = j + 1;
+        }
+        e.astart = this.u.a_n;
+        long k = 0;
+        while (k < total) {
+            long ix = -1;
+            unsafe {
+                ix = this.abuf_[slot + k];
+            }
+            this.push_arg(ix);
+            k = k + 1;
+        }
+        e.an = total;
+
+        if (ca.kind == 8) {
+            long fi = this.resolve_overload(ca.sval, e.astart, e.an, a.line, a.col);
+            if (fi >= 0) {
+                HFunction hf;
+                unsafe {
+                    hf = this.u.fns[fi];
+                }
+                e.sval = hf.name;
+                e.type = hf.ret;
+                e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
+                return this.push_expr(e);
+            }
+            if (this.count_fns(ca.sval) != 0) {
+                // Overload resolution already reported the problem.
+                e.sval = ca.sval;
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+            if (this.seq(ca.sval, "move") && a.an == 1) {
+                long ai = -1;
+                unsafe {
+                    ai = this.abuf_[slot];
+                }
+                HExpr ae;
+                unsafe {
+                    ae = this.u.exprs[ai];
+                }
+                if (ae.kind == 8) {
+                    e.sval = ca.sval;
+                    e.type = ae.type;
+                    return this.push_expr(e);
+                }
+            }
+            if (this.find_sym(ca.sval) < 0 && this.find_global_enum(ca.sval) < 0) {
+                this.err_undeclared(ca.line, ca.col, ca.sval);
+            }
+            if (this.is_builtin_fn(ca.sval) == 0) {
+                this.err_call_undeclared(ca.line, ca.col, ca.sval);
+            }
+            e.sval = ca.sval;
+            if (this.is_builtin_fn(ca.sval) != 0) {
+                e.type = this.builtin_ret(ca.sval);
+            } else {
+                e.type = this.ty_dummy();
+            }
+            return this.push_expr(e);
+        }
+        if (ca.kind == 15 && ca.is_scope != 0) {
+            this.db_start_ = this.db_n_;
+            if (this.flatten_chain(a.a) != 0) {
+                this.tmp_ = this.db_end();
+                long fi = this.resolve_overload(this.tmp_, e.astart, e.an, a.line, a.col);
+                if (fi >= 0) {
+                    HFunction hf;
+                    unsafe {
+                        hf = this.u.fns[fi];
+                    }
+                    e.sval = hf.name;
+                    e.type = hf.ret;
+                    e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
+                    return this.push_expr(e);
+                }
+                if (this.count_fns(this.tmp_) != 0) {
+                    e.sval = this.tmp_;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                if (this.is_builtin_fn(this.tmp_) != 0) {
+                    e.sval = this.tmp_;
+                    e.type = this.builtin_ret(this.tmp_);
+                    return this.push_expr(e);
+                }
+                this.err_call_undeclared(ca.line, ca.col, this.tmp_);
+                e.sval = this.tmp_;
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+        }
+        this.diag(ca.line, ca.col, "callee must be a function name");
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    long build_expr(long idx) {
+        AExpr a = this.get_expr(idx);
+        if (a.kind == 1) {
+            HExpr e = this.new_expr(1, a.line, a.col);
+            e.ival = a.ival;
+            e.type = this.ty_int();
+            return this.push_expr(e);
+        }
+        if (a.kind == 2) {
+            HExpr e = this.new_expr(2, a.line, a.col);
+            e.sval = a.sval;
+            e.type = this.ty_double();
+            return this.push_expr(e);
+        }
+        if (a.kind == 3) {
+            HExpr e = this.new_expr(3, a.line, a.col);
+            e.sval = a.sval;
+            AType t = this.ty_empty();
+            t.base = "char";
+            t.is_const = 1;
+            t.ptr_depth = 1;
+            e.type = t;
+            return this.push_expr(e);
+        }
+        if (a.kind == 4) {
+            HExpr e = this.new_expr(4, a.line, a.col);
+            e.sval = a.sval;
+            e.type = this.ty_char();
+            return this.push_expr(e);
+        }
+        if (a.kind == 5) {
+            HExpr e = this.new_expr(5, a.line, a.col);
+            e.ival = a.flag;
+            e.type = this.ty_bool();
+            return this.push_expr(e);
+        }
+        if (a.kind == 6) {
+            HExpr e = this.new_expr(6, a.line, a.col);
+            this.require_unsafe(a.line, a.col, "'nullptr' literal");
+            e.type = this.ty_nullptr();
+            return this.push_expr(e);
+        }
+        if (a.kind == 7) {
+            HExpr e = this.new_expr(6, a.line, a.col);
+            AType t = this.ty_empty();
+            t.base = "nullopt";
+            e.type = t;
+            return this.push_expr(e);
+        }
+        if (a.kind == 8) {
+            return this.build_ident(a);
+        }
+        if (a.kind == 9) {
+            return this.build_this(a);
+        }
+        if (a.kind == 10) {
+            return this.build_unary(a);
+        }
+        if (a.kind == 11) {
+            return this.build_binary(a);
+        }
+        if (a.kind == 12) {
+            return this.build_ternary(a);
+        }
+        if (a.kind == 13) {
+            return this.build_call(a);
+        }
+        if (a.kind == 14) {
+            return this.build_index(a);
+        }
+        if (a.kind == 15) {
+            return this.build_member(a);
+        }
+        if (a.kind == 16) {
+            return this.build_assign(a);
+        }
+        if (a.kind == 18) {
+            HExpr e = this.new_expr(16, a.line, a.col);
+            e.type = this.ty_int();
+            return this.push_expr(e);
+        }
+        if (a.kind == 19) {
+            HExpr e = this.new_expr(17, a.line, a.col);
+            e.type = this.ty_int();
+            return this.push_expr(e);
+        }
+        if (a.kind == 20) {
+            return this.build_cast(a);
+        }
+        HExpr e = this.new_expr(8, a.line, a.col);
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    // Find the method `name` in the struct's method table or in one of its
+    // base classes (the oracle copies the base method tables into the
+    // derived struct).  The qualified method name is left in `this.tmp_`.
+    // Returns 1 when the method was found.
+    bool find_method_owner(AStruct sd, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put(sd.name);
+        this.db_put("::");
+        this.db_put(name);
+        this.tmp_ = this.db_end();
+        if (this.count_fns(this.tmp_) != 0) {
+            return true;
+        }
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                AStruct bs = this.pa.get_struct(bi);
+                if (this.find_method_owner(bs, name)) {
+                    return true;
+                }
+            }
+            k = k + 1;
+        }
+        return false;
+    }
+
+    // Find the struct in the inheritance chain that declares the
+    // `operator<op>` method.  The oracle copies the base method tables
+    // into the derived struct, so an inherited operator is found through
+    // the base.  Returns 1 when an owner was found; the qualified method
+    // name is left in `op_name_`.
+    bool find_operator_owner(AStruct sd, const char* op) {
+        this.db_start_ = this.db_n_;
+        this.db_put(sd.name);
+        this.db_put("::operator");
+        this.db_put(op);
+        this.op_name_ = this.db_end();
+        if (this.count_fns(this.op_name_) != 0) {
+            this.op_owner_ = sd.name;
+            return true;
+        }
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                AStruct bs = this.pa.get_struct(bi);
+                if (this.find_operator_owner(bs, op)) {
+                    return true;
+                }
+            }
+            k = k + 1;
+        }
+        return false;
+    }
+
+    // tryOperatorOverload in hir_builder.cpp: rewrite `base op rhs` as a
+    // call to the struct's `operator<op>` method with the base injected as
+    // the implicit `this` argument.  Returns the call expression index, or
+    // -1 when the struct declares no matching operator.
+    long try_operator_overload(long baseIdx, const char* op, long rhsIdx,
+                               long line, long col) {
+        HExpr be;
+        unsafe {
+            be = this.u.exprs[baseIdx];
+        }
+        AType bt = be.type;
+        bt.is_ref = 0;
+        // D4: no operator overload on pointers-to-struct.
+        if (bt.ptr_depth > 0) {
+            return -1;
+        }
+        long si = this.find_struct(bt.base);
+        if (si < 0) {
+            return -1;
+        }
+        AStruct sd = this.pa.get_struct(si);
+        if (this.find_operator_owner(sd, op) == 0) {
+            return -1;
+        }
+        // Build the argument list: the base is the implicit `this`.
+        long start = this.u.a_n;
+        this.push_arg(baseIdx);
+        long n = 1;
+        if (rhsIdx >= 0) {
+            this.push_arg(rhsIdx);
+            n = 2;
+        }
+        long fi = this.resolve_overload(this.op_name_, start, n, line, col);
+        if (fi < 0) {
+            return -1;
+        }
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[fi];
+        }
+        HExpr e = this.new_expr(12, line, col);
+        e.sval = hf.name;
+        e.type = hf.ret;
+        e.astart = start;
+        e.an = n;
+        long idx = this.push_expr(e);
+        long cnt = this.check_call(fi, start, n, line, col);
+        if (cnt != n) {
+            unsafe {
+                this.u.exprs[idx].an = cnt;
+            }
+        }
+        return idx;
+    }
+
+    // Unary operators (buildExpr / Expr::Unary in hir_builder.cpp).
+    long build_unary(AExpr a) {
+        long opnd = this.build_expr(a.a);
+        HExpr oe;
+        unsafe {
+            oe = this.u.exprs[opnd];
+        }
+        AType ot = oe.type;
+        HExpr e = this.new_expr(9, a.line, a.col);
+        e.sval = a.sval;
+        e.flag = a.flag;
+        e.a = opnd;
+        if (ot.ptr_depth == 0 && this.is_struct_name(ot.base)) {
+            // A struct operand needs an operator overload (7.4).
+            long callIdx = this.try_operator_overload(opnd, a.sval, -1, a.line, a.col);
+            if (callIdx >= 0) {
+                return callIdx;
+            }
+            this.err_no_operator(a.line, a.col, ot, a.sval);
+            e.type = this.ty_dummy();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "!")) {
+            if (this.is_numeric(ot) == 0 && ot.ptr_depth == 0) {
+                this.err_unary_operand(a.line, a.col, "'!' expects a numeric or pointer operand");
+            }
+            e.type = this.ty_bool();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "~")) {
+            if (this.is_integer_like(ot) == 0) {
+                this.err_unary_operand(a.line, a.col, "'~' expects an integer operand");
+            }
+            e.type = this.strip_ref(ot);
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "-") || this.seq(a.sval, "+")) {
+            if (this.is_numeric(ot) == 0) {
+                this.err_unary_op(a.line, a.col, "numeric", a.sval);
+            }
+            e.type = this.strip_ref(ot);
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "*")) {
+            if (ot.ptr_depth == 0) {
+                this.err_unary_operand(a.line, a.col, "'*' expects a pointer operand");
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+            this.require_unsafe(a.line, a.col, "pointer dereference");
+            ot.ptr_depth = ot.ptr_depth - 1;
+            e.type = ot;
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "&")) {
+            if (oe.kind != 8) {
+                this.err_unary_operand(a.line, a.col,
+                    "'&' is only supported on variables in the Ivy subset");
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+            this.require_unsafe(a.line, a.col,
+                "address-of operator '&' taking raw pointer");
+            ot.ptr_depth = ot.ptr_depth + 1;
+            e.type = ot;
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "++") || this.seq(a.sval, "--")) {
+            if (ot.ptr_depth > 0) {
+                this.require_unsafe(a.line, a.col, "pointer increment/decrement");
+            } else if (this.is_numeric(ot) == 0) {
+                this.db_start_ = this.db_n_;
+                this.db_put("'");
+                this.db_put(a.sval);
+                this.db_put("' expects a numeric or pointer operand");
+                this.diag(a.line, a.col, this.db_end());
+            }
+            e.type = ot;
+            return this.push_expr(e);
+        }
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    // Binary operators (buildExpr / Expr::Binary in hir_builder.cpp).
+    long build_binary(AExpr a) {
+        long lhs = this.build_expr(a.a);
+        long rhs = this.build_expr(a.b);
+        HExpr le;
+        HExpr re;
+        unsafe {
+            le = this.u.exprs[lhs];
+            re = this.u.exprs[rhs];
+        }
+        AType lt = le.type;
+        AType rt = re.type;
+        HExpr e = this.new_expr(10, a.line, a.col);
+        e.sval = a.sval;
+        e.a = lhs;
+        e.b = rhs;
+        bool lnum = this.is_numeric(lt);
+        bool rnum = this.is_numeric(rt);
+        bool lptr = lt.ptr_depth > 0;
+        bool rptr = rt.ptr_depth > 0;
+        bool lnull = this.seq(lt.base, "nullptr");
+        bool rnull = this.seq(rt.base, "nullptr");
+
+        if (lt.ptr_depth == 0 && this.is_struct_name(lt.base)) {
+            // A struct operand needs an operator overload (7.4).
+            long callIdx = this.try_operator_overload(lhs, a.sval, rhs, a.line, a.col);
+            if (callIdx >= 0) {
+                return callIdx;
+            }
+            this.err_no_operator(a.line, a.col, lt, a.sval);
+            e.type = this.ty_dummy();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "==") || this.seq(a.sval, "!=")) {
+            bool ok = (lnum && rnum) || (lptr && rptr) ||
+                      (lnull && rptr) || (rnull && lptr);
+            if (ok == 0) {
+                this.err_binary_incompatible(a.line, a.col, a.sval);
+            }
+            e.type = this.ty_bool();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "<") || this.seq(a.sval, ">") ||
+            this.seq(a.sval, "<=") || this.seq(a.sval, ">=")) {
+            if (lptr || rptr) {
+                if (lptr == 0 || rptr == 0) {
+                    this.err_binary_ptr_mixed(a.line, a.col, a.sval);
+                }
+            } else if (lnum == 0 || rnum == 0) {
+                this.err_binary_expects(a.line, a.col, a.sval, "numeric");
+            }
+            e.type = this.ty_bool();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "&&") || this.seq(a.sval, "||")) {
+            if ((lnum || lptr) == 0 || (rnum || rptr) == 0) {
+                this.err_binary_expects(a.line, a.col, a.sval, "numeric or pointer");
+            }
+            e.type = this.ty_bool();
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "<<") || this.seq(a.sval, ">>") ||
+            this.seq(a.sval, "&") || this.seq(a.sval, "|") ||
+            this.seq(a.sval, "^")) {
+            if (lnum == 0 || rnum == 0) {
+                this.err_binary_expects(a.line, a.col, a.sval, "integer");
+            }
+            e.type = this.promote(lt, rt);
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "+") || this.seq(a.sval, "-")) {
+            if (lptr || rptr) {
+                this.require_unsafe(a.line, a.col, "pointer arithmetic");
+                if (lptr && rptr) {
+                    this.diag(a.line, a.col,
+                        "pointer subtraction is not supported in the Ivy subset");
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                if (lptr && rnum == 0) {
+                    this.err_ptr_non_numeric(a.line, a.col, a.sval);
+                }
+                if (rptr && lnum == 0) {
+                    this.err_ptr_non_numeric(a.line, a.col, a.sval);
+                }
+                if (lptr) { e.type = lt; } else { e.type = rt; }
+                return this.push_expr(e);
+            }
+            if (lnum == 0 || rnum == 0) {
+                this.err_binary_expects(a.line, a.col, a.sval, "numeric");
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+            e.type = this.promote(lt, rt);
+            return this.push_expr(e);
+        }
+        if (this.seq(a.sval, "*") || this.seq(a.sval, "/") ||
+            this.seq(a.sval, "%")) {
+            if (lnum == 0 || rnum == 0) {
+                this.err_binary_expects(a.line, a.col, a.sval, "numeric");
+                e.type = this.ty_dummy();
+                return this.push_expr(e);
+            }
+            if (this.seq(a.sval, "%") &&
+                (this.is_integer_like(lt) == 0 || this.is_integer_like(rt) == 0)) {
+                this.err_binary_expects(a.line, a.col, "%", "integer");
+            }
+            e.type = this.promote(lt, rt);
+            return this.push_expr(e);
+        }
+        e.type = this.ty_dummy();
+        return this.push_expr(e);
+    }
+
+    // Ternary operator (buildExpr / Expr::Ternary in hir_builder.cpp).
+    long build_ternary(AExpr a) {
+        long cond = this.build_expr(a.a);
+        this.check_condition(cond);
+        long thenb = this.build_expr(a.b);
+        long elseb = this.build_expr(a.c);
+        HExpr te;
+        HExpr ee;
+        unsafe {
+            te = this.u.exprs[thenb];
+            ee = this.u.exprs[elseb];
+        }
+        HExpr e = this.new_expr(11, a.line, a.col);
+        e.a = cond;
+        e.b = thenb;
+        e.c = elseb;
+        AType t = this.promote(te.type, ee.type);
+        if (this.seq(t.base, "char") || this.seq(t.base, "bool") ||
+            this.seq(t.base, "void") || this.slen(t.base) == 0) {
+            t = te.type;
+        }
+        e.type = t;
+        return this.push_expr(e);
+    }
+
+    // Subscript operator (buildExpr / Expr::Index in hir_builder.cpp).
+    long build_index(AExpr a) {
+        long base = this.build_expr(a.a);
+        long index = this.build_expr(a.b);
+        HExpr be;
+        unsafe {
+            be = this.u.exprs[base];
+        }
+        AType t = be.type;
+        HExpr e = this.new_expr(13, a.line, a.col);
+        e.a = base;
+        e.b = index;
+        if (t.array_size == 0 && t.ptr_depth == 0 && this.is_struct_name(t.base)) {
+            // A struct operand needs an `operator[]` overload (7.4).
+            long callIdx = this.try_operator_overload(base, "[]", index, a.line, a.col);
+            if (callIdx >= 0) {
+                return callIdx;
+            }
+            this.err_no_operator(a.line, a.col, t, "[]");
+            e.type = this.ty_dummy();
+        } else if (t.array_size > 0) {
+            t.array_size = 0;
+            e.type = t;
+        } else if (t.ptr_depth > 0) {
+            this.require_unsafe(a.line, a.col, "pointer indexing");
+            t.ptr_depth = t.ptr_depth - 1;
+            e.type = t;
+        } else {
+            this.diag(a.line, a.col, "'[]' requires an array or pointer operand");
+            e.type = this.ty_dummy();
+        }
+        if (index >= 0) {
+            HExpr ie;
+            unsafe {
+                ie = this.u.exprs[index];
+            }
+            if (this.is_numeric(ie.type) == 0) {
+                this.diag(ie.line, ie.col, "index expression must be numeric");
+            }
+        }
+        return this.push_expr(e);
+    }
+
+    // Assignment (buildExpr / Expr::Assign in hir_builder.cpp).
+    long build_assign(AExpr a) {
+        long lhs = this.build_expr(a.a);
+        long rhs = this.build_expr(a.b);
+        HExpr le;
+        HExpr re;
+        unsafe {
+            le = this.u.exprs[lhs];
+            re = this.u.exprs[rhs];
+        }
+        HExpr e = this.new_expr(15, a.line, a.col);
+        e.sval = a.sval;
+        e.a = lhs;
+        e.b = rhs;
+        e.type = le.type;
+        bool lhs_var = le.kind == 8;
+        bool lhs_idx = le.kind == 13;
+        bool lhs_mem = le.kind == 14;
+        bool lhs_deref = false;
+        if (le.kind == 9 && le.flag != 0 && this.seq(le.sval, "*")) {
+            lhs_deref = true;
+        }
+        bool lhs_call_ref = false;
+        if (le.kind == 12 && le.type.is_ref != 0) {
+            lhs_call_ref = true;
+        }
+        if (lhs_var == 0 && lhs_idx == 0 && lhs_mem == 0 &&
+            lhs_deref == 0 && lhs_call_ref == 0) {
+            this.diag(a.line, a.col, "left-hand side of assignment is not assignable");
+        } else if (this.seq(a.sval, "=")) {
+            if (le.type.is_const != 0 && le.type.ptr_depth == 0) {
+                this.diag(a.line, a.col, "cannot assign to const variable");
+            } else if (this.is_assignable(le.type, re.type) == 0) {
+                this.err_assign_types(a.line, a.col, le.type, re.type);
+            } else {
+                // B5 / B6: materialise an expected<T, E> / optional<T>.
+                e.b = this.wrap_value(le.type, rhs, a.line, a.col);
+            }
+        } else {
+            if (this.is_numeric(le.type) == 0 || this.is_numeric(re.type) == 0) {
+                this.err_compound_assign(a.line, a.col, a.sval);
+            }
+        }
+        return this.push_expr(e);
+    }
+
+    // Explicit cast (buildExpr / Expr::Cast in hir_builder.cpp).
+    long build_cast(AExpr a) {
+        AType target = this.resolve_alias(a.type);
+        target.is_ref = 0;
+        long opnd = this.build_expr(a.a);
+        HExpr oe;
+        unsafe {
+            oe = this.u.exprs[opnd];
+        }
+        AType from = oe.type;
+        from.is_ref = 0;
+        HExpr e = this.new_expr(18, a.line, a.col);
+        e.a = opnd;
+        e.flag = a.flag;
+        e.type = target;
+        if (a.flag == 1) {
+            // reinterpret_cast / C-style cast
+            this.require_unsafe(a.line, a.col,
+                a.flag == 1 ? "reinterpret_cast" : "C-style cast");
+            bool ok = false;
+            if (target.ptr_depth > 0 && from.ptr_depth > 0) {
+                ok = true;
+            } else if (target.ptr_depth > 0 && this.is_integer_base(from.base)) {
+                ok = true;
+            } else if (this.is_integer_base(target.base) && from.ptr_depth > 0) {
+                ok = true;
+            } else if (this.is_numeric(target) && this.is_numeric(from)) {
+                ok = true;
+            }
+            if (ok == 0) {
+                this.err_cast_convert(a.line, a.col, "reinterpret_cast", from, target);
+            }
+            return this.push_expr(e);
+        }
+        if (a.flag == 2) {
+            // const_cast
+            this.require_unsafe(a.line, a.col, "const_cast");
+            if (!this.seq(target.base, from.base) ||
+                target.ptr_depth != from.ptr_depth) {
+                this.diag(a.line, a.col,
+                    "const_cast: target type must match source type except for const qualifier");
+            }
+            return this.push_expr(e);
+        }
+        // static_cast
+        bool ok = false;
+        if (this.is_numeric(target) && this.is_numeric(from)) {
+            ok = true;
+        } else if (target.ptr_depth > 0 && from.ptr_depth > 0) {
+            ok = this.seq(target.base, from.base) ||
+                 this.seq(target.base, "void") || this.seq(from.base, "void");
+        } else if (target.ptr_depth > 0 &&
+                   (this.seq(from.base, "nullptr") || this.seq(from.base, "nullptr_t"))) {
+            ok = true;
+        } else if (target.ptr_depth > 0 && this.is_integer_base(from.base)) {
+            ok = true;
+        } else if (this.is_integer_base(target.base) && from.ptr_depth > 0) {
+            ok = true;
+        } else if (this.is_integer_base(target.base) && this.is_enum_name(from.base)) {
+            ok = true;
+        } else if (this.is_enum_name(target.base) && this.is_integer_base(from.base)) {
+            ok = true;
+        }
+        if (ok == 0) {
+            this.err_cast_convert(a.line, a.col, "static_cast", from, target);
+        }
+        return this.push_expr(e);
+    }
+
+    // --- entry point -----------------------------------------------------
+
+    // Find the HIR function that matches an AST function by name and
+    // parameter types (the oracle matches the body to its signature).
+    // `skip` is the number of leading HIR parameters to ignore (1 for a
+    // method, whose first parameter is the implicit `this`).
+    long find_fn_sig(AFunction af, long skip) {
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.seq(f.name, af.name) && f.pn == af.nparams + skip) {
+                long k = 0;
+                long ok = 1;
+                while (k < af.nparams && ok != 0) {
+                    AParam p;
+                    unsafe {
+                        p = af.params[k];
+                    }
+                    AType a = this.resolve_alias(p.type);
+                    a.is_ref = 0;
+                    HParam hp;
+                    unsafe {
+                        hp = this.u.params[f.pstart + skip + k];
+                    }
+                    AType b = hp.type;
+                    b.is_ref = 0;
+                    if (this.same_type(a, b) == 0) {
+                        ok = 0;
+                    }
+                    k = k + 1;
+                }
+                if (ok != 0) {
+                    return i;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    void build() {
+        this.build_enums();
+        this.build_structs();
+        long n = this.pa.fn_count();
+        long i = 0;
+        while (i < n) {
+            AFunction f = this.pa.get_fn(i);
+            if (f.is_extern_c != 0) {
+                this.build_free_signature(f);
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < n) {
+            AFunction f = this.pa.get_fn(i);
+            if (f.is_extern_c == 0) {
+                this.build_free_signature(f);
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < n) {
+            AFunction f = this.pa.get_fn(i);
+            if (f.body >= 0) {
+                long fi = this.find_fn_sig(f, 0);
+                if (fi >= 0) {
+                    this.build_body(fi, f);
+                }
+            }
+            i = i + 1;
+        }
+        long sn = this.pa.struct_count();
+        long si = 0;
+        while (si < sn) {
+            AStruct sd = this.pa.get_struct(si);
+            long j = 0;
+            while (j < sd.nmethods) {
+                AFunction mf;
+                unsafe {
+                    mf = sd.methods[j];
+                }
+                if (mf.body >= 0) {
+                    long fi = this.find_fn_sig(mf, 1);
+                    if (fi >= 0) {
+                        this.build_body(fi, mf);
+                    }
+                }
+                j = j + 1;
+            }
+            si = si + 1;
+        }
+    }
+};
+
+
+
+
+
+
+
+

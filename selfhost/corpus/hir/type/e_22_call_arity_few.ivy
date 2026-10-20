@@ -1,0 +1,8 @@
+// Too few arguments is an error.
+int32 f(int32 a, int32 b) {
+    return a;
+}
+
+void g() {
+    auto c = f(1);
+}

@@ -1,0 +1,21 @@
+// Only a direct base binds to a base reference.
+struct Base {
+    int32 a;
+};
+
+struct Middle : public Base {
+    int32 b;
+};
+
+struct Derived : public Middle {
+    int32 c;
+};
+
+void g(Base& r) {
+    auto a = r.a;
+}
+
+void f() {
+    Derived d;
+    g(d);
+}

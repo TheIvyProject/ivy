@@ -1,0 +1,6 @@
+// `size` is an unsigned 64-bit type.
+void f() {
+    size a = 1;
+    auto b = a + 1;
+    auto c = 1 + a;
+}

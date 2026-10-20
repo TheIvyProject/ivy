@@ -1,0 +1,13 @@
+// A missing method argument is an error.
+struct Counter {
+    int32 v;
+
+    int32 get(int32 n) {
+        return this.v;
+    }
+};
+
+void f() {
+    Counter c;
+    auto a = c.get();
+}

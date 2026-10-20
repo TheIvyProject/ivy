@@ -1,0 +1,6 @@
+// A pointer operand makes the whole expression a pointer expression.
+void f() {
+    unsafe {
+        auto a = 1 + "text";
+    }
+}

@@ -1,0 +1,13 @@
+// A method call checks the method arguments.
+struct Counter {
+    int32 v;
+
+    int32 get(int32 n) {
+        return this.v;
+    }
+};
+
+void f() {
+    Counter c;
+    auto a = c.get(1);
+}

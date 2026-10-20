@@ -1,0 +1,5 @@
+// `for` checks its condition.
+void f() {
+    for (int32 i = 0; i < 10; i = i + 1) {
+    }
+}

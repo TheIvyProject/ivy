@@ -1,0 +1,11 @@
+using Index = int32;
+
+struct Box {
+    Index v;
+};
+
+void f(Index i) {
+    Index j = i;
+    Box b;
+    b.v = j;
+}

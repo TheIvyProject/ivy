@@ -1,0 +1,6 @@
+// String literals have type `const char*`.
+void f() {
+    unsafe {
+        auto a = "text";
+    }
+}

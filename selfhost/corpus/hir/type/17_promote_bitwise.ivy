@@ -1,0 +1,8 @@
+// Bitwise operators use the usual arithmetic conversions.
+void f() {
+    int32 a = 1;
+    int64 b = 2;
+    auto c = a & b;
+    auto d = a | b;
+    auto e = a ^ b;
+}

@@ -1,0 +1,9 @@
+// `&&` and `||` require numeric or pointer operands.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    Point p;
+    auto a = 1 && p;
+}

@@ -1,0 +1,4 @@
+// A non-void function must not fall off the end.
+int32 f() {
+    int32 a = 1;
+}

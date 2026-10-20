@@ -1,0 +1,13 @@
+// An enum value converts to an integer parameter.
+enum Color {
+    Red,
+    Green
+};
+
+int32 f(int32 a) {
+    return a;
+}
+
+void g() {
+    auto b = f(Red);
+}

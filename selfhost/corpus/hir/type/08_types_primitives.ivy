@@ -1,0 +1,17 @@
+// The fixed-width primitive types keep their canonical `_t` names.
+void f() {
+    int8 a = 1;
+    int16 b = 1;
+    int32 c = 1;
+    int64 d = 1;
+    uint8 e = 1;
+    uint16 g = 1;
+    uint32 h = 1;
+    uint64 i = 1;
+    float32 j = 1.5;
+    float64 k = 1.5;
+    bool l = true;
+    size m = 1;
+    iptr n = 1;
+    uptr o = 1;
+}

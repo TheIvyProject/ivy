@@ -1,0 +1,3 @@
+void f() {
+    int32 a = nope(1);
+}

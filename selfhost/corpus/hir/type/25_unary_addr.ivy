@@ -1,0 +1,8 @@
+// Address-of a variable yields a pointer to its type.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32** q = &p;
+    }
+}

@@ -1,0 +1,11 @@
+int32 twice(int32 x) {
+    return x * 2;
+}
+
+int32 quad(int32 x) {
+    return twice(twice(x));
+}
+
+void g() {
+    int32 y = quad(3);
+}

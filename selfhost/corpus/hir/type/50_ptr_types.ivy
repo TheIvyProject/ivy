@@ -1,0 +1,10 @@
+// Pointer types keep the pointee type.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32** q = &p;
+        auto a = *p;
+        auto b = *q;
+    }
+}

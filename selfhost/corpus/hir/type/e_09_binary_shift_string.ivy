@@ -1,0 +1,6 @@
+// Shift and bitwise operators require integer operands.
+void f() {
+    unsafe {
+        auto a = "text" << 1;
+    }
+}

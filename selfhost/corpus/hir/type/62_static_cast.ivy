@@ -1,0 +1,11 @@
+// `static_cast` converts between numeric and pointer types.
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        auto a = static_cast<int64>(1);
+        auto b = static_cast<float64>(1);
+        auto c = static_cast<int32*>(p);
+        auto d = static_cast<int64>(p);
+    }
+}

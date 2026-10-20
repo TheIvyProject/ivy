@@ -1,0 +1,8 @@
+// A condition may be a boolean.
+void f() {
+    bool a = true;
+    if (a) {
+    }
+    while (a) {
+    }
+}

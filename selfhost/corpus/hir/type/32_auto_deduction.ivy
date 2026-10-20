@@ -1,0 +1,9 @@
+// `auto` adopts the type of the initializer.
+void f() {
+    int32 a = 1;
+    auto b = a;
+    auto c = 1;
+    auto d = 1.5;
+    auto e = true;
+    auto g = 'x';
+}

@@ -1,0 +1,8 @@
+// A pointer is a valid condition.
+void f() {
+    unsafe {
+        int32* p = nullptr;
+        if (p) {
+        }
+    }
+}

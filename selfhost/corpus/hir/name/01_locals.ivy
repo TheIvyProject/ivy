@@ -1,0 +1,11 @@
+int32 sum(int32 a, int32 b) {
+    return a + b;
+}
+
+void f() {
+    int32 a = 0;
+    int32 b = 2;
+    int32 c = 3;
+    int32 d = 4;
+    a = sum(b, c) + d;
+}
