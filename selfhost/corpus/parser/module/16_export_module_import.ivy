@@ -1,0 +1,3 @@
+export module h36_iface2;
+import cpp <cstdint>;
+export int32 f(int32 x) { return x; }

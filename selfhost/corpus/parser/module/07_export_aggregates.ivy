@@ -1,0 +1,4 @@
+export struct S { int32 x; };
+export enum E { A, B };
+export using Alias = int32;
+void g() { S s; Alias v = 1; }

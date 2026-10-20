@@ -1,0 +1,2 @@
+export module h36_iface;
+export int32 add(int32 a, int32 b) { return a + b; }

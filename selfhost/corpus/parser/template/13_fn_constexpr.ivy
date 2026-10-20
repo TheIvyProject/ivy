@@ -1,0 +1,2 @@
+template <typename T> constexpr T id(T x) { return x; }
+void f() { int32 a = id<int32>(8); }

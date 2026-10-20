@@ -1,0 +1,2 @@
+module h36_impl;
+int32 f() { return 1; }

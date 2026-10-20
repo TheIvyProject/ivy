@@ -1,0 +1,4 @@
+void f() {
+  int32 x = 0;
+  [[ivy::unsafe]] { x = 1; }
+}

@@ -1,0 +1,2 @@
+import cpp <vector>;
+int32 f() { return 1; }

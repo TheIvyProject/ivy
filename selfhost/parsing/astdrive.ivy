@@ -488,6 +488,24 @@ void run() {
                                 k = k + 1;
                             }
                         } else {
+                            if (pa.is_module_export() != 0) {
+                                long slash = -1;
+                                long qi = 0;
+                                while (line[qi] != 0) {
+                                    if (line[qi] == 47 || line[qi] == 92) {
+                                        slash = qi;
+                                    }
+                                    qi = qi + 1;
+                                }
+                                if (slash >= 0) {
+                                    line[slash] = 0;
+                                }
+                                io::print("ivy: module interface written to '");
+                                io::print(line);
+                                io::print("\\");
+                                io::print(pa.module_name());
+                                io::println(".ivm'");
+                            }
                             Dumper d;
                             d.ep = pa.exprs();
                             d.sp = pa.stmts();

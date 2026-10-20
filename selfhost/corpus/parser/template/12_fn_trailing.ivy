@@ -1,0 +1,2 @@
+template <typename T> fn identity(T x) -> T { return x; }
+void f() { int32 a = identity<int32>(7); }

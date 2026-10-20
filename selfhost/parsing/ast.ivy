@@ -26,6 +26,8 @@ export struct AAttr {
     const char* name;
     const char* args;
     long has_args;
+    long line;
+    long col;
 };
 
 // A function parameter: type, optional name, and attributes.

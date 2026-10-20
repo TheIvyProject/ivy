@@ -1,0 +1,1 @@
+export constexpr int32 f() { return 1; }

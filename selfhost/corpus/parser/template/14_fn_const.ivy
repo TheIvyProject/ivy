@@ -1,0 +1,1 @@
+template <typename T> T inc(const T& x) { return x; }

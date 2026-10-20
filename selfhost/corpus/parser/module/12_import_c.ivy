@@ -1,0 +1,3 @@
+import c <stdio.h>;
+import c "h36.h";
+int32 f() { return 1; }

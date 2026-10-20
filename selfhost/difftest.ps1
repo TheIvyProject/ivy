@@ -45,19 +45,31 @@
 #   H3.1 (declarations: func def/proto, extern "C", constexpr, fn trailing,
 #     variadic, unnamed params, lifetime<>, cnumber c-style types, ptr returns):
 #     -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast
-#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 #   H3.2 (expressions + precedence + minimal statements; no declarations):
 #     -Dir selfhost/corpus/parser/expr -Kinds all -Oracle --ast
-#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 #   H3.3 (statements / control flow: decl, if/else, while, do-while, for,
 #     switch/case/default, nextcase, break/continue, unsafe, nested blocks):
 #     -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast
-#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 #   H3.4 (struct/enum/class: fields, methods, ctor/dtor, operator, virtual/
 #     override, access specifiers, base list, enum/enum class/underlying type,
 #     using alias, user-defined types in signatures/bodies):
 #     -Dir selfhost/corpus/parser/aggregate -Kinds all -Oracle --ast
-#     -Modules token,lexer,preprocessor,parser,ast -Driver astdrive
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
+#   H3.5 (template / concept: template function/struct/class, non-type and
+#     variadic params, constrained params, `concept Name = requires(...){...}`):
+#     -Dir selfhost/corpus/parser/template -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
+#   H3.6 (module / import / import cpp: `module NAME`/`export module NAME`,
+#     `export <decl>`, `import cpp <...>`/`"..."`, `import c`, `import name`):
+#     -Dir selfhost/corpus/parser/module -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
+#   H3.7 (parser error cases E2/E3/E4: `[[ivy::unsafe]]` removal, `_t` suffix
+#     removal, `#include` rejection, attribute namespace/position validation):
+#     -Dir selfhost/corpus/parser/err -Kinds all -Oracle --ast
+#     -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 
@@ -132,7 +144,7 @@ function Test-KeepLine([string]$ln, $kindSet, [bool]$allKinds) {
 Write-Output "[3/4] running C++ oracle + Ivy port ..."
 $exp = New-Object System.Collections.Generic.List[string]
 foreach ($f in $files) {
-    cmd /c "`"$ivy`" $Oracle `"$f`" > `"$one`" 2>&1"
+    cmd /c "`"$ivy`" -I `"$sh`" $Oracle `"$f`" > `"$one`" 2>&1"
     $exp.Add("=== $f ===")
     $txt = ([System.IO.File]::ReadAllText($one)) -replace "`r`n", "`n"
     foreach ($ln in $txt.Split("`n")) { if (Test-KeepLine $ln $kindSet $allKinds) { $exp.Add($ln) } }

@@ -165,13 +165,13 @@ src/                              selfhost/
   `fn ... -> T;`, variadic `...`, tham số ẩn danh, `lifetime<...>` (biến thể
   `fn` trailing), kiểu C-style dưới `#pragma ivy cnumber`, trả về con trỏ,
   `unsigned`/`const`; gồm 2 file chẩn đoán C-style type/`char`). Lệnh:
-  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/decl -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
 - H3.2 (Expression + precedence): port parser expression + minimal statement
   (compound, expr-stmt, return), dump body AST byte-identical on
   `selfhost/corpus/parser/expr/` (13 file) vs `ivy --ast` (precedence bieu thuc,
   unary/postfix, ternary, call/index/member/assign, sizeof/alignof/static_cast,
   toan tu bit/shift/so sanh). Khong gom khai bao (deferred H3.3). Lenh:
-  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/expr -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/expr -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: mang `const char**` (chan doan) bi loi codegen Ivy khi ghi >=2 phan
   tu, nen `Parser.dmsg_` dung `long*` + `reinterpret_cast<const char*>`.
 - H3.3 (Statement / control flow): port parser statement + control flow, dump
@@ -180,7 +180,7 @@ src/                              selfhost/
   constexpr, while, do-while, for (init decl/expr/null, cond, incr), break,
   continue, switch/case/default, nextcase, unsafe, nested block). Con cho
   range-for (can mang/struct). Lenh:
-  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/stmt -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: con cua compound/switch dung danh sach moc noi (`AStmt.next`) thay
   cho stack chung, tranh xen ke khi long nhau.
 - H3.4 (Struct / enum / class): tieu thu/khai bao aggregate + ten kieu nguoi
@@ -191,10 +191,52 @@ src/                              selfhost/
   member access `p.x`, member call). `--ast` KHONG dump aggregate o top-level,
   nen byte-identical = tieu thu dung + nhan ten kieu de ham con dump giong.
   Lenh:
-  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/aggregate -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive`.
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/aggregate -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: them registry ten kieu (`tnames_` luu `long` dia chi intern) +
   `token_is_type_name`/`register_type_name`; `is_type_start`/`parse_type` nhan
   identifier da dang ky. Chua ho tro namespace/template/global var.
+- H3.5 (Template / concept): port parser `template<...>` (function/struct/class,
+  `constexpr`/`consteval`, trailing `fn ... -> T`, variadic `...`, non-type
+  `int32 N`, constrained `Concept T`) va `concept Name = requires(...) { ... };`.
+  Ten tham so template luu registry tam thoi rieng (`tpnames_`), tra trong
+  `token_is_type_name` nen `T` duoc nhan la kieu; khong dump template param hay
+  concept (giong oracle, `--ast` chi liet ke `tu.functions`). Dump body AST
+  byte-identical on `selfhost/corpus/parser/template/` (15 file) vs `ivy --ast`.
+  Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/template -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
+  Ghi chu: template struct/class tieu thu het + dang ky ten kieu (giu trong
+  `tnames_`), con `tpnames_` duoc luu/tra ve quanh moi template.
+- H3.6 (Module / `import` / `import cpp`): port parser `module NAME;`,
+  `export module NAME;`, `export <decl>` (struct/class/enum/using/template/
+  constexpr/function, `fn ... -> T`), va `import` (`cpp <header>`/`cpp "h"`,
+  `c <header>`/`c "h"`, `"name"`, bare `name`). Ten module luu `module_name_` +
+  `is_module_export_`. `--ast` khong dump module/import nen byte-identical =
+  tieu thu dung + dump ham nhu thuong. Oracle ghi `<Name>.ivm` va in
+  `ivy: module interface written to '<dir>\<Name>.ivm'` cho `export module`,
+  nen `astdrive` in lai dung dong nay (dung separator `\`); `difftest.ps1` them
+  `-I selfhost\parsing` cho oracle de bare `import` resolve giong ban port
+  build. Corpus `selfhost/corpus/parser/module/` (16 file) byte-identical vs
+  `ivy --ast`. Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/module -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
+  Ghi chu: `--ast` chi liet ke `tu.functions`; `.ivm` do oracle sinh trong
+  corpus dir bi gitignore (`*.ivm`). Chua ho tro module name co dau `.`
+  (oracle cung vay) va `export extern "C"`/`export { }`/`export import`.
+- H3.7 (Error cases E2/E3/E4): port chan doan parser:
+  E2 `[[ivy::unsafe]]` trong statement in `[[ivy::unsafe]] is removed - use
+  'unsafe { }' instead` tai `[[` dau, roi `unknown Ivy attribute 'ivy::unsafe'
+  in this position` cho tung attribute; validate attribute o vi tri function
+  (`lt_def`/`lt_ret`) va parameter (`lt`). E3 `_t` keyword in
+  `_t-suffixed type '<lexeme>' is removed - use '<suggestion>' instead`
+  (`ptrdiff_t` -> `iptr`, con lai bo `_t`), chi voi token kind keyword; khong
+  them `expected a type`, khong ap dung cho identifier nhu `int128_t`/`uptr_t`.
+  E4 `#include` trong `.ivy` da do preprocessor xu ly (H2.7); parser giu
+  `unsupported preprocessor directive` cho `#` con lai. `AAttr` them `line`/
+  `col`; thong diep dong dung trong `sbuf_` voi `sb_end()` (NUL + tien con
+  tro) de khong ghi de thong diep truoc. Corpus `selfhost/corpus/parser/err/`
+  (19 file) byte-identical vs `ivy --ast` (ke ca chan doan PP E4). Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/err -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
+  Ghi chu: thu tu build phai la `ast` truoc `parser` (parser `import ast;`);
+  cac lenh H3.x da cap nhat theo thu tu nay.
 
 ---
 
@@ -233,9 +275,9 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ✅ byte-identical 13 files |
 | H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 15 files |
 | H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ✅ byte-identical 14 files |
-| H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ☐ |
-| H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ☐ |
-| H3.7 | Error cases (E2/E3/E4) | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/err` | ☐ |
+| H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ✅ byte-identical 15 files |
+| H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ✅ byte-identical 16 files |
+| H3.7 | Error cases (E2/E3/E4) | `parser.cpp` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/err` | ✅ byte-identical 19 files |
 
 ### H4 — HIR
 

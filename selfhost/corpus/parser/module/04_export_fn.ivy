@@ -1,0 +1,1 @@
+export int32 f(int32 x) { return x; }

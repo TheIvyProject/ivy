@@ -1,0 +1,2 @@
+import "ast";
+int32 f() { return 1; }

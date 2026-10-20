@@ -1,0 +1,2 @@
+template <typename... Args> int32 count(Args... args) { return 0; }
+void f() { int32 a = 1; }

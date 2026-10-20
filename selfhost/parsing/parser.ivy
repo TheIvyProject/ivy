@@ -15,7 +15,7 @@
 //     parsing arrives in H3.3; H3.1 corpus uses empty bodies.
 //
 // Oracle: src/parsing/parser.cpp + dumpAst in src/app/main.cpp via `ivy --ast`.
-// Harness: selfhost/difftest.ps1 -Oracle --ast -Modules token,lexer,preprocessor,parser -Driver astdrive
+// Harness: selfhost/difftest.ps1 -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive
 
 #pragma ivy cnumber
 export module parser;
@@ -42,7 +42,7 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 24, AParam 64, AFunction 96) so `__ivy_alloc` can be used.
+// sizes (AAttr 40, AParam 64, AFunction 96) so `__ivy_alloc` can be used.
 export struct Parser {
     Token* toks_;
     long n_;
@@ -97,6 +97,18 @@ export struct Parser {
     long tn_n_;
     long tn_cap_;
 
+    // template type-parameter names currently in scope (mirrors
+    // templateParamNames_ in src/parsing/parser.h); interned long* pool
+    long* tpnames_;
+    long tp_n_;
+    long tp_cap_;
+
+    // H3.6 module state: `export module NAME;` interface unit + name.
+    // module_name_ is an interned pointer (or ""), for the driver's
+    // "module interface written" message (mirrors TranslationUnit::moduleName).
+    const char* module_name_;
+    long is_module_export_;
+
     // diagnostics
     long* dline_;
     long* dcol_;
@@ -132,13 +144,17 @@ export struct Parser {
         this.cp_cap_ = in_count + 16;
         this.tn_n_ = 0;
         this.tn_cap_ = in_count + 16;
+        this.tp_n_ = 0;
+        this.tp_cap_ = in_count + 16;
+        this.module_name_ = "";
+        this.is_module_export_ = 0;
         this.dn_ = 0;
         this.dcap_ = in_count + 16;
         this.ce_ = 0;
         this.cv_ = 0;
         unsafe {
             this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 96);
-            this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 24);
+            this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
             this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 64);
             this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
             this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 112);
@@ -149,6 +165,7 @@ export struct Parser {
             this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
             this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
+            this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         }
     }
 
@@ -170,6 +187,7 @@ export struct Parser {
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
             __ivy_free(this.tnames_);
+            __ivy_free(this.tpnames_);
         }
     }
 
@@ -246,7 +264,26 @@ export struct Parser {
             }
             i = i + 1;
         }
+        i = 0;
+        while (i < this.tp_n_) {
+            unsafe {
+                const char* nm = reinterpret_cast<const char*>(this.tpnames_[i]);
+                if (this.lexeme_eq(t.off, t.len, nm)) {
+                    return 1;
+                }
+            }
+            i = i + 1;
+        }
         return 0;
+    }
+
+    void register_template_param(const char* s) {
+        if (this.tp_n_ < this.tp_cap_) {
+            unsafe {
+                this.tpnames_[this.tp_n_] = (long) s;
+            }
+            this.tp_n_ = this.tp_n_ + 1;
+        }
     }
 
     void register_type_name(const char* s) {
@@ -402,6 +439,18 @@ export struct Parser {
             this.sbuf_[this.sb_n_ + n] = 0;
         }
         this.sb_n_ = this.sb_n_ + n;
+    }
+
+    // Terminate the current string and advance past the NUL so later appends
+    // do not overwrite the terminator of a previously interned message.
+    void sb_end() {
+        if (this.sb_n_ + 1 > this.sb_cap_) {
+            return;
+        }
+        unsafe {
+            this.sbuf_[this.sb_n_] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + 1;
     }
 
     const char* intern(long off, long len) {
@@ -708,16 +757,36 @@ export struct Parser {
                 }
             }
         }
-        if (this.is_removed_t(this.peek(0))) {
-            this.error_at(this.peek(0),
-                          "_t-suffixed type is removed in .ivy files");
+        long e3 = 0;
+        if (this.kind_eq(this.peek(0), "keyword") && this.is_removed_t(this.peek(0)) != 0) {
+            Token c = this.peek(0);
+            unsafe {
+                long m0 = this.sb_n_;
+                const char* p1 = "_t-suffixed type '";
+                this.sb_put(p1, this.cstr_len(p1));
+                this.sb_put_raw(this.src_ + c.off, c.len);
+                const char* p2 = "' is removed — use '";
+                this.sb_put(p2, this.cstr_len(p2));
+                if (this.lexeme_eq(c.off, c.len, "ptrdiff_t")) {
+                    this.sb_put("iptr", 4);
+                } else {
+                    this.sb_put_raw(this.src_ + c.off, c.len - 2);
+                }
+                const char* p3 = "' instead";
+                this.sb_put(p3, this.cstr_len(p3));
+                this.sb_end();
+                this.error_at(c, this.sbuf_ + m0);
+            }
+            e3 = 1;
         }
         if (this.cstr_len(t.base) == 0) {
-            if (saw == 0 && t.is_const == 0) {
-                this.error_at(this.peek(0),
-                              "expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)");
-            } else {
-                t.base = "int";
+            if (e3 == 0) {
+                if (saw == 0 && t.is_const == 0) {
+                    this.error_at(this.peek(0),
+                                  "expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)");
+                } else {
+                    t.base = "int";
+                }
             }
         }
         while (this.at("*")) {
@@ -745,6 +814,7 @@ export struct Parser {
         unsafe {
             long start = this.ap_n_;
             while (this.at("[") && this.kind_eq(this.peek(1), "[")) {
+                Token attrStart = this.peek(0);
                 this.next();
                 this.next();
                 const char* name = "";
@@ -792,13 +862,22 @@ export struct Parser {
                 this.expect("]", "expected ']'");
                 this.expect("]", "expected ']'");
                 if (!this.cstr_eq(ns, "") && !this.cstr_eq(ns, "ivy")) {
-                    this.error_at(this.peek(0), "unknown attribute namespace: only ivy:: is supported");
+                    long m0 = this.sb_n_;
+                    const char* p1 = "unknown attribute namespace '";
+                    this.sb_put(p1, this.cstr_len(p1));
+                    this.sb_put(ns, this.cstr_len(ns));
+                    const char* p2 = "': only ivy:: attributes are supported in the Ivy subset";
+                    this.sb_put(p2, this.cstr_len(p2));
+                    this.sb_end();
+                    this.error_at(attrStart, this.sbuf_ + m0);
                     continue;
                 }
                 AAttr a;
                 a.name = name;
                 a.args = args;
                 a.has_args = has_args;
+                a.line = attrStart.line;
+                a.col = attrStart.col;
                 if (this.ap_n_ < this.ap_cap_) {
                     this.apool_[this.ap_n_] = a;
                     this.ap_n_ = this.ap_n_ + 1;
@@ -808,6 +887,49 @@ export struct Parser {
             result.n = this.ap_n_ - start;
         }
         return result;
+    }
+
+    void error_at_ll(long line, long col, const char* msg) {
+        if (this.dn_ >= this.dcap_) {
+            return;
+        }
+        unsafe {
+            this.dline_[this.dn_] = line;
+            this.dcol_[this.dn_] = col;
+            this.dmsg_[this.dn_] = (long) msg;
+        }
+        this.dn_ = this.dn_ + 1;
+        this.failed_ = 1;
+    }
+
+    void validate_list(AAttrList l, const char* a0, const char* a1) {
+        long i = 0;
+        while (i < l.n) {
+            AAttr a;
+            unsafe {
+                a = l.items[i];
+            }
+            long ok = 0;
+            if (this.cstr_len(a0) > 0 && this.cstr_eq(a.name, a0)) {
+                ok = 1;
+            }
+            if (this.cstr_len(a1) > 0 && this.cstr_eq(a.name, a1)) {
+                ok = 1;
+            }
+            if (ok == 0) {
+                unsafe {
+                    long m0 = this.sb_n_;
+                    const char* p1 = "unknown Ivy attribute 'ivy::";
+                    this.sb_put(p1, this.cstr_len(p1));
+                    this.sb_put(a.name, this.cstr_len(a.name));
+                    const char* p2 = "' in this position";
+                    this.sb_put(p2, this.cstr_len(p2));
+                    this.sb_end();
+                    this.error_at_ll(a.line, a.col, this.sbuf_ + m0);
+                }
+            }
+            i = i + 1;
+        }
     }
 
     // Copy a caller-provided attribute list into the pool; returns its index.
@@ -923,11 +1045,12 @@ export struct Parser {
                 p.name = this.intern_tok(this.next());
             }
             long pa_start = this.ap_n_;
-            this.parse_attrs();
+            AAttrList pa = this.parse_attrs();
             unsafe {
                 p.attrs = this.apool_ + pa_start;
             }
             p.nattrs = this.ap_n_ - pa_start;
+            this.validate_list(pa, "lt", "");
             this.push_param(p);
             if (!this.at(")")) {
                 this.expect(",", "expected ',' between parameters");
@@ -1455,6 +1578,22 @@ export struct Parser {
             s.a = body;
             return this.push_stmt(s);
         }
+        if (this.at("[") && this.kind_eq(this.peek(1), "[")) {
+            Token start = this.peek(0);
+            AAttrList st = this.parse_attrs();
+            long i = 0;
+            while (i < st.n) {
+                AAttr a;
+                unsafe {
+                    a = st.items[i];
+                }
+                if (this.cstr_eq(a.name, "unsafe")) {
+                    this.error_at(start, "[[ivy::unsafe]] is removed — use 'unsafe { }' instead");
+                }
+                i = i + 1;
+            }
+            this.validate_list(st, "", "");
+        }
         if (this.kw("if")) {
             return this.parse_if();
         }
@@ -1878,6 +2017,10 @@ export struct Parser {
             }
             this.parse_attrs();
             long a_end = this.ap_n_;
+            AAttrList all;
+            all.items = this.apool_ + a_start;
+            all.n = a_end - a_start;
+            this.validate_list(all, "lt_def", "lt_ret");
             if (!this.at("identifier")) {
                 this.error_at(this.peek(0), "expected function name");
                 this.synchronize();
@@ -1920,6 +2063,10 @@ export struct Parser {
             }
             this.parse_attrs();
             long a_end = this.ap_n_;
+            AAttrList all;
+            all.items = this.apool_ + a_start;
+            all.n = a_end - a_start;
+            this.validate_list(all, "lt_def", "lt_ret");
             AFunction f;
             this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c);
         }
@@ -2240,6 +2387,240 @@ export struct Parser {
       }
     }
 
+    // --- templates / concepts (H3.5) --------------------------------------
+
+    void parse_template_params() {
+        if (!this.at("<")) {
+            this.error_at(this.peek(0), "expected '<' to start template parameter list");
+            return;
+        }
+        this.next();  // '<'
+        while (!this.at(">") && !this.at("eof")) {
+            long is_typename = 0;
+            if (this.kw("typename") || this.kw("class")) {
+                this.next();
+                is_typename = 1;
+            } else if (this.is_type_start() != 0) {
+                this.parse_type();  // non-type parameter: `int32 N`
+            } else if (this.at("identifier")) {
+                this.next();  // constrained type parameter: `Addable T`
+                is_typename = 1;
+            } else {
+                this.error_at(this.peek(0),
+                              "expected 'typename', a concept name, or a type in template parameter list");
+                this.synchronize();
+                return;
+            }
+            if (this.at("...")) {
+                this.next();  // `typename... Args`
+            }
+            if (this.at("identifier")) {
+                if (is_typename != 0) {
+                    this.register_template_param(this.intern_tok(this.peek(0)));
+                }
+                this.next();
+            } else {
+                this.error_at(this.peek(0), "expected template parameter name");
+                this.synchronize();
+                return;
+            }
+            if (this.at("...")) {
+                this.next();  // `typename Args...`
+            }
+            if (this.at(",")) {
+                this.next();
+            } else {
+                break;
+            }
+        }
+        this.expect(">", "expected '>' to close template parameter list");
+    }
+
+    void parse_template() {
+        this.next();  // 'template'
+        long saved = this.tp_n_;
+        this.parse_template_params();
+        if (this.kw("struct") || this.kw("class")) {
+            this.parse_struct();
+        } else if (this.kw("constexpr") || this.kw("consteval")) {
+            this.parse_constexpr_spec();
+            if (this.kw("fn")) {
+                this.next();
+                AAttrList a = this.parse_attrs();
+                this.parse_fn_trailing(a, 0, this.ce_, this.cv_);
+            } else {
+                AAttrList a2 = this.parse_attrs();
+                this.parse_function(a2, 0, this.ce_, this.cv_);
+            }
+        } else if (this.kw("fn")) {
+            this.next();
+            AAttrList a = this.parse_attrs();
+            this.parse_fn_trailing(a, 0, 0, 0);
+        } else {
+            AAttrList a = this.parse_attrs();
+            this.parse_function(a, 0, 0, 0);
+        }
+        this.tp_n_ = saved;
+    }
+
+    void parse_concept() {
+        this.next();  // 'concept'
+        if (!this.at("identifier")) {
+            this.error_at(this.peek(0), "expected concept name");
+            this.synchronize();
+            return;
+        }
+        this.next();  // concept name
+        this.expect("=", "expected '=' in concept definition");
+        this.expect_kw("requires", "expected 'requires' in concept definition");
+        this.expect("(", "expected '(' after 'requires'");
+        long depth = 0;
+        while (!this.at("eof")) {
+            if (this.at("(")) {
+                depth = depth + 1;
+                this.next();
+            } else if (this.at(")")) {
+                if (depth == 0) {
+                    break;
+                }
+                depth = depth - 1;
+                this.next();
+            } else {
+                this.next();
+            }
+        }
+        this.expect(")", "expected ')' to close requires parameter list");
+        this.expect("{", "expected '{' to start requires body");
+        while (!this.at("}") && !this.at("eof")) {
+            while (!this.at(";") && !this.at("}") && !this.at("eof")) {
+                this.next();
+            }
+            if (this.at(";")) {
+                this.next();
+            }
+        }
+        this.expect("}", "expected '}' to close requires body");
+        if (this.at(";")) {
+            this.next();
+        }
+    }
+
+    // --- modules / imports (H3.6) -----------------------------------------
+
+    const char* module_name() {
+        return this.module_name_;
+    }
+
+    long is_module_export() {
+        return this.is_module_export_;
+    }
+
+    void parse_module_decl() {
+        this.next();  // 'module'
+        if (!this.at("identifier")) {
+            this.error_at(this.peek(0), "expected module name after 'module'");
+            this.synchronize();
+            return;
+        }
+        this.module_name_ = this.intern_tok(this.next());
+        this.is_module_export_ = 0;
+        this.expect(";", "expected ';' after module declaration");
+    }
+
+    void parse_export() {
+        this.next();  // 'export'
+        if (this.kw("module")) {
+            this.next();
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0), "expected module name after 'export module'");
+                this.synchronize();
+                return;
+            }
+            this.module_name_ = this.intern_tok(this.next());
+            this.is_module_export_ = 1;
+            this.expect(";", "expected ';' after module declaration");
+            return;
+        }
+        if (this.kw("struct") || this.kw("class")) {
+            this.parse_struct();
+            return;
+        }
+        if (this.kw("enum")) {
+            this.parse_enum();
+            return;
+        }
+        if (this.kw("using")) {
+            this.parse_using();
+            return;
+        }
+        if (this.kw("template")) {
+            this.parse_template();
+            return;
+        }
+        if (this.kw("constexpr") || this.kw("consteval")) {
+            this.parse_constexpr_spec();
+            if (this.kw("fn")) {
+                this.next();
+                AAttrList a = this.parse_attrs();
+                this.parse_fn_trailing(a, 0, this.ce_, this.cv_);
+            } else {
+                AAttrList a2 = this.parse_attrs();
+                this.parse_function(a2, 0, this.ce_, this.cv_);
+            }
+            return;
+        }
+        if (this.kw("fn")) {
+            this.next();
+            AAttrList a = this.parse_attrs();
+            this.parse_fn_trailing(a, 0, 0, 0);
+            return;
+        }
+        if (this.is_type_start() == 0) {
+            this.error_at(this.peek(0), "expected a declaration after 'export'");
+            this.synchronize();
+            return;
+        }
+        AAttrList a = this.parse_attrs();
+        this.parse_function(a, 0, 0, 0);
+    }
+
+    void parse_import_header(const char* no_hdr_msg, const char* gt_msg) {
+        if (this.at("<")) {
+            this.next();
+            while (!this.at(">") && !this.at("eof")) {
+                this.next();
+            }
+            this.expect(">", gt_msg);
+        } else if (this.at("string")) {
+            this.next();
+        } else {
+            this.error_at(this.peek(0), no_hdr_msg);
+            this.synchronize();
+        }
+    }
+
+    void parse_import() {
+        this.next();  // 'import'
+        if (this.kw("cpp")) {
+            this.next();
+            this.parse_import_header("expected '<header>' or \"header\" after 'import cpp'",
+                                     "expected '>' after C++ header name");
+        } else if (this.at("identifier") && this.lexeme_eq(this.peek(0).off, this.peek(0).len, "c")) {
+            this.next();
+            this.parse_import_header("expected '<header>' or \"header\" after 'import c'",
+                                     "expected '>' after C header name");
+        } else if (this.at("string")) {
+            this.next();
+        } else if (this.at("identifier")) {
+            this.next();
+        } else {
+            this.error_at(this.peek(0), "expected module name after 'import'");
+            this.synchronize();
+            return;
+        }
+        this.expect(";", "expected ';' after import");
+    }
+
     void parse_extern_c(AAttrList attrs) {
         if (this.at("{")) {
             this.next();
@@ -2329,6 +2710,26 @@ export struct Parser {
             }
             if (this.kw("using")) {
                 this.parse_using();
+                continue;
+            }
+            if (this.kw("template")) {
+                this.parse_template();
+                continue;
+            }
+            if (this.kw("concept")) {
+                this.parse_concept();
+                continue;
+            }
+            if (this.kw("import")) {
+                this.parse_import();
+                continue;
+            }
+            if (this.kw("module")) {
+                this.parse_module_decl();
+                continue;
+            }
+            if (this.kw("export")) {
+                this.parse_export();
                 continue;
             }
             AAttrList a = this.parse_attrs();

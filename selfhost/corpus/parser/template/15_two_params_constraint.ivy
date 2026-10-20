@@ -1,0 +1,3 @@
+concept Addable = requires(T a, T b) { a + b; };
+template <Addable T, typename U> T combine(T a, U b) { return a; }
+void f() { int32 r = combine<int32, int32>(1, 2); }

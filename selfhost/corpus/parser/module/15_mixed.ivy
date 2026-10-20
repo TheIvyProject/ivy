@@ -1,0 +1,4 @@
+module h36_mixed;
+import cpp <cstdint>;
+import c <stdint.h>;
+int32 f() { return 1; }

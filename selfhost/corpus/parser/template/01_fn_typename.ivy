@@ -1,0 +1,2 @@
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity<int32>(1); }

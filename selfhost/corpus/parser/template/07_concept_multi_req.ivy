@@ -1,0 +1,2 @@
+concept Comparable = requires(T a, T b) { a == b; a != b; };
+void f() { }

@@ -1,0 +1,2 @@
+template <int32 N> int32 val(int32 x) { return x; }
+void f() { int32 a = 5; }

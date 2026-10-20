@@ -1,0 +1,2 @@
+import cpp "h36_helper.hpp";
+int32 f() { return 1; }
