@@ -1,0 +1,3 @@
+// The same template with the pack deduced from the call arguments.
+template <typename T, typename... Args> int32 count_after(T first, Args... rest) { return 0; }
+void f() { int32 a = count_after(10, 20); }

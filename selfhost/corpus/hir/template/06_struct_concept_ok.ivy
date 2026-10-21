@@ -1,0 +1,4 @@
+// A struct template with a satisfied constraint.
+concept Addable = requires(T a, T b) { a + b; };
+template <Addable T> struct Box { T value; T get() { return this.value; } };
+void f() { Box<int32> b; }

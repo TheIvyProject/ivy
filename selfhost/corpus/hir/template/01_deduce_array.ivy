@@ -1,0 +1,3 @@
+// An array argument: the argument type is the element type.
+template <typename T> int32 arr(T a) { return 0; }
+void f() { int32 xs[4]; int32 a = arr(xs); }

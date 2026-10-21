@@ -1,0 +1,4 @@
+// A nested template-id: the argument of the outer specialization is
+// mangled by its base name only (`Box<Box>`).
+template <typename T> struct Box { T value; };
+void f() { Box<int32> b; Box<Box<int32> > c; }

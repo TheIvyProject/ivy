@@ -1,0 +1,5 @@
+// The base list of a specialization is dropped, so the base constructor is
+// not inherited.
+struct Base { int32 x; Base() { this.x = 1; } };
+template <typename T> struct Derived : Base { T value; };
+void f() { Derived<int32> d; }

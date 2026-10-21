@@ -1,0 +1,5 @@
+// A method of a struct template calling another template: the explicit
+// template argument IS substituted (`id<int32_t>`).
+template <typename T> T id(T x) { return x; }
+template <typename T> struct Box { T value; T get() { return id<T>(this.value); } };
+void f() { Box<int32> b; }

@@ -1,0 +1,6 @@
+// The constraint is not satisfied on the *deduced* path: the diagnostic
+// says that the deduction failed.
+concept Addable = requires(T a, T b) { a + b; };
+struct P { int32 x; };
+template <Addable T> T add(T a, T b) { return a; }
+void f() { P p; P q; P r = add(p, q); }

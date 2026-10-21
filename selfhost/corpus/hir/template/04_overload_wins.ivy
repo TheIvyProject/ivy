@@ -1,0 +1,5 @@
+// An ordinary overload always wins for an implicit call; a template-id
+// call always uses the template.
+int32 a(int32 x) { return x; }
+template <typename T> T a(T x) { return x; }
+void f() { int32 r = a(1); int32 s = a<int32>(2); }

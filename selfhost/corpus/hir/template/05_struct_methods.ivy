@@ -1,0 +1,8 @@
+// The methods of a specialization: they are named `<Spec>::<method>` and
+// their `this` parameter has the type `<Spec>&`.
+template <typename T> struct Box {
+    T value;
+    T get() { return this.value; }
+    void set(T v) { this.value = v; }
+};
+void f() { Box<int32> b; }

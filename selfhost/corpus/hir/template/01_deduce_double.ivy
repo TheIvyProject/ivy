@@ -1,0 +1,3 @@
+// A floating-point literal deduces the type `double`.
+template <typename T> T identity(T x) { return x; }
+void f() { auto d = identity(1.5); }

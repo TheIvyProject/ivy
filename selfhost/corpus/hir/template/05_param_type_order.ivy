@@ -1,0 +1,5 @@
+// A specialization created while a function signature is built is dumped
+// before that function.
+template <typename T> struct Box { T value; T get() { return this.value; } };
+void a() { }
+void f(Box<int32> b) { }

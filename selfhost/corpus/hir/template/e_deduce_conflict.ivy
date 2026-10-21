@@ -1,0 +1,4 @@
+// The same type parameter deduced twice with two different types: the
+// deduction fails.
+template <typename T> T two(T a, T b) { return a; }
+void f() { int32 x = 1; int32 a = two(1, x); }

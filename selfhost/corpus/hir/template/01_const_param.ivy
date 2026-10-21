@@ -1,0 +1,4 @@
+// A `const T` parameter: the const qualifier comes from the declaration,
+// not from the deduced argument type.
+template <typename T> T id(const T x) { return x; }
+void f() { int32 a = id<int32>(1); }

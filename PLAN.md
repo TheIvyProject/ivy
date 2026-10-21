@@ -276,7 +276,8 @@ src/                              selfhost/
   Ghi chu: oracle crash khi toan nhan tren struct (dang ky dung `lt` sau
   `std::move`) nen corpus tranh case do; `sizeof`/`alignof` (fold hang so),
   `if constexpr`, template/lambda/new/delete, aggregate init `{...}` va
-  constructor injection de cho H4.3-H4.4 (hoac cac milestone sau).
+  constructor injection de cho H4.3-H4.4 (hoac cac milestone sau; `sizeof`/
+  `alignof` xong o H4.3, template xong o H4.4).
 - H4.2 (giai chinh va xac minh lap lai): kiem tra lai bang fixture rieng
   (ngoai corpus) cho mo ra cac lech doi oracle, va sua port:
   (1) `isAssignable` thieu khoi B5/B6 (`expected<T,E>` / `optional<T>`) —
@@ -293,9 +294,11 @@ src/                              selfhost/
   ke ca ke thua); method/operator cua base class cung duoc tim thay;
   (5) parser tu choi kieu `signed` don le (oracle: "expected a type"),
   dung nhu `unsigned`/`const` don le.
-  Corpus bo sung 9 file (120 file tong). Con lai: aggregate init, ctor/dtor,
-  `new`/`delete`, template, lambda, range-for, move-tracking, namespace van
-  chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3).
+   Corpus bo sung 9 file (120 file tong). Con lai: aggregate init, goi
+   constructor/destructor (constructor injection; phan *khai bao* cua
+   constructor da port), `new`/`delete`, lambda, range-for, move-tracking,
+   namespace van chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3,
+   template xong o H4.4).
 - H4.3 (Constexpr folding): port phan fold hang so cua `hir_builder.cpp`
   sang `hir/hir_builder.ivy` (va `hir/hir.ivy`):
   (1) `sizeof`/`alignof` fold thanh integer literal (`typeSize`/
@@ -352,9 +355,85 @@ src/                              selfhost/
   goi toi ham `constexpr` khac nam trong bieu thuc nhi phan (vd
   `return sq(x) * x;`) — `substituteParams` tra null roi `evalConstExpr`
   dereference null; corpus tranh case do.
-  Con lai (de milestone sau): aggregate init `{...}`, ctor/dtor, `new`/
-  `delete`, template, lambda, range-for, structured binding, move-tracking,
-  namespace.
+   Con lai (de milestone sau): aggregate init `{...}`, goi
+   constructor/destructor (constructor injection; phan *khai bao* cua
+   constructor da port), `new`/`delete`, lambda, range-for, structured
+   binding, move-tracking, namespace (template xong o H4.4).
+- H4.4 (Template instantiation): port phan khoi tao mau (instantiate) cua
+  `hir_builder.cpp` sang `hir/hir_builder.ivy` (va `hir/hir.ivy` khong doi
+  gi - ten mau chi la mot `const char*`):
+  (1) function template: registry ten -> AST function; khoi tao khi co
+  template-id call (`f<T>(x)`) hoac khi suy luan ngam (`f(x)`, chi khi
+  khong co overload thuong cung ten). Chi *chu ky* (kieu tra ve + kieu tham
+  so) duoc thay the; than giu trong co mang. Ten mau = `ten<arg0,arg1>`
+  (arg = base + " unsigned"? + " const"? + "*"*ptrDepth, phan tach bang dau
+  phay KHONG khoang trang); pack rong -> `ten<>`. Thu tu dump: tat ca ham
+  thuong truoc, cac ban khoi tao theo thu tu khoi tao dau tien, mot ban
+  khoi tao chi xuat hien mot lan (dedup theo ten mau);
+  (2) suy luan (deduce): chi truong hop "kieu tham so DUNG la tham so kieu";
+  bien -> `int32_t`, literal so nguyen -> `int` (khong phai `int32_t`),
+  literal char -> `char`, literal float -> `double`, bool -> `bool`, con tro
+  -> kieu pointee, mang -> kieu phan tu, cau truc -> ten cau truc;
+  reference bi bo qua, `const T` bo const cua tham so; cung mot tham so
+  kieu suy luan hai lan voi hai kieu khac nhau -> suy luan that bai; tham
+  so kieu khong phai (non-type) khong bao gio duoc suy luan;
+  (3) variadic pack: `Args... args` no ra mot tham so cho moi phan tu
+  (`__args0`, `__args1`), tham so co dinh truoc pack giu ten;
+  (4) struct/class template: ten bien thanh ten mau, thay the kieu field /
+  kieu tham so / kieu tra ve, method duoc dat ten `<Mau>::<method>` va
+  `this` co kieu `<Mau>&`, constructor giu ten goc
+  (`Holder<int32_t>::Holder`); khoi tao theo kieu template-id (kieu field,
+  kieu tham so, kieu tra ve, alias, kieu trong method);
+  (5) concept: kiem tra LUC KHOI TAO, chi khi tham so la tham so kieu co
+  rang buoc; yeu cau co toan tu nhi phan -> kieu phai la so hoc (ke `bool`),
+  con cau truc phai co `operator<op>` kiem duoc (oracle khong co free
+  `operator+` nen moi kieu cau truc deu khong thoa man); concept la khong
+  biet duoc coi la thoa man; yeu cau khong co toan tu (member, sizeof) khong
+  duoc kiem tra.
+   Corpus `selfhost/corpus/hir/template/` (99 file: 16 file type-parameter +
+   suy luan, 5 file explicit argument, 5 file variadic pack, 14 file overload/
+   recursion/prototype/constexpr/thu tu, 31 file class template, 9 file
+   concept, 19 file error) byte-identical vs `ivy --hir`. Lenh:
+   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/template -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+  Loi (bug) cua oracle duoc tai hien nguyen ban, KHONG sua: kieu `T` cua
+  bien cuc bo trong function template KHONG duoc thay the (`currentTypeMapping_`
+  chi duoc bat khi khoi tao struct template); template goi template khac
+  bang template-id thi tham so cung khong duoc thay the; kieu const/con tro
+  cua kieu suy luan bi mat khi thay the vao tham so `T`; literal so nguyen
+  suy luan ra `int` chu khong phai `int32_t`; tham so template thua duoc
+  chap nhan va xuat hien trong ten mau; hai template trung ten -> template
+  thu hai thay the template dau (khong bao loi); khoi tao struct template
+  LAM MAT danh sach base; `sizeof`/`alignof` cua mot template-id = 4 (gia
+  tri fallback); concept la khong biet duoc coi la thoa man; default
+  argument cua template bi mat; alias khong duoc resolve trong template
+  argument.
+   Con lai (de milestone sau): `sizeof...(pack)` va fold expression
+   `(args + ...)` (parser chua ho tro), namespace (`ns::id<int32>` - port chua
+   co namespace), goi constructor cua mot specialization (`Box<int32>(1)` -
+   port chua co constructor resolution/injection; phai goi constructor cua
+   mot struct thuong (`W(1)`) cung chua ho tro, nen day la tinh nang
+   constructor chung chu phai rieng cho template).
+- H4.4 (giai chinh va xac minh lap lai - phase 6/6): xac minh lai toan bo
+   24 suite (574 file) + 120 fixture rieng (ngoai corpus) de kiem tra oracle
+   parity byte-for-byte, va sua port:
+   (1) template-id call KHONG tra cuu registry cua struct template (oracle
+   tra `lookupStructTemplate` TRUOC `lookupTemplate`): ten vua la struct
+   template vua la function template bi resolve sai, va mot template-id call
+   tren struct template bao loi sai ("'X' is not a template"). Port sua:
+   tra cuu struct template truoc, khoi tao specialization voi argument
+   explicit, va giu call chua resolve (callee = ten goc, type = dummy) -
+   dung nhu oracle khi specialization khong co constructor;
+   (2) buffer chuoi chua doan (dien bao) bi cat im lang khi tran: port xay
+   message trong mot buffer cu dinh roi diagnostic giu con tro vao buffer do,
+   nen message bi cat (hoac rong) khi buffer day. Port sua: copy message vao
+   mot cap phinh on dinh va tai su dung buffer lam scratch;
+   (3) layout cua mot struct specialization khong bao gio tinh polymorphic
+   (`layout_spec` duyet method cua specialization, ma specialization khong
+   co method) -> vptr khong duoc dem. Port sua: tinh tu method cua template.
+   Corpus bo sung 4 file regression (3 file `05_` + 1 file `e_`) -> 99 file.
+   Ghi chu: `get_stmt` co dong gan `s.line`/`s.col` cho `HStmt` (struct nay
+   khong co field do) nhung do la dead code sau `return` nen khong bien
+   dich; khong doi.
 
 
 ---
@@ -405,7 +484,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ✅ byte-identical 27 files |
 | H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 120 files |
 | H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ✅ byte-identical 70 files |
-| H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ☐ |
+| H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ✅ byte-identical 99 files |
 | H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ☐ |
 | H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ☐ |
 

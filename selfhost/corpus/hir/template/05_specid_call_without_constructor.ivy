@@ -1,0 +1,5 @@
+// A template-id call on a struct template without a constructor: the
+// specialization is instantiated and the call stays unresolved (the callee
+// keeps the bare name, the type is the dummy type).
+template <typename T> struct TCall { T value; };
+void f() { int32 a = TCall<int32>(1); }

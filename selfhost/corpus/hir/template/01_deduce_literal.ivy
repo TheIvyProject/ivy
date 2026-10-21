@@ -1,0 +1,4 @@
+// Implicit deduction: an integer literal deduces the type `int` (not
+// `int32_t`), so the specialization is named `identity<int>`.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity(1); }

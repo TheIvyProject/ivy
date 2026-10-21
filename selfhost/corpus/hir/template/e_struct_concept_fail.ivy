@@ -1,0 +1,6 @@
+// A struct template with a failing constraint: the type falls back to the
+// unmangled template name, which is then an uninitialized variable.
+concept Addable = requires(T a, T b) { a + b; };
+struct P { int32 x; };
+template <Addable T> struct Box { T value; };
+void f() { Box<P> b; }

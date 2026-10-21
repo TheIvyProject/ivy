@@ -1,0 +1,5 @@
+// A string literal deduces `char const*`, but the substitution into a plain
+// `T` parameter drops the const and the pointer qualifiers, so the call
+// reports an argument type mismatch.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity("hello"); }

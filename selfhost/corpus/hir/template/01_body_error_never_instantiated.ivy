@@ -1,0 +1,5 @@
+// The body of a template is only type-checked when the template is
+// instantiated: an error in a body that is never instantiated is not
+// reported.
+template <typename T> T broken(T x) { return undefined_name; }
+void f() { int32 a = 1; }

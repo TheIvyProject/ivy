@@ -1,0 +1,5 @@
+// Two templates with the same name: the second one silently replaces the
+// first (the registry is keyed by name).
+template <typename T> T a(T x) { return x; }
+template <typename T> T a(T x, T y) { return x; }
+void f() { int32 r = a<int32>(1); }

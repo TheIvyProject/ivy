@@ -1,0 +1,4 @@
+// A template used before its declaration: the instantiation still
+// succeeds (the signatures are collected before the bodies are built).
+void f() { int32 a = later<int32>(1); }
+template <typename T> T later(T x) { return x; }

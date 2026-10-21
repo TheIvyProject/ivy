@@ -1,0 +1,4 @@
+// A concept with two requirements: every requirement is checked.
+concept Two = requires(T a, T b) { a + b; a == b; };
+template <Two T> T id(T x) { return x; }
+void f() { int32 a = id<int32>(1); }

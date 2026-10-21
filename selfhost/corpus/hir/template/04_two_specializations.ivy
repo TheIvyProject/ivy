@@ -1,0 +1,4 @@
+// Two specializations of the same template; the repeated one is emitted
+// once.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id<int32>(1); int32 b = id<int64>(2); int32 c = id<int32>(3); }

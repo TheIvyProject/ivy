@@ -1,0 +1,4 @@
+// A specialization passed as an argument to an ordinary function.
+template <typename T> struct Box { T value; };
+void take(Box<int32> b) { }
+void f() { Box<int32> b; take(b); }

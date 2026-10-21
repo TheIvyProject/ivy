@@ -1,0 +1,4 @@
+// A type parameter with an explicit `<int32>` argument: the specialization
+// is named `identity<int32_t>`.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity<int32>(1); }

@@ -1,0 +1,3 @@
+// Two type parameters are deduced independently.
+template <typename T, typename U> T pair(T a, U b) { return a; }
+void f() { int32 a = pair(1, 2); }

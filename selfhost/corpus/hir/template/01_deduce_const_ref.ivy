@@ -1,0 +1,4 @@
+// Deduction through a `const T&` parameter: the reference-ness and the
+// const qualifier of the argument are stripped.
+template <typename T> T id(const T& x) { return x; }
+void f() { int32 a = id(1); }

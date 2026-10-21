@@ -1,0 +1,5 @@
+// A template-id as the field type of a plain struct: the specialization
+// is created while the plain struct is laid out.
+template <typename T> struct Box { T value; T get() { return this.value; } };
+struct Holder { Box<int32> b; };
+void f() { Holder h; }

@@ -1,0 +1,3 @@
+// An unknown concept name is assumed to be satisfied.
+template <UnknownConcept T> T id(T x) { return x; }
+void f() { int32 a = id<int32>(1); }

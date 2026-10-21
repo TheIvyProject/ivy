@@ -1,0 +1,4 @@
+// A template called from the body of a method.
+template <typename T> T g(T x) { return x; }
+struct S { int32 f() { return g<int32>(1); } };
+void h() { S s; int32 a = s.f(); }

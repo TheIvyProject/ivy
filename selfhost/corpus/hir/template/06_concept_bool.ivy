@@ -1,0 +1,4 @@
+// `bool` counts as an arithmetic type, so it satisfies `a + b`.
+concept Addable = requires(T a, T b) { a + b; };
+template <Addable T> T add(T a, T b) { return a; }
+void f() { bool r = add<bool>(true, false); }

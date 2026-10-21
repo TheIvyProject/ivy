@@ -1,0 +1,4 @@
+// Two specializations: they are dumped in the order they were created.
+template <typename T> struct Box { T value; };
+void g() { Box<int64> b; }
+void f() { Box<int32> b; }

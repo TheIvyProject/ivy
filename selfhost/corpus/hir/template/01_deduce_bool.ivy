@@ -1,0 +1,3 @@
+// A boolean literal deduces the type `bool`.
+template <typename T> T identity(T x) { return x; }
+void f() { auto b = identity(true); }

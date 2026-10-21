@@ -1,0 +1,6 @@
+// A template calling another template with an explicit type argument: the
+// argument is NOT substituted (there is no type mapping during a function
+// template instantiation).
+template <typename T> T id(T x) { return x; }
+template <typename T> T outer(T x) { return id<T>(x); }
+void f() { int32 a = outer<int32>(1); }

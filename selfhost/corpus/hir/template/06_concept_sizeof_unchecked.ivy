@@ -1,0 +1,5 @@
+// A `sizeof` requirement is not checked at all.
+concept Sz = requires(T a) { sizeof(a); };
+struct P { int32 x; };
+template <Sz T> T id(T x) { return x; }
+void f() { P p; P r = id<P>(p); }

@@ -1,0 +1,4 @@
+// A template declared without a body: the specialization is dumped as
+// "(declaration only)".
+template <typename T> T id(T x);
+void f() { int32 a = id<int32>(1); }

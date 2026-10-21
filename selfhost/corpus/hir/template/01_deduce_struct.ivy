@@ -1,0 +1,6 @@
+// A struct argument deduces the struct type.
+struct P {
+    int32 v;
+};
+template <typename T> T identity(T x) { return x; }
+void f() { P p; P q = identity(p); }

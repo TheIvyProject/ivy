@@ -1,0 +1,4 @@
+// A template-id on a plain (non-template) struct: the arguments are
+// ignored and the type stays `Box`.
+struct Box { int32 x; };
+void f() { Box<int32> b; }

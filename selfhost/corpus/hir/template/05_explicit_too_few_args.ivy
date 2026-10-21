@@ -1,0 +1,4 @@
+// Too few explicit arguments on a struct template: the unmapped field
+// keeps the literal parameter name.
+template <typename T, typename U> struct Box { T value; U other; };
+void f() { Box<int32> b; }

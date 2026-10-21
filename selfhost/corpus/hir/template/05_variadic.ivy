@@ -1,0 +1,3 @@
+// A variadic struct template: the arguments are mapped one to one.
+template <typename... Args> struct Box { int32 value; };
+void f() { Box<int32, int64> b; }

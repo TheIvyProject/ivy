@@ -1,0 +1,5 @@
+// The redefinition of a struct template: the second template silently
+// replaces the first (no diagnostic).
+template <typename T> struct Box { T value; };
+template <typename T> struct Box { T value; };
+void f() { Box<int32> b; }

@@ -1,0 +1,4 @@
+// An implicit call with no arguments: the template arguments cannot be
+// deduced.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id(); }

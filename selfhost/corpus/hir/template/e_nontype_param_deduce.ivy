@@ -1,0 +1,4 @@
+// A template with only a non-type parameter: a non-type parameter is
+// never deduced.
+template <int32 N> int32 val(int32 x) { return x; }
+void f() { int32 a = val(1); }

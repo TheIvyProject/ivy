@@ -1,0 +1,4 @@
+// A template instantiated from the body of another template.
+template <typename T> T id(T x) { return x; }
+template <typename T> T outer(T x) { return id(x); }
+void f() { int32 a = outer<int32>(1); }

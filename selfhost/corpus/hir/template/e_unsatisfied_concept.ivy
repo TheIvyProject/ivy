@@ -1,0 +1,6 @@
+// The constraint of a type parameter is not satisfied and the result of
+// the failed call is initialized: the call keeps the dummy type `int`.
+concept Addable = requires(T a, T b) { a + b; };
+struct P { int32 x; };
+template <Addable T> T add(T a, T b) { return a; }
+void f() { P p; P q; P r = add<P>(p, q); }

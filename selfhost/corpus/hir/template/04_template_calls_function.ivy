@@ -1,0 +1,4 @@
+// A template calling an ordinary function.
+int32 helper(int32 x) { return x; }
+template <typename T> T call_helper(T x) { return helper(x); }
+void f() { int32 a = call_helper<int32>(1); }

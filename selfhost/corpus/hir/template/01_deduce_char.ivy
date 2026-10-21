@@ -1,0 +1,3 @@
+// A character literal deduces the type `char`.
+template <typename T> T identity(T x) { return x; }
+void f() { auto c = identity('a'); }

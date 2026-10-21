@@ -1,0 +1,8 @@
+// The dump order: the ordinary functions first, then the instantiations
+// in first-instantiation order; a specialization that is used twice is
+// emitted once.
+template <typename T> T id(T x) { return x; }
+void a() { int32 v = id<int32>(1); }
+void b() { int32 v = 2; }
+void c() { int32 v = id<int32>(3); }
+void d() { int32 v = id<int64>(4); }

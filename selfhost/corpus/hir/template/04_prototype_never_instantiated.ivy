@@ -1,0 +1,3 @@
+// A template declaration that is never used produces no entry.
+template <typename T> T id(T x);
+void f() { int32 a = 1; }

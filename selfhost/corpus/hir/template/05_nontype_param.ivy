@@ -1,0 +1,3 @@
+// A non-type template parameter of a struct template is never bound.
+template <int32 N> struct Box { int32 value; int32 get() { return this.value; } };
+void f() { Box<int32> b; }

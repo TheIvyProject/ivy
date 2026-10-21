@@ -1,0 +1,5 @@
+// A pack expansion in a call: the pack name is not a scope name, so the
+// expansion reports an undeclared identifier.
+void take(int32 x) { }
+template <typename... Args> void pass(Args... args) { take(args...); }
+void f() { pass<int32>(1); }

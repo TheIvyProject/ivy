@@ -1,0 +1,8 @@
+// Two template-id diagnostics in a row with a long name: the message must be
+// complete and the second message must not be prefixed with the first one
+// (the diagnostic messages are copied out of the scratch buffer, which is
+// reused for the next message).
+void f() {
+    int32 a = aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001<int32>(1);
+    int32 b = aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000002<int32>(1);
+}

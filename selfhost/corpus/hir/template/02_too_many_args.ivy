@@ -1,0 +1,4 @@
+// Too many explicit arguments: the extra arguments are silently accepted
+// and appear in the mangled name.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity<int32, int32>(1); }

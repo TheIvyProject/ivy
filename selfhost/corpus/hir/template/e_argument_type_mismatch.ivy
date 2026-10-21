@@ -1,0 +1,4 @@
+// The type of an argument does not match the type of the parameter of the
+// specialization.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id<int32>("hello"); }

@@ -1,0 +1,8 @@
+// A name that is both a struct template and a function template: the struct
+// template wins.  The oracle looks up the struct-template registry before the
+// function-template registry, so the specialization is created and the call
+// stays unresolved (the callee keeps the bare name, the type is the dummy
+// type).
+template <typename T> struct TDup { T value; };
+template <typename T> T TDup(T x) { return x; }
+void f() { int32 a = TDup<int32>(1); }

@@ -1,0 +1,4 @@
+// A recursive template: the specialization is registered before its body
+// is built, so the recursive call resolves to the specialization itself.
+template <typename T> T rec(T x) { return rec(x); }
+void f() { int32 a = rec<int32>(1); }

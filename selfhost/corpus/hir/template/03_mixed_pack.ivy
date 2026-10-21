@@ -1,0 +1,3 @@
+// A fixed parameter followed by a pack.
+template <typename T, typename... Args> int32 count_after(T first, Args... rest) { return 0; }
+void f() { int32 a = count_after<int32, int32>(10, 20); }

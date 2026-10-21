@@ -1,0 +1,5 @@
+// The `==` requirement: a struct type does not satisfy it either.
+concept Eq = requires(T a, T b) { a == b; };
+struct P { int32 x; };
+template <Eq T> T id(T x) { return x; }
+void f() { P p; P r = id<P>(p); }

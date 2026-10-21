@@ -1,0 +1,4 @@
+// An error in the body of a template is reported when the template is
+// instantiated.
+template <typename T> T broken(T x) { return undefined_name; }
+void f() { int32 a = broken<int32>(1); }

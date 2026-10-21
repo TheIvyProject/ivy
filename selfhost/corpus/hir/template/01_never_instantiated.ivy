@@ -1,0 +1,3 @@
+// A template that is never instantiated produces no dump entry at all.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = 1; }

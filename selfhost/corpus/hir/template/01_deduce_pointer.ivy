@@ -1,0 +1,10 @@
+// A `T*` parameter deduces the pointee type of a pointer argument; the
+// parameter type of the specialization is the substituted pointer type.
+template <typename T> int32 first(T* p) { return 0; }
+void f() {
+    unsafe {
+        int32 v = 1;
+        int32* p = &v;
+        int32 q = first(p);
+    }
+}

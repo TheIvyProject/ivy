@@ -1,0 +1,3 @@
+// A template-id call on an ordinary function: the name is not a template.
+int32 plain(int32 x) { return x; }
+void f() { int32 a = plain<int32>(1); }

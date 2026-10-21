@@ -97,6 +97,13 @@
 #     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
 #     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
 #     -Driver hirdrive
+#   H4.4 (template instantiation: function templates, explicit and deduced
+#     template arguments, variadic packs, overload/template precedence,
+#     class/struct templates, concepts and the related diagnostics):
+#     -Dir selfhost/corpus/hir/template -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 

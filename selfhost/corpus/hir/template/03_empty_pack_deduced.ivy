@@ -1,0 +1,3 @@
+// A pack deduced from an empty argument list is mangled `count_args<>` too.
+template <typename... Args> int32 count_args(Args... args) { return 0; }
+void f() { int32 a = count_args(); }

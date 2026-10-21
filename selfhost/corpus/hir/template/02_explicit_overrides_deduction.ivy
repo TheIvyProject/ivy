@@ -1,0 +1,4 @@
+// An explicit argument and a deduced call create two different
+// specializations of the same template.
+template <typename T> T identity(T x) { return x; }
+void f() { int32 a = identity<int32>(1); int32 b = identity(2); }

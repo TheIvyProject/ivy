@@ -1,0 +1,3 @@
+// A `constexpr` template: the call is folded to a literal.
+template <typename T> constexpr T cst(T x) { return x; }
+void f() { int32 a = cst<int32>(1); }

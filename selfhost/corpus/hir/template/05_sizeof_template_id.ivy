@@ -1,0 +1,4 @@
+// `sizeof`/`alignof` of a template-id type is the 4-byte fallback: the
+// type is not resolved to the specialization before the size is computed.
+template <typename T> struct Box { T value; T get() { return this.value; } };
+void f() { int32 s = sizeof(Box<int32>); int32 a = alignof(Box<int32>); }

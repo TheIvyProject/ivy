@@ -1,0 +1,4 @@
+// Too many explicit arguments on a struct template: the extra arguments
+// are silently accepted.
+template <typename T> struct Box { T value; };
+void f() { Box<int32, int64> b; }

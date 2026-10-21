@@ -1,0 +1,7 @@
+// A class template with a constructor: the constructor keeps the original
+// struct name (`Holder<int32_t>::Holder`).
+template <typename T> class Holder {
+    T value;
+    Holder(T v) { this.value = v; }
+};
+void f() { Holder<int32> h; }

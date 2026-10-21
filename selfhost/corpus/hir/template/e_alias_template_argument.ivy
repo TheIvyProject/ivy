@@ -1,0 +1,5 @@
+// An alias used as an explicit template argument is not resolved: the
+// parameter of the specialization keeps the alias name.
+using MyInt = int32;
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id<MyInt>(1); }

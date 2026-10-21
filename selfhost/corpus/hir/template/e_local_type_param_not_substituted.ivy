@@ -1,0 +1,4 @@
+// A local declaration of the template parameter type is NOT substituted
+// in the body of a function template.
+template <typename T> T f(T x) { T y = x; return y; }
+void g() { int32 r = f<int32>(1); }

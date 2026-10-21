@@ -1,0 +1,4 @@
+// A `T&` parameter: the specialization keeps the reference on the
+// parameter.
+template <typename T> T ref(T& x) { return x; }
+void f() { int32 a = 1; int32 b = ref<int32>(a); }

@@ -1,0 +1,4 @@
+// Too few explicit arguments: the unmapped parameter keeps its literal
+// name (`U`), which the call check then reports.
+template <typename T, typename U> T first(T a, U b) { return a; }
+void f() { int32 r = first<int32>(1, 2); }

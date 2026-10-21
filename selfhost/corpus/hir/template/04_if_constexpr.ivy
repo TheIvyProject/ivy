@@ -1,0 +1,5 @@
+// `if constexpr` inside a template: `sizeof(T)` folds to the 4-byte
+// fallback, so the `else` branch is taken and the discarded branch is
+// never checked.
+template <typename T> int32 f(T x) { if constexpr (sizeof(T) == 8) { return undefined_thing; } else { return 2; } }
+void g() { int32 r = f<int32>(1); }

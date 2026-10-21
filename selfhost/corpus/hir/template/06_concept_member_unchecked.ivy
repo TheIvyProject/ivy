@@ -1,0 +1,6 @@
+// A requirement without a binary operator (a member access) is not
+// checked at all.
+concept Foo = requires(T a) { a.bar(); };
+struct P { int32 x; };
+template <Foo T> T id(T x) { return x; }
+void f() { P p; P r = id<P>(p); }

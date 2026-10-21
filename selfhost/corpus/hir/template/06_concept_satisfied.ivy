@@ -1,0 +1,4 @@
+// A concept satisfied by an arithmetic type.
+concept Addable = requires(T a, T b) { a + b; };
+template <Addable T> T add(T a, T b) { return a + b; }
+void f() { int32 r = add<int32>(3, 4); }

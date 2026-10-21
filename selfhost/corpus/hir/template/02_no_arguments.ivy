@@ -1,0 +1,4 @@
+// A template with no function parameters is still instantiated with an
+// explicit argument.
+template <typename T> int32 zero() { return 0; }
+void f() { int32 a = zero<int32>(); }

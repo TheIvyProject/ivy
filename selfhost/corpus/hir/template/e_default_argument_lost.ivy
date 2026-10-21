@@ -1,0 +1,4 @@
+// A default argument of a template is not copied into the specialization,
+// so the argument is reported as missing.
+template <typename T> T withdefault(T x, int32 y = 5) { return x; }
+void f() { int32 a = withdefault(1); }

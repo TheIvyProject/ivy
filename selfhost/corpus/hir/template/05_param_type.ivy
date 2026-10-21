@@ -1,0 +1,3 @@
+// A template-id as a parameter type.
+template <typename T> struct Box { T value; };
+void f(Box<int32> b) { }

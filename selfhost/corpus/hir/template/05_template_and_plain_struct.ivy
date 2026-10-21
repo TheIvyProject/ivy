@@ -1,0 +1,4 @@
+// A struct template and a plain struct with the same name may coexist.
+template <typename T> struct Box { T value; };
+struct Box { int32 x; };
+void f() { Box<int32> b; Box c; }

@@ -12,13 +12,72 @@ export module ast;
 // A resolved type: canonical base name plus const/unsigned/reference/pointer
 // qualifiers. `base` is "" when no type could be parsed.
 // `array_size` is 0 for a scalar/pointer type and > 0 for `T[N]`.
+//
+// Template-id types (`Box<int32>`) keep their argument list: `tpl_args`
+// points at a contiguous run of `tpl_n` argument types owned by the parser
+// and `tpl_n` is 0 for an ordinary (non-template-id) type.  The run is
+// immutable — a consumer that substitutes into the arguments must build a
+// fresh run instead of writing through this pointer.
+//
+// sizeof(AType) is 48 bytes: the three qualifier flags are `bool` (1 byte
+// each) so that the two template fields fit without growing the record.
+// The qualifier flags mirror `ast::Type` in src/parsing/ast.h.
 export struct AType {
     const char* base;
-    long is_unsigned;
-    long is_const;
-    long is_ref;
+    AType* tpl_args;      // template-id arguments (null when not a template-id)
+    long tpl_n;           // number of template arguments
+    bool is_unsigned;
+    bool is_const;
+    bool is_ref;
     long ptr_depth;
     long array_size;
+};
+
+// A slice of template-argument types (the argument list of a template-id).
+export struct ATypeList {
+    AType* items;
+    long n;
+};
+
+// A template parameter of a template declaration:
+//   `typename T` / `class T`  -> is_typename = 1, type empty
+//   `Concept T`                -> is_typename = 1, constraint = "Concept"
+//   `int32 N` / `auto V`       -> is_typename = 0, type = the parameter type
+//   `typename... Args`         -> is_variadic = 1
+// `constraint` is the concept name of a constrained type parameter and ""
+// when the parameter is unconstrained.  Mirrors `ast::TemplateParam`
+// (src/parsing/ast.h); the oracle has no default template argument and no
+// trailing `requires` clause, so neither is representable here.
+export struct ATemplateParam {
+    const char* name;
+    AType type;              // the type of a non-type parameter
+    const char* constraint;   // concept name ("" when unconstrained)
+    long is_typename;
+    long is_variadic;
+    long line;
+    long col;
+};
+
+// A slice of template parameters (the parameter list of a template
+// declaration).  `items` points into the parser's template-parameter pool.
+export struct ATemplateParamList {
+    ATemplateParam* items;
+    long n;
+};
+
+// A concept definition: `concept Name = requires(T a, T b) { a + b; };`.
+// `param_name` is the concept's type parameter (e.g. "T") and the
+// requirements are the raw token texts of the requires-expression body,
+// joined per requirement.  `req_start`/`nreqs` delimit a contiguous run in
+// the parser's requirement-text pool.  Mirrors `ast::ConceptDecl`
+// (src/parsing/ast.h).
+export struct AConcept {
+    const char* name;
+    const char* param_name;
+    long req_start;     // first requirement index in the requirement pool
+    long nreqs;         // number of requirements (0 => `req_start` unused)
+    long line;
+    long col;
 };
 
 // An `[[ivy::name(args)]]` attribute. `args` is the argument list already
@@ -47,6 +106,8 @@ export struct AParam {
 
 // A top-level function declaration or definition. `body` is a statement-pool
 // index for the root Compound, or -1 for a declaration only.
+// `tpl_params`/`tpl_n` hold the template parameter list of a template
+// function (empty for an ordinary function).
 export struct AFunction {
     AAttr* attrs;
     long nattrs;
@@ -60,6 +121,8 @@ export struct AFunction {
     long col;
     long is_constexpr;   // `constexpr` / `consteval` function
     long is_virtual;     // `virtual` or pure-virtual method
+    ATemplateParam* tpl_params;
+    long tpl_n;
 };
 
 // A struct/class field declaration.
@@ -82,7 +145,8 @@ export struct AEnumerator {
 // A struct/class definition. `fields` and `methods` point into contiguous
 // runs of the parser's field/method pools. Method names are qualified as
 // `StructName::methodName`. `bstart`/`nbases` delimit the base-class names
-// in the parser's base-name pool.
+// in the parser's base-name pool.  `tpl_params`/`tpl_n` hold the template
+// parameter list of a template struct/class (empty otherwise).
 export struct AStruct {
     const char* name;
     long is_class;
@@ -94,6 +158,8 @@ export struct AStruct {
     long nbases;
     long line;
     long col;
+    ATemplateParam* tpl_params;
+    long tpl_n;
 };
 
 // An enum definition. `enumerators` points into a contiguous run of the
@@ -122,6 +188,9 @@ export struct AAlias {
 //   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 nullopt
 //   8 ident  9 this  10 unary  11 binary  12 ternary  13 call  14 index
 //   15 member  16 assign  17 sizeofpack  18 sizeof  19 alignof  20 cast
+//
+// `tpl_args`/`tpl_n` hold the explicit template arguments of a template-id
+// call (`f<int32>(x)`); they are empty for an ordinary call.
 export struct AExpr {
     long kind;
     long ival;          // integer literal value (kind 1)
@@ -137,6 +206,8 @@ export struct AExpr {
     long line;
     long col;
     double fval;        // exact value of a float literal (kind 2)
+    AType* tpl_args;    // explicit template arguments of a template-id call
+    long tpl_n;
 };
 
 // A statement node in the statement pool.

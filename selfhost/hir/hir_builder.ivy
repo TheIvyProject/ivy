@@ -109,18 +109,128 @@ export struct HirBuilder {
     long db_start_;
 
     long cur_fn_;
-    const char* cur_fn_name_;
     AType cur_ret_;
     long eval_hit_;
     const char* tmp_;
     long* abuf_;
     long ab_n_;
+    long ab_cap_;
     long unsafe_depth_;   // nesting depth of `unsafe` blocks
     long has_return_;     // current function body contains a `return`
     AField found_field_;  // last field matched by lookup_field
     const char* base_name_;  // scratch: current base-class name
     long* ovl_;           // scratch: overload candidate indices
     long ovl_cap_;
+
+    // --- template instantiation (H4.4) ---
+    //
+    // The function-template registry: the AST function index of every
+    // template, with its name.  A second template with the same name
+    // replaces the first one (the oracle keys `templates_` by name).
+    long* tpl_ast_;
+    long* tpl_name_;
+    long tpl_n_;
+    long tpl_cap_;
+
+    // The instantiated specializations: the mangled name and the HIR
+    // function index of every specialization built so far.  A second use
+    // of a specialization reuses the entry (the oracle's `instantiated_`).
+    long* inst_name_;
+    long* inst_idx_;
+    long inst_n_;
+    long inst_cap_;
+
+    // The template-parameter mapping of the specialization that is being
+    // built: the parameter name and the concrete type it maps to.
+    long* map_name_;
+    AType* map_type_;
+    long map_n_;
+    long map_cap_;
+
+    // Stable storage for the strings that must outlive their scratch
+    // buffer: the mangled names, the synthesized pack parameter names and
+    // the diagnostic messages.  Every allocation is remembered so that it
+    // can be freed in `release`.
+    long* strs_;
+    long strs_n_;
+    long strs_cap_;
+
+    // The scratch buffer the mangled names are built in.
+    char* sb_;
+    long sb_n_;
+    long sb_cap_;
+
+    // The pool of substituted template-argument lists.  It is a list of
+    // fixed-size chunks: a chunk is never reallocated (a substituted type
+    // keeps the pointer to its argument list), so a full chunk is not
+    // reused but a new one is added.
+    long* tpchunks_;
+    long tpchunk_n_;
+    long tpblk_cap_;
+    AType* tpcur_;
+    long tpcur_n_;
+    long tpchunk_size_;
+    long tpok_;
+    long* tpbig_;
+    long tpbig_n_;
+    long tpbig_cap_;
+
+    // The pack of the specialization whose body is being built.  A frame
+    // is a run of four longs in `packdata_`:
+    //   0: the template parameter name (a pointer)
+    //   1: the function parameter name (a pointer)
+    //   2: the number of elements
+    //   3: the index of the first element in the function's parameters
+    // The frames form a stack: a nested instantiation pushes its own
+    // frame and pops it when its body has been built.
+    long* packdata_;
+    long packdata_n_;
+    long packdata_cap_;
+    long packframe_;
+    long pack_first_;
+
+    // --- class/struct template instantiation (H4.4) ---
+    //
+    // The struct-template registry: the AST struct index of every struct
+    // template, with its name.  A second template with the same name
+    // replaces the first one (the oracle keys `structTemplates_` by name).
+    long* stpl_ast_;
+    long* stpl_name_;
+    long stpl_n_;
+    long stpl_cap_;
+
+    // The struct specializations: the mangled name and the synthetic
+    // struct record (with the substituted fields) of every specialization
+    // built so far.  A second use of a specialization reuses the entry
+    // (the oracle's `instantiatedStructs_`).  The layout of a
+    // specialization is kept in `spc_size_` / `spc_align_` / `spc_poly_`.
+    long* spc_name_;
+    AStruct* spc_rec_;
+    long spc_n_;
+    long spc_cap_;
+    long* spc_size_;
+    long* spc_align_;
+    long* spc_poly_;
+
+    // The field arrays of the specializations.  Every array is allocated
+    // separately and remembered here so that it can be freed in `release`.
+    long* spcfld_;
+    long spcfld_n_;
+    long spcfld_cap_;
+
+    // The stack of the HIR function indices of the methods of a struct
+    // specialization: the signatures of all the methods are built first,
+    // their bodies afterwards.
+    long* spcfns_;
+    long spcfns_n_;
+    long spcfns_cap_;
+
+    // The base index in `map_` of the type mapping that is currently
+    // active (the oracle's `currentTypeMapping_`).  It is set while a
+    // struct template is instantiated and restored afterwards; -1 when
+    // there is no active mapping.
+    long gmap_base_;
+
 
 
     void setup(Parser p, long ntoks) {
@@ -199,6 +309,7 @@ export struct HirBuilder {
             this.ev_n_ = 0;
             this.evstart_ = (long*) __ivy_alloc((ntoks + 16) * 8);
             this.evend_ = (long*) __ivy_alloc((ntoks + 16) * 8);
+            this.ab_cap_ = ntoks * 4 + 64;
             this.abuf_ = (long*) __ivy_alloc((ntoks * 4 + 64) * 8);
             this.ab_n_ = 0;
 
@@ -215,7 +326,6 @@ export struct HirBuilder {
             this.db_start_ = 0;
 
         this.cur_fn_ = -1;
-        this.cur_fn_name_ = "";
         this.tmp_ = "";
         this.cur_ret_ = this.ty_void();
         this.eval_hit_ = 0;
@@ -229,6 +339,69 @@ export struct HirBuilder {
             this.has_return_ = 0;
             this.ovl_cap_ = ntoks + 64;
             this.ovl_ = (long*) __ivy_alloc(this.ovl_cap_ * 8);
+
+            this.tpl_cap_ = ntoks + 16;
+            this.tpl_ast_ = (long*) __ivy_alloc(this.tpl_cap_ * 8);
+            this.tpl_name_ = (long*) __ivy_alloc(this.tpl_cap_ * 8);
+            this.tpl_n_ = 0;
+
+            this.inst_cap_ = ntoks + 16;
+            this.inst_name_ = (long*) __ivy_alloc(this.inst_cap_ * 8);
+            this.inst_idx_ = (long*) __ivy_alloc(this.inst_cap_ * 8);
+            this.inst_n_ = 0;
+
+            this.map_cap_ = ntoks + 16;
+            this.map_name_ = (long*) __ivy_alloc(this.map_cap_ * 8);
+            this.map_type_ = (AType*) __ivy_alloc(this.map_cap_ * 48);
+            this.map_n_ = 0;
+
+            this.strs_cap_ = ntoks + 16;
+            this.strs_ = (long*) __ivy_alloc(this.strs_cap_ * 8);
+            this.strs_n_ = 0;
+
+            this.sb_cap_ = 256;
+            this.sb_ = (char*) __ivy_alloc(this.sb_cap_);
+            this.sb_n_ = 0;
+
+            this.tpblk_cap_ = 16;
+            this.tpchunks_ = (long*) __ivy_alloc(this.tpblk_cap_ * 8);
+            this.tpchunk_n_ = 0;
+            this.tpchunk_size_ = 64;
+            this.tpcur_ = (AType*)0;
+            this.tpcur_n_ = 0;
+            this.tpok_ = 0;
+            this.tpbig_cap_ = 8;
+            this.tpbig_ = (long*) __ivy_alloc(this.tpbig_cap_ * 8);
+            this.tpbig_n_ = 0;
+
+            this.packdata_cap_ = ntoks * 4 + 64;
+            this.packdata_ = (long*) __ivy_alloc(this.packdata_cap_ * 8);
+            this.packdata_n_ = 0;
+            this.packframe_ = -1;
+            this.pack_first_ = 0;
+
+            this.stpl_cap_ = ntoks + 16;
+            this.stpl_ast_ = (long*) __ivy_alloc(this.stpl_cap_ * 8);
+            this.stpl_name_ = (long*) __ivy_alloc(this.stpl_cap_ * 8);
+            this.stpl_n_ = 0;
+
+            this.spc_cap_ = ntoks + 16;
+            this.spc_name_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
+            this.spc_rec_ = (AStruct*) __ivy_alloc(this.spc_cap_ * 96);
+            this.spc_size_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
+            this.spc_align_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
+            this.spc_poly_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
+            this.spc_n_ = 0;
+
+            this.spcfld_cap_ = ntoks + 16;
+            this.spcfld_ = (long*) __ivy_alloc(this.spcfld_cap_ * 8);
+            this.spcfld_n_ = 0;
+
+            this.spcfns_cap_ = ntoks + 16;
+            this.spcfns_ = (long*) __ivy_alloc(this.spcfns_cap_ * 8);
+            this.spcfns_n_ = 0;
+
+            this.gmap_base_ = -1;
         }
     }
 
@@ -271,6 +444,54 @@ export struct HirBuilder {
             __ivy_free((void*)this.dmsg_);
             __ivy_free(this.dbuf_);
             __ivy_free(this.ovl_);
+            __ivy_free(this.tpl_ast_);
+            __ivy_free((void*)this.tpl_name_);
+            __ivy_free((void*)this.inst_name_);
+            __ivy_free(this.inst_idx_);
+            __ivy_free((void*)this.map_name_);
+            __ivy_free(this.map_type_);
+            long si = 0;
+            while (si < this.strs_n_) {
+                unsafe {
+                    __ivy_free((void*)this.strs_[si]);
+                }
+                si = si + 1;
+            }
+            __ivy_free((void*)this.strs_);
+            __ivy_free(this.sb_);
+            long tc = 0;
+            while (tc < this.tpchunk_n_) {
+                unsafe {
+                    __ivy_free((void*)this.tpchunks_[tc]);
+                }
+                tc = tc + 1;
+            }
+            __ivy_free((void*)this.tpchunks_);
+            long tb = 0;
+            while (tb < this.tpbig_n_) {
+                unsafe {
+                    __ivy_free((void*)this.tpbig_[tb]);
+                }
+                tb = tb + 1;
+            }
+            __ivy_free((void*)this.tpbig_);
+            __ivy_free(this.packdata_);
+            __ivy_free(this.stpl_ast_);
+            __ivy_free((void*)this.stpl_name_);
+            __ivy_free((void*)this.spc_name_);
+            __ivy_free(this.spc_rec_);
+            __ivy_free(this.spc_size_);
+            __ivy_free(this.spc_align_);
+            __ivy_free(this.spc_poly_);
+            long sf = 0;
+            while (sf < this.spcfld_n_) {
+                unsafe {
+                    __ivy_free((void*)this.spcfld_[sf]);
+                }
+                sf = sf + 1;
+            }
+            __ivy_free((void*)this.spcfld_);
+            __ivy_free(this.spcfns_);
         }
     }
 
@@ -355,6 +576,40 @@ export struct HirBuilder {
         return false;
     }
 
+    // True when `s` starts with `prefix`.
+    bool starts_with(const char* s, const char* prefix) {
+        long n = this.slen(prefix);
+        long i = 0;
+        while (i < n) {
+            unsafe {
+                if (s[i] != prefix[i]) {
+                    return false;
+                }
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    // True when `s` ends with `suffix`.
+    bool ends_with(const char* s, const char* suffix) {
+        long sn = this.slen(suffix);
+        long n = this.slen(s);
+        if (sn > n) {
+            return false;
+        }
+        long i = 0;
+        while (i < sn) {
+            unsafe {
+                if (s[n - sn + i] != suffix[i]) {
+                    return false;
+                }
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
     bool is_builtin_fn(const char* name) {
         return this.seq(name, "move") ||
                this.seq(name, "printf") || this.seq(name, "puts") ||
@@ -396,15 +651,42 @@ export struct HirBuilder {
         this.db_n_ = this.db_n_ + n;
     }
 
-    const char* db_end() {
-        if (this.db_n_ + 1 <= this.db_cap_) {
-            unsafe {
-                this.dbuf_[this.db_n_] = 0;
-            }
-            this.db_n_ = this.db_n_ + 1;
+    void db_put_char(char c) {
+        if (this.db_n_ + 2 > this.db_cap_) {
+            return;
         }
         unsafe {
-            return this.dbuf_ + this.db_start_;
+            this.dbuf_[this.db_n_] = c;
+        }
+        this.db_n_ = this.db_n_ + 1;
+    }
+
+    // The message is built in the scratch buffer `dbuf_` and copied into a
+    // stable allocation by `db_end`: the diagnostic keeps the pointer, so
+    // the scratch buffer is reused for the next message.  (Keeping every
+    // message in the scratch buffer would truncate it once the buffer is
+    // full, and the diagnostic would show a cut-off message.)
+    const char* db_end() {
+        long n = this.db_n_ - this.db_start_;
+        if (n < 0) {
+            n = 0;
+        }
+        unsafe {
+            char* p = (char*) __ivy_alloc((unsigned long long)(n + 1));
+            if (p == (char*)0) {
+                this.db_n_ = 0;
+                this.db_start_ = 0;
+                return "";
+            }
+            __ivy_memcpy((void*)p, (void*)(this.dbuf_ + this.db_start_),
+                         (unsigned long long)n);
+            p[n] = 0;
+            this.strs_grow();
+            this.strs_[this.strs_n_] = (long)p;
+            this.strs_n_ = this.strs_n_ + 1;
+            this.db_n_ = 0;
+            this.db_start_ = 0;
+            return p;
         }
         return "";
     }
@@ -562,17 +844,6 @@ export struct HirBuilder {
         this.db_put(name);
         this.db_put("' cannot be used as a value (no function pointers)");
         this.diag(line, col, this.db_end());
-    }
-
-    // Append a single character to the message scratch buffer.
-    void db_put_char(char c) {
-        if (this.db_n_ + 2 > this.db_cap_) {
-            return;
-        }
-        unsafe {
-            this.dbuf_[this.db_n_] = c;
-        }
-        this.db_n_ = this.db_n_ + 1;
     }
 
     // Append a decimal integer to the message scratch buffer.
@@ -833,6 +1104,11 @@ export struct HirBuilder {
         t.is_ref = 0;
         t.ptr_depth = 0;
         t.array_size = 0;
+        // The template-argument list of a type that is not a template-id.
+        // The allocator does not zero its memory, so the new fields have
+        // to be initialised before they are read.
+        unsafe { t.tpl_args = (AType*)0; }
+        t.tpl_n = 0;
         return t;
     }
 
@@ -929,9 +1205,7 @@ export struct HirBuilder {
         }
         long si = this.find_struct(t.base);
         if (si >= 0) {
-            unsafe {
-                return this.ssize_[si];
-            }
+            return this.struct_size(si);
         }
         if (t.array_size > 0) {
             AType elem = t;
@@ -950,9 +1224,7 @@ export struct HirBuilder {
         }
         long si = this.find_struct(t.base);
         if (si >= 0) {
-            unsafe {
-                return this.salign_[si];
-            }
+            return this.struct_align(si);
         }
         if (t.array_size > 0) {
             AType elem = t;
@@ -967,7 +1239,7 @@ export struct HirBuilder {
     // component is aligned to its natural alignment and the size is rounded
     // up to the alignment of the struct.
     void layout_struct(long si) {
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         long offset = 0;
         long align = 1;
         long poly = 0;
@@ -987,10 +1259,8 @@ export struct HirBuilder {
             this.load_base(sd, k);
             long bi = this.find_struct(this.base_name_);
             if (bi >= 0) {
-                unsafe {
-                    if (this.spoly_[bi] != 0) {
-                        poly = 1;
-                    }
+                if (this.struct_poly(bi) != 0) {
+                    poly = 1;
                 }
             }
             k = k + 1;
@@ -1004,12 +1274,8 @@ export struct HirBuilder {
             this.load_base(sd, k);
             long bi = this.find_struct(this.base_name_);
             if (bi >= 0) {
-                long bsize = 0;
-                long balign = 0;
-                unsafe {
-                    bsize = this.ssize_[bi];
-                    balign = this.salign_[bi];
-                }
+                long bsize = this.struct_size(bi);
+                long balign = this.struct_align(bi);
                 offset = this.align_up(offset, balign);
                 offset = offset + bsize;
                 if (balign > align) {
@@ -1024,7 +1290,8 @@ export struct HirBuilder {
             unsafe {
                 f = sd.fields[i];
             }
-            AType ft = this.resolve_alias(f.type);
+            AType ft = this.resolve_template_struct_type(this.resolve_alias(f.type),
+                                                           f.line, f.col);
             long fsz = this.type_size(ft);
             long fal = this.type_align(ft);
             offset = this.align_up(offset, fal);
@@ -1111,6 +1378,26 @@ export struct HirBuilder {
             if (this.slen(t.base) == 0) {
                 return t;
             }
+            // The active type mapping (the oracle's `currentTypeMapping_`):
+            // inside a struct-template instantiation the template parameters
+            // are replaced by their concrete types before the aliases are
+            // resolved.  The qualifiers of the usage site are kept, the
+            // pointer depth is added.
+            if (this.gmap_base_ >= 0) {
+                long mi = this.map_find(t.base, this.gmap_base_);
+                if (mi >= 0) {
+                    AType subst;
+                    unsafe {
+                        subst = this.map_type_[mi];
+                    }
+                    if (t.is_const != 0) { subst.is_const = 1; }
+                    if (t.is_ref != 0) { subst.is_ref = 1; }
+                    subst.ptr_depth = subst.ptr_depth + t.ptr_depth;
+                    t = subst;
+                    guard = guard + 1;
+                    continue;
+                }
+            }
             long found = -1;
             long n = this.pa.alias_count();
             long i = 0;
@@ -1195,7 +1482,7 @@ export struct HirBuilder {
         if (si < 0) {
             return false;
         }
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         if (sd.nfields != 3) {
             return false;
         }
@@ -1227,7 +1514,7 @@ export struct HirBuilder {
         if (si < 0) {
             return false;
         }
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         if (sd.nfields != 2) {
             return false;
         }
@@ -1264,7 +1551,7 @@ export struct HirBuilder {
         if (si < 0) {
             return false;
         }
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         long k = 0;
         while (k < sd.nbases) {
             this.load_base(sd, k);
@@ -1374,17 +1661,123 @@ export struct HirBuilder {
 
     // --- struct/enum/function lookup -------------------------------------
 
+    // The global struct index: the AST structs come first (0..n-1), the
+    // struct-template specializations follow them (n..n+k-1).
     long find_struct(const char* name) {
         long n = this.pa.struct_count();
         long i = 0;
         while (i < n) {
-            AStruct sd = this.pa.get_struct(i);
-            if (this.seq(sd.name, name)) {
+            AStruct sd = this.get_struct(i);
+            // A struct template is not a struct: it is instantiated on
+            // demand and only its specializations enter the registry.
+            if (sd.tpl_n == 0 && this.seq(sd.name, name)) {
                 return i;
             }
             i = i + 1;
         }
+        long k = 0;
+        while (k < this.spc_n_) {
+            unsafe {
+                if (this.seq((char*)this.spc_name_[k], name)) {
+                    return n + k;
+                }
+            }
+            k = k + 1;
+        }
         return -1;
+    }
+
+    // The struct record of the global struct index `gidx`.
+    AStruct get_struct(long gidx) {
+        long n = this.pa.struct_count();
+        if (gidx < 0) {
+            AStruct empty;
+            empty.name = "";
+            empty.is_class = 0;
+            unsafe { empty.fields = (AField*)0; }
+            empty.nfields = 0;
+            unsafe { empty.methods = (AFunction*)0; }
+            empty.nmethods = 0;
+            empty.bstart = 0;
+            empty.nbases = 0;
+            empty.line = 0;
+            empty.col = 0;
+            unsafe { empty.tpl_params = (ATemplateParam*)0; }
+            empty.tpl_n = 0;
+            return empty;
+        }
+        if (gidx < n) {
+            return this.pa.get_struct(gidx);
+        }
+        long k = gidx - n;
+        if (k < this.spc_n_) {
+            unsafe {
+                return this.spc_rec_[k];
+            }
+        }
+        AStruct empty;
+        empty.name = "";
+        empty.is_class = 0;
+        unsafe { empty.fields = (AField*)0; }
+        empty.nfields = 0;
+        unsafe { empty.methods = (AFunction*)0; }
+        empty.nmethods = 0;
+        empty.bstart = 0;
+        empty.nbases = 0;
+        empty.line = 0;
+        empty.col = 0;
+        unsafe { empty.tpl_params = (ATemplateParam*)0; }
+        empty.tpl_n = 0;
+        return empty;
+    }
+
+    // The computed layout of the struct with the global index `gidx`.
+    long struct_size(long gidx) {
+        long n = this.pa.struct_count();
+        if (gidx < n) {
+            unsafe {
+                return this.ssize_[gidx];
+            }
+        }
+        long k = gidx - n;
+        if (k >= 0 && k < this.spc_n_) {
+            unsafe {
+                return this.spc_size_[k];
+            }
+        }
+        return 0;
+    }
+
+    long struct_align(long gidx) {
+        long n = this.pa.struct_count();
+        if (gidx < n) {
+            unsafe {
+                return this.salign_[gidx];
+            }
+        }
+        long k = gidx - n;
+        if (k >= 0 && k < this.spc_n_) {
+            unsafe {
+                return this.spc_align_[k];
+            }
+        }
+        return 0;
+    }
+
+    long struct_poly(long gidx) {
+        long n = this.pa.struct_count();
+        if (gidx < n) {
+            unsafe {
+                return this.spoly_[gidx];
+            }
+        }
+        long k = gidx - n;
+        if (k >= 0 && k < this.spc_n_) {
+            unsafe {
+                return this.spc_poly_[k];
+            }
+        }
+        return 0;
     }
 
     long find_enum(const char* name) {
@@ -1421,7 +1814,7 @@ export struct HirBuilder {
             this.load_base(sd, k);
             long bi = this.find_struct(this.base_name_);
             if (bi >= 0) {
-                AStruct bs = this.pa.get_struct(bi);
+                AStruct bs = this.get_struct(bi);
                 if (this.lookup_field(bs, name)) {
                     return true;
                 }
@@ -1653,6 +2046,8 @@ export struct HirBuilder {
         e.line = 0;
         e.col = 0;
         e.fval = 0.0;
+        unsafe { e.tpl_args = (AType*)0; }
+        e.tpl_n = 0;
         return e;
     }
 
@@ -1978,12 +2373,19 @@ export struct HirBuilder {
     }
 
     long add_function(const char* name, AType ret, long is_ext, long is_constexpr) {
+        return this.add_function_at(name, ret, is_ext, is_constexpr, this.u.p_n);
+    }
+
+    // Add a function whose parameters were already pushed into the
+    // parameter pool: `pstart` is the index of its first parameter.
+    long add_function_at(const char* name, AType ret, long is_ext, long is_constexpr,
+                         long pstart) {
         HFunction f;
         f.name = name;
         f.ret = ret;
         f.is_extern_c = is_ext;
         f.body = -1;
-        f.pstart = this.u.p_n;
+        f.pstart = pstart;
         f.pn = 0;
         f.is_constexpr = is_constexpr;
         long idx = this.u.fn_n;
@@ -2008,43 +2410,90 @@ export struct HirBuilder {
         }
     }
 
-    void build_free_signature(AFunction af) {
-        AType ret = this.resolve_alias(af.ret);
-        long idx = this.add_function(af.name, ret, af.is_extern_c, af.is_constexpr);
-        long j = 0;
-        while (j < af.nparams) {
-            AParam p;
-            unsafe {
-                p = af.params[j];
-            }
-            AType pt = this.resolve_alias(p.type);
-            if (af.body >= 0 && pt.ptr_depth > 0) {
-                this.diag(p.line, p.col, "raw pointer parameter type requires an unsafe block");
-            }
-            this.push_param(pt, p.name, p.line, p.col);
-            this.set_param_default(this.u.p_n - 1, p.default_value);
-            j = j + 1;
+    void build_free_signature(AFunction af, long astIdx) {
+        // A template definition is not registered as a function: it is
+        // stored in the template registry and instantiated on demand.
+        // Its body is never type checked.
+        if (af.tpl_n > 0) {
+            this.register_template(astIdx);
+            return;
         }
+        // The return type and the parameter types are resolved before the
+        // parameters are pushed: a template-id type instantiates its
+        // specialization, whose methods are added to the function pool
+        // first, and the parameters of a function must stay contiguous.
+        AType ret = this.resolve_template_struct_type(this.resolve_alias(af.ret),
+                                                        af.line, af.col);
+        long np = af.nparams;
+        long pstart = 0;
+        unsafe {
+            AType* ptypes = (AType*)0;
+            if (np > 0) {
+                ptypes = this.alloc_types(np);
+            }
+            long j = 0;
+            while (j < np) {
+                AParam p = af.params[j];
+                AType pt = this.resolve_template_struct_type(
+                    this.resolve_alias(p.type), p.line, p.col);
+                ptypes[j] = pt;
+                if (af.body >= 0 && pt.ptr_depth > 0) {
+                    this.diag(p.line, p.col,
+                              "raw pointer parameter type requires an unsafe block");
+                }
+                j = j + 1;
+            }
+            pstart = this.u.p_n;
+            long k = 0;
+            while (k < np) {
+                AParam p = af.params[k];
+                AType pt = ptypes[k];
+                this.push_param(pt, p.name, p.line, p.col);
+                this.set_param_default(this.u.p_n - 1, p.default_value);
+                k = k + 1;
+            }
+        }
+        long idx = this.add_function_at(af.name, ret, af.is_extern_c, af.is_constexpr,
+                                        pstart);
         this.finish_function(idx);
     }
 
     void build_method_signature(AStruct sd, AFunction mf) {
-        AType ret = this.resolve_alias(mf.ret);
-        long idx = this.add_function(mf.name, ret, 0, mf.is_constexpr);
-        AType tt = this.ty_empty();
-        tt.base = sd.name;
-        tt.is_ref = 1;
-        this.push_param(tt, "this", mf.line, mf.col);
-        long j = 0;
-        while (j < mf.nparams) {
-            AParam p;
-            unsafe {
-                p = mf.params[j];
+        // The return type and the parameter types are resolved before the
+        // parameters are pushed (see build_free_signature).
+        AType ret = this.resolve_template_struct_type(this.resolve_alias(mf.ret),
+                                                        mf.line, mf.col);
+        long np = mf.nparams;
+        long pstart = 0;
+        unsafe {
+            AType* ptypes = (AType*)0;
+            if (np > 0) {
+                ptypes = this.alloc_types(np);
             }
-            this.push_param(this.resolve_alias(p.type), p.name, p.line, p.col);
-            this.set_param_default(this.u.p_n - 1, p.default_value);
-            j = j + 1;
+            long j = 0;
+            while (j < np) {
+                AParam p = mf.params[j];
+                AType pt = this.resolve_template_struct_type(
+                    this.resolve_alias(p.type), p.line, p.col);
+                ptypes[j] = pt;
+                j = j + 1;
+            }
+            // The implicit `this` parameter comes first.
+            AType tt = this.ty_empty();
+            tt.base = sd.name;
+            tt.is_ref = 1;
+            pstart = this.u.p_n;
+            this.push_param(tt, "this", mf.line, mf.col);
+            long k = 0;
+            while (k < np) {
+                AParam p = mf.params[k];
+                AType pt = ptypes[k];
+                this.push_param(pt, p.name, p.line, p.col);
+                this.set_param_default(this.u.p_n - 1, p.default_value);
+                k = k + 1;
+            }
         }
+        long idx = this.add_function_at(mf.name, ret, 0, mf.is_constexpr, pstart);
         this.finish_function(idx);
     }
 
@@ -2052,14 +2501,23 @@ export struct HirBuilder {
         long n = this.pa.struct_count();
         long i = 0;
         while (i < n) {
-            AStruct sd = this.pa.get_struct(i);
+            AStruct sd = this.get_struct(i);
+            // A struct/class template is not built: it is registered and
+            // instantiated on demand when a template-id type is used.
+            if (sd.tpl_n > 0) {
+                this.register_struct_template(i);
+                i = i + 1;
+                continue;
+            }
             // Reject a duplicate struct name: the oracle skips the whole
-            // declaration, so none of its methods are registered.
+            // declaration, so none of its methods are registered.  A
+            // struct template never occupies the struct registry, so it
+            // never clashes with an ordinary struct.
             long prev = 0;
             long dup = 0;
             while (prev < i) {
-                AStruct ps = this.pa.get_struct(prev);
-                if (this.seq(ps.name, sd.name)) {
+                AStruct ps = this.get_struct(prev);
+                if (ps.tpl_n == 0 && this.seq(ps.name, sd.name)) {
                     dup = 1;
                 }
                 prev = prev + 1;
@@ -2085,11 +2543,31 @@ export struct HirBuilder {
     }
 
 
+    // The name of the function whose body is currently being built.
+    const char* current_fn_name() {
+        if (this.cur_fn_ < 0 || this.cur_fn_ >= this.u.fn_n) {
+            return "";
+        }
+        HFunction f;
+        unsafe {
+            f = this.u.fns[this.cur_fn_];
+        }
+        return f.name;
+    }
+
     // --- statements ------------------------------------------------------
 
-    void build_body(long fnidx, AFunction af) {
-        this.s_n_ = 0;
-        this.sc_n_ = 0;
+    void build_body(long fnidx, AFunction af, long locLine, long locCol) {
+        // The scope stack of the caller is saved and restored: a template
+        // that is instantiated from inside another function's body must
+        // not clobber the caller's scopes.  The parameter scope is pushed
+        // on top of the current stack, so the caller's scope markers stay
+        // intact.
+        long saved_s = this.s_n_;
+        long saved_sc = this.sc_n_;
+        long saved_fn = this.cur_fn_;
+        AType saved_ret = this.cur_ret_;
+        long saved_hasret = this.has_return_;
         this.cur_fn_ = fnidx;
         this.has_return_ = 0;
         HFunction hf;
@@ -2097,7 +2575,6 @@ export struct HirBuilder {
             hf = this.u.fns[fnidx];
         }
         this.cur_ret_ = hf.ret;
-        this.cur_fn_name_ = hf.name;
         this.enter_scope();
         long i = 0;
         while (i < hf.pn) {
@@ -2118,9 +2595,13 @@ export struct HirBuilder {
         // A non-void function must not fall off the end of its body.
         if (hf.ret.is_const == 0 && hf.ret.ptr_depth == 0 &&
             !this.seq(hf.ret.base, "void") && this.has_return_ == 0) {
-            this.err_may_reach_end(af.line, af.col, hf.name);
+            this.err_may_reach_end(locLine, locCol, hf.name);
         }
-        this.cur_fn_ = -1;
+        this.s_n_ = saved_s;
+        this.sc_n_ = saved_sc;
+        this.cur_fn_ = saved_fn;
+        this.cur_ret_ = saved_ret;
+        this.has_return_ = saved_hasret;
     }
 
     long build_compound(long idx) {
@@ -2250,7 +2731,8 @@ export struct HirBuilder {
     }
 
     long build_decl(AStmt a) {
-        AType t = this.resolve_alias(a.type);
+        AType t = this.resolve_template_struct_type(this.resolve_alias(a.type),
+                                                    a.line, a.col);
         long init = -1;
         if (t.ptr_depth == 0 && this.seq(t.base, "void")) {
             this.db_start_ = this.db_n_;
@@ -2369,7 +2851,7 @@ export struct HirBuilder {
             }
         } else {
             if (rt.ptr_depth == 0 && !this.seq(rt.base, "void")) {
-                this.err_must_return_value(a.line, a.col, this.cur_fn_name_, rt);
+                this.err_must_return_value(a.line, a.col, this.current_fn_name(), rt);
             }
         }
         HStmt s = this.new_stmt(7, a.line, a.col);
@@ -2718,7 +3200,7 @@ export struct HirBuilder {
             bad.type = this.ty_dummy();
             return this.push_expr(bad);
         }
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         if (this.lookup_field(sd, a.sval) == 0) {
             this.err_no_member(a.line, a.col, sd.name, a.sval);
             HExpr bad = this.new_expr(14, a.line, a.col);
@@ -2754,13 +3236,27 @@ export struct HirBuilder {
         return 0;
     }
 
-    // Type identity (Type::operator== in ast.h, minus template arguments).
+    // Type identity (Type::operator== in ast.h).  The template arguments
+    // are part of the identity: a `Box<int32_t>` is not the same type as
+    // a plain `Box`.
     bool same_type(AType a, AType b) {
         if (!this.seq(a.base, b.base)) { return false; }
         if (a.is_unsigned != b.is_unsigned) { return false; }
         if (a.is_const != b.is_const) { return false; }
         if (a.ptr_depth != b.ptr_depth) { return false; }
         if (a.array_size != b.array_size) { return false; }
+        if (a.tpl_n != b.tpl_n) { return false; }
+        long i = 0;
+        while (i < a.tpl_n) {
+            AType x;
+            AType y;
+            unsafe {
+                x = a.tpl_args[i];
+                y = b.tpl_args[i];
+            }
+            if (this.same_type(x, y) == 0) { return false; }
+            i = i + 1;
+        }
         return true;
     }
 
@@ -3031,7 +3527,7 @@ export struct HirBuilder {
                 if (si < 0) {
                     this.err_not_struct(a.line, a.col, bt, "call method", ca.sval);
                 } else {
-                    AStruct sd = this.pa.get_struct(si);
+                    AStruct sd = this.get_struct(si);
                     this.find_method_owner(sd, ca.sval);
                 }
             }
@@ -3062,7 +3558,7 @@ export struct HirBuilder {
                     e.sval = hf.name;
                     e.type = hf.ret;
                 } else if (this.count_fns(this.tmp_) == 0) {
-                    AStruct sd = this.pa.get_struct(si);
+                    AStruct sd = this.get_struct(si);
                     this.err_no_method(a.line, a.col, sd.name, ca.sval);
                 }
             }
@@ -3073,20 +3569,78 @@ export struct HirBuilder {
         }
 
         // Arguments are built before callee resolution (matches the oracle).
+        // A pack expansion in an argument position is expanded into one
+        // argument per pack element.
         long total = a.an;
+        long n1 = 0;
+        while (n1 < a.an) {
+            long ai1 = -1;
+            unsafe {
+                ai1 = this.pa.call_args()[a.astart + n1];
+            }
+            long pat1 = this.arg_pack_pattern(ai1);
+            if (pat1 >= 0) {
+                long cnt1 = this.pack_expand_count(pat1);
+                if (cnt1 >= 0) {
+                    total = total + cnt1 - 1;
+                } else {
+                    // An unknown pack expands to nothing: the argument is
+                    // dropped (the oracle pushes no argument for it).
+                    total = total - 1;
+                }
+            }
+            n1 = n1 + 1;
+        }
+        // The scratch buffer must hold every expanded argument.
+        if (this.ab_n_ + total > this.ab_cap_) {
+            total = a.an;
+        }
         long slot = this.ab_n_;
         this.ab_n_ = this.ab_n_ + total;
-        long j = 0;
-        while (j < a.an) {
-            long ai = -1;
+        long wrote = slot;
+        long n2 = 0;
+        while (n2 < a.an) {
+            long ai2 = -1;
             unsafe {
-                ai = this.pa.call_args()[a.astart + j];
+                ai2 = this.pa.call_args()[a.astart + n2];
             }
-            long he = this.build_expr(ai);
-            unsafe {
-                this.abuf_[slot + j] = he;
+            long patIdx = this.arg_pack_pattern(ai2);
+            if (patIdx >= 0) {
+                // A pack expansion: the pattern is built (the oracle
+                // reports the undeclared identifier) and one argument per
+                // pack element is spliced into the argument list.
+                long pat = this.build_expr(patIdx);
+                long cnt = this.pack_expand_count(patIdx);
+                if (cnt < 0) {
+                    // An unknown pack expands to nothing: the argument is
+                    // dropped (the oracle pushes no argument for it).
+                } else {
+                    long k = 0;
+                    while (k < cnt) {
+                        HExpr id = this.new_expr(8, a.line, a.col);
+                        HFunction cf;
+                        HParam hp;
+                        unsafe {
+                            cf = this.u.fns[this.cur_fn_];
+                            hp = this.u.params[cf.pstart + this.pack_first_ + k];
+                        }
+                        id.sval = hp.name;
+                        id.type = hp.type;
+                        unsafe {
+                            this.abuf_[wrote] = this.push_expr(id);
+                        }
+                        wrote = wrote + 1;
+                        k = k + 1;
+                    }
+                }
+            } else {
+                long he = this.build_expr(ai2);
+                unsafe {
+                    this.abuf_[wrote] = he;
+                }
+                wrote = wrote + 1;
             }
-            j = j + 1;
+            n2 = n2 + 1;
         }
         e.astart = this.u.a_n;
         long k = 0;
@@ -3101,6 +3655,89 @@ export struct HirBuilder {
         e.an = total;
 
         if (ca.kind == 8) {
+            // A template-id call: `func<T>(args)`.
+            if (a.tpl_n > 0) {
+                // The oracle looks up the struct-template registry BEFORE the
+                // function-template registry (buildCall in hir_builder.cpp),
+                // so a name that is both a struct template and a function
+                // template is resolved as the struct template.
+                long stplIdx = this.find_struct_template(ca.sval);
+                if (stplIdx >= 0) {
+                    // The struct template is instantiated with the explicit
+                    // arguments (substituted with the active type mapping,
+                    // like the oracle's `currentTypeMapping_`).
+                    unsafe {
+                        AType* targs = this.alloc_types(a.tpl_n);
+                        long k = 0;
+                        while (k < a.tpl_n && targs != (AType*)0) {
+                            AType ta = a.tpl_args[k];
+                            targs[k] = this.substitute_type(ta, this.gmap_base_);
+                            k = k + 1;
+                        }
+                        this.instantiate_struct_template(stplIdx, ca.sval, targs,
+                                                         a.tpl_n, a.line, a.col);
+                    }
+                    // The oracle resolves the constructor of the
+                    // specialization.  The port has no constructor
+                    // resolution (deferred), so the call stays unresolved:
+                    // the callee keeps the bare name and the type is the
+                    // dummy type - exactly what the oracle produces for a
+                    // specialization without a constructor.
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                long tplIdx = this.find_template(ca.sval);
+                if (tplIdx < 0) {
+                    // The oracle builds the callee expression (which reports
+                    // the undeclared identifier) and then reports that the
+                    // name is not a template.
+                    if (this.count_fns(ca.sval) == 0 &&
+                        this.find_sym(ca.sval) < 0 &&
+                        this.find_global_enum(ca.sval) < 0) {
+                        this.err_undeclared(ca.line, ca.col, ca.sval);
+                    }
+                    this.err_not_a_template(a.line, a.col, ca.sval);
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                // The explicit template arguments.  Inside a struct
+                // template the arguments are substituted with the active
+                // type mapping (the oracle's `currentTypeMapping_`), so
+                // `id<T>(x)` instantiates `id<int32_t>`.
+                long fi = -1;
+                unsafe {
+                    AType* targs = this.alloc_types(a.tpl_n);
+                    long k = 0;
+                    while (k < a.tpl_n && targs != (AType*)0) {
+                        AType ta = a.tpl_args[k];
+                        targs[k] = this.substitute_type(ta, this.gmap_base_);
+                        k = k + 1;
+                    }
+                    fi = this.instantiate_template(tplIdx, targs, a.tpl_n,
+                                                  a.line, a.col);
+                }
+                if (fi < 0) {
+                    this.err_failed_instantiate(a.line, a.col, ca.sval);
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                HFunction hf;
+                unsafe {
+                    hf = this.u.fns[fi];
+                }
+                e.sval = hf.name;
+                e.type = hf.ret;
+                e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
+                long folded = this.try_fold_constexpr_call(fi, e.astart, e.an,
+                                                          a.line, a.col);
+                if (folded >= 0) {
+                    return folded;
+                }
+                return this.push_expr(e);
+            }
             long fi = this.resolve_overload(ca.sval, e.astart, e.an, a.line, a.col);
             if (fi >= 0) {
                 HFunction hf;
@@ -3124,6 +3761,51 @@ export struct HirBuilder {
                 e.type = this.ty_dummy();
                 return this.push_expr(e);
             }
+            // An implicit instantiation: `func(args)` where `func` is a
+            // template and there is no ordinary overload.
+            long tplIdx = this.find_template(ca.sval);
+            if (tplIdx >= 0) {
+                AFunction tpl = this.pa.get_fn(tplIdx);
+                long cap = tpl.tpl_n + e.an + 4;
+                long dedN = -1;
+                long tfi = -1;
+                unsafe {
+                    AType* ded = this.alloc_types(cap);
+                    if (ded != (AType*)0) {
+                        dedN = this.deduce_template_args(tplIdx, e.astart, e.an,
+                                                         ded, cap);
+                    }
+                    if (dedN >= 0) {
+                        tfi = this.instantiate_template(tplIdx, ded, dedN,
+                                                         a.line, a.col);
+                    }
+                }
+                if (dedN < 0) {
+                    this.err_cannot_deduce(a.line, a.col, ca.sval);
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                if (tfi < 0) {
+                    this.err_failed_to_deduce(a.line, a.col, ca.sval);
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+                HFunction hf;
+                unsafe {
+                    hf = this.u.fns[tfi];
+                }
+                e.sval = hf.name;
+                e.type = hf.ret;
+                e.an = this.check_call(tfi, e.astart, e.an, a.line, a.col);
+                long folded = this.try_fold_constexpr_call(tfi, e.astart, e.an,
+                                                          a.line, a.col);
+                if (folded >= 0) {
+                    return folded;
+                }
+                return this.push_expr(e);
+            }
             if (this.seq(ca.sval, "move") && a.an == 1) {
                 long ai = -1;
                 unsafe {
@@ -3139,7 +3821,11 @@ export struct HirBuilder {
                     return this.push_expr(e);
                 }
             }
-            if (this.find_sym(ca.sval) < 0 && this.find_global_enum(ca.sval) < 0) {
+            if (this.find_sym(ca.sval) < 0 && this.find_global_enum(ca.sval) < 0 &&
+                this.find_struct_template(ca.sval) < 0) {
+                // A struct template is not an identifier: the oracle does
+                // not build the callee expression for it, so there is no
+                // "undeclared identifier" diagnostic.
                 this.err_undeclared(ca.line, ca.col, ca.sval);
             }
             if (this.is_builtin_fn(ca.sval) == 0) {
@@ -3263,6 +3949,22 @@ export struct HirBuilder {
         if (a.kind == 15) {
             return this.build_member(a);
         }
+        if (a.kind == 17) {
+            // A pack expansion: `expr...`.  The pattern is built (the
+            // pack name is not a scope name, so the oracle reports an
+            // undeclared identifier).  A call splices the pack elements
+            // into its argument list; everywhere else the expansion has
+            // the dummy type.
+            long pat = this.build_expr(a.a);
+            HExpr pe;
+            unsafe {
+                pe = this.u.exprs[pat];
+            }
+            HExpr e = this.new_expr(8, a.line, a.col);
+            e.sval = pe.sval;
+            e.type = this.ty_dummy();
+            return this.push_expr(e);
+        }
         if (a.kind == 16) {
             return this.build_assign(a);
         }
@@ -3308,7 +4010,7 @@ export struct HirBuilder {
             this.load_base(sd, k);
             long bi = this.find_struct(this.base_name_);
             if (bi >= 0) {
-                AStruct bs = this.pa.get_struct(bi);
+                AStruct bs = this.get_struct(bi);
                 if (this.find_method_owner(bs, name)) {
                     return true;
                 }
@@ -3338,7 +4040,7 @@ export struct HirBuilder {
             this.load_base(sd, k);
             long bi = this.find_struct(this.base_name_);
             if (bi >= 0) {
-                AStruct bs = this.pa.get_struct(bi);
+                AStruct bs = this.get_struct(bi);
                 if (this.find_operator_owner(bs, op)) {
                     return true;
                 }
@@ -3368,7 +4070,7 @@ export struct HirBuilder {
         if (si < 0) {
             return -1;
         }
-        AStruct sd = this.pa.get_struct(si);
+        AStruct sd = this.get_struct(si);
         if (this.find_operator_owner(sd, op) == 0) {
             return -1;
         }
@@ -4463,6 +5165,1376 @@ export struct HirBuilder {
         return this.push_expr(e);
     }
 
+    // --- the pack of the specialization that is being built -------------
+
+    // Push the pack frame of a specialization.  The elements are the
+    // parameters `first` .. `first + n` of the function.
+    void push_pack_frame(const char* tname, const char* pname, long n, long first) {
+        if (this.packdata_n_ + 4 > this.packdata_cap_) {
+            return;
+        }
+        unsafe {
+            this.packdata_[this.packdata_n_] = (long)tname;
+            this.packdata_[this.packdata_n_ + 1] = (long)pname;
+            this.packdata_[this.packdata_n_ + 2] = n;
+            this.packdata_[this.packdata_n_ + 3] = first;
+        }
+        this.packframe_ = this.packdata_n_;
+        this.packdata_n_ = this.packdata_n_ + 4;
+    }
+
+    // The number of elements of the pack named `name`, or -1 when there is
+    // no such pack.  `pack_first_` is set to the index of the first
+    // element in the parameters of the function that is being built.
+    long pack_find(const char* name) {
+        if (this.packframe_ < 0) {
+            return -1;
+        }
+        long f = this.packframe_;
+        unsafe {
+            const char* tname = (char*)this.packdata_[f];
+            const char* pname = (char*)this.packdata_[f + 1];
+            if (!this.seq(name, tname) && !this.seq(name, pname)) {
+                return -1;
+            }
+            this.pack_first_ = this.packdata_[f + 3];
+            return this.packdata_[f + 2];
+        }
+        return -1;
+    }
+
+    // The number of elements a pack expansion expands to, or -1 when the
+    // pack is unknown.
+    long pack_expand_count(long patIdx) {
+        AExpr pat = this.get_expr(patIdx);
+        if (pat.kind != 8) {
+            return -1;
+        }
+        return this.pack_find(pat.sval);
+    }
+
+    // The index of the pattern of a pack expansion argument, or -1 when
+    // the argument is not a pack expansion.
+    long arg_pack_pattern(long ai) {
+        AExpr ae = this.get_expr(ai);
+        if (ae.kind != 17) {
+            return -1;
+        }
+        return ae.a;
+    }
+
+    // --- template instantiation (H4.4) -----------------------------------
+    //
+    // The oracle keeps the function templates in `templates_`, the built
+    // specializations in `instantiated_` and the template-parameter
+    // mapping of the specialization that is being built in a local
+    // variable of `instantiateTemplate`.  The port mirrors that: the
+    // mapping is only alive while the *signature* is substituted, so the
+    // body of a function template is built without it (the oracle does not
+    // set `currentTypeMapping_` for a function template either).
+
+    // --- pooled strings -------------------------------------------------
+
+    void sb_reset() {
+        this.sb_n_ = 0;
+    }
+
+    // Make room for `need` bytes plus a terminating NUL.
+    void sb_grow(long need) {
+        if (this.sb_n_ + need + 1 <= this.sb_cap_) {
+            return;
+        }
+        long ncap = this.sb_cap_ * 2;
+        while (ncap < this.sb_n_ + need + 1) {
+            ncap = ncap * 2;
+        }
+        unsafe {
+            char* np = (char*) __ivy_alloc((unsigned long long)ncap);
+            if (np == (char*)0) {
+                return;
+            }
+            __ivy_memcpy((void*)np, (void*)this.sb_, (unsigned long long)this.sb_n_);
+            __ivy_free(this.sb_);
+            this.sb_ = np;
+            this.sb_cap_ = ncap;
+        }
+    }
+
+    void sb_put_char(char c) {
+        this.sb_grow(1);
+        unsafe {
+            this.sb_[this.sb_n_] = c;
+            this.sb_[this.sb_n_ + 1] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + 1;
+    }
+
+    void sb_put(const char* s) {
+        long n = this.slen(s);
+        this.sb_grow(n);
+        unsafe {
+            __ivy_memcpy(this.sb_ + this.sb_n_, s, (unsigned long long)n);
+            this.sb_[this.sb_n_ + n] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + n;
+    }
+
+    void sb_put_num(long v) {
+        long x = v;
+        if (x < 0) {
+            this.sb_put_char('-');
+            x = 0 - x;
+        }
+        if (x == 0) {
+            this.sb_put_char('0');
+            return;
+        }
+        long start = this.sb_n_;
+        while (x > 0) {
+            this.sb_put_char(48 + (x % 10));
+            x = x / 10;
+        }
+        long i = this.sb_n_ - 1;
+        long j = start;
+        while (i > j) {
+            unsafe {
+                char t = this.sb_[i];
+                this.sb_[i] = this.sb_[j];
+                this.sb_[j] = t;
+            }
+            i = i - 1;
+            j = j + 1;
+        }
+    }
+
+    // Make room for one more stable string in `strs_`.  The pool holds
+    // pointers, so it can be reallocated.
+    void strs_grow() {
+        if (this.strs_n_ < this.strs_cap_) {
+            return;
+        }
+        long ncap = this.strs_cap_ * 2;
+        if (ncap < 64) {
+            ncap = 64;
+        }
+        unsafe {
+            long* np = (long*) __ivy_alloc((unsigned long long)(ncap * 8));
+            if (np == (long*)0) {
+                return;
+            }
+            __ivy_memcpy((void*)np, (void*)this.strs_,
+                         (unsigned long long)(this.strs_n_ * 8));
+            __ivy_free((void*)this.strs_);
+            this.strs_ = np;
+            this.strs_cap_ = ncap;
+        }
+    }
+
+    // Copy the scratch buffer into a stable allocation and return it.
+    const char* sb_save() {
+        long n = this.sb_n_;
+        unsafe {
+            char* p = (char*) __ivy_alloc((unsigned long long)(n + 1));
+            if (p == (char*)0) {
+                return "";
+            }
+            __ivy_memcpy((void*)p, (void*)this.sb_, (unsigned long long)n);
+            p[n] = 0;
+            this.strs_grow();
+            this.strs_[this.strs_n_] = (long)p;
+            this.strs_n_ = this.strs_n_ + 1;
+            return p;
+        }
+        return "";
+    }
+
+    // --- the pool of substituted template-argument lists ----------------
+
+    void tpchunk_add() {
+        if (this.tpchunk_n_ >= this.tpblk_cap_) {
+            long ncap = this.tpblk_cap_ * 2;
+            unsafe {
+                long* np = (long*) __ivy_alloc((unsigned long long)(ncap * 8));
+                if (np == (long*)0) {
+                    this.tpok_ = 0;
+                    return;
+                }
+                __ivy_memcpy((void*)np, (void*)this.tpchunks_,
+                             (unsigned long long)(this.tpchunk_n_ * 8));
+                __ivy_free((void*)this.tpchunks_);
+                this.tpchunks_ = np;
+                this.tpblk_cap_ = ncap;
+            }
+        }
+        unsafe {
+            AType* c = (AType*) __ivy_alloc((unsigned long long)(this.tpchunk_size_ * 48));
+            if (c == (AType*)0) {
+                this.tpok_ = 0;
+                return;
+            }
+            this.tpchunks_[this.tpchunk_n_] = (long)c;
+            this.tpchunk_n_ = this.tpchunk_n_ + 1;
+            this.tpcur_ = c;
+            this.tpcur_n_ = 0;
+            this.tpok_ = 1;
+        }
+    }
+
+    // Allocate `n` contiguous AType values in the pool.  The memory is
+    // never reused: a substituted type keeps the pointer to its argument
+    // list for the whole run of the builder.
+    AType* alloc_types(long n) {
+        unsafe {
+            if (n <= 0) {
+                return (AType*)0;
+            }
+            if (n > this.tpchunk_size_) {
+                AType* p = (AType*) __ivy_alloc((unsigned long long)(n * 48));
+                if (p == (AType*)0) {
+                    return (AType*)0;
+                }
+                if (this.tpbig_n_ < this.tpbig_cap_) {
+                    this.tpbig_[this.tpbig_n_] = (long)p;
+                    this.tpbig_n_ = this.tpbig_n_ + 1;
+                }
+                return p;
+            }
+            if (this.tpok_ == 0 || this.tpcur_n_ + n > this.tpchunk_size_) {
+                this.tpchunk_add();
+                if (this.tpok_ == 0) {
+                    return (AType*)0;
+                }
+            }
+            AType* p = this.tpcur_ + this.tpcur_n_;
+            this.tpcur_n_ = this.tpcur_n_ + n;
+            return p;
+        }
+    }
+
+    // --- the template-parameter mapping ---------------------------------
+
+    // The index of the mapping entry for `name` in [base, map_n_), or -1.
+    long map_find(const char* name, long base) {
+        if (base < 0) {
+            return -1;
+        }
+        long i = base;
+        while (i < this.map_n_) {
+            unsafe {
+                if (this.seq((char*)this.map_name_[i], name)) {
+                    return i;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // Map `name` to `t`.  An existing entry is replaced.
+    void map_set(const char* name, AType t, long base) {
+        long i = this.map_find(name, base);
+        if (i >= 0) {
+            unsafe {
+                this.map_type_[i] = t;
+            }
+            return;
+        }
+        if (this.map_n_ < this.map_cap_) {
+            unsafe {
+                this.map_name_[this.map_n_] = (long)name;
+                this.map_type_[this.map_n_] = t;
+            }
+            this.map_n_ = this.map_n_ + 1;
+        }
+    }
+
+    // --- the template registry ------------------------------------------
+
+    // The AST function index of the template named `name`, or -1.
+    long find_template(const char* name) {
+        long i = this.tpl_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq((char*)this.tpl_name_[i], name)) {
+                    return this.tpl_ast_[i];
+                }
+            }
+            i = i - 1;
+        }
+        return -1;
+    }
+
+    // Register the template `astIdx`.  A second template with the same
+    // name replaces the first one (the oracle keys `templates_` by name).
+    void register_template(long astIdx) {
+        AFunction af = this.pa.get_fn(astIdx);
+        long i = 0;
+        while (i < this.tpl_n_) {
+            unsafe {
+                if (this.seq((char*)this.tpl_name_[i], af.name)) {
+                    this.tpl_ast_[i] = astIdx;
+                    return;
+                }
+            }
+            i = i + 1;
+        }
+        if (this.tpl_n_ < this.tpl_cap_) {
+            unsafe {
+                this.tpl_name_[this.tpl_n_] = (long)af.name;
+                this.tpl_ast_[this.tpl_n_] = astIdx;
+            }
+            this.tpl_n_ = this.tpl_n_ + 1;
+        }
+    }
+
+    // The HIR function index of the specialization `mangled`, or -1.
+    long find_instantiated(const char* mangled) {
+        long i = 0;
+        while (i < this.inst_n_) {
+            unsafe {
+                if (this.seq((char*)this.inst_name_[i], mangled)) {
+                    return this.inst_idx_[i];
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    void add_instantiated(const char* mangled, long idx) {
+        if (this.inst_n_ < this.inst_cap_) {
+            unsafe {
+                this.inst_name_[this.inst_n_] = (long)mangled;
+                this.inst_idx_[this.inst_n_] = idx;
+            }
+            this.inst_n_ = this.inst_n_ + 1;
+        }
+    }
+
+    // The i-th template parameter of a function template.
+    ATemplateParam get_tpl_param(AFunction af, long i) {
+        unsafe {
+            if (i < af.tpl_n) {
+                return af.tpl_params[i];
+            }
+        }
+        ATemplateParam tp;
+        tp.name = "";
+        tp.constraint = "";
+        tp.is_typename = 0;
+        tp.is_variadic = 0;
+        tp.type = this.ty_empty();
+        tp.line = 0;
+        tp.col = 0;
+        return tp;
+    }
+
+    // The i-th parameter of a function.
+    AParam get_param(AFunction af, long i) {
+        unsafe {
+            if (i < af.nparams) {
+                return af.params[i];
+            }
+        }
+        AParam p;
+        p.type = this.ty_empty();
+        p.name = "";
+        unsafe { p.attrs = (AAttr*)0; }
+        p.nattrs = 0;
+        p.line = 0;
+        p.col = 0;
+        p.default_value = -1;
+        return p;
+    }
+
+    // The mangled name of a specialization: "<name><arg,arg,...>".  An
+    // argument is the base name, " unsigned", " const" and the pointer
+    // stars; the arguments are separated by a comma without a space.
+    const char* mangle_args(const char* name, AType* args, long n) {
+        unsafe {
+        this.sb_reset();
+        this.sb_put(name);
+        this.sb_put("<");
+        long i = 0;
+        while (i < n) {
+            AType a = args[i];
+            if (i > 0) {
+                this.sb_put(",");
+            }
+            this.sb_put(a.base);
+            if (a.is_unsigned != 0) {
+                this.sb_put(" unsigned");
+            }
+            if (a.is_const != 0) {
+                this.sb_put(" const");
+            }
+            long d = 0;
+            while (d < a.ptr_depth) {
+                this.sb_put("*");
+                d = d + 1;
+            }
+            i = i + 1;
+        }
+        this.sb_put(">");
+        return this.sb_save();
+        }
+        return "";
+    }
+
+    // substituteType in hir_builder.cpp: replace the base name of a type
+    // when it is a template parameter and recurse into the template
+    // arguments.  The pointer depth, the reference-ness and the const
+    // qualifier of the *declaration* are re-applied to the substituted
+    // type (so a `T` deduced as `char const*` becomes a plain `char`).
+    AType substitute_type(AType t, long base) {
+        AType result = t;
+        if (result.tpl_n > 0) {
+            unsafe {
+                AType* args = this.alloc_types(result.tpl_n);
+                if (args != (AType*)0) {
+                    long i = 0;
+                    while (i < result.tpl_n) {
+                        AType a = result.tpl_args[i];
+                        AType s = this.substitute_type(a, base);
+                        args[i] = s;
+                        i = i + 1;
+                    }
+                    result.tpl_args = args;
+                }
+            }
+        }
+        long mi = this.map_find(result.base, base);
+        if (mi >= 0) {
+            AType sub;
+            unsafe { sub = this.map_type_[mi]; }
+            sub.ptr_depth = result.ptr_depth;
+            sub.is_ref = result.is_ref;
+            sub.is_const = result.is_const;
+            return sub;
+        }
+        return result;
+    }
+
+    // deduceTemplateArgs in hir_builder.cpp: deduce the template
+    // arguments of an implicit call.  The only deduction is "the
+    // parameter type is exactly a type parameter"; the argument type is
+    // taken as it is, so an integer literal deduces `int` (not `int32_t`).
+    // Returns the number of deduced arguments, or -1 on failure.
+    long deduce_template_args(long tplAstIdx, long argstart, long argcount,
+                              AType* out, long outcap) {
+        unsafe {
+        AFunction tpl = this.pa.get_fn(tplAstIdx);
+        long base = this.map_n_;
+        // The type parameters: a non-type parameter is never deduced.
+        long ntp = 0;
+        long i = 0;
+        while (i < tpl.tpl_n) {
+            ATemplateParam tp = this.get_tpl_param(tpl, i);
+            if (tp.is_typename != 0) {
+                ntp = ntp + 1;
+            }
+            i = i + 1;
+        }
+        if (ntp == 0) {
+            this.map_n_ = base;
+            return -1;
+        }
+        // The variadic pack, if any.
+        bool hasVariadic = false;
+        long variadicIdx = 0;
+        const char* vName = "";
+        i = 0;
+        while (i < tpl.tpl_n) {
+            ATemplateParam tp = this.get_tpl_param(tpl, i);
+            if (tp.is_variadic != 0 && tp.is_typename != 0) {
+                hasVariadic = true;
+                variadicIdx = i;
+                vName = tp.name;
+                break;
+            }
+            i = i + 1;
+        }
+        // The number of fixed function parameters: the parameter that
+        // carries the pack is the one whose type or name matches the
+        // variadic template parameter.
+        long fixedParamCount = tpl.nparams;
+        if (hasVariadic) {
+            long j = 0;
+            while (j < tpl.nparams) {
+                AParam p = this.get_param(tpl, j);
+                if (this.seq(p.type.base, vName) || this.seq(p.name, vName)) {
+                    fixedParamCount = j;
+                    break;
+                }
+                j = j + 1;
+            }
+        }
+        if (hasVariadic) {
+            if (argcount < fixedParamCount) {
+                this.map_n_ = base;
+                return -1;
+            }
+        } else {
+            if (argcount < tpl.nparams) {
+                long j = argcount;
+                while (j < tpl.nparams) {
+                    AParam p = this.get_param(tpl, j);
+                    if (p.default_value < 0) {
+                        this.map_n_ = base;
+                        return -1;
+                    }
+                    j = j + 1;
+                }
+            }
+        }
+        // Match the fixed parameters against the leading arguments.
+        long fixedMatch = argcount;
+        if (fixedMatch > fixedParamCount) {
+            fixedMatch = fixedParamCount;
+        }
+        long k = 0;
+        while (k < fixedMatch) {
+            AParam ap = this.get_param(tpl, k);
+            AType paramType = this.resolve_alias(ap.type);
+            paramType.is_ref = 0;
+            AType argType = this.arg_type(argstart + k);
+            argType.is_ref = 0;
+            bool isTypeParam = false;
+            long q = 0;
+            while (q < tpl.tpl_n) {
+                ATemplateParam tp = this.get_tpl_param(tpl, q);
+                if (tp.is_typename != 0 && this.seq(paramType.base, tp.name)) {
+                    isTypeParam = true;
+                    break;
+                }
+                q = q + 1;
+            }
+            if (isTypeParam) {
+                AType d = argType;
+                if (paramType.is_const != 0) {
+                    d.is_const = 0;
+                }
+                if (paramType.ptr_depth > 0) {
+                    if (argType.ptr_depth != paramType.ptr_depth) {
+                        this.map_n_ = base;
+                        return -1;
+                    }
+                    d.ptr_depth = 0;
+                }
+                long mi = this.map_find(paramType.base, base);
+                if (mi >= 0) {
+                    AType existing;
+                    unsafe { existing = this.map_type_[mi]; }
+                    existing.is_const = 0;
+                    d.is_const = 0;
+                    if (this.same_type(existing, d) == 0) {
+                        this.map_n_ = base;
+                        return -1;
+                    }
+                } else {
+                    this.map_set(paramType.base, d, base);
+                }
+                k = k + 1;
+                continue;
+            }
+            // An array parameter: only handled when the argument's base
+            // already equals the parameter name.
+            if (paramType.array_size > 0 && paramType.ptr_depth == 0) {
+                bool baseIsTp = false;
+                q = 0;
+                while (q < tpl.tpl_n) {
+                    ATemplateParam tp = this.get_tpl_param(tpl, q);
+                    if (tp.is_typename != 0 && this.seq(paramType.base, tp.name)) {
+                        baseIsTp = true;
+                        break;
+                    }
+                    q = q + 1;
+                }
+                if (baseIsTp && argType.ptr_depth == 1 &&
+                    this.seq(argType.base, paramType.base)) {
+                    AType d = this.ty_empty();
+                    d.base = argType.base;
+                    d.is_unsigned = argType.is_unsigned;
+                    long mi = this.map_find(paramType.base, base);
+                    if (mi >= 0) {
+                        AType existing;
+                        unsafe { existing = this.map_type_[mi]; }
+                        if (this.same_type(existing, d) == 0) {
+                            this.map_n_ = base;
+                            return -1;
+                        }
+                    } else {
+                        this.map_set(paramType.base, d, base);
+                    }
+                }
+                k = k + 1;
+                continue;
+            }
+            // The parameter does not mention a type parameter: nothing is
+            // deduced from this argument.
+            k = k + 1;
+        }
+        // The deduced arguments, in the order of the template parameters.
+        long n = 0;
+        i = 0;
+        while (i < tpl.tpl_n) {
+            ATemplateParam tp = this.get_tpl_param(tpl, i);
+            if (tp.is_typename == 0) {
+                i = i + 1;
+                continue;
+            }
+            if (tp.is_variadic != 0) {
+                long j = fixedParamCount;
+                while (j < argcount) {
+                    AType at = this.arg_type(argstart + j);
+                    at.is_ref = 0;
+                    if (n >= outcap) {
+                        this.map_n_ = base;
+                        return -1;
+                    }
+                    unsafe { out[n] = at; }
+                    n = n + 1;
+                    j = j + 1;
+                }
+            } else {
+                long mi = this.map_find(tp.name, base);
+                if (mi < 0) {
+                    this.map_n_ = base;
+                    return -1;
+                }
+                AType d;
+                unsafe { d = this.map_type_[mi]; }
+                if (n >= outcap) {
+                    this.map_n_ = base;
+                    return -1;
+                }
+                unsafe { out[n] = d; }
+                n = n + 1;
+            }
+            i = i + 1;
+        }
+        this.map_n_ = base;
+        return n;
+        }
+        return -1;
+    }
+
+    // instantiateTemplate in hir_builder.cpp: build the specialization of
+    // a function template.  The signature is substituted with the
+    // template-parameter mapping; the body is the template's body, built
+    // without the mapping (the oracle does not set `currentTypeMapping_`
+    // for a function template).  Returns the HIR function index.
+    long instantiate_template(long tplAstIdx, AType* args, long n,
+                              long line, long col) {
+        unsafe {
+        AFunction tpl = this.pa.get_fn(tplAstIdx);
+        // The mangled name of the specialization.
+        const char* mangled = this.mangle_args(tpl.name, args, n);
+        // A specialization that was already built is reused.
+        long cached = this.find_instantiated(mangled);
+        if (cached >= 0) {
+            return cached;
+        }
+        // The variadic pack, if any.
+        long variadicIdx = -1;
+        long i = 0;
+        while (i < tpl.tpl_n) {
+            ATemplateParam tp = this.get_tpl_param(tpl, i);
+            if (tp.is_variadic != 0) {
+                variadicIdx = i;
+                break;
+            }
+            i = i + 1;
+        }
+        // The mapping: the non-variadic parameters consume the arguments
+        // one to one, a variadic pack takes all the remaining ones.  A
+        // non-type parameter is never bound.
+        long nonVariadic = tpl.tpl_n;
+        if (variadicIdx >= 0) {
+            nonVariadic = variadicIdx;
+        }
+        long mbase = this.map_n_;
+        long m = 0;
+        while (m < nonVariadic && m < n) {
+            ATemplateParam tp = this.get_tpl_param(tpl, m);
+            if (tp.is_typename != 0) {
+                AType a = args[m];
+                this.map_set(tp.name, a, mbase);
+                // A constrained parameter is checked at instantiation time.
+                if (this.slen(tp.constraint) > 0) {
+                    if (this.check_constraint(tp.constraint, a, line, col) == 0) {
+                        this.map_n_ = mbase;
+                        return -1;
+                    }
+                }
+            }
+            m = m + 1;
+        }
+        // The function parameter that carries the pack and the name the
+        // synthesized pack parameters are built from.
+        const char* packBase = "";
+        if (variadicIdx >= 0) {
+            ATemplateParam vtp = this.get_tpl_param(tpl, variadicIdx);
+            packBase = vtp.name;
+            long j = 0;
+            while (j < tpl.nparams) {
+                AParam p = this.get_param(tpl, j);
+                if (this.seq(p.type.base, vtp.name) || this.seq(p.name, vtp.name)) {
+                    if (this.slen(p.name) > 0) {
+                        packBase = p.name;
+                    }
+                    break;
+                }
+                j = j + 1;
+            }
+        }
+        // The pack elements: the arguments from the variadic parameter on.
+        long packN = 0;
+        if (variadicIdx >= 0 && n > variadicIdx) {
+            packN = n - variadicIdx;
+        }
+        AType* packTypes = (AType*)0;
+        if (packN > 0) {
+            packTypes = this.alloc_types(packN);
+            long pk = 0;
+            while (pk < packN && packTypes != (AType*)0) {
+                packTypes[pk] = args[variadicIdx + pk];
+                pk = pk + 1;
+            }
+        }
+        // The substituted signature.
+        AType ret = this.substitute_type(tpl.ret, mbase);
+        long idx = this.add_function(mangled, ret, tpl.is_extern_c, tpl.is_constexpr);
+        long j = 0;
+        long pushed = 0;
+        long firstElem = -1;
+        while (j < tpl.nparams) {
+            AParam p = this.get_param(tpl, j);
+            bool isPack = false;
+            if (variadicIdx >= 0) {
+                ATemplateParam vtp = this.get_tpl_param(tpl, variadicIdx);
+                if (this.seq(p.type.base, vtp.name) || this.seq(p.name, vtp.name)) {
+                    isPack = true;
+                }
+            }
+            if (isPack) {
+                if (firstElem < 0) {
+                    firstElem = pushed;
+                }
+                long k = 0;
+                while (k < packN) {
+                    AType pt = packTypes[k];
+                    // The synthesized parameter name: __<name><index>.
+                    this.sb_reset();
+                    this.sb_put("__");
+                    this.sb_put(packBase);
+                    this.sb_put_num(k);
+                    const char* pn = this.sb_save();
+                    this.push_param(pt, pn, p.line, p.col);
+                    pushed = pushed + 1;
+                    k = k + 1;
+                }
+            } else {
+                AType pt = this.substitute_type(p.type, mbase);
+                this.push_param(pt, p.name, p.line, p.col);
+                pushed = pushed + 1;
+            }
+            j = j + 1;
+        }
+        this.finish_function(idx);
+        this.add_instantiated(mangled, idx);
+        // The mapping is only used for the signature: the body of the
+        // specialization is built without it.
+        this.map_n_ = mbase;
+        // The pack of this specialization is visible while its body is
+        // built (the oracle registers it in `currentPackMapping_`).
+        long savedFrame = this.packframe_;
+        if (variadicIdx >= 0 && firstElem >= 0) {
+            ATemplateParam vtp = this.get_tpl_param(tpl, variadicIdx);
+            this.push_pack_frame(vtp.name, packBase, packN, firstElem);
+        }
+        if (tpl.body >= 0) {
+            this.build_body(idx, tpl, line, col);
+        }
+        this.packframe_ = savedFrame;
+        return idx;
+        }
+        return -1;
+    }
+
+    // --- class/struct template instantiation (H4.4) ----------------------
+
+    // The AST struct index of the struct template named `name`, or -1.
+    long find_struct_template(const char* name) {
+        long i = this.stpl_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq((char*)this.stpl_name_[i], name)) {
+                    return this.stpl_ast_[i];
+                }
+            }
+            i = i - 1;
+        }
+        return -1;
+    }
+
+    // Register the struct template `astIdx`.  A second template with the
+    // same name replaces the first one (the oracle keys `structTemplates_`
+    // by name).
+    void register_struct_template(long astIdx) {
+        AStruct sd = this.get_struct(astIdx);
+        long i = 0;
+        while (i < this.stpl_n_) {
+            unsafe {
+                if (this.seq((char*)this.stpl_name_[i], sd.name)) {
+                    this.stpl_ast_[i] = astIdx;
+                    return;
+                }
+            }
+            i = i + 1;
+        }
+        if (this.stpl_n_ < this.stpl_cap_) {
+            unsafe {
+                this.stpl_name_[this.stpl_n_] = (long)sd.name;
+                this.stpl_ast_[this.stpl_n_] = astIdx;
+            }
+            this.stpl_n_ = this.stpl_n_ + 1;
+        }
+    }
+
+    // The i-th template parameter of a struct template.
+    ATemplateParam get_struct_tpl_param(AStruct sd, long i) {
+        unsafe {
+            if (i < sd.tpl_n) {
+                return sd.tpl_params[i];
+            }
+        }
+        ATemplateParam tp;
+        tp.name = "";
+        tp.constraint = "";
+        tp.is_typename = 0;
+        tp.is_variadic = 0;
+        tp.type = this.ty_empty();
+        tp.line = 0;
+        tp.col = 0;
+        return tp;
+    }
+
+    // The global struct index of the specialization `mangled`, or -1.
+    long find_spec(const char* mangled) {
+        long i = 0;
+        while (i < this.spc_n_) {
+            unsafe {
+                if (this.seq((char*)this.spc_name_[i], mangled)) {
+                    return this.pa.struct_count() + i;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // The name of the specialization with the global struct index `gidx`.
+    const char* spec_name(long gidx) {
+        long k = gidx - this.pa.struct_count();
+        if (k < 0 || k >= this.spc_n_) {
+            return "";
+        }
+        unsafe {
+            return (char*)this.spc_name_[k];
+        }
+        return "";
+    }
+
+    // Register the specialization `rec` under the name `mangled` and
+    // return its global struct index.
+    long add_spec(const char* mangled, AStruct rec) {
+        long k = this.spc_n_;
+        if (k < this.spc_cap_) {
+            unsafe {
+                this.spc_name_[k] = (long)mangled;
+                this.spc_rec_[k] = rec;
+                this.spc_size_[k] = 0;
+                this.spc_align_[k] = 0;
+                this.spc_poly_[k] = 0;
+            }
+            this.spc_n_ = this.spc_n_ + 1;
+        }
+        return this.pa.struct_count() + k;
+    }
+
+    // The length of the bare method name: the part of a qualified name
+    // after the last "::" (the oracle's `mf.name.rfind("::")`).
+    long bare_method_len(const char* q) {
+        long n = this.slen(q);
+        long i = n - 1;
+        while (i > 0) {
+            unsafe {
+                if (q[i] == ':') {
+                    return n - i - 1;
+                }
+            }
+            i = i - 1;
+        }
+        return n;
+    }
+
+    // The layout of a struct specialization: the fields are already
+    // substituted, the base classes are lost (the oracle never copies
+    // them into the clone).  The methods are not copied into the record
+    // either, so the polymorphism is taken from the template.
+    void layout_spec(long gidx, AStruct tpl) {
+        AStruct sd = this.get_struct(gidx);
+        long offset = 0;
+        long align = 1;
+        long poly = 0;
+        long j = 0;
+        while (j < tpl.nmethods) {
+            AFunction mf;
+            unsafe {
+                mf = tpl.methods[j];
+            }
+            if (mf.is_virtual != 0) {
+                poly = 1;
+            }
+            j = j + 1;
+        }
+        if (poly != 0) {
+            // The vptr of a polymorphic struct (buildStruct in
+            // hir_builder.cpp).
+            offset = 8;
+            align = 8;
+        }
+        long i = 0;
+        while (i < sd.nfields) {
+            AField f;
+            unsafe {
+                f = sd.fields[i];
+            }
+            long fsz = this.type_size(f.type);
+            long fal = this.type_align(f.type);
+            offset = this.align_up(offset, fal);
+            offset = offset + fsz;
+            if (fal > align) {
+                align = fal;
+            }
+            i = i + 1;
+        }
+        long total = this.align_up(offset, align);
+        long k = gidx - this.pa.struct_count();
+        if (k >= 0 && k < this.spc_n_) {
+            unsafe {
+                this.spc_size_[k] = total;
+                this.spc_align_[k] = align;
+                this.spc_poly_[k] = poly;
+            }
+        }
+    }
+
+    // The index of the concept named `name`, or -1.
+    long find_concept(const char* name) {
+        long n = this.pa.concept_count();
+        long i = 0;
+        while (i < n) {
+            AConcept cd = this.pa.get_concept(i);
+            if (this.seq(cd.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // The builtin arithmetic types (the `typeIsArithmetic` helper of
+    // checkConstraint): a pointer is never arithmetic, a base name that
+    // ends with "_t" always is.
+    bool type_is_arithmetic(AType t) {
+        if (t.ptr_depth != 0) {
+            return false;
+        }
+        if (this.slen(t.base) == 0) {
+            return false;
+        }
+        if (this.ends_with(t.base, "_t")) {
+            return true;
+        }
+        return this.seq(t.base, "char") || this.seq(t.base, "bool") ||
+               this.seq(t.base, "int") || this.seq(t.base, "long") ||
+               this.seq(t.base, "short") || this.seq(t.base, "unsigned") ||
+               this.seq(t.base, "signed") || this.seq(t.base, "float") ||
+               this.seq(t.base, "double");
+    }
+
+    // True when a function whose name starts with "operator" takes the
+    // concrete type as its first two parameters (the operator-overload
+    // check of checkConstraint).
+    bool has_operator_overload(AType concrete) {
+        long si = this.find_struct(concrete.base);
+        if (si < 0) {
+            return false;
+        }
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.starts_with(f.name, "operator") && f.pn >= 2) {
+                HParam p0;
+                HParam p1;
+                unsafe {
+                    p0 = this.u.params[f.pstart];
+                    p1 = this.u.params[f.pstart + 1];
+                }
+                if (this.same_type(p0.type, concrete) &&
+                    this.same_type(p1.type, concrete)) {
+                    return true;
+                }
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // checkConstraint in hir_builder.cpp: verify that the concrete type
+    // satisfies the concept.  The check runs only at instantiation time.
+    // An unknown concept name is assumed to be satisfied; a requirement
+    // that mentions a binary operator needs an arithmetic type or an
+    // operator overload; every other requirement is not checked at all.
+    bool check_constraint(const char* conceptName, AType concrete,
+                          long line, long col) {
+        long ci = this.find_concept(conceptName);
+        if (ci < 0) {
+            // Unknown concept - can't check, assume satisfied.
+            return true;
+        }
+        AConcept cd = this.pa.get_concept(ci);
+        long r = 0;
+        while (r < cd.nreqs) {
+            unsafe {
+            const char* req = this.pa.requirement_text(cd.req_start + r);
+            long len = this.slen(req);
+            long opLen = 0;
+            long opPos = -1;
+            long i = 0;
+            // The two-character operators are looked for first.
+            while (i + 1 < len) {
+                char c0 = 0;
+                char c1 = 0;
+                unsafe {
+                    c0 = req[i];
+                    c1 = req[i + 1];
+                }
+                if ((c0 == '=' && c1 == '=') || (c0 == '!' && c1 == '=') ||
+                    (c0 == '<' && c1 == '=') || (c0 == '>' && c1 == '=')) {
+                    opLen = 2;
+                    opPos = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if (opPos < 0) {
+                i = 0;
+                while (i < len) {
+                    char c = 0;
+                    unsafe {
+                        c = req[i];
+                    }
+                    if (c == '+' || c == '-' || c == '*' || c == '/' ||
+                        c == '<' || c == '>') {
+                        if (i > 0) {
+                            char prev = 0;
+                            unsafe {
+                                prev = req[i - 1];
+                            }
+                            if (prev == '-') {
+                                i = i + 1;
+                                continue;
+                            }
+                        }
+                        opLen = 1;
+                        opPos = i;
+                        break;
+                    }
+                    i = i + 1;
+                }
+            }
+            if (opLen > 0) {
+                if (this.type_is_arithmetic(concrete) == 0) {
+                    if (this.has_operator_overload(concrete) == 0) {
+                        this.err_concept_not_satisfied(line, col, cd.name,
+                                                      concrete, req, opPos, opLen);
+                        return false;
+                    }
+                }
+            }
+            }
+            r = r + 1;
+        }
+        return true;
+    }
+
+    // instantiateStructTemplate in hir_builder.cpp: build the
+    // specialization of a struct template.  The field types are
+    // substituted, the methods are renamed to "<Spec>::<method>" and their
+    // bodies are built with the type mapping active.  The base classes are
+    // lost (the oracle never copies them into the clone).  Returns the
+    // global struct index of the specialization, or -1 when a constraint is
+    // not satisfied.
+    long instantiate_struct_template(long tplAstIdx, const char* tplName,
+                                     AType* args, long n, long line, long col) {
+        unsafe {
+        const char* mangled = this.mangle_args(tplName, args, n);
+        long cached = this.find_spec(mangled);
+        if (cached >= 0) {
+            return cached;
+        }
+        AStruct tpl = this.get_struct(tplAstIdx);
+        long mbase = this.map_n_;
+        // The type mapping: the template parameters consume the arguments
+        // one to one; a non-type parameter is never bound.
+        long i = 0;
+        while (i < tpl.tpl_n && i < n) {
+            ATemplateParam tp = this.get_struct_tpl_param(tpl, i);
+            if (tp.is_typename != 0) {
+                this.map_set(tp.name, args[i], mbase);
+                if (this.slen(tp.constraint) > 0) {
+                    if (this.check_constraint(tp.constraint, args[i], line, col) == 0) {
+                        // The constraint is not satisfied: the error was
+                        // already reported.
+                        this.map_n_ = mbase;
+                        return -1;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        // The template name itself maps to the specialization name, so that
+        // a parameter of the template's own type is substituted.
+        AType specTy = this.ty_empty();
+        specTy.base = mangled;
+        this.map_set(tplName, specTy, mbase);
+        // The mapping is active while the fields, the method signatures and
+        // the method bodies are built (the oracle's `currentTypeMapping_`).
+        long savedG = this.gmap_base_;
+        this.gmap_base_ = mbase;
+        // The substituted fields.  The base classes are lost: the oracle
+        // never copies them into the clone of the template.
+        long nf = tpl.nfields;
+        AStruct rec;
+        rec.name = mangled;
+        rec.is_class = tpl.is_class;
+        rec.nfields = nf;
+        rec.methods = (AFunction*)0;
+        rec.nmethods = 0;
+        rec.bstart = 0;
+        rec.nbases = 0;
+        rec.line = tpl.line;
+        rec.col = tpl.col;
+        rec.tpl_params = (ATemplateParam*)0;
+        rec.tpl_n = 0;
+        AField* flds = (AField*)0;
+        if (nf > 0) {
+            flds = (AField*) __ivy_alloc((unsigned long long)(nf * 72));
+            if (flds != (AField*)0) {
+                if (this.spcfld_n_ < this.spcfld_cap_) {
+                    this.spcfld_[this.spcfld_n_] = (long)flds;
+                    this.spcfld_n_ = this.spcfld_n_ + 1;
+                }
+                long k = 0;
+                while (k < nf) {
+                    AField f = tpl.fields[k];
+                    AField cf;
+                    cf.type = this.resolve_template_struct_type(
+                        this.substitute_type(this.resolve_alias(f.type), mbase),
+                        f.line, f.col);
+                    cf.name = f.name;
+                    cf.line = f.line;
+                    cf.col = f.col;
+                    flds[k] = cf;
+                    k = k + 1;
+                }
+            }
+        }
+        rec.fields = flds;
+        long gidx = this.add_spec(mangled, rec);
+        this.layout_spec(gidx, tpl);
+        // The methods of the specialization.
+        long nm = tpl.nmethods;
+        long fnbase = this.spcfns_n_;
+        long j = 0;
+        while (j < nm) {
+            AFunction mf = tpl.methods[j];
+            // The qualified name of the method: "<Spec>::<method>".
+            this.sb_reset();
+            this.sb_put(mangled);
+            this.sb_put("::");
+            long mflen = this.slen(mf.name);
+            long blen = this.bare_method_len(mf.name);
+            long k = 0;
+            while (k < blen) {
+                this.sb_put_char(mf.name[mflen - blen + k]);
+                k = k + 1;
+            }
+            const char* qname = this.sb_save();
+            AType ret = this.resolve_template_struct_type(
+                this.substitute_type(this.resolve_alias(mf.ret), mbase),
+                mf.line, mf.col);
+            // The implicit `this` parameter has the type "<Spec>&".
+            AType tt = this.ty_empty();
+            tt.base = mangled;
+            tt.is_ref = 1;
+            long np = mf.nparams;
+            long pstart = 0;
+            AType* ptypes = (AType*)0;
+            if (np > 0) {
+                ptypes = this.alloc_types(np);
+            }
+            long p = 0;
+            while (p < np) {
+                AParam ap = mf.params[p];
+                AType pt = this.resolve_template_struct_type(
+                    this.substitute_type(this.resolve_alias(ap.type), mbase),
+                    ap.line, ap.col);
+                ptypes[p] = pt;
+                p = p + 1;
+            }
+            pstart = this.u.p_n;
+            this.push_param(tt, "this", mf.line, mf.col);
+            p = 0;
+            while (p < np) {
+                AParam ap = mf.params[p];
+                AType pt = ptypes[p];
+                this.push_param(pt, ap.name, ap.line, ap.col);
+                this.set_param_default(this.u.p_n - 1, ap.default_value);
+                p = p + 1;
+            }
+            long idx = this.add_function_at(qname, ret, 0, mf.is_constexpr, pstart);
+            this.finish_function(idx);
+            if (this.spcfns_n_ < this.spcfns_cap_) {
+                this.spcfns_[this.spcfns_n_] = idx;
+                this.spcfns_n_ = this.spcfns_n_ + 1;
+            }
+            j = j + 1;
+        }
+        // The method bodies are built now: the specialization is not in the
+        // AST, so the body pass never walks it.
+        j = 0;
+        while (j < nm) {
+            AFunction mf = tpl.methods[j];
+            if (mf.body >= 0) {
+                long fi = this.spcfns_[fnbase + j];
+                this.build_body(fi, mf, mf.line, mf.col);
+            }
+            j = j + 1;
+        }
+        this.spcfns_n_ = fnbase;
+        this.gmap_base_ = savedG;
+        this.map_n_ = mbase;
+        return gidx;
+        }
+    }
+
+    // resolveTemplateStructType in hir_builder.cpp: a template-id type is
+    // replaced by the name of its specialization.  A type that names no
+    // struct template is left as it is.
+    AType resolve_template_struct_type(AType t, long line, long col) {
+        if (t.tpl_n <= 0) {
+            return t;
+        }
+        long tplIdx = this.find_struct_template(t.base);
+        if (tplIdx < 0) {
+            return t;
+        }
+        long spec = this.instantiate_struct_template(tplIdx, t.base, t.tpl_args,
+                                                      t.tpl_n, line, col);
+        AType r = t;
+        unsafe { r.tpl_args = (AType*)0; }
+        r.tpl_n = 0;
+        if (spec >= 0) {
+            r.base = this.spec_name(spec);
+        } else {
+            // The constraint was not satisfied: the oracle falls back to
+            // the unmangled template name.
+            r.base = t.base;
+        }
+        return r;
+    }
+
+    // --- template diagnostics -------------------------------------------
+
+    // "'X' is not a template"
+    void err_not_a_template(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(name);
+        this.db_put("' is not a template");
+        this.diag(line, col, this.db_end());
+    }
+
+    // "failed to instantiate template 'X'"
+    void err_failed_instantiate(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("failed to instantiate template '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // "cannot deduce template arguments for 'X'"
+    void err_cannot_deduce(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("cannot deduce template arguments for '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // "failed to deduce template arguments for 'X'"
+    void err_failed_to_deduce(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("failed to deduce template arguments for '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // "concept 'X' not satisfied: type 'T' does not support operator 'OP'"
+    void err_concept_not_satisfied(long line, long col, const char* conceptName,
+                                   AType concrete, const char* req,
+                                   long opPos, long opLen) {
+        this.db_start_ = this.db_n_;
+        this.db_put("concept '");
+        this.db_put(conceptName);
+        this.db_put("' not satisfied: type '");
+        // The name of the concrete type (typeNameStr in checkConstraint):
+        // the base name, " unsigned", " const" and the pointer stars.
+        this.db_put(concrete.base);
+        if (concrete.is_unsigned != 0) {
+            this.db_put(" unsigned");
+        }
+        if (concrete.is_const != 0) {
+            this.db_put(" const");
+        }
+        long d = 0;
+        while (d < concrete.ptr_depth) {
+            this.db_put("*");
+            d = d + 1;
+        }
+        this.db_put("' does not support operator '");
+        long k = 0;
+        while (k < opLen) {
+            char c = 0;
+            unsafe {
+                c = req[opPos + k];
+            }
+            this.db_put_char(c);
+            k = k + 1;
+        }
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
     // --- entry point -----------------------------------------------------
 
     // Find the HIR function that matches an AST function by name and
@@ -4484,7 +6556,8 @@ export struct HirBuilder {
                     unsafe {
                         p = af.params[k];
                     }
-                    AType a = this.resolve_alias(p.type);
+                    AType a = this.resolve_template_struct_type(
+                        this.resolve_alias(p.type), p.line, p.col);
                     a.is_ref = 0;
                     HParam hp;
                     unsafe {
@@ -4514,7 +6587,7 @@ export struct HirBuilder {
         while (i < n) {
             AFunction f = this.pa.get_fn(i);
             if (f.is_extern_c != 0) {
-                this.build_free_signature(f);
+                this.build_free_signature(f, i);
             }
             i = i + 1;
         }
@@ -4522,17 +6595,17 @@ export struct HirBuilder {
         while (i < n) {
             AFunction f = this.pa.get_fn(i);
             if (f.is_extern_c == 0) {
-                this.build_free_signature(f);
+                this.build_free_signature(f, i);
             }
             i = i + 1;
         }
         i = 0;
         while (i < n) {
             AFunction f = this.pa.get_fn(i);
-            if (f.body >= 0) {
+            if (f.body >= 0 && f.tpl_n == 0) {
                 long fi = this.find_fn_sig(f, 0);
                 if (fi >= 0) {
-                    this.build_body(fi, f);
+                    this.build_body(fi, f, f.line, f.col);
                 }
             }
             i = i + 1;
@@ -4540,17 +6613,17 @@ export struct HirBuilder {
         long sn = this.pa.struct_count();
         long si = 0;
         while (si < sn) {
-            AStruct sd = this.pa.get_struct(si);
+            AStruct sd = this.get_struct(si);
             long j = 0;
             while (j < sd.nmethods) {
                 AFunction mf;
                 unsafe {
                     mf = sd.methods[j];
                 }
-                if (mf.body >= 0) {
+                if (mf.body >= 0 && mf.tpl_n == 0) {
                     long fi = this.find_fn_sig(mf, 1);
                     if (fi >= 0) {
-                        this.build_body(fi, mf);
+                        this.build_body(fi, mf, mf.line, mf.col);
                     }
                 }
                 j = j + 1;

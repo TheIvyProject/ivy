@@ -1,0 +1,4 @@
+// An explicit template argument list that is empty (`f<>()`) is rejected by
+// the parser: an explicit template argument must be a type.
+template <typename... Args> int32 count_args(Args... args) { return 0; }
+void f() { int32 a = count_args<>(); }

@@ -1,0 +1,6 @@
+// A name that is both a struct template and a function template, called
+// WITHOUT an explicit argument list: the function template is used (the
+// struct-template registry is only consulted for an explicit template-id).
+template <typename T> struct TDup2 { T value; };
+template <typename T> T TDup2(T x) { return x; }
+void f() { int32 a = TDup2(1); }

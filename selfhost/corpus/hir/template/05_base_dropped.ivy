@@ -1,0 +1,5 @@
+// A struct template with a base class: the specialization loses the base
+// list entirely.
+struct Base { int32 x; };
+template <typename T> struct Derived : Base { T value; };
+void f() { Derived<int32> d; }

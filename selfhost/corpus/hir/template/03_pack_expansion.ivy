@@ -1,0 +1,4 @@
+// A variadic template: the pack expands into one parameter per element,
+// named `__args0`, `__args1`, ...
+template <typename... Args> int32 count(Args... args) { return 0; }
+void f() { int32 a = count<int32, int32>(1, 2); }

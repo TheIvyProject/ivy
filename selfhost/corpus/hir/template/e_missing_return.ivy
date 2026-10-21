@@ -1,0 +1,5 @@
+// A specialization whose body may reach the end without returning a
+// value: the diagnostic is reported at the call site with the mangled
+// name.
+template <typename T> T noret(T x) { }
+void f() { int32 a = noret<int32>(1); }

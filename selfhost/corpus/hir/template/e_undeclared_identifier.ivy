@@ -1,0 +1,4 @@
+// A template-id call on a name that does not exist: the callee is built
+// first (so the identifier is undeclared) and then the name is reported as
+// not being a template.
+void f() { int32 a = nosuch<int32>(1); }
