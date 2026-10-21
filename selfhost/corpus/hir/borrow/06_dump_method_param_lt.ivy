@@ -1,0 +1,7 @@
+struct S {
+    int32 v;
+
+    int32 get(const int32& $a x) {
+        return x;
+    }
+};

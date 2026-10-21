@@ -46,8 +46,9 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 96, AFunction 152, AExpr 168, AStruct 96,
-// ATemplateParam 96, AConcept 48, AType 48) so `__ivy_alloc` can be used.
+// sizes (AAttr 40, AParam 128, AFunction 200, AExpr 168, AStruct 96,
+// ATemplateParam 96, AConcept 48, AType 48, ALifetime 8, ALegacyLifetime 40)
+// so `__ivy_alloc` can be used.
 export struct Parser {
     Token* toks_;
     long n_;
@@ -167,6 +168,18 @@ export struct Parser {
     long req_n_;
     long req_cap_;
 
+    // lifetime name pool: the names of the native `lifetime<$a, $b>`
+    // declarations and the arguments of the legacy lifetime attributes
+    ALifetime* ltpool_;
+    long lt_n_;
+    long lt_cap_;
+
+    // legacy lifetime annotation pool: one record per `[[ivy::lt(x)]]`,
+    // `[[ivy::lt_ret(x)]]` and `[[ivy::lt_def(a, b)]]` attribute
+    ALegacyLifetime* llpool_;
+    long ll_n_;
+    long ll_cap_;
+
     // template-argument scratch stack: the arguments of a template-id are
     // parsed onto this stack and then copied into their own block, so that
     // every argument list ends up contiguous (a nested template-id owns its
@@ -217,7 +230,15 @@ export struct Parser {
         this.pp_n_ = 0;
         this.pp_cap_ = in_count + 16;
         this.sb_n_ = 0;
-        this.sb_cap_ = src_len + 8192;
+        // The intern arena holds every interned string.  It is never
+        // reallocated (an interned pointer must stay valid for the whole
+        // parse), so it is sized up front.  A source byte can be interned
+        // more than once: the identifier/type names once, the attribute
+        // argument texts once (in `parse_attrs`) and a second time when
+        // `record_attr_args` splits them into the individual lifetime
+        // names, and the native `lifetime<...>` names once more.  Four
+        // times the source length plus a fixed slack covers those copies.
+        this.sb_cap_ = src_len * 4 + 65536;
         this.ep_n_ = 0;
         this.ep_cap_ = in_count * 8 + 256;
         this.sp_n_ = 0;
@@ -250,6 +271,10 @@ export struct Parser {
         this.con_cap_ = in_count + 16;
         this.req_n_ = 0;
         this.req_cap_ = in_count * 4 + 64;
+        this.lt_n_ = 0;
+        this.lt_cap_ = in_count + 16;
+        this.ll_n_ = 0;
+        this.ll_cap_ = in_count + 16;
         this.argst_n_ = 0;
         this.argst_cap_ = in_count * 2 + 64;
         this.argblk_n_ = 0;
@@ -264,9 +289,9 @@ export struct Parser {
         this.cv_ = 0;
         this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 152);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 200);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
-        this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 96);
+        this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 128);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
         // The float scratch buffer holds the cleaned text of a float
         // literal: it must be able to hold the whole literal, otherwise the
@@ -288,12 +313,14 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 152);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 200);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
         this.tppool_ = (ATemplateParam*) __ivy_alloc(this.tpp_cap_ * 96);
         this.conpool_ = (AConcept*) __ivy_alloc(this.con_cap_ * 48);
+        this.ltpool_ = (ALifetime*) __ivy_alloc(this.lt_cap_ * 8);
+        this.llpool_ = (ALegacyLifetime*) __ivy_alloc(this.ll_cap_ * 40);
         this.reqpool_ = (long*) __ivy_alloc(this.req_cap_ * 8);
         this.argstack_ = (AType*) __ivy_alloc(this.argst_cap_ * 48);
         this.argblk_ = (long*) __ivy_alloc(this.argblk_cap_ * 8);
@@ -331,6 +358,8 @@ export struct Parser {
             __ivy_free(this.alpool_);
             __ivy_free(this.tppool_);
             __ivy_free(this.conpool_);
+            __ivy_free(this.ltpool_);
+            __ivy_free(this.llpool_);
             __ivy_free(this.reqpool_);
             __ivy_free(this.argstack_);
             unsafe {
@@ -651,6 +680,53 @@ export struct Parser {
     const char* intern_tok(Token t) {
         unsafe {
             return this.intern(t.off, t.len);
+        }
+        return "";
+    }
+
+    // Copy `len` bytes of an arbitrary buffer into the intern buffer and
+    // return the interned copy.
+    const char* intern_buf(const char* s, long len) {
+        long start = this.sb_n_;
+        if (this.sb_n_ + len + 1 > this.sb_cap_) {
+            return "";
+        }
+        unsafe {
+            __ivy_memcpy(this.sbuf_ + this.sb_n_, s, (unsigned long long)len);
+            this.sbuf_[this.sb_n_ + len] = 0;
+        }
+        this.sb_n_ = this.sb_n_ + len + 1;
+        unsafe {
+            return this.sbuf_ + start;
+        }
+        return "";
+    }
+
+    // The name of a lifetime token (`$a`) without the leading `$`.
+    const char* intern_lifetime(Token t) {
+        long off = t.off;
+        long len = t.len;
+        unsafe {
+            if (len > 0 && this.src_[off] == 36) {
+                off = off + 1;
+                len = len - 1;
+            }
+            return this.intern(off, len);
+        }
+        return "";
+    }
+
+    // The "duplicate lifetime '$a'" message (the oracle names the lifetime
+    // in the diagnostic).
+    const char* dup_lt_msg(const char* name) {
+        long start = this.sb_n_;
+        unsafe {
+            const char* p1 = "duplicate lifetime '$";
+            this.sb_put(p1, this.cstr_len(p1));
+            this.sb_put(name, this.cstr_len(name));
+            this.sb_put_char(39);
+            this.sb_end();
+            return this.sbuf_ + start;
         }
         return "";
     }
@@ -1516,6 +1592,115 @@ export struct Parser {
         this.pp_n_ = this.pp_n_ + 1;
     }
 
+    // Append a lifetime name to the lifetime pool.
+    void push_lifetime(const char* name) {
+        if (this.lt_n_ >= this.lt_cap_) {
+            return;
+        }
+        unsafe {
+            this.ltpool_[this.lt_n_].name = name;
+        }
+        this.lt_n_ = this.lt_n_ + 1;
+    }
+
+    // A one-element lifetime list: the native lifetime of a parameter or
+    // of a return type.
+    ALifetimeList one_lt(const char* name) {
+        ALifetimeList l;
+        this.push_lifetime(name);
+        unsafe {
+            l.items = this.ltpool_ + this.lt_n_ - 1;
+        }
+        l.n = 1;
+        return l;
+    }
+
+    // The empty lifetime list: no lifetime annotation at all.
+    ALifetimeList no_lt() {
+        ALifetimeList l;
+        unsafe { l.items = (ALifetime*)0; }
+        l.n = 0;
+        return l;
+    }
+
+    // Append a legacy lifetime annotation to the legacy-lifetime pool.
+    void push_legacy_lt(ALegacyLifetime ll) {
+        if (this.ll_n_ >= this.ll_cap_) {
+            return;
+        }
+        unsafe {
+            this.llpool_[this.ll_n_] = ll;
+        }
+        this.ll_n_ = this.ll_n_ + 1;
+    }
+
+    // Split an attribute's argument list (the parser joins the argument
+    // texts with ", ") into the individual argument names and record them
+    // in the lifetime pool.  An attribute without an argument list has
+    // no arguments at all.
+    ALifetimeList record_attr_args(const char* args) {
+        ALifetimeList res;
+        long start = this.lt_n_;
+        long len = this.cstr_len(args);
+        unsafe {
+            long i = 0;
+            long argb = 0;
+            while (i < len) {
+                if (args[i] == 44 && i + 1 < len && args[i + 1] == 32) {
+                    this.push_lifetime(this.intern_buf(args + argb, i - argb));
+                    i = i + 2;
+                    argb = i;
+                    continue;
+                }
+                i = i + 1;
+            }
+            if (argb < len) {
+                this.push_lifetime(this.intern_buf(args + argb, len - argb));
+            }
+            res.items = this.ltpool_ + start;
+        }
+        res.n = this.lt_n_ - start;
+        return res;
+    }
+
+    // Collect the legacy lifetime annotations of an attribute list:
+    // `[[ivy::lt(x)]]` (kind 1) on a parameter, `[[ivy::lt_ret(x)]]`
+    // (kind 2) and `[[ivy::lt_def(a, b)]]` (kind 3) on a function.  The
+    // annotations keep their attribute order.
+    ALegacyLifetimeList collect_legacy_lts(AAttrList l) {
+        ALegacyLifetimeList res;
+        long start = this.ll_n_;
+        long i = 0;
+        while (i < l.n) {
+            AAttr a;
+            unsafe {
+                a = l.items[i];
+            }
+            long kind = 0;
+            if (this.cstr_eq(a.name, "lt")) {
+                kind = 1;
+            } else if (this.cstr_eq(a.name, "lt_ret")) {
+                kind = 2;
+            } else if (this.cstr_eq(a.name, "lt_def")) {
+                kind = 3;
+            }
+            if (kind != 0) {
+                ALegacyLifetime ll;
+                ll.args = this.record_attr_args(a.args);
+                ll.kind = kind;
+                ll.line = a.line;
+                ll.col = a.col;
+                this.push_legacy_lt(ll);
+            }
+            i = i + 1;
+        }
+        unsafe {
+            res.items = this.llpool_ + start;
+        }
+        res.n = this.ll_n_ - start;
+        return res;
+    }
+
     long fn_count() {
         return this.fn_n_;
     }
@@ -1736,25 +1921,63 @@ export struct Parser {
         }
     }
 
-    void parse_lifetime_decl() {
+    // A5: parse `lifetime<$a, $b, ...>` — the declared lifetime names
+    // (without the leading `$`).  The caller checks that the `lifetime`
+    // keyword is the current token.
+    ALifetimeList parse_lifetime_decl() {
+        ALifetimeList res;
+        unsafe {
+            res.items = (ALifetime*)0;
+        }
+        res.n = 0;
         this.next();  // `lifetime`
         if (!this.at("<")) {
             this.error_at(this.peek(0), "expected '<' after 'lifetime'");
-            return;
+            return res;
         }
         this.next();
+        long start = this.lt_n_;
         while (!this.at(">") && !this.at("eof")) {
             if (!this.at_lifetime()) {
                 this.error_at(this.peek(0), "expected a lifetime variable ($name) in lifetime<...>");
                 this.synchronize();
-                return;
+                unsafe {
+                    res.items = this.ltpool_ + start;
+                }
+                res.n = this.lt_n_ - start;
+                return res;
             }
-            this.next();
+            Token lt = this.next();
+            unsafe {
+                const char* name = this.intern_lifetime(lt);
+                // A duplicated name is an error, but the declaration
+                // continues.
+                long i = 0;
+                bool dup = false;
+                while (i < this.lt_n_ - start) {
+                    if (this.cstr_eq(this.ltpool_[start + i].name, name)) {
+                        dup = true;
+                    }
+                    i = i + 1;
+                }
+                if (dup) {
+                    this.error_at(this.peek(0), this.dup_lt_msg(name));
+                } else {
+                    this.push_lifetime(name);
+                }
+            }
             if (this.at(",")) {
                 this.next();
+            } else {
+                break;
             }
         }
         this.expect(">", "expected '>' to close lifetime<...>");
+        unsafe {
+            res.items = this.ltpool_ + start;
+        }
+        res.n = this.lt_n_ - start;
+        return res;
     }
 
     AParamList parse_params() {
@@ -1776,15 +1999,28 @@ export struct Parser {
                 p.attrs = this.apool_;
             }
             p.nattrs = 0;
+            unsafe {
+                p.lt_names.items = (ALifetime*)0;
+                p.lt_names.n = 0;
+                p.legacy_lts.items = (ALegacyLifetime*)0;
+                p.legacy_lts.n = 0;
+            }
             p.type = this.parse_type();
             if (this.at("...")) {
                 this.next();  // parameter pack marker
             }
+            // A5: the native lifetime annotation of the parameter
+            // (`const int32& $a x`).
             if (this.at_lifetime()) {
-                this.next();
+                Token lt = this.next();
+                p.lt_names = this.one_lt(this.intern_lifetime(lt));
             }
             if (this.at("identifier")) {
                 p.name = this.intern_tok(this.next());
+            } else if (this.at("[") && this.kind_eq(this.peek(1), "[")) {
+                // An attribute on an unnamed parameter: the name has to
+                // come first.
+                this.error_at(this.peek(0), "attribute must follow the parameter name");
             }
             long pa_start = this.ap_n_;
             AAttrList pa = this.parse_attrs();
@@ -1793,6 +2029,9 @@ export struct Parser {
             }
             p.nattrs = this.ap_n_ - pa_start;
             this.validate_list(pa, "lt", "");
+            // A5: the legacy lifetime annotation of the parameter
+            // (`[[ivy::lt(a)]]`).
+            p.legacy_lts = this.collect_legacy_lts(pa);
             // Default argument: `= expr` — fills in the missing argument
             // at the call site.
             if (this.at("=")) {
@@ -2984,7 +3223,8 @@ export struct Parser {
 
     void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
                         AParamList pl, long is_extern_c, long is_constexpr, long line, long col,
-                        ATemplateParamList tpl) {
+                        ATemplateParamList tpl, ALifetimeList declared, ALifetimeList ret_lts,
+                        ALegacyLifetimeList legacy) {
         unsafe {
             f.attrs = this.apool_ + a_start;
         }
@@ -3003,6 +3243,10 @@ export struct Parser {
         f.is_virtual = 0;
         f.tpl_params = tpl.items;
         f.tpl_n = tpl.n;
+        // A5: the lifetime annotations of the function.
+        f.lt_names = declared;
+        f.ret_lts = ret_lts;
+        f.legacy_lts = legacy;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -3011,18 +3255,25 @@ export struct Parser {
         this.push_fn(f);
     }
 
+    // `dline`/`dcol` are the position of the first token of the function
+    // declaration (the oracle's `Function::loc`): the leading attribute,
+    // the `fn` keyword, the `template`/`export` keyword of the enclosing
+    // declaration or the return type.
     void parse_function(AAttrList caller, long is_extern_c, long ce, long cv,
-                        ATemplateParamList tpl) {
+                        ATemplateParamList tpl, ALifetimeList declared,
+                        long dline, long dcol) {
         unsafe {
-            Token fstart = this.peek(0);
             long a_start = this.copy_attrs(caller);
             AType ret = this.parse_type();
             if (this.cstr_len(ret.base) == 0) {
                 this.synchronize();
                 return;
             }
+            // A5: the native return lifetime (`-> const int32& $a`).
+            ALifetimeList ret_lts = this.no_lt();
             if (this.at_lifetime()) {
-                this.next();
+                Token lt = this.next();
+                ret_lts = this.one_lt(this.intern_lifetime(lt));
             }
             this.parse_attrs();
             long a_end = this.ap_n_;
@@ -3030,6 +3281,8 @@ export struct Parser {
             all.items = this.apool_ + a_start;
             all.n = a_end - a_start;
             this.validate_list(all, "lt_def", "lt_ret");
+            // A5: the legacy lifetime annotations of the function.
+            ALegacyLifetimeList legacy = this.collect_legacy_lts(all);
             if (!this.at("identifier")) {
                 this.error_at(this.peek(0), "expected function name");
                 this.synchronize();
@@ -3041,15 +3294,16 @@ export struct Parser {
             this.expect(")", "expected ')' to close parameter list");
             AFunction f;
             this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
-                                fstart.line, fstart.col, tpl);
+                                dline, dcol, tpl, declared, ret_lts, legacy);
         }
     }
 
+    // `dline`/`dcol` are the position of the first token of the function
+    // declaration (the oracle's `Function::loc`).
     void parse_fn_trailing(AAttrList caller, long is_extern_c, long ce, long cv,
-                           ATemplateParamList tpl) {
+                           ATemplateParamList tpl, ALifetimeList declared,
+                           long dline, long dcol) {
         unsafe {
-            Token fstart = this.peek(0);
-            long a_start = this.copy_attrs(caller);
             if (!this.at("identifier")) {
                 this.error_at(this.peek(0), "expected function name after 'fn'");
                 this.synchronize();
@@ -3070,18 +3324,30 @@ export struct Parser {
                 this.synchronize();
                 return;
             }
+            // A5: the native return lifetime (`-> const int32& $a`).
+            ALifetimeList ret_lts = this.no_lt();
             if (this.at_lifetime()) {
-                this.next();
+                Token lt = this.next();
+                ret_lts = this.one_lt(this.intern_lifetime(lt));
             }
-            this.parse_attrs();
+            AAttrList mid = this.parse_attrs();
+            // The function's attribute list is the caller's attributes
+            // followed by the ones that follow the return type.  The
+            // parameter attributes are not part of it: they were parsed
+            // before the return type and are validated on their own.
+            long a_start = this.ap_n_;
+            this.copy_attrs(caller);
+            this.copy_attrs(mid);
             long a_end = this.ap_n_;
             AAttrList all;
             all.items = this.apool_ + a_start;
             all.n = a_end - a_start;
             this.validate_list(all, "lt_def", "lt_ret");
+            // A5: the legacy lifetime annotations of the function.
+            ALegacyLifetimeList legacy = this.collect_legacy_lts(all);
             AFunction f;
             this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
-                                fstart.line, fstart.col, tpl);
+                                dline, dcol, tpl, declared, ret_lts, legacy);
         }
     }
 
@@ -3195,6 +3461,14 @@ export struct Parser {
         m.is_virtual = is_virtual;
         unsafe { m.tpl_params = (ATemplateParam*)0; }
         m.tpl_n = 0;
+        unsafe {
+            m.lt_names.items = (ALifetime*)0;
+            m.lt_names.n = 0;
+            m.ret_lts.items = (ALifetime*)0;
+            m.ret_lts.n = 0;
+            m.legacy_lts.items = (ALegacyLifetime*)0;
+            m.legacy_lts.n = 0;
+        }
         this.push_method(m);
     }
 
@@ -3495,6 +3769,8 @@ export struct Parser {
         return l;
     }
 
+
+
     // --- template arguments (template-id types and template-id calls) -----
     //
     // The arguments of a template-id are parsed onto a scratch stack and are
@@ -3565,16 +3841,20 @@ export struct Parser {
     // parseTemplateParams in parser.cpp: `typename T, int N, Concept U, ...`.
     // The parsed parameters are collected in the parser's template-parameter
     // pool and returned as a slice.
-    ATemplateParamList parse_template_params() {
+    //
+    // `reg` controls whether the type-parameter names are added to the
+    // template-parameter scope.  The oracle registers them in
+    // `parseTemplate` (after the list has been parsed); the
+    // `lifetime<...> template<...>` prefix parses the list without
+    // registering the names, so `reg` is false there.
+    ATemplateParamList parse_template_params(bool reg) {
         long start = this.tpp_n_;
+        // The oracle's `expect(Lt, ...)` consumes the offending token when
+        // the '<' is missing, so that the parse always progresses.
         if (!this.at("<")) {
             this.error_at(this.peek(0), "expected '<' to start template parameter list");
-            ATemplateParamList empty;
-            unsafe { empty.items = (ATemplateParam*)0; }
-            empty.n = 0;
-            return empty;
         }
-        this.next();  // '<'
+        this.next();  // '<' (or the offending token)
         while (!this.at(">") && !this.at("eof")) {
             ATemplateParam tp;
             tp.name = "";
@@ -3605,7 +3885,7 @@ export struct Parser {
             }
             if (this.at("identifier")) {
                 tp.name = this.intern_tok(this.peek(0));
-                if (tp.is_typename != 0) {
+                if (tp.is_typename != 0 && reg) {
                     this.register_template_param(tp.name);
                 }
                 this.next();
@@ -3634,10 +3914,10 @@ export struct Parser {
         return l;
     }
 
-    void parse_template() {
+    void parse_template(long dline, long dcol) {
         this.next();  // 'template'
         long saved = this.tp_n_;
-        ATemplateParamList tpl = this.parse_template_params();
+        ATemplateParamList tpl = this.parse_template_params(true);
         if (this.kw("struct") || this.kw("class")) {
             this.parse_struct(tpl);
         } else if (this.kw("constexpr") || this.kw("consteval")) {
@@ -3645,18 +3925,18 @@ export struct Parser {
             if (this.kw("fn")) {
                 this.next();
                 AAttrList a = this.parse_attrs();
-                this.parse_fn_trailing(a, 0, this.ce_, this.cv_, tpl);
+                this.parse_fn_trailing(a, 0, this.ce_, this.cv_, tpl, this.no_lt(), dline, dcol);
             } else {
                 AAttrList a2 = this.parse_attrs();
-                this.parse_function(a2, 0, this.ce_, this.cv_, tpl);
+                this.parse_function(a2, 0, this.ce_, this.cv_, tpl, this.no_lt(), dline, dcol);
             }
         } else if (this.kw("fn")) {
             this.next();
             AAttrList a = this.parse_attrs();
-            this.parse_fn_trailing(a, 0, 0, 0, tpl);
+            this.parse_fn_trailing(a, 0, 0, 0, tpl, this.no_lt(), dline, dcol);
         } else {
             AAttrList a = this.parse_attrs();
-            this.parse_function(a, 0, 0, 0, tpl);
+            this.parse_function(a, 0, 0, 0, tpl, this.no_lt(), dline, dcol);
         }
         this.tp_n_ = saved;
     }
@@ -3797,7 +4077,7 @@ export struct Parser {
         this.expect(";", "expected ';' after module declaration");
     }
 
-    void parse_export() {
+    void parse_export(long dline, long dcol) {
         this.next();  // 'export'
         if (this.kw("module")) {
             this.next();
@@ -3824,7 +4104,7 @@ export struct Parser {
             return;
         }
         if (this.kw("template")) {
-            this.parse_template();
+            this.parse_template(dline, dcol);
             return;
         }
         if (this.kw("constexpr") || this.kw("consteval")) {
@@ -3832,17 +4112,17 @@ export struct Parser {
             if (this.kw("fn")) {
                 this.next();
                 AAttrList a = this.parse_attrs();
-                this.parse_fn_trailing(a, 0, this.ce_, this.cv_, this.no_tpl());
+                this.parse_fn_trailing(a, 0, this.ce_, this.cv_, this.no_tpl(), this.no_lt(), dline, dcol);
             } else {
                 AAttrList a2 = this.parse_attrs();
-                this.parse_function(a2, 0, this.ce_, this.cv_, this.no_tpl());
+                this.parse_function(a2, 0, this.ce_, this.cv_, this.no_tpl(), this.no_lt(), dline, dcol);
             }
             return;
         }
         if (this.kw("fn")) {
             this.next();
             AAttrList a = this.parse_attrs();
-            this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl());
+            this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl(), this.no_lt(), dline, dcol);
             return;
         }
         if (this.is_type_start() == 0) {
@@ -3851,7 +4131,7 @@ export struct Parser {
             return;
         }
         AAttrList a = this.parse_attrs();
-        this.parse_function(a, 0, 0, 0, this.no_tpl());
+        this.parse_function(a, 0, 0, 0, this.no_tpl(), this.no_lt(), dline, dcol);
     }
 
     void parse_import_header(const char* no_hdr_msg, const char* gt_msg) {
@@ -3891,17 +4171,20 @@ export struct Parser {
         this.expect(";", "expected ';' after import");
     }
 
-    void parse_extern_c(AAttrList attrs) {
+    void parse_extern_c(AAttrList attrs, long dline, long dcol) {
         if (this.at("{")) {
             this.next();
             while (!this.at("}") && !this.at("eof")) {
                 AAttrList f = this.parse_attrs();
-                this.parse_function(f, 1, 0, 0, this.no_tpl());
+                // The oracle locates a function of an `extern "C"` block
+                // at the token that follows its attributes.
+                Token fd = this.peek(0);
+                this.parse_function(f, 1, 0, 0, this.no_tpl(), this.no_lt(), fd.line, fd.col);
             }
             this.expect("}", "expected '}' to close extern \"C\" block");
             return;
         }
-        this.parse_function(attrs, 1, 0, 0, this.no_tpl());
+        this.parse_function(attrs, 1, 0, 0, this.no_tpl(), this.no_lt(), dline, dcol);
     }
 
     void parse_top() {
@@ -3912,11 +4195,12 @@ export struct Parser {
                 continue;
             }
             if (this.kw("extern")) {
+                Token dstart = this.peek(0);  // the `extern` keyword
                 this.next();
                 if (this.at("string") && this.lexeme_eq(this.peek(0).off, this.peek(0).len, "\"C\"")) {
                     this.next();
                     AAttrList a = this.parse_attrs();
-                    this.parse_extern_c(a);
+                    this.parse_extern_c(a, dstart.line, dstart.col);
                 } else {
                     this.error_at(this.peek(0), "only 'extern \"C\"' is supported in the Ivy subset");
                     this.synchronize();
@@ -3926,9 +4210,11 @@ export struct Parser {
             if (this.kw("constexpr") || this.kw("consteval")) {
                 this.parse_constexpr_spec();
                 if (this.kw("fn")) {
+                    Token dstart = this.peek(0);  // the `fn` keyword
                     this.next();
                     AAttrList a = this.parse_attrs();
-                    this.parse_fn_trailing(a, 0, this.ce_, this.cv_, this.no_tpl());
+                    this.parse_fn_trailing(a, 0, this.ce_, this.cv_, this.no_tpl(), this.no_lt(),
+                                           dstart.line, dstart.col);
                     continue;
                 }
                 if (this.is_type_start() == 0) {
@@ -3936,38 +4222,101 @@ export struct Parser {
                     this.synchronize();
                     continue;
                 }
+                Token dstart = this.peek(0);  // the attributes or the type
                 AAttrList a = this.parse_attrs();
-                this.parse_function(a, 0, this.ce_, this.cv_, this.no_tpl());
+                this.parse_function(a, 0, this.ce_, this.cv_, this.no_tpl(), this.no_lt(),
+                                    dstart.line, dstart.col);
                 continue;
             }
+            // A5: `lifetime<$a, $b>` — the lifetime declaration prefix.
+            // It must be followed by a function declaration.
             if (this.kw("lifetime")) {
-                this.parse_lifetime_decl();
+                ALifetimeList lts = this.parse_lifetime_decl();
                 if (this.kw("constexpr") || this.kw("consteval")) {
                     this.parse_constexpr_spec();
                     if (this.kw("fn")) {
+                        Token dstart = this.peek(0);  // the `fn` keyword
                         this.next();
                         AAttrList a2 = this.parse_attrs();
-                        this.parse_fn_trailing(a2, 0, this.ce_, this.cv_, this.no_tpl());
+                        this.parse_fn_trailing(a2, 0, this.ce_, this.cv_, this.no_tpl(), lts,
+                                               dstart.line, dstart.col);
                         continue;
                     }
+                    if (this.is_type_start() == 0) {
+                        this.error_at(this.peek(0), "expected a function after lifetime<...> + constexpr");
+                        this.synchronize();
+                        continue;
+                    }
+                    Token dstart = this.peek(0);  // the attributes or the type
                     AAttrList a3 = this.parse_attrs();
-                    this.parse_function(a3, 0, this.ce_, this.cv_, this.no_tpl());
+                    this.parse_function(a3, 0, this.ce_, this.cv_, this.no_tpl(), lts,
+                                        dstart.line, dstart.col);
                     continue;
                 }
                 if (this.kw("fn")) {
+                    Token dstart = this.peek(0);  // the `fn` keyword
                     this.next();
                     AAttrList a4 = this.parse_attrs();
-                    this.parse_fn_trailing(a4, 0, 0, 0, this.no_tpl());
+                    this.parse_fn_trailing(a4, 0, 0, 0, this.no_tpl(), lts, dstart.line, dstart.col);
                     continue;
                 }
+                // `lifetime<...> template<...> ...` — the template parameter
+                // list follows the lifetime declaration.  The oracle does not
+                // put the template parameter names into scope here (only
+                // `parseTemplate` does), so the port does not either.
+                if (this.kw("template")) {
+                    this.next();  // 'template'
+                    // The oracle consumes the '<' of the template parameter
+                    // list here and then parses the parameter list, which
+                    // expects the '<' again.  The port mirrors that, so that
+                    // the diagnostics of the list match.
+                    this.expect("<", "expected '<' after 'template'");
+                    ATemplateParamList tpl = this.parse_template_params(false);
+                    if (this.kw("fn")) {
+                        Token floc = this.peek(0);  // the `fn` keyword
+                        this.next();
+                        AAttrList a = this.parse_attrs();
+                        this.parse_fn_trailing(a, 0, 0, 0, tpl, lts, floc.line, floc.col);
+                        continue;
+                    }
+                    if (this.is_type_start() == 0) {
+                        this.error_at(this.peek(0), "expected a function after 'template<...>'");
+                        this.synchronize();
+                        continue;
+                    }
+                    Token floc = this.peek(0);  // the attributes or the type
+                    AAttrList a = this.parse_attrs();
+                    this.parse_function(a, 0, 0, 0, tpl, lts, floc.line, floc.col);
+                    continue;
+                }
+                // `lifetime<...> [[attrs]] fn ...` or `lifetime<...> Type ...`
+                Token dstart = this.peek(0);  // the attributes or the type
                 AAttrList a5 = this.parse_attrs();
-                this.parse_function(a5, 0, 0, 0, this.no_tpl());
+                if (this.kw("fn")) {
+                    this.next();
+                    AAttrList a6 = this.parse_attrs();
+                    // The attributes before and after `fn` are adjacent in
+                    // the attribute pool, so they form one list.
+                    AAttrList am;
+                    am.items = a5.items;
+                    am.n = a5.n + a6.n;
+                    this.parse_fn_trailing(am, 0, 0, 0, this.no_tpl(), lts, dstart.line, dstart.col);
+                    continue;
+                }
+                if (this.is_type_start() == 0) {
+                    this.error_at(this.peek(0), "expected a function declaration after lifetime<...>");
+                    this.synchronize();
+                    continue;
+                }
+                this.parse_function(a5, 0, 0, 0, this.no_tpl(), lts, dstart.line, dstart.col);
                 continue;
             }
             if (this.kw("fn")) {
+                Token dstart = this.peek(0);  // the `fn` keyword
                 this.next();
                 AAttrList a = this.parse_attrs();
-                this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl());
+                this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl(), this.no_lt(),
+                                       dstart.line, dstart.col);
                 continue;
             }
             if (this.kw("enum")) {
@@ -3983,7 +4332,8 @@ export struct Parser {
                 continue;
             }
             if (this.kw("template")) {
-                this.parse_template();
+                Token dstart = this.peek(0);  // the `template` keyword
+                this.parse_template(dstart.line, dstart.col);
                 continue;
             }
             if (this.kw("concept")) {
@@ -3999,17 +4349,25 @@ export struct Parser {
                 continue;
             }
             if (this.kw("export")) {
-                this.parse_export();
+                Token dstart = this.peek(0);  // the `export` keyword
+                this.parse_export(dstart.line, dstart.col);
                 continue;
             }
+            Token dstart = this.peek(0);  // the attributes, `fn` or the type
             AAttrList a = this.parse_attrs();
             if (this.kw("fn")) {
                 this.next();
                 AAttrList m = this.parse_attrs();
-                this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl());
+                // The attributes before and after `fn` are adjacent in the
+                // attribute pool, so they form one list.
+                AAttrList am;
+                am.items = a.items;
+                am.n = a.n + m.n;
+                this.parse_fn_trailing(am, 0, 0, 0, this.no_tpl(), this.no_lt(),
+                                       dstart.line, dstart.col);
                 continue;
             }
-            this.parse_function(a, 0, 0, 0, this.no_tpl());
+            this.parse_function(a, 0, 0, 0, this.no_tpl(), this.no_lt(), dstart.line, dstart.col);
         }
     }
 

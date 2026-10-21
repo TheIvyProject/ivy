@@ -104,6 +104,26 @@
 #     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
 #     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
 #     -Driver hirdrive
+#   H4.5 (borrow / lifetime check - the HIR-stage lifetime *annotations*:
+#     the native `lifetime<$a>` / `$a` syntax, the legacy
+#     `[[ivy::lt_def(...)]]` / `[[ivy::lt_ret(...)]]` / `[[ivy::lt(...)]]`
+#     attributes, their precedence, the ten HIR-stage lifetime diagnostics
+#     and the `lifetimes:` / `return lifetime:` / ` [lt:X]` dump lines):
+#     -Dir selfhost/corpus/hir/borrow -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
+#     (the corpus must stay MIR-clean: `ivy --hir` runs the whole pipeline,
+#      so a MIR-stage diagnostic would be printed after the HIR dump and
+#      could never match the HIR-only port)
+#
+# The comparison is byte-exact: both sides are captured as raw bytes, the
+# lines are filtered at byte level and the two byte arrays are compared.
+# Only the line terminator is normalized (CR LF -> LF).  An earlier version
+# wrote both sides with ASCII encoding, which folded every non-ASCII byte
+# to '?' on BOTH sides and therefore hid byte-level differences in the
+# non-ASCII diagnostics (e.g. the em dash U+2014 in the H4.5 lifetime
+# diagnostics).
 #
 # Exit 0 = identical, 1 = mismatch or build failure.
 
@@ -132,7 +152,6 @@ $expected = Join-Path $tmp "expected.txt"
 $actual   = Join-Path $tmp "actual.txt"
 
 $sh = "selfhost\parsing"
-$ascii = New-Object System.Text.ASCIIEncoding
 
 if ($ModuleDirs -eq "") { $ModuleDirs = "selfhost/parsing" }
 if ($DriverDir -eq "") { $DriverDir = "selfhost/parsing" }
@@ -179,43 +198,101 @@ if (-not $allKinds) {
 # Lexeme columns never contain a tab for these kinds, so field 1 is the kind.
 # "all" keeps every token line (including operators, whose kind name can be a
 # comma and therefore cannot be listed in the comma-separated -Kinds set).
-function Test-KeepLine([string]$ln, $kindSet, [bool]$allKinds) {
+#
+# The comparison is BYTE-EXACT: the lines are kept as raw byte arrays and
+# compared as such, so a difference in a non-ASCII byte (e.g. the em dash
+# U+2014 in the lifetime diagnostics) cannot hide behind an encoding
+# round-trip.  Only the line terminator is normalized (CR LF -> LF), which
+# is a platform artifact and not a content difference.
+function Get-ByteLines([byte[]]$bytes) {
+    $lines = New-Object System.Collections.Generic.List[byte[]]
+    $start = 0
+    for ($i = 0; $i -lt $bytes.Length; $i++) {
+        if ($bytes[$i] -eq 10) {
+            $end = $i
+            if ($end -gt $start -and $bytes[$end - 1] -eq 13) { $end = $end - 1 }
+            $seg = New-Object byte[] ($end - $start)
+            if ($end -gt $start) { [Array]::Copy($bytes, $start, $seg, 0, $end - $start) }
+            $lines.Add($seg)
+            $start = $i + 1
+        }
+    }
+    if ($start -lt $bytes.Length) {
+        $seg = New-Object byte[] ($bytes.Length - $start)
+        [Array]::Copy($bytes, $start, $seg, 0, $bytes.Length - $start)
+        $lines.Add($seg)
+    }
+    # The comma operator keeps the list as a single pipeline object (otherwise
+    # PowerShell unrolls the nested byte arrays into individual bytes).
+    return ,$lines.ToArray()
+}
+
+function Test-KeepBytes([byte[]]$ln, $kindSet, [bool]$allKinds) {
     if ($ln.Length -eq 0) { return $false }
-    if ($ln.StartsWith("=== ")) { return $true }
+    # "=== " marker
+    if ($ln.Length -ge 4 -and $ln[0] -eq 61 -and $ln[1] -eq 61 -and $ln[2] -eq 61 -and $ln[3] -eq 32) {
+        return $true
+    }
     if ($allKinds) { return $true }
-    $f = $ln.Split([char]9)
-    return ($f.Length -ge 2 -and $kindSet.ContainsKey($f[1]))
+    # field 1 (between the first and the second tab) is the kind
+    $t1 = -1
+    for ($i = 0; $i -lt $ln.Length; $i++) { if ($ln[$i] -eq 9) { $t1 = $i; break } }
+    if ($t1 -lt 0) { return $false }
+    $t2 = -1
+    for ($i = $t1 + 1; $i -lt $ln.Length; $i++) { if ($ln[$i] -eq 9) { $t2 = $i; break } }
+    if ($t2 -lt 0) { return $false }
+    $kind = [System.Text.Encoding]::ASCII.GetString($ln, $t1 + 1, $t2 - $t1 - 1)
+    return $kindSet.ContainsKey($kind)
+}
+
+function Join-ByteLines($lines) {
+    $out = New-Object System.Collections.Generic.List[byte]
+    foreach ($ln in $lines) {
+        foreach ($b in $ln) { $out.Add($b) }
+        $out.Add(10)
+    }
+    return ,$out.ToArray()
 }
 
 # 3a. Expected: C++ `ivy --lex` per file, filtered, marker prepended in PS.
 # (`--lex` has no trailing newline after its `eof` line, so per-file capture
 # avoids the next marker gluing onto it.)
 Write-Output "[3/4] running C++ oracle + Ivy port ..."
-$exp = New-Object System.Collections.Generic.List[string]
+$exp = New-Object System.Collections.Generic.List[byte[]]
 foreach ($f in $files) {
     cmd /c "`"$ivy`" $inc $Oracle `"$f`" > `"$one`" 2>&1"
-    $exp.Add("=== $f ===")
-    $txt = ([System.IO.File]::ReadAllText($one)) -replace "`r`n", "`n"
-    foreach ($ln in $txt.Split("`n")) { if (Test-KeepLine $ln $kindSet $allKinds) { $exp.Add($ln) } }
+    $exp.Add([System.Text.Encoding]::ASCII.GetBytes("=== $f ==="))
+    foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($one)))) {
+        if (Test-KeepBytes $ln $kindSet $allKinds) { $exp.Add($ln) }
+    }
 }
-[System.IO.File]::WriteAllText($expected, (($exp -join "`n") + "`n"), $ascii)
+$expBytes = Join-ByteLines $exp
+[System.IO.File]::WriteAllBytes($expected, $expBytes)
 
 # 3b. Actual: port over stdin (one file per line).
 cmd /c "(type `"$list`" | `"$port`") > `"$actRaw`" 2>&1"
-$act = New-Object System.Collections.Generic.List[string]
-$txt = ([System.IO.File]::ReadAllText($actRaw)) -replace "`r`n", "`n"
-foreach ($ln in $txt.Split("`n")) { if (Test-KeepLine $ln $kindSet $allKinds) { $act.Add($ln) } }
-[System.IO.File]::WriteAllText($actual, (($act -join "`n") + "`n"), $ascii)
+$act = New-Object System.Collections.Generic.List[byte[]]
+foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($actRaw)))) {
+    if (Test-KeepBytes $ln $kindSet $allKinds) { $act.Add($ln) }
+}
+$actBytes = Join-ByteLines $act
+[System.IO.File]::WriteAllBytes($actual, $actBytes)
 
-# 4. Compare.
+# 4. Compare (byte-exact).
 Write-Output "[4/4] comparing (kinds: $Kinds) ..."
-$e = [System.IO.File]::ReadAllText($expected)
-$a = [System.IO.File]::ReadAllText($actual)
-if ($e -eq $a) {
+$same = ($expBytes.Length -eq $actBytes.Length)
+if ($same) {
+    for ($i = 0; $i -lt $expBytes.Length; $i++) {
+        if ($expBytes[$i] -ne $actBytes[$i]) { $same = $false; break }
+    }
+}
+if ($same) {
     Write-Output ("PASS: identical (filtered) output on " + $files.Count + " files")
     exit 0
 }
 Write-Output "FAIL: outputs differ"
+$e = [System.Text.Encoding]::UTF8.GetString($expBytes)
+$a = [System.Text.Encoding]::UTF8.GetString($actBytes)
 $expLines = $e -split "`n"
 $actLines = $a -split "`n"
 $shown = 0

@@ -91,9 +91,53 @@ export struct AAttr {
     long col;
 };
 
+// One lifetime name.  `name` is the lifetime name without the leading
+// `$` (native `lifetime<$a>`) or without the attribute brackets (legacy
+// `[[ivy::lt_def(a)]]`).  A name is never NULL; an empty name means the
+// annotation carried no name text.
+export struct ALifetime {
+    const char* name;
+};
+
+// A list of lifetime names: a contiguous run of the parser's lifetime
+// pool.  `items` is NULL when the list is absent, which is distinct from
+// an empty list (`items` non-NULL, `n == 0`).
+export struct ALifetimeList {
+    ALifetime* items;
+    long n;
+};
+
+// A legacy lifetime annotation: `[[ivy::lt(x)]]` on a parameter,
+// `[[ivy::lt_ret(x)]]` or `[[ivy::lt_def(a, b)]]` on a function.
+// `kind` is 1 for `lt`, 2 for `lt_ret` and 3 for `lt_def`.  `args` are
+// the annotation's arguments in source order; `args.items` is NULL when
+// the annotation carries no argument list at all, which is distinct from
+// an empty argument list.  `line`/`col` locate the attribute.
+export struct ALegacyLifetime {
+    ALifetimeList args;
+    long kind;
+    long line;
+    long col;
+};
+
+// A list of legacy lifetime annotations: a contiguous run of the parser's
+// legacy-lifetime pool.  `items` is NULL when the declaration carries no
+// such annotation at all, which is distinct from an empty list.
+export struct ALegacyLifetimeList {
+    ALegacyLifetime* items;
+    long n;
+};
+
 // A function parameter: type, optional name, and attributes.
 // `default_value` is the expression-pool index of the parameter's default
 // value, or -1 when the parameter has none.
+//
+// Lifetime annotations (A5).  A parameter may carry a native lifetime
+// (`const int32& $a x`) and/or a legacy one (`[[ivy::lt(a)]]` after the
+// name).  `lt_names` holds the native names (at most one) and
+// `legacy_lts` the legacy annotations of the parameter; both forms are
+// kept so that the HIR stage can apply the precedence rules.  A list
+// whose `items` is NULL is absent, which is distinct from an empty list.
 export struct AParam {
     AType type;
     const char* name;
@@ -102,12 +146,21 @@ export struct AParam {
     long line;
     long col;
     long default_value;
+    ALifetimeList lt_names;
+    ALegacyLifetimeList legacy_lts;
 };
 
 // A top-level function declaration or definition. `body` is a statement-pool
 // index for the root Compound, or -1 for a declaration only.
 // `tpl_params`/`tpl_n` hold the template parameter list of a template
 // function (empty for an ordinary function).
+//
+// Lifetime annotations (A5).  `lt_names` is the native `lifetime<$a, $b>`
+// declaration in declaration order, `ret_lts` the native `$a` on the
+// return type (at most one) and `legacy_lts` the legacy
+// `[[ivy::lt_ret(x)]]` / `[[ivy::lt_def(a, b)]]` annotations.  Both the
+// native and the legacy forms are kept so that the HIR stage can apply
+// the precedence rules.
 export struct AFunction {
     AAttr* attrs;
     long nattrs;
@@ -123,6 +176,9 @@ export struct AFunction {
     long is_virtual;     // `virtual` or pure-virtual method
     ATemplateParam* tpl_params;
     long tpl_n;
+    ALifetimeList lt_names;
+    ALifetimeList ret_lts;
+    ALegacyLifetimeList legacy_lts;
 };
 
 // A struct/class field declaration.

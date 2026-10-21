@@ -1,0 +1,4 @@
+lifetime<$a>
+fn bad(int32 $a p, const int32& $b q) -> const int32& $c {
+    return q;
+}

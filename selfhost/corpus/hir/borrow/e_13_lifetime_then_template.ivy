@@ -1,0 +1,5 @@
+lifetime<$a>
+template<typename T>
+fn f(const T& $a x) -> int32 {
+    return 1;
+}

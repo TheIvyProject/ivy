@@ -1,0 +1,4 @@
+lifetime<$a>
+const int32& $a first(const int32& $a x) {
+    return x;
+}

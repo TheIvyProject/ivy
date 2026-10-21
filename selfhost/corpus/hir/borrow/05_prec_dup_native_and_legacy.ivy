@@ -1,0 +1,5 @@
+lifetime<$a>
+[[ivy::lt_def(a)]]
+fn f(const int32& $a x) -> int32 {
+    return 1;
+}

@@ -1,0 +1,4 @@
+lifetime<$a>
+fn f() -> int32 $a {
+    return 1;
+}

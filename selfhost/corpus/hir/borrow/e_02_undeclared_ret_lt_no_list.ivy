@@ -1,0 +1,3 @@
+fn f(const int32& x) -> const int32& $b {
+    return x;
+}

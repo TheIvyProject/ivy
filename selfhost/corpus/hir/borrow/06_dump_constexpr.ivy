@@ -1,0 +1,4 @@
+lifetime<$a>
+constexpr fn f() -> int32 {
+    return 1;
+}

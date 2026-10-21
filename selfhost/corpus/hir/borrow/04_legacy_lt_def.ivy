@@ -1,0 +1,4 @@
+[[ivy::lt_def(a)]]
+fn f() -> int32 {
+    return 1;
+}

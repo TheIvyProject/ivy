@@ -1,0 +1,4 @@
+extern "C" {
+    [[ivy::lt_def(a)]]
+    int32 g(const int32& x [[ivy::lt(a)]]);
+}

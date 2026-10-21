@@ -1,0 +1,2 @@
+lifetime<$a>
+fn f(int32* $a p) -> int32;

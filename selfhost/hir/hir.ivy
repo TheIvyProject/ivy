@@ -53,14 +53,26 @@ export struct HCase {
     long sn;
 };
 
+// A parameter of a HIR function.  `lt` is the name of the parameter's
+// lifetime (the native `$a` or the legacy `[[ivy::lt(a)]]`) and is NULL
+// when the parameter carries no lifetime.  The name is owned by the
+// parser (the lifetime names are interned there).  (`lifetime` is a
+// keyword, so the field cannot be called that.)
 export struct HParam {
     AType type;
     const char* name;
     long line;
     long col;
     long default_value;   // AST expression index of the default value (-1 none)
+    const char* lt;       // the parameter's lifetime name (NULL when none)
 };
 
+// A HIR function.  The declared lifetimes are the native `lifetime<$a, $b>`
+// names first, then the legacy `[[ivy::lt_def(a, b)]]` names; they are
+// stored in the `HUnit.ltnames` pool and `lt_start`/`lt_n` delimit the
+// run.  `lt_start` is -1 when the function declares no lifetime at all
+// (an absent declaration), which is distinct from a declaration that is
+// present but carries no name (`lt_n == 0`).
 export struct HFunction {
     const char* name;
     AType ret;
@@ -69,6 +81,9 @@ export struct HFunction {
     long pstart;        // first HParam index
     long pn;            // HParam count
     long is_constexpr;  // `constexpr` / `consteval` function
+    long lt_start;      // first lifetime name index (-1 when absent)
+    long lt_n;          // number of declared lifetime names
+    const char* return_lifetime;  // the return lifetime name (NULL when none)
 };
 
 // A whole HIR translation unit. Flat pools are owned by HirBuilder.
@@ -91,4 +106,10 @@ export struct HUnit {
     long* args;
     long a_n;
     long a_cap;
+    // The declared lifetime names of every function: a contiguous run the
+    // `HFunction.lt_start` / `HFunction.lt_n` fields index into.  The
+    // names are stored as `(long) const char*` (the port keeps the
+    // pointers of the symbol pool in a `long` array).
+    long* ltnames;
+    long lt_n;
 };

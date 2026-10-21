@@ -1,0 +1,4 @@
+lifetime<$a>
+fn f(const int32& $a x) -> const int32& $b {
+    return x;
+}

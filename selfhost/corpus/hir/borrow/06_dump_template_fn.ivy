@@ -1,0 +1,9 @@
+lifetime<$a>
+fn pick(const int32& $a x) -> int32 {
+    return 1;
+}
+
+template<typename T>
+fn apply(const T& v) -> int32 {
+    return 1;
+}

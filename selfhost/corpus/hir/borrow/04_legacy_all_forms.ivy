@@ -1,0 +1,5 @@
+[[ivy::lt_def(a, b)]]
+[[ivy::lt_ret(a)]]
+fn f(const int32& x [[ivy::lt(a)]], const int32& y [[ivy::lt(b)]]) -> const int32& {
+    return x;
+}

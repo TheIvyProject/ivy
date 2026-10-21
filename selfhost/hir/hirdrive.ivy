@@ -30,6 +30,7 @@ struct HDumper {
     HParam* pp;
     HCase* cp;
     long* ap;
+    long* ltn;   // the lifetime names of the functions
 
     long slen(const char* s) {
         long i = 0;
@@ -390,9 +391,38 @@ struct HDumper {
             if (this.slen(p.name) > 0) {
                 io::print(" {}", p.name);
             }
+            bool has_lt = false;
+            unsafe {
+                has_lt = p.lt != (char*)0;
+            }
+            if (has_lt) {
+                io::print(" [lt:{}]", p.lt);
+            }
             j = j + 1;
         }
         io::println(")");
+        // The declared lifetimes of the function (the native names first,
+        // then the legacy ones).  The line is printed only when the
+        // function declares at least one lifetime.
+        if (f.lt_n > 0) {
+            io::print("  lifetimes:");
+            long k = 0;
+            while (k < f.lt_n) {
+                unsafe {
+                    const char* nm = (char*)this.ltn[f.lt_start + k];
+                    io::print(" {}", nm);
+                }
+                k = k + 1;
+            }
+            io::println("");
+        }
+        bool has_ret_lt = false;
+        unsafe {
+            has_ret_lt = f.return_lifetime != (char*)0;
+        }
+        if (has_ret_lt) {
+            io::println("  return lifetime: {}", f.return_lifetime);
+        }
         if (f.body >= 0) {
             this.dump_compound(f.body, 1);
         } else {
@@ -492,6 +522,7 @@ void run() {
                                 d.pp = u.params;
                                 d.cp = u.cases;
                                 d.ap = u.args;
+                                d.ltn = u.ltnames;
                                 long i = 0;
                                 while (i < u.fn_n) {
                                     HFunction f;

@@ -201,7 +201,7 @@ src/                              selfhost/
   Ten tham so template luu registry tam thoi rieng (`tpnames_`), tra trong
   `token_is_type_name` nen `T` duoc nhan la kieu; khong dump template param hay
   concept (giong oracle, `--ast` chi liet ke `tu.functions`). Dump body AST
-  byte-identical on `selfhost/corpus/parser/template/` (15 file) vs `ivy --ast`.
+   byte-identical on `selfhost/corpus/parser/template/` (16 file) vs `ivy --ast`.
   Lenh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/template -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: template struct/class tieu thu het + dang ky ten kieu (giu trong
@@ -298,7 +298,9 @@ src/                              selfhost/
    constructor/destructor (constructor injection; phan *khai bao* cua
    constructor da port), `new`/`delete`, lambda, range-for, move-tracking,
    namespace van chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3,
-   template xong o H4.4).
+   template xong o H4.4, ha muc `__ret` + phat sinh destructor/RAII + NRVO +
+   struct construction xong o milestone RAII/DTOR, kiem tra *borrow* (MIR)
+   xong o H5.1/H5.2).
 - H4.3 (Constexpr folding): port phan fold hang so cua `hir_builder.cpp`
   sang `hir/hir_builder.ivy` (va `hir/hir.ivy`):
   (1) `sizeof`/`alignof` fold thanh integer literal (`typeSize`/
@@ -358,7 +360,9 @@ src/                              selfhost/
    Con lai (de milestone sau): aggregate init `{...}`, goi
    constructor/destructor (constructor injection; phan *khai bao* cua
    constructor da port), `new`/`delete`, lambda, range-for, structured
-   binding, move-tracking, namespace (template xong o H4.4).
+   binding, move-tracking, namespace (template xong o H4.4; ha muc `__ret` +
+   phat sinh destructor/RAII + NRVO + struct construction xong o milestone
+   RAII/DTOR, kiem tra *borrow* (MIR) xong o H5.1/H5.2).
 - H4.4 (Template instantiation): port phan khoi tao mau (instantiate) cua
   `hir_builder.cpp` sang `hir/hir_builder.ivy` (va `hir/hir.ivy` khong doi
   gi - ten mau chi la mot `const char*`):
@@ -412,7 +416,9 @@ src/                              selfhost/
    co namespace), goi constructor cua mot specialization (`Box<int32>(1)` -
    port chua co constructor resolution/injection; phai goi constructor cua
    mot struct thuong (`W(1)`) cung chua ho tro, nen day la tinh nang
-   constructor chung chu phai rieng cho template).
+   constructor chung chu phai rieng cho template), ha muc `__ret` + phat
+   sinh destructor/RAII + NRVO + struct construction (milestone RAII/DTOR),
+   kiem tra *borrow* + suy dien lifetime (MIR) (H5.1/H5.2).
 - H4.4 (giai chinh va xac minh lap lai - phase 6/6): xac minh lai toan bo
    24 suite (574 file) + 120 fixture rieng (ngoai corpus) de kiem tra oracle
    parity byte-for-byte, va sua port:
@@ -434,6 +440,93 @@ src/                              selfhost/
    Ghi chu: `get_stmt` co dong gan `s.line`/`s.col` cho `HStmt` (struct nay
    khong co field do) nhung do la dead code sau `return` nen khong bien
    dich; khong doi.
+- H4.5 (Borrow / lifetime check - phan *annotation* o tang HIR): port phan
+   ghi nhan + kiem tra *chu thich* lifetime cua `hir_builder.cpp` sang
+   `hir/hir_builder.ivy` (va `hir/hir.ivy`, `hir/hirdrive.ivy`; parser/ast giu
+   lifetime trong AST):
+   (1) cu phap **native**: `lifetime<$a, $b>` (prefix khai bao danh sach),
+   `$a` tren tham so (`const int32& $a x`, `int32* $a p`), `$a` sau kieu
+   tra ve (`-> const int32& $a`) va dang leading (`const int32& $a f(...)`);
+   `lifetime<>` (danh sach rong) hop le;
+   (2) cu phap **legacy**: `[[ivy::lt_def(a, b)]]` (khai bao danh sach),
+   `[[ivy::lt_ret(a)]]` (lifetime tra ve), `[[ivy::lt(a)]]` (tham so, phai
+   viet sau ten tham so);
+   (3) thu tu uu tien - theo **code** oracle (`hir_builder.cpp:217-305`),
+   khong theo comment cua no: danh sach khai bao = ten native truoc, ten
+   legacy `lt_def` sau; lifetime **tra ve**: legacy `lt_ret` **thang** native
+   `$a`; lifetime **tham so**: native `$a` **thang** legacy `lt`; cung mot
+   ten o ca hai dang -> `duplicate lifetime` (van phien legacy);
+   (4) 10 chan doan HIR-stage (dung chuoi va thu tu, dung ca 3 loai vi
+   tri: token kieu tham so / token bat dau khai bao ham / vi tri cua
+   attribute):
+   `lifetime '$b' is not declared in lifetime<...>`,
+   `return lifetime '$b' is not declared in lifetime<...>`,
+   `lifetime annotation requires a reference or pointer parameter`,
+   `[[ivy::lt(b)]]: lifetime 'b' is not declared via [[ivy::lt_def(...)]]`,
+   `[[ivy::lt]] expects exactly one lifetime argument`,
+   `[[ivy::lt_ret]] expects exactly one lifetime argument`,
+   `[[ivy::lt]] requires a reference or pointer parameter`,
+   `duplicate lifetime 'a'`, `duplicate lifetime '$a'`,
+   `function 'f' returns a pointer but has no return lifetime - use
+   `lifetime<$a>` and annotate the return type with $a` (co em dash U+2014);
+   (5) dong dump HIR moi: `  lifetimes: a b` (chi khi danh sach khong rong),
+   `  return lifetime: X` (chi khi ham co lifetime tra ve), va hau to
+   ` [lt:X]` ngay sau ten tham so (KHONG co khoang trong sau `lt:` - MIR
+   dump dung ` [lt: X]`).
+   Corpus `selfhost/corpus/hir/borrow/` (45 file: 28 file nhom `01_`-`06_` +
+   17 file `e_` chan doan) byte-identical vs `ivy --hir`. Lenh:
+   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/borrow -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+   Ghi chu: corpus phai **MIR-clean** - `ivy --hir` chay ca pipeline, nen mot
+   chan doan MIR-stage in ra SAU HIR dump (exit 1) va khong bao gio doi
+   chieu duoc voi port chi co HIR; vi du bi loai khoi corpus: `syntax/x27`
+   va `p02` (MIR lifetime mismatch), `stage/s1,s4,s5,s6,s7,s11,s15` (borrow
+   error), `ret/r01..r22` (`__ret` + RAII/destructor).
+   `syntax/x10` (`lifetime<...>` + `template<...>`) **khong con bi loai** nua:
+   xem H4.5 (giai chinh) ben duoi - port da reproduce dung 3 chan doan cua
+   oracle (bug oracle: `parser.cpp:789` consume '<' hai lan).
+   Con lai (de H5 - MIR): borrow checker (`checkBorrow` aliasing/mutability,
+   `checkReturn` dangling + khop lifetime, `checkStore` dangling store), suy
+   dien lifetime (`mir::Expr::lifetime` Named/Static/Local/Unknown) va MIR
+   dump (` [lt: X]`, `block N`, `alloca`/`eval`/`ret`) - xem H5.1/H5.2;
+   ha muc `__ret` (danh gia bieu thuc tra ve truoc destructor) + phat sinh
+   destructor/RAII + NRVO (`returnedLocals_`) + struct construction (can
+   khoi tao mau `Res` co destructor) - canh RAII/DTOR milestone (hoac H5).
+   (Khong con gi ve *chu thich* lifetime trong danh sach "chua port" - H4.5
+   da port xong phan annotation; phan kiem tra *borrow* thi thuoc MIR.)
+- H4.5 (giai chinh va xac minh lap lai - phase 5/5): xac minh lai toan bo
+   25 suite (620 file) + 52 fixture rieng (ngoai corpus) de kiem tra oracle
+   parity byte-for-byte, va sua port:
+   (1) **harness `difftest.ps1` so sanh byte-exact**: ban cu ghi ca hai ben
+   bang encoding ASCII, nen moi byte khong ASCII (em dash U+2014 trong chan
+   doan lifetime) bi fold thanh '?' o CA HAI ben - lech byte bi giu an.
+   Da doi sang: doc raw byte -> tach dong o muc byte -> so sanh mang byte
+   (chi chuan hoa CRLF -> LF). Chung minh blind spot: doi em dash thanh en
+   dash trong port, harness CU PASS (ASCII), harness MO FAIL (byte-exact).
+   (2) **parser: `lifetime<...> template<...>`** - port thieu nhanh XAY
+   (oracle `parser.cpp:785-809`); port bao "expected a function declaration
+   after lifetime<...>" thay vi 3 chan doan cua oracle. Da them nhanh
+   (mirror oracle, ke ca bug consume '<' hai lan + khong register ten
+   template param) + regression `corpus/hir/borrow/e_13_lifetime_then_template.ivy`.
+   (3) **parser: `parse_template_params`** - oracle `expect(Lt, ...)` consume
+   token loi (de parse luon tien), port bao loi roi return (1 chan doan thay
+   vi 3). Da sua + regression `corpus/parser/template/16_template_no_lt.ivy`.
+   (4) **parser: arena intern** - `sb_cap_` = `src_len + 8192` khong du vi
+   H4.5 intern lai text cua `[[ivy::lt_def(...)]]` (de tach ten lifetime)
+   -> tran arena, port in chan doan rong/SAI ( lech oracle). Da doi
+   `sb_cap_` = `src_len * 4 + 65536` (4 lan: ten bien + text attribute + ten
+   lifetime + tieu de bien).
+   (5) **pool stride**: da re-derive moi kich thuoc pool cua `parser.ivy` /
+   `hir_builder.ivy` / `hirdrive.ivy` tu layout cua struct trong `ast.ivy` /
+   `hir.ivy` (x86-64: pointer 8, `long` 8, `bool` 1, align 8) - khong co sai
+   lech nao; xac nhan them bang `sizeof` cua chinh compiler Ivy (AType 48,
+   AAttr 40, ALifetime 8, ALifetimeList 16, ALegacyLifetime 40,
+   ALegacyLifetimeList 16, AParam 128, ATemplateParam 96, AField 72,
+   AEnumerator 32, AStruct 96, AFunction 200, AEnum 96, AAlias 56,
+   AConcept 48, AExpr 168, AStmt 136, ACase 24, HExpr 144, HStmt 120,
+   HCase 24, HParam 88, HFunction 120).
+   (6) **MIR-clean**: 45/45 file corpus `hir/borrow` khong co chan doan
+   MIR-stage (stdout/stderr tach rieng: 0 file co stderr sau HIR dump).
+   Con lai: xem "Con lai (de H5 - MIR)" o H4.5 ben tren.
 
 
 ---
@@ -473,7 +566,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ✅ byte-identical 13 files |
 | H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 15 files |
 | H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ✅ byte-identical 14 files |
-| H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ✅ byte-identical 15 files |
+| H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ✅ byte-identical 16 files |
 | H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ✅ byte-identical 16 files |
 | H3.7 | Error cases (E2/E3/E4) | `parser.cpp` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/err` | ✅ byte-identical 19 files |
 
@@ -485,7 +578,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 120 files |
 | H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ✅ byte-identical 70 files |
 | H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ✅ byte-identical 99 files |
-| H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ☐ |
+| H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ✅ byte-identical 45 files |
 | H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ☐ |
 
 ### H5 — MIR + Interpreter
