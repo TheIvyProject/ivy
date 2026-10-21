@@ -1,0 +1,9 @@
+// H4.6 rule: the bypass covers the base of a member left-hand side (phase-1 fixture: e04_member_lhs_bypass)
+struct S {
+    int32 v;
+};
+void f() {
+    S s;
+    move(s);
+    s.v = 1;
+}

@@ -1,0 +1,9 @@
+// H4.6 rule: move() of a struct value, then a field read (phase-1 fixture: m31_move_struct_value)
+struct S {
+    int32 v;
+};
+void f() {
+    S s;
+    move(s);
+    int32 y = s.v;
+}

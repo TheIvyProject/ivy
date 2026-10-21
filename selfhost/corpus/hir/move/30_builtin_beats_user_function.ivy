@@ -1,0 +1,8 @@
+// H4.6 rule: a user-defined move function does not shadow the builtin (phase-1 fixture: e01_user_defined_move)
+void move(int32 x) {
+}
+void f() {
+    int32 y = 1;
+    move(y);
+    int32 z = y;
+}

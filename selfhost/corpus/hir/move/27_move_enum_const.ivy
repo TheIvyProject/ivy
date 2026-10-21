@@ -1,0 +1,8 @@
+// H4.6 rule: move(Red) is not the builtin: the enum constant folds to an integer literal (phase-1 fixture: f01_move_enum_const)
+enum Color {
+    Red,
+    Green
+};
+void f() {
+    move(Red);
+}

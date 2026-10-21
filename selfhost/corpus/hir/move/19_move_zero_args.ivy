@@ -1,0 +1,4 @@
+// H4.6 rule: move() with no argument is not the builtin (phase-1 fixture: m11_move_zero_args)
+void f() {
+    move();
+}

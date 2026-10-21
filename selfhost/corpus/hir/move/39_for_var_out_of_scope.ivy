@@ -1,0 +1,7 @@
+// H4.6 rule: the for-loop variable is out of scope after the loop (phase-1 fixture: m89_move_for_var_after_loop)
+void f() {
+    for (int32 i = 0; i < 3; i = i + 1) {
+        move(i);
+    }
+    int32 y = i;
+}

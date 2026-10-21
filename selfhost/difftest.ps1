@@ -116,6 +116,19 @@
 #     (the corpus must stay MIR-clean: `ivy --hir` runs the whole pipeline,
 #      so a MIR-stage diagnostic would be printed after the HIR dump and
 #      could never match the HIR-only port)
+#   H4.6 (move / use-after-move - the HIR-stage move tracking: the `move()`
+#     builtin recognition rules (the callee is the bare name `move`, exactly
+#     one argument, the argument is an identifier), the move state of every
+#     binding, the use-after-move and the already-moved-out diagnostics, the
+#     assignment-LHS bypass, the re-initialisation by a plain `=`, and the
+#     builtin-vs-user-defined precedence):
+#     -Dir selfhost/corpus/hir/move -Kinds all -Oracle --hir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir
+#     -Driver hirdrive
+#     (the corpus must stay MIR-clean: `ivy --hir` runs the whole pipeline,
+#      so a MIR-stage diagnostic would be printed after the HIR dump and
+#      could never match the HIR-only port)
 #
 # The comparison is byte-exact: both sides are captured as raw bytes, the
 # lines are filtered at byte level and the two byte arrays are compared.

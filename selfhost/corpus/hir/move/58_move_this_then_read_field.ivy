@@ -1,0 +1,8 @@
+// H4.6 rule: move(this) is not the builtin, and the field read is not checked (phase-1 fixture: m99_move_this_field_read)
+struct S {
+    int32 v;
+    int32 get() {
+        move(this);
+        return this.v;
+    }
+};

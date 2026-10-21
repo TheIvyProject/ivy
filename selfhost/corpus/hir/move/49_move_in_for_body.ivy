@@ -1,0 +1,8 @@
+// H4.6 rule: the move in the for body is visible after the loop (phase-1 fixture: m39_move_in_for_body_after_loop)
+void f() {
+    int32 x = 1;
+    for (int32 i = 0; i < 3; i = i + 1) {
+        move(x);
+    }
+    int32 y = x;
+}

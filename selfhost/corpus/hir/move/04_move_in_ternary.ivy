@@ -1,0 +1,6 @@
+// H4.6 rule: the use-after-move in a ternary condition (phase-1 fixture: m40_move_ternary)
+void f() {
+    int32 x = 1;
+    move(x);
+    int32 y = x > 0 ? 1 : 2;
+}

@@ -1,0 +1,7 @@
+// H4.6 rule: a compound assignment bypasses the check but does not re-initialise (phase-1 fixture: m04_move_compound_assign)
+void f() {
+    int32 x = 1;
+    move(x);
+    x += 1;
+    int32 y = x;
+}

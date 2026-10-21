@@ -1,0 +1,6 @@
+// H4.6 rule: a user-defined move called with a literal goes to the user function (phase-1 fixture: e08_user_move_non_ident)
+void move(int32 x) {
+}
+void f() {
+    move(1);
+}

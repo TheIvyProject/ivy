@@ -1,0 +1,7 @@
+// H4.6 rule: move -> = -> move again: no already-moved-out (phase-1 fixture: m93_move_after_reassign_then_move)
+void f() {
+    int32 x = 1;
+    move(x);
+    x = 2;
+    move(x);
+}

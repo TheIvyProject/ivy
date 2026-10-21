@@ -1,0 +1,8 @@
+// H4.6 rule: move(s.v) is not the builtin (phase-1 fixture: m17_move_field)
+struct S {
+    int32 v;
+};
+void f() {
+    S s;
+    move(s.v);
+}

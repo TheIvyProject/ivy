@@ -1,0 +1,6 @@
+// H4.6 rule: return of a moved-out variable (phase-1 fixture: m27_move_return)
+int32 f() {
+    int32 x = 1;
+    move(x);
+    return x;
+}

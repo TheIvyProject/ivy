@@ -1,0 +1,6 @@
+// H4.6 rule: a parameter shadowed by a body local: separate move states (phase-1 fixture: f03_move_param_shadow_body)
+void f(int32 x) {
+    int32 x = 1;
+    move(x);
+    int32 y = x;
+}

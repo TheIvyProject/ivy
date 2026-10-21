@@ -1,0 +1,8 @@
+// H4.6 rule: the unsafe block does not bypass the check (phase-1 fixture: m36_move_in_unsafe)
+void f() {
+    int32 x = 1;
+    unsafe {
+        move(x);
+        int32 y = x;
+    }
+}

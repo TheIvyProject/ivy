@@ -1,0 +1,8 @@
+// H4.6 rule: a template named move called with a literal: the template is used (phase-1 fixture: q06_template_named_move)
+template<typename T>
+fn move(T x) -> T {
+    return x;
+}
+void g() {
+    move(1);
+}

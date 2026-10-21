@@ -30,6 +30,16 @@ export struct HirBuilder {
     long sc_n_;
     long sc_cap_;
 
+    // Move-state tracking (A4 in hir_builder.cpp): the move state of every
+    // symbol, parallel to `snm_` / `sty_`.  0 = Initialized, 1 = MovedOut.
+    // The state belongs to the *binding*, not to the name: a shadowing
+    // declaration has its own state.
+    long* smv_;
+    // The assignment left-hand side bypass flag (the oracle's
+    // `inAssignLhs_`): while it is set the use-after-move check is
+    // disabled for every identifier of the left-hand side expression.
+    long in_assign_lhs_;
+
     // unscoped enum constants
     long* ecnm_;
     long* ecval_;
@@ -283,6 +293,7 @@ export struct HirBuilder {
             this.s_cap_ = ntoks * 4 + 64;
             this.snm_ = (long*) __ivy_alloc(this.s_cap_ * 8);
             this.sty_ = (AType*) __ivy_alloc(this.s_cap_ * 48);
+            this.smv_ = (long*) __ivy_alloc(this.s_cap_ * 8);
             this.s_n_ = 0;
             this.sc_cap_ = ntoks + 64;
             this.scope_ = (long*) __ivy_alloc(this.sc_cap_ * 8);
@@ -360,6 +371,7 @@ export struct HirBuilder {
         this.op_name_ = "";
             this.unsafe_depth_ = 0;
             this.has_return_ = 0;
+            this.in_assign_lhs_ = 0;
             this.ovl_cap_ = ntoks + 64;
             this.ovl_ = (long*) __ivy_alloc(this.ovl_cap_ * 8);
 
@@ -449,6 +461,7 @@ export struct HirBuilder {
             __ivy_free(this.u.args);
             __ivy_free(this.snm_);
             __ivy_free(this.sty_);
+            __ivy_free(this.smv_);
             __ivy_free(this.scope_);
             __ivy_free(this.ecnm_);
             __ivy_free(this.ecval_);
@@ -745,6 +758,26 @@ export struct HirBuilder {
         this.db_put("undeclared identifier '");
         this.db_put(name);
         this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // A4 in hir_builder.cpp: an identifier that resolves to a variable
+    // whose move state is `MovedOut`.
+    void err_use_moved_out(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("use of moved-out variable '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // A4 in hir_builder.cpp: `move(x)` applied to a variable that is
+    // already moved-out.  The location is the call's, not the operand's.
+    void err_already_moved_out(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("'");
+        this.db_put(name);
+        this.db_put("' is already moved-out");
         this.diag(line, col, this.db_end());
     }
 
@@ -1935,6 +1968,49 @@ export struct HirBuilder {
         return this.ty_dummy();
     }
 
+    // The move state of a symbol: 0 = Initialized, 1 = MovedOut.
+    long sym_moved(long i) {
+        unsafe {
+            return this.smv_[i];
+        }
+        return 0;
+    }
+
+    void set_sym_moved(long i, long moved) {
+        unsafe {
+            this.smv_[i] = moved;
+        }
+    }
+
+    // A4 in hir_builder.cpp: mark the variable `name` as moved-out
+    // (hir_builder.cpp:2941-2950).  The oracle searches the move-state
+    // scopes from the inside out, so the *innermost binding* of the name is
+    // marked; the flat symbol stack resolves the name the same way (the
+    // innermost symbol with that name is the innermost scope that declares
+    // it).  A variable that is already moved-out raises the "already
+    // moved-out" diagnostic at the call's location.  A name that is not a
+    // variable at all is not marked and raises no diagnostic.
+    void mark_moved_out(const char* name, long line, long col) {
+        long si = this.find_sym(name);
+        if (si < 0) {
+            return;
+        }
+        if (this.sym_moved(si) != 0) {
+            this.err_already_moved_out(line, col, name);
+        }
+        this.set_sym_moved(si, 1);
+    }
+
+    // A4 in hir_builder.cpp: a plain assignment re-initializes a moved-out
+    // variable (a compound assignment does not) - hir_builder.cpp:3684-3695.
+    void reinitialize(const char* name) {
+        long si = this.find_sym(name);
+        if (si < 0) {
+            return;
+        }
+        this.set_sym_moved(si, 0);
+    }
+
     void declare(const char* name, AType t, long line, long col) {
         long start = 0;
         if (this.sc_n_ > 0) {
@@ -1960,6 +2036,8 @@ export struct HirBuilder {
                 this.sty_[this.s_n_] = t;
             }
             this.s_n_ = this.s_n_ + 1;
+            // A4: a new variable starts in the Initialized move state.
+            this.set_sym_moved(this.s_n_ - 1, 0);
         }
     }
 
@@ -3537,6 +3615,14 @@ export struct HirBuilder {
 
     long build_ident(AExpr a) {
         long si = this.find_sym(a.sval);
+        // A4: the use-after-move check.  It fires for every identifier that
+        // resolves to a variable whose move state is `MovedOut`; the
+        // location is the identifier's own location.  The check is skipped
+        // while the left-hand side of an assignment is built (a
+        // re-assignment re-initializes a moved-out variable).
+        if (si >= 0 && this.in_assign_lhs_ == 0 && this.sym_moved(si) != 0) {
+            this.err_use_moved_out(a.line, a.col, a.sval);
+        }
         HExpr e = this.new_expr(8, a.line, a.col);
         e.sval = a.sval;
         if (si >= 0) {
@@ -4080,6 +4166,33 @@ export struct HirBuilder {
         }
         e.an = total;
 
+        // A4/B3: the `move(expr)` builtin (hir_builder.cpp:2932-2963).  It is
+        // recognised *before* any callee resolution, so it shadows a
+        // user-defined function, a template or a local variable named
+        // `move` - the oracle checks the builtin at :2937, before the
+        // operator-overload probe (:2969), the template-id call (:3044) and
+        // the ordinary overload resolution (:3119).  It applies only when
+        // the callee is the bare name `move`, the call has exactly one
+        // *built* argument and that argument is an identifier.  The call node
+        // is kept (the dump shows `call 'move' : <operand type>`) and the
+        // operand is marked as moved-out.
+        if (ca.kind == 8 && this.seq(ca.sval, "move") && e.an == 1) {
+            long ai = -1;
+            unsafe {
+                ai = this.abuf_[slot];
+            }
+            HExpr ae;
+            unsafe {
+                ae = this.u.exprs[ai];
+            }
+            if (ae.kind == 8) {
+                this.mark_moved_out(ae.sval, a.line, a.col);
+                e.sval = ca.sval;
+                e.type = ae.type;
+                return this.push_expr(e);
+            }
+        }
+
         if (ca.kind == 8) {
             // A template-id call: `func<T>(args)`.
             if (a.tpl_n > 0) {
@@ -4231,21 +4344,6 @@ export struct HirBuilder {
                     return folded;
                 }
                 return this.push_expr(e);
-            }
-            if (this.seq(ca.sval, "move") && a.an == 1) {
-                long ai = -1;
-                unsafe {
-                    ai = this.abuf_[slot];
-                }
-                HExpr ae;
-                unsafe {
-                    ae = this.u.exprs[ai];
-                }
-                if (ae.kind == 8) {
-                    e.sval = ca.sval;
-                    e.type = ae.type;
-                    return this.push_expr(e);
-                }
             }
             if (this.find_sym(ca.sval) < 0 && this.find_global_enum(ca.sval) < 0 &&
                 this.find_struct_template(ca.sval) < 0) {
@@ -4799,7 +4897,13 @@ export struct HirBuilder {
 
     // Assignment (buildExpr / Expr::Assign in hir_builder.cpp).
     long build_assign(AExpr a) {
+        // A4: the left-hand side of an assignment bypasses the
+        // use-after-move check - for every identifier in the left-hand side
+        // expression, at any nesting depth.  The right-hand side is always
+        // checked.
+        this.in_assign_lhs_ = 1;
         long lhs = this.build_expr(a.a);
+        this.in_assign_lhs_ = 0;
         long rhs = this.build_expr(a.b);
         HExpr le;
         HExpr re;
@@ -4839,6 +4943,12 @@ export struct HirBuilder {
             if (this.is_numeric(le.type) == 0 || this.is_numeric(re.type) == 0) {
                 this.err_compound_assign(a.line, a.col, a.sval);
             }
+        }
+        // A4: a re-assignment re-initializes a moved-out variable.  Only the
+        // plain `=` operator does, and only when the left-hand side is a
+        // plain identifier.
+        if (this.seq(a.sval, "=") && le.kind == 8) {
+            this.reinitialize(le.sval);
         }
         return this.push_expr(e);
     }

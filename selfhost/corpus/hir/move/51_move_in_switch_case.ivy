@@ -1,0 +1,12 @@
+// H4.6 rule: a move(x) in a switch case, then a read after the switch (phase-1 fixture: m30_move_in_switch)
+void f(int32 n) {
+    int32 x = 1;
+    switch (n) {
+        case 1:
+            move(x);
+            break;
+        default:
+            break;
+    }
+    int32 y = x;
+}

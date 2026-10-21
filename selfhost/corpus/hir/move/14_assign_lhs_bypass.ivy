@@ -1,0 +1,6 @@
+// H4.6 rule: the assignment left-hand side is bypassed (phase-1 fixture: m24_move_assign_lhs)
+void f() {
+    int32 x = 1;
+    move(x);
+    x = 2;
+}

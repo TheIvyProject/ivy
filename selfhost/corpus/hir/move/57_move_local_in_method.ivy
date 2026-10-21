@@ -1,0 +1,9 @@
+// H4.6 rule: a method-local is moved and then read (phase-1 fixture: m86_move_local_in_method)
+struct S {
+    int32 v;
+    int32 get() {
+        int32 x = 1;
+        move(x);
+        return x;
+    }
+};

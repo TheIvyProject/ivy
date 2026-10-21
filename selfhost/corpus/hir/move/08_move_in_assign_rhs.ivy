@@ -1,0 +1,7 @@
+// H4.6 rule: the right-hand side of an assignment is always checked (phase-1 fixture: m81_move_assign_from_moved_in_rhs)
+void f() {
+    int32 x = 1;
+    int32 y = 2;
+    move(x);
+    y = x;
+}

@@ -1,0 +1,6 @@
+// H4.6 rule: the clean baseline: the dump shows call 'move' : int32_t (phase-1 fixture: m47_move_ok_baseline)
+void f() {
+    int32 x = 1;
+    int32 y = move(x);
+    int32 z = y;
+}

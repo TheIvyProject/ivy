@@ -1,0 +1,10 @@
+// H4.6 rule: the bypass leaks into a call nested in the left-hand side (phase-1 fixture: q04_nested_call_in_lhs)
+int32 f(int32 q) {
+    return q;
+}
+void g() {
+    int32 x = 1;
+    move(x);
+    int32 a[3];
+    a[f(x)] = 1;
+}

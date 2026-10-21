@@ -1,0 +1,8 @@
+// H4.6 rule: a re-assignment inside unsafe re-initialises the binding (phase-1 fixture: m102_move_unsafe_bypass_spec)
+void f() {
+    int32 p = 5;
+    unsafe {
+        int32 q = move(p);
+        p = q + 1;
+    }
+}

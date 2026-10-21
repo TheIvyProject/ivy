@@ -1,0 +1,8 @@
+// H4.6 rule: the use-after-move inside an address-of expression (phase-1 fixture: m25_move_addr_of)
+void f() {
+    int32 x = 1;
+    move(x);
+    unsafe {
+        int32* p = &x;
+    }
+}

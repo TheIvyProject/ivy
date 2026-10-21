@@ -1,0 +1,7 @@
+// H4.6 rule: move(g) is not the builtin: the function name is not a variable (phase-1 fixture: f02_move_function_name)
+int32 g(int32 a) {
+    return a;
+}
+void f() {
+    move(g);
+}

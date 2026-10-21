@@ -1,0 +1,7 @@
+// H4.6 rule: move(g()) is not the builtin (phase-1 fixture: m16_move_call_result)
+int32 g() {
+    return 1;
+}
+void f() {
+    move(g());
+}

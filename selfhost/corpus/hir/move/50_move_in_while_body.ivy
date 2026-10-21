@@ -1,0 +1,8 @@
+// H4.6 rule: a move(x) in a while body, then a re-assignment (phase-1 fixture: e11_move_in_while_body)
+void f() {
+    int32 x = 1;
+    while (x < 3) {
+        move(x);
+        x = 2;
+    }
+}

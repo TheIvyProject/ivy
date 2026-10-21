@@ -1,0 +1,10 @@
+// H4.6 rule: the inner shadowing binding has its own move state (phase-1 fixture: m09_move_shadow_inner)
+void f() {
+    int32 x = 1;
+    {
+        int32 x = 2;
+        move(x);
+        int32 y = x;
+    }
+    int32 z = x;
+}

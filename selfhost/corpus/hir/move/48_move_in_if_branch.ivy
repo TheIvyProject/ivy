@@ -1,0 +1,8 @@
+// H4.6 rule: the move in the if-branch is visible after the if (phase-1 fixture: f06_move_in_if_branch)
+void f(int32 n) {
+    int32 x = 1;
+    if (n > 0) {
+        move(x);
+    }
+    int32 y = x;
+}

@@ -1,0 +1,5 @@
+// H4.6 rule: move(move(x)) is not the builtin (phase-1 fixture: m41_move_nested_move)
+void f() {
+    int32 x = 1;
+    move(move(x));
+}

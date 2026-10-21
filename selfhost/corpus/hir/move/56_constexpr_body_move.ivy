@@ -1,0 +1,6 @@
+// H4.6 rule: a constexpr function body that moves a local (phase-1 fixture: m34_move_constexpr)
+constexpr fn f() -> int32 {
+    int32 x = 1;
+    move(x);
+    return 2;
+}

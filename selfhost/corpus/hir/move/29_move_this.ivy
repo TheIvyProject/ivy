@@ -1,0 +1,8 @@
+// H4.6 rule: move(this) is not the builtin (phase-1 fixture: m38_move_this)
+struct S {
+    int32 v;
+    int32 get() {
+        move(this);
+        return 1;
+    }
+};

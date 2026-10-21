@@ -1,0 +1,7 @@
+// H4.6 rule: a plain = re-initialises the binding (phase-1 fixture: m03_move_reassign_then_read)
+void f() {
+    int32 x = 1;
+    move(x);
+    x = 2;
+    int32 y = x;
+}

@@ -1,0 +1,6 @@
+// H4.6 rule: the basic use-after-move: a read of a moved-out local (phase-1 fixture: m01_move_local_read)
+void f() {
+    int32 x = 1;
+    move(x);
+    int32 y = x;
+}

@@ -1,0 +1,8 @@
+// H4.6 rule: the move in a nested block is visible after the block (phase-1 fixture: m21_move_after_block)
+void f() {
+    int32 x = 1;
+    {
+        move(x);
+    }
+    int32 y = x;
+}

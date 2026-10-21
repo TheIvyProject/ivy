@@ -1,0 +1,7 @@
+// H4.6 rule: the right-hand side of an assignment is checked - a move in the right-hand side reports the use-after-move and the already-moved-out, in that order (phase-1 fixtures: m70_move_assign_chain - the plain `y = x;` form, kept by the corpus file 08; m42_move_assign_from_move - the same two diagnostics in a declaration initialiser)
+void f() {
+    int32 x = 1;
+    int32 y = 2;
+    move(x);
+    y = move(x);
+}

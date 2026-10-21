@@ -1,0 +1,8 @@
+// H4.6 rule: the use-after-move in a while condition (phase-1 fixture: m73_move_while_cond)
+void f() {
+    int32 x = 1;
+    move(x);
+    while (x > 0) {
+        break;
+    }
+}

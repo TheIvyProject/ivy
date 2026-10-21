@@ -1,0 +1,8 @@
+// H4.6 rule: the unsafe block does not bypass the check, and the read is outside it (phase-1 fixture: m49_move_in_unsafe_then_read)
+void f() {
+    int32 x = 1;
+    unsafe {
+        move(x);
+    }
+    int32 y = x;
+}

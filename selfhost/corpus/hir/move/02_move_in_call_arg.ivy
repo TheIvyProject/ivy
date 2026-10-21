@@ -1,0 +1,8 @@
+// H4.6 rule: a moved-out variable used as a call argument (phase-1 fixture: m26_move_call_arg)
+void g(int32 a) {
+}
+void f() {
+    int32 x = 1;
+    move(x);
+    g(x);
+}

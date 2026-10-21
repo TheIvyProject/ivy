@@ -1,0 +1,9 @@
+// H4.6 rule: the argument of a constexpr call is checked (phase-1 fixture: e14_move_in_constexpr_call)
+constexpr fn f(int32 x) -> int32 {
+    return x;
+}
+void g() {
+    int32 y = 1;
+    move(y);
+    int32 z = f(y);
+}

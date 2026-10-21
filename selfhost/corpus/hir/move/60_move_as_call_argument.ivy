@@ -1,0 +1,9 @@
+// H4.6 rule: the move as a call argument, then a read of the operand (phase-1 fixture: m69_move_in_callarg_position)
+int32 g(int32 a) {
+    return a;
+}
+void f() {
+    int32 x = 1;
+    int32 y = g(move(x));
+    int32 z = x;
+}

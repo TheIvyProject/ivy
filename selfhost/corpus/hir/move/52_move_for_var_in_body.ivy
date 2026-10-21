@@ -1,0 +1,7 @@
+// H4.6 rule: the for-loop variable is moved in the body and read there (phase-1 fixture: m07_move_for_var)
+void f() {
+    for (int32 i = 0; i < 3; i = i + 1) {
+        move(i);
+        int32 y = i;
+    }
+}

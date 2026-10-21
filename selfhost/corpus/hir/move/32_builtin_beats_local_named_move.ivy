@@ -1,0 +1,6 @@
+// H4.6 rule: a local variable named move: the builtin still wins (phase-1 fixture: q02_local_named_move)
+void f() {
+    int32 move = 1;
+    move(move);
+    int32 y = move;
+}

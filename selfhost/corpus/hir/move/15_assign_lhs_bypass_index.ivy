@@ -1,0 +1,7 @@
+// H4.6 rule: the bypass covers the identifiers of the index expression (phase-1 fixture: e02_index_lhs_bypass)
+void f() {
+    int32 i = 0;
+    int32 a[3];
+    move(i);
+    a[i] = 1;
+}

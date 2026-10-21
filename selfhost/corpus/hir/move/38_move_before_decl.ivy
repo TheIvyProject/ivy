@@ -1,0 +1,5 @@
+// H4.6 rule: move(x) before the declaration: x is not a variable yet (phase-1 fixture: m10_move_before_decl)
+void f() {
+    move(x);
+    int32 x = 1;
+}

@@ -296,11 +296,13 @@ src/                              selfhost/
   dung nhu `unsigned`/`const` don le.
    Corpus bo sung 9 file (120 file tong). Con lai: aggregate init, goi
    constructor/destructor (constructor injection; phan *khai bao* cua
-   constructor da port), `new`/`delete`, lambda, range-for, move-tracking,
+   constructor da port), `new`/`delete`, lambda, range-for,
    namespace van chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3,
    template xong o H4.4, ha muc `__ret` + phat sinh destructor/RAII + NRVO +
    struct construction xong o milestone RAII/DTOR, kiem tra *borrow* (MIR)
-   xong o H5.1/H5.2).
+   xong o H5.1/H5.2). Move-tracking da port xong o tang HIR (H4.6); con lai
+   tracking move o tang MIR (H5.2) + bypass `unsafe` (oracle tang HIR khong
+   co - xem `selfhost/hir/MOVE_NOTES.md` §1.2/§7.4).
 - H4.3 (Constexpr folding): port phan fold hang so cua `hir_builder.cpp`
   sang `hir/hir_builder.ivy` (va `hir/hir.ivy`):
   (1) `sizeof`/`alignof` fold thanh integer literal (`typeSize`/
@@ -360,9 +362,11 @@ src/                              selfhost/
    Con lai (de milestone sau): aggregate init `{...}`, goi
    constructor/destructor (constructor injection; phan *khai bao* cua
    constructor da port), `new`/`delete`, lambda, range-for, structured
-   binding, move-tracking, namespace (template xong o H4.4; ha muc `__ret` +
+   binding, namespace (template xong o H4.4; ha muc `__ret` +
    phat sinh destructor/RAII + NRVO + struct construction xong o milestone
-   RAII/DTOR, kiem tra *borrow* (MIR) xong o H5.1/H5.2).
+   RAII/DTOR, kiem tra *borrow* (MIR) xong o H5.1/H5.2). Move-tracking da
+   port xong o tang HIR (H4.6); con lai tracking move o tang MIR (H5.2) +
+   bypass `unsafe` (oracle tang HIR khong co).
 - H4.4 (Template instantiation): port phan khoi tao mau (instantiate) cua
   `hir_builder.cpp` sang `hir/hir_builder.ivy` (va `hir/hir.ivy` khong doi
   gi - ten mau chi la mot `const char*`):
@@ -527,6 +531,74 @@ src/                              selfhost/
    (6) **MIR-clean**: 45/45 file corpus `hir/borrow` khong co chan doan
    MIR-stage (stdout/stderr tach rieng: 0 file co stderr sau HIR dump).
    Con lai: xem "Con lai (de H5 - MIR)" o H4.5 ben tren.
+- H4.6 (Move / use-after-move - phan *tracking* o tang HIR): port phan
+  tracking move cua `hir_builder.cpp` sang `hir/hir_builder.ivy` (chi file
+  nay; `hir/hir.ivy` va `hir/hirdrive.ivy` khong doi - node HIR khong mang
+  trang thai move, dump cung khong co dong ghi them):
+  (1) **nhan dien builtin `move()`** - theo **code** oracle
+  (`hir_builder.cpp:2932-2963`): callee phai la ten **trần** `move`
+  (khong phai `ivy::move`, khong phai method `s.move(...)`), co **dung 1**
+  doi so (so *sau* khi noi pack expansion: `call.args.size()`, khong phai
+  so *cu phap*), va doi so phai la mot `IdentRef` (mot dinh danh **chua
+  khai bao** van la `IdentRef`; hang enum khong pham vi gop -> fold thanh
+  integer literal; `this` -> `H::This`; ten ham -> khong phai bien). Node
+  `Call` **duoc giu nguyen** nen dump van hien `call 'move' : <kieu cua
+  toan so>` va kieu ket qua = kieu cua toan so;
+  (2) **kho trang thai move** cho moi *binding*: oracle
+  `moveStates_` (`hir_builder.h:53`) la mot map **theo scope**, push/pop
+  cung `scopes_` (`:930/:938`, `:1253/:1261`, `:2050/:2060`, `:4208/:4311`,
+  `:4283/:4303`); moi binding moi bat dau `Initialized` trong `declare()`
+  (`:965`). Port dung mot mang phang `smv_` **theo symbol**
+  (`hir_builder.ivy:37`), `declare()` (`:2040`) dat `Initialized`;
+  (3) **chan doan use-after-move** - `use of moved-out variable '<ten>'`,
+  tai **vi tri cua chinh identifier** (oracle `:2653-2659`; port
+  `build_ident` `:3616-3625`); bat ky expression nao doc binding
+  `MovedOut` deu bi bao;
+  (4) **chan doan already-moved-out** - `'<ten>' is already moved-out`, tai
+  **vi tri cua call** (token `(`) (oracle `:2944-2946`; port
+  `mark_moved_out` `:1993-2002`); khi move 2 lan, chan doan (3) den
+  **truoc** chan doan (4) (operand duoc build truoc khi vao nhanh);
+  (5) **bypass left-hand side cua gan** - co co `inAssignLhs_`
+  (oracle `hir_builder.h:74-77` + `:3603-3605`; port `:41`, `:4904-4906`),
+  bat quanh **toan bo** expression LHS nen phu moi identifier ben trong LHS
+  (ke ca trong goi long nhau `a[f(x)] = 1`), va duoc bat cho **moi** toan
+  tu gan (khong chi `=`); RHS luon duoc kiem tra;
+  (6) **re-initialize** - chi toan tu `=` **va** LHS la `IdentRef` moi
+  re-initialize (oracle `:3684-3695`; port `reinitialize` `:2006-2012` +
+  `build_assign` `:4947-4952`); gan toan hop (compound) **khong**
+  re-initialize;
+  (7) **builtin thang moi shadowing** cua ten `move` - nhanh builtin duoc
+  kiem tra **truoc** overload resolution (oracle `:2937` truoc `:2969`/
+  `:3044`/`:3119`), nen no thang ham do nguoi dinh nghia, function
+  template, template-id call va bien cuc bo cung ten `move`; chi khi toan so
+  **khong phai** `IdentRef` moi dung resolution thuong.
+  Corpus `selfhost/corpus/hir/move/` (60 file, 13 nhom chu de: chan doan
+  use-after-move, already-moved-out, bypass LHS, re-initialize, nhan dien
+  builtin, precedence builtin, scope/shadowing, binding, `unsafe`, control
+  flow, template/lifetime/constexpr, method/`this`, dump shape) byte-identical
+  vs `ivy --hir`. Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/move -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
+  Ghi chu: corpus phai **MIR-clean** - `ivy --hir` chay ca pipeline, nen mot
+  chan doan MIR-stage in ra SAU HIR dump (exit 1) va khong bao gio doi
+  chieu duoc voi port chi co HIR; do do 4 fixture co chan doan MIR-stage
+  bi loai khoi corpus (`m37`/`m83`/`m84` - lambda capture, `m51` - tra ve
+  reference toi bien cuc bo), cung 7 fixture con lai gap port co san bi loai
+  (4 file struct constructor `S s(1);`, 2 file lambda, 1 file C-style cast) -
+  xem `selfhost/hir/MOVE_NOTES.md` §12.2 (bang loai + bang chung oracle).
+  Con lai (de milestone sau): tracking move o tang **MIR**
+  (`mir_builder.cpp:189-220`, `:471-482`, `:556-584`, `:626-645`) - H5.2;
+  bypass `unsafe` (oracle tang HIR **khong co**, chi tang MIR co - `spec/
+  ownership.md` §2.6 la aspirational, xem `MOVE_NOTES.md` §7.4); lambda
+  (parser port chua co); struct construction `S s(1);` (milestone RAII/DTOR).
+  (Khong con gi ve tracking move o tang HIR trong danh sach "chua port" -
+  H4.6 da port xong.)
+- H4.6 (corpus + ghi chu so): tao corpus chinh thuc
+  `selfhost/corpus/hir/move/` (60 file) tu 140 fixture cua phase 1; 60 file
+  byte-identical, 80 file bi loai (4 MIR-stage, 4 struct constructor, 2
+  lambda, 1 C-style cast, 2 global var, 2 multi-declarator, 1 namespace
+  `::`, 5 khong phai rule move, 59 near-duplicate) - bang day du trong
+  `selfhost/hir/MOVE_NOTES.md` §12.2. Xac minh lai toan bo 25 suite
+  (620 file) + suite moi (60 file) = 26 suite / 680 file byte-identical.
 
 
 ---
@@ -579,7 +651,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ✅ byte-identical 70 files |
 | H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ✅ byte-identical 99 files |
 | H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ✅ byte-identical 45 files |
-| H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ☐ |
+| H4.6 | Move / use-after-move | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/move` | ✅ byte-identical 60 files |
 
 ### H5 — MIR + Interpreter
 

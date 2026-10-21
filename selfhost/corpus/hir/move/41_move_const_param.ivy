@@ -1,0 +1,5 @@
+// H4.6 rule: a const parameter can be moved (phase-1 fixture: e18_move_of_const_param)
+void f(const int32 p) {
+    move(p);
+    int32 y = p;
+}

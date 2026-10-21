@@ -1,0 +1,6 @@
+// H4.6 rule: the second move of a binding: the use-after-move and the already-moved-out, in that order (phase-1 fixture: m02_move_twice)
+void f() {
+    int32 x = 1;
+    move(x);
+    move(x);
+}

@@ -1,0 +1,5 @@
+// H4.6 rule: move(a[0]) is not the builtin (phase-1 fixture: m18_move_index)
+void f() {
+    int32 a[3];
+    move(a[0]);
+}

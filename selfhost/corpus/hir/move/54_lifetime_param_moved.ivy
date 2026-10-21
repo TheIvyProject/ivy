@@ -1,0 +1,6 @@
+// H4.6 rule: a lifetime parameter is moved (phase-1 fixture: m33_move_lifetime_param)
+lifetime<$a>
+fn f(const int32& $a x) -> int32 {
+    move(x);
+    return 0;
+}

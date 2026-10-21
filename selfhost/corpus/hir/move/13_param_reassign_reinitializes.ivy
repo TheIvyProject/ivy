@@ -1,0 +1,6 @@
+// H4.6 rule: a parameter re-assigned after the move re-initialises it (phase-1 fixture: m57_move_param_reassign)
+void f(int32 p) {
+    move(p);
+    p = 3;
+    int32 y = p;
+}

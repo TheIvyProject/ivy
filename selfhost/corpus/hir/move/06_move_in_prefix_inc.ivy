@@ -1,0 +1,6 @@
+// H4.6 rule: the use-after-move in a prefix increment (phase-1 fixture: m76_move_prefix_inc)
+void f() {
+    int32 x = 1;
+    move(x);
+    x++;
+}

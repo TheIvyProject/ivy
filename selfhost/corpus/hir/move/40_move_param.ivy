@@ -1,0 +1,5 @@
+// H4.6 rule: a parameter is moved and then read (phase-1 fixture: m05_move_param)
+void f(int32 p) {
+    move(p);
+    int32 y = p;
+}

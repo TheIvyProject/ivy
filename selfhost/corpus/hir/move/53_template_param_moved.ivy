@@ -1,0 +1,9 @@
+// H4.6 rule: a template function parameter is moved and then read (phase-1 fixture: m32_move_template)
+template<typename T>
+fn f(T x) -> T {
+    move(x);
+    T y = x;
+}
+void g() {
+    f(1);
+}

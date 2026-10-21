@@ -1,0 +1,5 @@
+// H4.6 rule: ivy::move(x) is a qualified name, not the builtin (phase-1 fixture: m14_move_qualified)
+void f() {
+    int32 x = 1;
+    ivy::move(x);
+}
