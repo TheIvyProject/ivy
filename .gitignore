@@ -28,3 +28,7 @@ out/
 
 # Build logs
 build_log*.txt
+
+# opencode
+.opencode/
+
