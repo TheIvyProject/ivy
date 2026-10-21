@@ -1780,10 +1780,58 @@ std::unique_ptr<hir::Stmt> HirBuilder::buildReturn(const Stmt::Return& r, Source
         // function body (dtorBaseline_ and above), not for locals from
         // the caller's scope that are still on dtorStacks_.
         emitDtorCalls(dtorBaseline_, loc, dtorStmts);
+        // FIX (use-after-destroy): evaluate a non-trivial return expression
+        // into a temp BEFORE running local dtors. Previously dtors ran
+        // first, so `return a == b;` (etc.) read destroyed locals — silent
+        // wrong results. C++ evaluates the return expression first, then
+        // destroys. Plain `return <local>` needs no temp (NRVO path).
+        // Only when dtors will actually run (non-empty) — otherwise the
+        // return stays untouched (zero behavior change).
+        std::unique_ptr<hir::Stmt> tempDecl;
+        if (!dtorStmts.empty() && ret.value) {
+            const hir::Type& rt2 = current_->returnType;
+            const bool byValue = !rt2.isReference && rt2.pointerDepth == 0 &&
+                                 rt2.base != "void";
+            const bool plainLocal =
+                std::holds_alternative<hir::Expr::IdentRef>(ret.value->node) &&
+                !ret.value->type.isReference && ret.value->type.base == rt2.base;
+            if (byValue && !plainLocal && !scopes_.empty()) {
+                // Unique temp name (`__`-prefix is reserved for synthesized
+                // names, mirroring `__rfiN` from range-for desugaring).
+                std::string base = "__ret";
+                std::size_t n = 0;
+                auto nameTaken = [&](const std::string& nm) {
+                    const std::string_view v(nm);
+                    for (const auto& sc : scopes_)
+                        if (sc.contains(v)) return true;
+                    return false;
+                };
+                while (nameTaken(base)) base = "__ret" + std::to_string(n++);
+                synthesizedNames_.push_back(base);
+                const std::string_view tname = synthesizedNames_.back();
+                tempDecl = std::make_unique<hir::Stmt>();
+                tempDecl->loc = loc;
+                auto& dd = tempDecl->node.emplace<hir::Stmt::Decl>();
+                dd.type = ret.value->type;
+                dd.name = tname;
+                dd.init = std::move(ret.value);
+                declare(tname, dd.type, loc);
+                recordDtorVar(tname, dd.type);
+                returnedLocals_.insert(tname);  // transferred, skip dtor
+                auto idref = std::make_unique<hir::Expr>();
+                idref->loc = loc;
+                idref->node = hir::Expr::IdentRef{tname};
+                idref->type = dd.type;
+                idref->type.isReference = false;
+                ret.value = std::move(idref);
+            }
+        }
         if (!dtorStmts.empty()) {
             auto wrap = std::make_unique<hir::Stmt>();
             wrap->loc = loc;
             auto& wc = wrap->node.emplace<hir::Stmt::Compound>();
+            // Order: evaluate into temp FIRST, then dtors, then return.
+            if (tempDecl) dtorStmts.insert(dtorStmts.begin(), std::move(tempDecl));
             wc.stmts = std::move(dtorStmts);
             // Clear the innermost scope's dtor list so buildCompound
             // doesn't emit them again for the (unreachable) trailing

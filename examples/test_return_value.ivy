@@ -1,0 +1,38 @@
+// Test return-expression evaluation order with RAII locals.
+//
+// EXPECT: compiles and runs with exit 0. Local destructors must run
+// AFTER the return expression is evaluated (C++ order). Previously the
+// compiler emitted dtors first, so `return a == b;` read destroyed
+// strings — silent wrong results.
+#pragma ivy cnumber
+import string;
+
+bool str_eq(string p) {
+    string q = string("hello");
+    io::println("q='{}'", q.cstr());
+    return q == p;
+}
+
+int32 str_len_plus(string p, int32 extra) {
+    string q = string("hello");
+    io::println("q='{}'", q.cstr());
+    if (q == p) {
+        return 100 + extra;
+    }
+    return 0 + extra;
+}
+
+int32 main() {
+    int32 fails = 0;
+    if (!str_eq(string("hello"))) {
+        fails = fails + 1;
+    }
+    if (str_eq(string("world"))) {
+        fails = fails + 1;
+    }
+    if (str_len_plus(string("hello"), 5) != 105) {
+        fails = fails + 1;
+    }
+    io::println("return_value fails={}", fails);
+    return fails;
+}

@@ -66,6 +66,10 @@ private:
     // transferred to the caller (NRVO/copy elision), so emitDtorCalls
     // must skip them (otherwise the caller receives a dangling pointer).
     std::unordered_set<std::string_view> returnedLocals_;
+    // Storage for synthesized identifiers (e.g. `__ret` temps for return
+    // values) — string_views into these stay valid (deque nodes don't
+    // move on push_back, unlike vector).
+    std::deque<std::string> synthesizedNames_;
     int unsafeDepth_ = 0;
     // A4: When true, use-after-move check is bypassed for IdentRef
     // (used when building the lhs of an assignment — re-assignment
