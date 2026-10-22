@@ -305,7 +305,7 @@ export struct Parser {
         this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
         this.argn_idx_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
         this.argn_next_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
-        this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 24);
+        this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 32);
         this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
@@ -2112,17 +2112,36 @@ export struct Parser {
         return s;
     }
 
-    long push_case(long value, long sstart, long sn) {
+    // Append a case clause to the case pool.  `label` is the A6 case label
+    // of `case LABEL: value:` (0 when there is none); it is a `const char*`
+    // kept in an integer register.  The clause is the last one of its
+    // switch: `set_case_next` links it to the clause that follows.
+    // The pool is never full in practice (its capacity is the token count
+    // plus 16 and every clause needs at least three tokens), but when it
+    // is, the clause is NOT recorded and -1 is returned: the caller must
+    // not link it (the index would point past the end of the pool).
+    long push_case(long value, long sstart, long label) {
         long i = this.cp_n_;
         if (this.cp_n_ < this.cp_cap_) {
             unsafe {
                 this.casepool_[this.cp_n_].value = value;
                 this.casepool_[this.cp_n_].sstart = sstart;
-                this.casepool_[this.cp_n_].sn = sn;
+                this.casepool_[this.cp_n_].next = -1;
+                this.casepool_[this.cp_n_].label = reinterpret_cast<const char*>(label);
             }
             this.cp_n_ = this.cp_n_ + 1;
+            return i;
         }
-        return i;
+        return -1;
+    }
+
+    // Link the clause `i` to the clause that follows it in the same switch.
+    void set_case_next(long i, long v) {
+        unsafe {
+            if (i >= 0 && i < this.cp_n_) {
+                this.casepool_[i].next = v;
+            }
+        }
     }
 
     long push_expr(AExpr e) {
@@ -2194,7 +2213,8 @@ export struct Parser {
         ACase c;
         c.value = -1;
         c.sstart = -1;
-        c.sn = 0;
+        c.next = -1;
+        c.label = "";
         return c;
     }
 
@@ -3024,9 +3044,16 @@ export struct Parser {
         this.expect(")", "expected ')' after switch condition");
         this.expect("{", "expected '{' to start switch body");
 
-        long cstart = this.cp_n_;
+        long ncases = 0;
+        // The head and the tail of the list of the clauses of this switch.
+        long head = -1;
+        long prev = -1;
         while (!this.at("}") && !this.at("eof")) {
             long value = -1;
+            // The A6 case label of `case LABEL: value:` (0 when there is
+            // none).  It is kept as a `long` (a `const char*` in an integer
+            // register) because a raw pointer local needs an unsafe block.
+            long label = 0;
             if (this.kw("case")) {
                 this.next();
                 // A6: optional case label — `case LABEL: value:` (two colons).
@@ -3048,6 +3075,12 @@ export struct Parser {
                         i = i + 1;
                     }
                     if (two != 0) {
+                        // The label is the identifier before the first colon;
+                        // it is interned so that it stays valid for the whole
+                        // parse (the HIR builder copies it into the HIR).
+                        unsafe {
+                            label = (long) this.intern_tok(this.peek(0));
+                        }
                         this.next();
                         this.next();
                     }
@@ -3076,13 +3109,26 @@ export struct Parser {
                 last = st;
                 count = count + 1;
             }
-            this.push_case(value, first, count);
+            // The clause is appended to the list of the clauses of this
+            // switch.  The list is a linked list and not a contiguous run of
+            // the pool: a switch that is nested in a case body pushes its
+            // own clauses into the same pool.
+            long ci = this.push_case(value, first, label);
+            if (ci >= 0) {
+                if (prev < 0) {
+                    head = ci;
+                } else {
+                    this.set_case_next(prev, ci);
+                }
+                prev = ci;
+                ncases = ncases + 1;
+            }
         }
         this.expect("}", "expected '}' to close switch");
         AStmt s = this.fresh_stmt(15);
         s.a = cond;
-        s.sstart = cstart;
-        s.sn = this.cp_n_ - cstart;
+        s.sstart = head;
+        s.sn = ncases;
         s.line = start.line;
         s.col = start.col;
         return this.push_stmt(s);

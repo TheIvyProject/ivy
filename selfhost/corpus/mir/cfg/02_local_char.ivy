@@ -1,0 +1,6 @@
+// H5.1 rule: a local of type char (phase-3 probe: e24_char_local).
+#pragma ivy cnumber
+void f() {
+    char a = 'q';
+    char b = a;
+}

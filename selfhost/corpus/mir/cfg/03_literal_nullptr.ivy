@@ -1,0 +1,7 @@
+// H5.1 rule: the nullptr literal (phase-3 probe: e18_nullptr).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32* p = nullptr;
+    }
+}

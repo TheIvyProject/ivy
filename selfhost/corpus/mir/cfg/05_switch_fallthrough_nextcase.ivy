@@ -1,0 +1,11 @@
+// H5.1 rule: a switch with a fall-through: the unlabelled nextcase jumps to the next case block (phase-1 fixture: 43_nextcase).
+int32 f(int32 a) {
+    switch (a) {
+        case 1:
+            nextcase;
+        case 2:
+            return 20;
+        default:
+            return 0;
+    }
+}

@@ -1,0 +1,8 @@
+// H5.1 rule: the address of a local has the local lifetime (phase-3 probe: p05_lt_local_addr).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+    }
+}

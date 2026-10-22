@@ -1,0 +1,5 @@
+// H5.1 rule: the native lifetime syntax: the lifetime parameter and the named lifetime of the parameter (phase-3 probe: d07_lifetime_native).
+lifetime<$a>
+fn f(const int32& $a x) -> const int32& $a {
+    return x;
+}

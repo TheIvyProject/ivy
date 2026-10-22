@@ -47,10 +47,24 @@ export struct HStmt {
 };
 
 // A switch case clause: `value` is an expression index or -1 for default.
+// `sstart` is the index of the first statement of the clause body (the
+// body is a chain of statements linked by their `next` field).
+//
+// `next` is the index of the next clause of the SAME switch (-1 for the
+// last one).  The clauses are a linked list and not a contiguous run of the
+// pool: a switch that is nested in a case body pushes its own clauses into
+// the same pool.
+//
+// `label` is the A6 case label of `case LABEL: value:` (the empty string
+// when the clause carries no label); the MIR builder resolves
+// `nextcase LABEL;` with it.
+//
+// sizeof(HCase): value(8) + sstart(8) + next(8) + label(8) = 32 bytes.
 export struct HCase {
     long value;
     long sstart;
-    long sn;
+    long next;
+    const char* label;
 };
 
 // A parameter of a HIR function.  `lt` is the name of the parameter's

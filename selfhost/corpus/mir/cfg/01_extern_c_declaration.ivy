@@ -1,0 +1,6 @@
+// H5.1 rule: an extern C declaration: the extern C marker after the function name (phase-1 fixture: 33_extern_c).
+#pragma ivy cnumber
+extern "C" {
+    int32 puts(const char* s);
+    int32 printf(const char* fmt, ...);
+}

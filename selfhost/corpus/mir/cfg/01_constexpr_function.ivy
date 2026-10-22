@@ -1,0 +1,4 @@
+// H5.1 rule: a constexpr function: it is folded, but it is still in the dump (phase-1 fixture: 25_constexpr).
+constexpr fn f() -> int32 {
+    return 42;
+}

@@ -1,0 +1,4 @@
+// H5.1 rule: a call to the io builtin (phase-3 probe: c13_call_builtin_io).
+void f() {
+    io::println("hello");
+}

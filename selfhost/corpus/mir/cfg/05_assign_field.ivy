@@ -1,0 +1,10 @@
+// H5.1 rule: an assignment to a struct field (phase-3 probe: s24_assign_field).
+struct Point {
+    int32 x;
+    int32 y;
+};
+void f() {
+    Point p;
+    p.x = 1;
+    p.y = p.x + 1;
+}

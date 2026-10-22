@@ -1,0 +1,11 @@
+// H5.1 rule: break and continue inside a loop (phase-3 probe: s15_break_continue).
+void f(int32 n) {
+    for (int32 i = 0; i < n; i = i + 1) {
+        if (i == 3) {
+            break;
+        }
+        if (i == 1) {
+            continue;
+        }
+    }
+}

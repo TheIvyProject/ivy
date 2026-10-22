@@ -1,0 +1,7 @@
+// H5.1 rule: every call has the unknown lifetime (phase-3 probe: r08_lt_call_unknown).
+int32 g() {
+    return 1;
+}
+void f() {
+    int32 x = g();
+}

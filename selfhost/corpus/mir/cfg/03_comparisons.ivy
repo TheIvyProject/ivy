@@ -1,0 +1,10 @@
+// H5.1 rule: the comparison operators (phase-3 probe: e07_compare_chain).
+bool f(int32 a, int32 b) {
+    bool r = a < b;
+    r = a <= b;
+    r = a > b;
+    r = a >= b;
+    r = a == b;
+    r = a != b;
+    return r;
+}

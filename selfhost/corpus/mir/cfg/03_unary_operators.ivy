@@ -1,0 +1,7 @@
+// H5.1 rule: the unary operators: the minus, the bitwise not and the logical not (phase-3 probe: e05_unary_ops).
+int32 f(int32 x) {
+    int32 a = -x;
+    int32 b = ~x;
+    bool c = !true;
+    return a + b;
+}

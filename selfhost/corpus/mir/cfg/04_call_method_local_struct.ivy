@@ -1,0 +1,12 @@
+// H5.1 rule: a method called on a local struct (phase-3 probe: c11_call_method_local).
+struct Point {
+    int32 x;
+    int32 getx() {
+        return this.x;
+    }
+};
+int32 f() {
+    Point p;
+    p.x = 3;
+    return p.getx();
+}

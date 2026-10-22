@@ -1,0 +1,161 @@
+// selfhost/mir/mir.ivy - the MIR model for the self-host port (H5.1).
+//
+// Mirror of src/mir/mir.h: the CFG (the blocks, the instructions and the
+// terminators) and the lowered expression tree.  The port uses the same
+// flat-pool idiom as selfhost/hir/hir.ivy: every record lives in a pool and
+// the links are pool indices (-1 when absent).
+//
+// The expression kinds keep the ORDER of the oracle's `std::variant`
+// alternatives (mir::Expr::node in src/mir/mir.h), so that the two
+// implementations can be compared kind by kind:
+//
+//   oracle variant :  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19
+//   port kind      :  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19
+//                     IntegerLit FloatLit StringLit CharLit BoolLit
+//                     NullptrLit IdentRef This Unary Binary Ternary Call
+//                     Index Member Assign New Delete InitList Lambda Cast
+//
+// The instruction kinds keep the order of mir::Inst::Kind:
+//
+//   0 Alloca  1 Store  2 Eval  3 Ret  4 CondBranch  5 Jump  6 Switch
+//
+// The lifetime kinds keep the order of mir::Lifetime::Kind:
+//
+//   0 None  1 Named  2 Static  3 Local  4 Unknown
+//
+// H5.2 elements: the borrow checker, the lifetime checker and the move
+// tracker are NOT modelled here - they are analyses, not data.  The
+// lifetime *annotation* of an expression IS modelled: it is pure data
+// derived from the HIR and it is printed as the ` [lt: X]` suffix, so it
+// belongs to H5.1.
+
+#pragma ivy cnumber
+export module mir;
+import ast;
+
+// A lowered expression.  `kind` selects the alternative (see the table
+// above); the fields that do not belong to the alternative keep their
+// default value.
+//
+// sizeof(MExpr) is 176 bytes: sixteen 8-byte fields plus the 48-byte AType.
+export struct MExpr {
+    long kind;           // the alternative (the oracle's variant index)
+    long ival;           // IntegerLit value / BoolLit value / Call vtableSlot
+    double fval;         // FloatLit value
+    const char* sval;    // StringLit raw / CharLit raw / IdentRef name /
+                         // Unary op / Binary op / Assign op / Member name /
+                         // Call callee / Call methodName / Lambda funcName
+    const char* sval2;   // Lambda closure type
+    long flag;           // Unary isPrefix / Member isArrow / Member isScope /
+                         // Delete isArray / Cast kind / Call isVirtual
+    AType type;          // the resolved type (mir::Expr::type)
+    long lt;             // the lifetime kind (mir::Lifetime::kind)
+    const char* ltname;  // the lifetime name (mir::Lifetime::name)
+    const char* retlt;   // Call returnLifetime (the callee's lt_ret)
+    long a;              // the operand / lhs / cond / base
+    long b;              // the rhs / then / index
+    long c;              // the else
+    long astart;         // the first index in the unit's `args` pool
+    long an;             // the number of arguments / elements
+    long line;           // the source line (H5.2: the diagnostics)
+    long col;            // the source column
+};
+
+// An instruction or a terminator.  The alternatives are selected by `kind`;
+// `a` / `b` / `c` hold the operand expressions and the target blocks.
+//
+// sizeof(MInst) is 136 bytes: eleven 8-byte fields plus the 48-byte AType.
+export struct MInst {
+    long kind;           // 0 alloca 1 store 2 eval 3 ret 4 condbranch 5 jump 6 switch
+    long in_unsafe;      // the instruction was built inside an unsafe block
+    long a;              // alloca: the init / store: the target / eval: the
+                         // value / ret: the value / condbranch: the cond /
+                         // switch: the cond
+    long b;              // store: the value / condbranch: the then block /
+                         // jump: the target block / switch: the default block
+    long c;              // condbranch: the else block
+    const char* var;     // the alloca's variable name
+    AType type;          // the alloca's type
+    long astart;         // the first switch arm in the unit's arm pool
+    long an;             // the number of switch arms
+    long next;           // the next instruction of the same block (-1 = end)
+    long line;           // the source line (H5.2: the diagnostics)
+    long col;            // the source column
+};
+
+// A basic block.  A block has no label: its identity is its index in the
+// function's block list, and the CFG edges live in the instructions.
+//
+// sizeof(MBlock) is 16 bytes.
+export struct MBlock {
+    long first;          // the first instruction (-1 when the block is empty)
+    long last;           // the last instruction (-1 when the block is empty)
+};
+
+// A parameter of a MIR function.
+//
+// sizeof(MParam) is 80 bytes: four 8-byte fields plus the 48-byte AType.
+export struct MParam {
+    AType type;
+    const char* name;    // empty when the parameter is unnamed
+    const char* lt;      // the lowered lifetime name (NULL when none)
+    long line;
+    long col;
+};
+
+// A lifetime declared by a function (the lowered `[[ivy::lt_def(a)]]`).
+//
+// sizeof(MLifetime) is 16 bytes.
+export struct MLifetime {
+    long kind;           // always 1 (Named)
+    const char* name;
+};
+
+// A MIR function.
+//
+// sizeof(MFunction) is 128 bytes: ten 8-byte fields plus the 48-byte AType.
+export struct MFunction {
+    const char* name;    // the qualified name ("math::abs", "Counter::get")
+    AType ret;           // the return type
+    long is_extern_c;    // `extern "C"`
+    long pstart;         // the first parameter index
+    long pn;             // the number of parameters
+    long lt_start;       // the first declared lifetime index
+    long lt_n;           // the number of declared lifetimes
+    const char* return_lifetime;  // the lowered lt_ret (NULL when none)
+    long block_start;    // the first block index
+    long block_n;        // the number of blocks
+    long has_body;       // 0 = declaration only
+};
+
+// A whole MIR translation unit.  The pools are owned by MirBuilder.
+export struct MUnit {
+    MFunction* fns;
+    long fn_n;
+    long fn_cap;
+    MExpr* exprs;
+    long ex_n;
+    long ex_cap;
+    MInst* insts;
+    long in_n;
+    long in_cap;
+    MBlock* blocks;
+    long bl_n;
+    long bl_cap;
+    MParam* params;
+    long pa_n;
+    long pa_cap;
+    MLifetime* lts;
+    long lt_n;
+    long lt_cap;
+    // The expression indices of the call arguments and of the init-list
+    // elements (a contiguous run the `astart` / `an` fields index into).
+    long* args;
+    long a_n;
+    long a_cap;
+    // The switch arms: the case value and the target block of every arm.
+    long* arm_val;
+    long* arm_blk;
+    long arm_n;
+    long arm_cap;
+};

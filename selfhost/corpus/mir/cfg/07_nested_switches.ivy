@@ -1,0 +1,23 @@
+// H5.1 rule: three levels of nested switches (phase-3 probe: q18_deep_switch_nesting).
+int32 f(int32 a, int32 b, int32 c) {
+    switch (a) {
+        case 1:
+            switch (b) {
+                case 2:
+                    switch (c) {
+                        case 3:
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            nextcase;
+        case 4:
+            return 4;
+        default:
+            return 0;
+    }
+}

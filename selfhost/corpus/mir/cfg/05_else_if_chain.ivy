@@ -1,0 +1,12 @@
+// H5.1 rule: a chain of else-if branches (phase-3 probe: s03_else_if_chain).
+int32 f(int32 a) {
+    if (a == 0) {
+        return 0;
+    } else if (a == 1) {
+        return 1;
+    } else if (a == 2) {
+        return 2;
+    } else {
+        return 3;
+    }
+}

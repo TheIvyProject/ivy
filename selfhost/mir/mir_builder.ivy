@@ -1,0 +1,2584 @@
+// selfhost/mir/mir_builder.ivy - the MIR builder for the self-host port (H5.1).
+//
+// Lowering of the type-checked HIR into the CFG-based MIR, a mirror of
+// src/mir/mir_builder.cpp:
+//
+//   * the entry point (build) walks the HIR functions in order and lowers
+//     every body;
+//   * the block machinery (new_block / emit / jump_to) builds the CFG; the
+//     index of a block in the function's block list is its identity, and
+//     the ORDER of the creation is normative (the dump prints it);
+//   * the statement lowering (build_stmt) mirrors buildStmt: the `alloca`
+//     of a local declaration, the `store` of an assignment, the `eval` of
+//     an expression statement, the `ret` of a return statement and the
+//     branch/jump terminators of the control flow;
+//   * the expression lowering (build_expr) mirrors buildExpr and propagates
+//     the lifetime annotation of every expression (the ` [lt: X]` suffix
+//     of the dump).
+//
+// The H5.2 elements (the borrow checker, the lifetime checker and the move
+// tracker) are not implemented yet: the diagnostics of the MIR stage are
+// collected in the same pools as the HIR ones, so that the driver already
+// prints them instead of the dump.
+//
+// STYLE: every statement form and every expression form has its own
+// method.  A method must not keep a record (an MExpr / an MInst / a HStmt)
+// in a local variable across a call: the C++ code generator of the port
+// keeps such a record in a stack slot that a call clobbers, which silently
+// corrupts the record.  The records are therefore read and written through
+// the pool pointers (`this.mu.exprs[i].field = ...`), and the values that
+// have to survive a call are kept in scalar locals or in the fields of the
+// builder.
+
+#pragma ivy cnumber
+export module mir_builder;
+import ast;
+import hir;
+import mir;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+
+export struct MirBuilder {
+    // The HIR unit and its pools.  The HIR builder owns them; the MIR
+    // builder only reads them.
+    HUnit hu;
+    HExpr* ep;
+    HStmt* sp;
+    HParam* hp;
+    HCase* hc;
+    long* ha;
+    long* hlt;
+
+    // The MIR unit.
+    MUnit mu;
+
+    // The function that is currently built, the block that is currently
+    // filled and the nesting depth of the `unsafe` blocks.
+    long cur_fn_;
+    long cur_blk_;
+    long unsafe_depth_;
+
+    // The scopes: the lifetime of every local variable.  The scope stack
+    // (`sc_start_`) marks the first entry of every scope; the entries of
+    // the innermost scope are the last ones.
+    long* sc_name_;      // (long) const char* - the variable names
+    long* sc_lt_;        // the lifetime kinds
+    long* sc_ltn_;       // (long) const char* - the lifetime names
+    long sc_n_;
+    long sc_cap_;
+    long* sc_start_;     // the scope stack
+    long scs_n_;
+    long scs_cap_;
+
+    // The lifetimes of the parameters of the current function.
+    long* pm_name_;      // (long) const char* - the parameter names
+    long* pm_lt_;        // the lifetime kinds
+    long* pm_ltn_;       // (long) const char* - the lifetime names
+    long pm_n_;
+    long pm_cap_;
+
+    // The loop context stack: the condition block, the increment block and
+    // the exit block of every enclosing loop (a switch pushes a context
+    // with only an exit block).
+    long* lp_cond_;
+    long* lp_incr_;
+    long* lp_exit_;
+    // The switch data of every loop context: the base of the case blocks in
+    // `sw_blocks_`, the number of the case blocks, the base of the case
+    // labels in `lbl_name_`/`lbl_blk_` and the number of the labels.  A
+    // context that is not a switch has a base of -1 and a count of 0.
+    //
+    // The oracle keeps this data in the `LoopCtx` (the `caseBlocks` and the
+    // `caseLabels` of a switch context are empty for a loop context), so the
+    // innermost context decides whether a `nextcase` can jump to a case
+    // block or to a case label.
+    long* lp_sw_base_;
+    long* lp_sw_n_;
+    long* lp_lbl_base_;
+    long* lp_lbl_n_;
+    long lp_n_;
+    long lp_cap_;
+
+    // The blocks of the case clauses of the switches that are currently
+    // built (a stack: the run of the innermost switch starts at the base
+    // that its loop context records).
+    long* sw_blocks_;
+    long sw_n_;
+    long sw_cap_;
+
+    // The case labels of the switches that are currently built: the label
+    // name and the block it names.  The oracle keeps them in the
+    // `caseLabels` map of the switch's `LoopCtx`.
+    long* lbl_name_;      // (long) const char* - the case label names
+    long* lbl_blk_;       // the block the label names
+    long lbl_n_;
+    long lbl_cap_;
+    // The index of the case clause that is currently built (the unlabelled
+    // `nextcase` jumps to the next one).
+    long case_index_;
+
+    // The diagnostics (the checks that report them are H5.2).
+    long* dline_;
+    long* dcol_;
+    long* dmsg_;
+    long dn_;
+    long dcap_;
+    long failed_;
+
+    // The scratch buffer the diagnostic messages are built in.
+    char* dbuf_;
+    long db_n_;
+    long db_cap_;
+
+    // The strings that must outlive the scratch buffer (the plain
+    // operators of the compound assignments).
+    long* strs_;
+    long strs_n_;
+    long strs_cap_;
+
+    // The out-parameters of the lifetime helpers.
+    long lt_kind_;
+    const char* lt_name_;
+
+    // --- helpers ---------------------------------------------------------
+
+    long slen(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    bool seq(const char* a, const char* b) {
+        unsafe {
+            long i = 0;
+            while (a[i] != 0) {
+                if (b[i] != a[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return b[i] == 0;
+        }
+        return false;
+    }
+
+    AType ty_empty() {
+        AType t;
+        t.base = "";
+        unsafe {
+            t.tpl_args = (AType*)0;
+        }
+        t.tpl_n = 0;
+        t.is_unsigned = false;
+        t.is_const = false;
+        t.is_ref = false;
+        t.ptr_depth = 0;
+        t.array_size = 0;
+        return t;
+    }
+
+    // --- the pools -------------------------------------------------------
+
+    // A zero-initialised expression record.
+    MExpr new_mexpr(long kind) {
+        MExpr e;
+        e.kind = kind;
+        e.ival = 0;
+        e.fval = 0.0;
+        e.sval = "";
+        e.sval2 = "";
+        e.flag = 0;
+        e.type = this.ty_empty();
+        e.lt = 0;
+        e.ltname = "";
+        e.retlt = "";
+        e.a = -1;
+        e.b = -1;
+        e.c = -1;
+        e.astart = -1;
+        e.an = 0;
+        e.line = 0;
+        e.col = 0;
+        return e;
+    }
+
+    // A zero-initialised instruction record.
+    MInst new_minst(long kind) {
+        MInst s;
+        s.kind = kind;
+        s.in_unsafe = 0;
+        s.a = -1;
+        s.b = -1;
+        s.c = -1;
+        s.var = "";
+        s.type = this.ty_empty();
+        s.astart = -1;
+        s.an = 0;
+        s.next = -1;
+        s.line = 0;
+        s.col = 0;
+        return s;
+    }
+
+    // Append an expression record and return its index.
+    long add_expr(long kind) {
+        long i = this.mu.ex_n;
+        if (i >= this.mu.ex_cap) {
+            this.grow_exprs();
+        }
+        MExpr e = this.new_mexpr(kind);
+        unsafe {
+            this.mu.exprs[i] = e;
+        }
+        this.mu.ex_n = i + 1;
+        return i;
+    }
+
+    // Append an instruction record and return its index.
+    long add_inst(long kind) {
+        long i = this.mu.in_n;
+        if (i >= this.mu.in_cap) {
+            this.grow_insts();
+        }
+        MInst s = this.new_minst(kind);
+        unsafe {
+            this.mu.insts[i] = s;
+        }
+        this.mu.in_n = i + 1;
+        return i;
+    }
+
+    // Grow the expression pool (the element size is 176 bytes).
+    void grow_exprs() {
+        long ncap = this.mu.ex_cap * 2 + 256;
+        unsafe {
+            MExpr* p = (MExpr*) __ivy_alloc(ncap * 176);
+            long i = 0;
+            while (i < this.mu.ex_n) {
+                p[i] = this.mu.exprs[i];
+                i = i + 1;
+            }
+            __ivy_free(this.mu.exprs);
+            this.mu.exprs = p;
+        }
+        this.mu.ex_cap = ncap;
+    }
+
+    // Grow the instruction pool (the element size is 136 bytes).
+    void grow_insts() {
+        long ncap = this.mu.in_cap * 2 + 256;
+        unsafe {
+            MInst* p = (MInst*) __ivy_alloc(ncap * 136);
+            long i = 0;
+            while (i < this.mu.in_n) {
+                p[i] = this.mu.insts[i];
+                i = i + 1;
+            }
+            __ivy_free(this.mu.insts);
+            this.mu.insts = p;
+        }
+        this.mu.in_cap = ncap;
+    }
+
+    // Grow the block pool (the element size is 16 bytes).
+    void grow_blocks() {
+        long ncap = this.mu.bl_cap * 2 + 64;
+        unsafe {
+            MBlock* p = (MBlock*) __ivy_alloc(ncap * 16);
+            long i = 0;
+            while (i < this.mu.bl_n) {
+                p[i] = this.mu.blocks[i];
+                i = i + 1;
+            }
+            __ivy_free(this.mu.blocks);
+            this.mu.blocks = p;
+        }
+        this.mu.bl_cap = ncap;
+    }
+
+    // Grow the parameter pool (the element size is 80 bytes).
+    void grow_mparams() {
+        long ncap = this.mu.pa_cap * 2 + 64;
+        unsafe {
+            MParam* p = (MParam*) __ivy_alloc(ncap * 80);
+            long i = 0;
+            while (i < this.mu.pa_n) {
+                p[i] = this.mu.params[i];
+                i = i + 1;
+            }
+            __ivy_free(this.mu.params);
+            this.mu.params = p;
+        }
+        this.mu.pa_cap = ncap;
+    }
+
+    void grow_lts() {
+        long ncap = this.mu.lt_cap * 2 + 64;
+        unsafe {
+            MLifetime* p = (MLifetime*) __ivy_alloc(ncap * 16);
+            long i = 0;
+            while (i < this.mu.lt_n) {
+                p[i] = this.mu.lts[i];
+                i = i + 1;
+            }
+            __ivy_free(this.mu.lts);
+            this.mu.lts = p;
+        }
+        this.mu.lt_cap = ncap;
+    }
+
+    long push_arg(long idx) {
+        long i = this.mu.a_n;
+        if (i >= this.mu.a_cap) {
+            long ncap = this.mu.a_cap * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.mu.a_n) {
+                    q[k] = this.mu.args[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.mu.args);
+                this.mu.args = q;
+            }
+            this.mu.a_cap = ncap;
+        }
+        unsafe {
+            this.mu.args[i] = idx;
+        }
+        this.mu.a_n = i + 1;
+        return i;
+    }
+
+    // Reserve `n` slots in the args pool and return the index of the first
+    // one.  The slots are placeholders (-1) until the caller fills them in
+    // with `set_arg`.
+    //
+    // The run MUST be reserved before the elements are built: an element
+    // may itself be a call, and the nested call pushes its own arguments
+    // into the same pool.  Reserving the run first keeps it contiguous
+    // (the nested run lands *after* it), so an argument at any position
+    // resolves to the right expression.  Pushing the arguments as they
+    // are built would only keep the run contiguous while the nested call
+    // sits at position 0.
+    long reserve_args(long n) {
+        long start = this.mu.a_n;
+        long i = 0;
+        while (i < n) {
+            this.push_arg(-1);
+            i = i + 1;
+        }
+        return start;
+    }
+
+    // Fill the slot `i` of the args pool (a slot reserved by `reserve_args`).
+    void set_arg(long i, long idx) {
+        unsafe {
+            this.mu.args[i] = idx;
+        }
+    }
+
+    long push_arm(long value, long block) {
+        long i = this.mu.arm_n;
+        if (i >= this.mu.arm_cap) {
+            long ncap = this.mu.arm_cap * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.mu.arm_n) {
+                    q[k] = this.mu.arm_val[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.mu.arm_val);
+                this.mu.arm_val = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.mu.arm_n) {
+                    r[k] = this.mu.arm_blk[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.mu.arm_blk);
+                this.mu.arm_blk = r;
+            }
+            this.mu.arm_cap = ncap;
+        }
+        unsafe {
+            this.mu.arm_val[i] = value;
+            this.mu.arm_blk[i] = block;
+        }
+        this.mu.arm_n = i + 1;
+        return i;
+    }
+
+    // --- the diagnostics -------------------------------------------------
+
+    void db_put(const char* s) {
+        long n = this.slen(s);
+        long i = 0;
+        while (i < n) {
+            if (this.db_n_ >= this.db_cap_) {
+                this.grow_dbuf();
+            }
+            unsafe {
+                this.dbuf_[this.db_n_] = s[i];
+            }
+            this.db_n_ = this.db_n_ + 1;
+            i = i + 1;
+        }
+    }
+
+    void db_ch(char c) {
+        if (this.db_n_ >= this.db_cap_) {
+            this.grow_dbuf();
+        }
+        unsafe {
+            this.dbuf_[this.db_n_] = c;
+        }
+        this.db_n_ = this.db_n_ + 1;
+    }
+
+    void grow_dbuf() {
+        long ncap = this.db_cap_ * 2 + 256;
+        unsafe {
+            char* p = (char*) __ivy_alloc(ncap);
+            long i = 0;
+            while (i < this.db_n_) {
+                p[i] = this.dbuf_[i];
+                i = i + 1;
+            }
+            __ivy_free(this.dbuf_);
+            this.dbuf_ = p;
+        }
+        this.db_cap_ = ncap;
+    }
+
+    // Copy the first `n` characters of a string into a fresh allocation and
+    // remember it, so that it stays valid until `release`.  The copy is
+    // NUL-terminated.  The allocation is the one that is registered in
+    // `strs_`: there is no second copy and no leak.
+    const char* keep_string(const char* s, long n) {
+        unsafe {
+            char* p = (char*) __ivy_alloc(n + 1);
+            long i = 0;
+            while (i < n) {
+                p[i] = s[i];
+                i = i + 1;
+            }
+            p[n] = 0;
+            if (this.strs_n_ >= this.strs_cap_) {
+                long ncap = this.strs_cap_ * 2 + 64;
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.strs_n_) {
+                    q[k] = this.strs_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.strs_);
+                this.strs_ = q;
+                this.strs_cap_ = ncap;
+            }
+            this.strs_[this.strs_n_] = (long) p;
+            this.strs_n_ = this.strs_n_ + 1;
+            return p;
+        }
+        return "";
+    }
+
+    // Report a diagnostic (the message is copied, the caller keeps the
+    // scratch buffer).
+    void diag(long line, long col, const char* msg) {
+        if (this.dn_ >= this.dcap_) {
+            long ncap = this.dcap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.dn_) {
+                    q[k] = this.dline_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.dline_);
+                this.dline_ = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.dn_) {
+                    r[k] = this.dcol_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.dcol_);
+                this.dcol_ = r;
+                long* t = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.dn_) {
+                    t[k] = this.dmsg_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.dmsg_);
+                this.dmsg_ = t;
+            }
+            this.dcap_ = ncap;
+        }
+        long mlen = this.slen(msg);
+        unsafe {
+            this.dline_[this.dn_] = line;
+            this.dcol_[this.dn_] = col;
+            this.dmsg_[this.dn_] = (long) this.keep_string(msg, mlen);
+        }
+        this.dn_ = this.dn_ + 1;
+        this.failed_ = 1;
+    }
+
+    // --- the setup -------------------------------------------------------
+
+    void setup(HUnit u) {
+        this.hu = u;
+        unsafe {
+            this.ep = u.exprs;
+            this.sp = u.stmts;
+            this.hp = u.params;
+            this.hc = u.cases;
+            this.ha = u.args;
+            this.hlt = u.ltnames;
+
+            long nex = u.ex_n * 2 + 256;
+            this.mu.ex_cap = nex;
+            this.mu.exprs = (MExpr*) __ivy_alloc(nex * 176);
+            this.mu.ex_n = 0;
+
+            long nin = u.st_n * 3 + 256;
+            this.mu.in_cap = nin;
+            this.mu.insts = (MInst*) __ivy_alloc(nin * 136);
+            this.mu.in_n = 0;
+
+            long nbl = u.st_n * 2 + 64;
+            this.mu.bl_cap = nbl;
+            this.mu.blocks = (MBlock*) __ivy_alloc(nbl * 16);
+            this.mu.bl_n = 0;
+
+            long npa = u.p_n + 16;
+            this.mu.pa_cap = npa;
+            this.mu.params = (MParam*) __ivy_alloc(npa * 80);
+            this.mu.pa_n = 0;
+
+            long nlt = u.lt_n + 16;
+            this.mu.lt_cap = nlt;
+            this.mu.lts = (MLifetime*) __ivy_alloc(nlt * 16);
+            this.mu.lt_n = 0;
+
+            long na = u.a_n * 2 + 64;
+            this.mu.a_cap = na;
+            this.mu.args = (long*) __ivy_alloc(na * 8);
+            this.mu.a_n = 0;
+
+            long narm = u.st_n + 64;
+            this.mu.arm_cap = narm;
+            this.mu.arm_val = (long*) __ivy_alloc(narm * 8);
+            this.mu.arm_blk = (long*) __ivy_alloc(narm * 8);
+            this.mu.arm_n = 0;
+
+            this.mu.fn_cap = u.fn_n + 16;
+            this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 128);
+            this.mu.fn_n = 0;
+
+            long nsc = u.st_n * 2 + 64;
+            this.sc_cap_ = nsc;
+            this.sc_name_ = (long*) __ivy_alloc(nsc * 8);
+            this.sc_lt_ = (long*) __ivy_alloc(nsc * 8);
+            this.sc_ltn_ = (long*) __ivy_alloc(nsc * 8);
+            this.sc_n_ = 0;
+            this.scs_cap_ = u.st_n + 64;
+            this.sc_start_ = (long*) __ivy_alloc(this.scs_cap_ * 8);
+            this.scs_n_ = 0;
+
+            this.pm_cap_ = u.p_n + 16;
+            this.pm_name_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
+            this.pm_lt_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
+            this.pm_ltn_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
+            this.pm_n_ = 0;
+
+            this.lp_cap_ = 64;
+            this.lp_cond_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_incr_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_exit_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_sw_base_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_sw_n_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_lbl_base_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_lbl_n_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
+            this.lp_n_ = 0;
+
+            this.sw_cap_ = 64;
+            this.sw_blocks_ = (long*) __ivy_alloc(this.sw_cap_ * 8);
+            this.sw_n_ = 0;
+
+            this.lbl_cap_ = 64;
+            this.lbl_name_ = (long*) __ivy_alloc(this.lbl_cap_ * 8);
+            this.lbl_blk_ = (long*) __ivy_alloc(this.lbl_cap_ * 8);
+            this.lbl_n_ = 0;
+            this.case_index_ = -1;
+
+            this.dcap_ = 64;
+            this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
+            this.dn_ = 0;
+            this.failed_ = 0;
+
+            this.db_cap_ = 1024;
+            this.dbuf_ = (char*) __ivy_alloc(this.db_cap_);
+            this.db_n_ = 0;
+
+            this.strs_cap_ = 64;
+            this.strs_ = (long*) __ivy_alloc(this.strs_cap_ * 8);
+            this.strs_n_ = 0;
+        }
+        this.cur_fn_ = -1;
+        this.cur_blk_ = -1;
+        this.unsafe_depth_ = 0;
+        this.lt_kind_ = 0;
+        this.lt_name_ = "";
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.mu.fns);
+            __ivy_free(this.mu.exprs);
+            __ivy_free(this.mu.insts);
+            __ivy_free(this.mu.blocks);
+            __ivy_free(this.mu.params);
+            __ivy_free(this.mu.lts);
+            __ivy_free(this.mu.args);
+            __ivy_free(this.mu.arm_val);
+            __ivy_free(this.mu.arm_blk);
+            __ivy_free(this.sc_name_);
+            __ivy_free(this.sc_lt_);
+            __ivy_free(this.sc_ltn_);
+            __ivy_free(this.sc_start_);
+            __ivy_free(this.pm_name_);
+            __ivy_free(this.pm_lt_);
+            __ivy_free(this.pm_ltn_);
+            __ivy_free(this.lp_cond_);
+            __ivy_free(this.lp_incr_);
+            __ivy_free(this.lp_exit_);
+            __ivy_free(this.lp_sw_base_);
+            __ivy_free(this.lp_sw_n_);
+            __ivy_free(this.lp_lbl_base_);
+            __ivy_free(this.lp_lbl_n_);
+            __ivy_free(this.sw_blocks_);
+            __ivy_free(this.lbl_name_);
+            __ivy_free(this.lbl_blk_);
+            __ivy_free(this.dline_);
+            __ivy_free(this.dcol_);
+            __ivy_free(this.dmsg_);
+            __ivy_free(this.dbuf_);
+            long i = 0;
+            while (i < this.strs_n_) {
+                __ivy_free((void*) this.strs_[i]);
+                i = i + 1;
+            }
+            __ivy_free(this.strs_);
+        }
+    }
+
+    MUnit unit() {
+        return this.mu;
+    }
+
+    long diag_count() {
+        return this.dn_;
+    }
+
+    long diag_line(long i) {
+        unsafe {
+            return this.dline_[i];
+        }
+        return 0;
+    }
+
+    long diag_col(long i) {
+        unsafe {
+            return this.dcol_[i];
+        }
+        return 0;
+    }
+
+    const char* diag_msg(long i) {
+        unsafe {
+            return (char*) this.dmsg_[i];
+        }
+        return "";
+    }
+
+    bool failed() {
+        return this.failed_ != 0;
+    }
+
+    // --- the scopes ------------------------------------------------------
+
+    void push_scope() {
+        if (this.scs_n_ >= this.scs_cap_) {
+            long ncap = this.scs_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.scs_n_) {
+                    q[k] = this.sc_start_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.sc_start_);
+                this.sc_start_ = q;
+            }
+            this.scs_cap_ = ncap;
+        }
+        unsafe {
+            this.sc_start_[this.scs_n_] = this.sc_n_;
+        }
+        this.scs_n_ = this.scs_n_ + 1;
+    }
+
+    void pop_scope() {
+        if (this.scs_n_ <= 0) {
+            return;
+        }
+        this.scs_n_ = this.scs_n_ - 1;
+        unsafe {
+            this.sc_n_ = this.sc_start_[this.scs_n_];
+        }
+    }
+
+    // Declare a local.  Like the oracle's `scopes_.back().emplace`, an
+    // entry that already exists in the same scope is NOT replaced.
+    void declare(const char* name, long kind, const char* lname) {
+        if (this.scs_n_ <= 0) {
+            return;
+        }
+        long start = 0;
+        unsafe {
+            start = this.sc_start_[this.scs_n_ - 1];
+        }
+        long i = start;
+        while (i < this.sc_n_) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
+                    return;
+                }
+            }
+            i = i + 1;
+        }
+        if (this.sc_n_ >= this.sc_cap_) {
+            long ncap = this.sc_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.sc_n_) {
+                    q[k] = this.sc_name_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.sc_name_);
+                this.sc_name_ = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.sc_n_) {
+                    r[k] = this.sc_lt_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.sc_lt_);
+                this.sc_lt_ = r;
+                long* t = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.sc_n_) {
+                    t[k] = this.sc_ltn_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.sc_ltn_);
+                this.sc_ltn_ = t;
+            }
+            this.sc_cap_ = ncap;
+        }
+        unsafe {
+            this.sc_name_[this.sc_n_] = (long) name;
+            this.sc_lt_[this.sc_n_] = kind;
+            this.sc_ltn_[this.sc_n_] = (long) lname;
+        }
+        this.sc_n_ = this.sc_n_ + 1;
+    }
+
+    // True when the name is a local variable of an enclosing scope.
+    bool is_local(const char* name) {
+        long i = this.sc_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
+                    return true;
+                }
+            }
+            i = i - 1;
+        }
+        return false;
+    }
+
+    // The lifetime of a name: the innermost local that shadows it, then the
+    // parameters.  The result is left in `lt_kind_` / `lt_name_`.
+    void lookup(const char* name) {
+        long i = this.sc_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
+                    this.lt_kind_ = this.sc_lt_[i];
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = reinterpret_cast<const char*>(this.sc_ltn_[i]);
+                    } else {
+                        this.lt_name_ = "";
+                    }
+                    return;
+                }
+            }
+            i = i - 1;
+        }
+        this.lookup_param(name);
+    }
+
+    // The lifetime of a parameter (or of a local that shadows it).
+    void lookup_param(const char* name) {
+        long j = 0;
+        while (j < this.pm_n_) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.pm_name_[j]), name)) {
+                    this.lt_kind_ = this.pm_lt_[j];
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = reinterpret_cast<const char*>(this.pm_ltn_[j]);
+                    } else {
+                        this.lt_name_ = "";
+                    }
+                    return;
+                }
+            }
+            j = j + 1;
+        }
+        this.lt_kind_ = 0;
+        this.lt_name_ = "";
+    }
+
+    // mergeLifetime in mir_builder.cpp.
+    void merge_lt(long ak, const char* an, long bk, const char* bn) {
+        if (ak == 1 && bk == 1 && this.seq(an, bn)) {
+            this.lt_kind_ = 1;
+            this.lt_name_ = an;
+            return;
+        }
+        if (ak == 3 || bk == 3) {
+            this.lt_kind_ = 3;
+            this.lt_name_ = "";
+            return;
+        }
+        if (ak == bk) {
+            this.lt_kind_ = ak;
+            this.lt_name_ = an;
+            return;
+        }
+        this.lt_kind_ = 4;
+        this.lt_name_ = "";
+    }
+
+    // Update the lifetime of a local variable (a store into a variable
+    // changes its value lifetime).
+    void update_local_lt(const char* name, long kind, const char* lname) {
+        long i = this.sc_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
+                    this.sc_lt_[i] = kind;
+                    this.sc_ltn_[i] = (long) lname;
+                    return;
+                }
+            }
+            i = i - 1;
+        }
+    }
+
+    // --- the blocks and the instructions ----------------------------------
+
+    // A new block of the current function.  The index of the block in the
+    // function's block list is its identity (the dump prints it).
+    long new_block() {
+        long i = this.mu.bl_n;
+        if (i >= this.mu.bl_cap) {
+            this.grow_blocks();
+        }
+        unsafe {
+            this.mu.blocks[i].first = -1;
+            this.mu.blocks[i].last = -1;
+            if (this.mu.fns[this.cur_fn_].block_start < 0) {
+                this.mu.fns[this.cur_fn_].block_start = i;
+            }
+            this.mu.fns[this.cur_fn_].block_n = this.mu.fns[this.cur_fn_].block_n + 1;
+        }
+        this.mu.bl_n = i + 1;
+        return i;
+    }
+
+    // Append an instruction to the block that is currently filled.
+    long emit(long kind) {
+        long i = this.add_inst(kind);
+        unsafe {
+            this.mu.insts[i].in_unsafe = this.unsafe_depth_ > 0 ? 1 : 0;
+            long b = this.cur_blk_;
+            if (this.mu.blocks[b].first < 0) {
+                this.mu.blocks[b].first = i;
+            } else {
+                this.mu.insts[this.mu.blocks[b].last].next = i;
+            }
+            this.mu.blocks[b].last = i;
+        }
+        return i;
+    }
+
+    // jumpTo in mir_builder.cpp: a block that already ends in a return must
+    // not get a trailing jump.
+    void jump_to(long target) {
+        long last = -1;
+        unsafe {
+            last = this.mu.blocks[this.cur_blk_].last;
+            if (last >= 0 && this.mu.insts[last].kind == 3) {
+                return;
+            }
+        }
+        long i = this.emit(5);
+        unsafe {
+            this.mu.insts[i].b = target;
+        }
+    }
+
+    // --- the expressions -------------------------------------------------
+
+    // The deep copy of an expression tree (the compound-assignment
+    // expansion needs the left-hand side twice).
+    long clone_expr(long idx) {
+        long kind = 0;
+        long ival = 0;
+        double fval = 0.0;
+        long flag = 0;
+        long lt = 0;
+        long a = -1;
+        long b = -1;
+        long c = -1;
+        long astart = -1;
+        long an = 0;
+        long line = 0;
+        long col = 0;
+        unsafe {
+            kind = this.mu.exprs[idx].kind;
+            ival = this.mu.exprs[idx].ival;
+            fval = this.mu.exprs[idx].fval;
+            flag = this.mu.exprs[idx].flag;
+            lt = this.mu.exprs[idx].lt;
+            a = this.mu.exprs[idx].a;
+            b = this.mu.exprs[idx].b;
+            c = this.mu.exprs[idx].c;
+            astart = this.mu.exprs[idx].astart;
+            an = this.mu.exprs[idx].an;
+            line = this.mu.exprs[idx].line;
+            col = this.mu.exprs[idx].col;
+        }
+        long ni = this.add_expr(kind);
+        unsafe {
+            this.mu.exprs[ni].ival = ival;
+            this.mu.exprs[ni].fval = fval;
+            this.mu.exprs[ni].sval = this.mu.exprs[idx].sval;
+            this.mu.exprs[ni].sval2 = this.mu.exprs[idx].sval2;
+            this.mu.exprs[ni].flag = flag;
+            this.mu.exprs[ni].type = this.mu.exprs[idx].type;
+            this.mu.exprs[ni].lt = lt;
+            this.mu.exprs[ni].ltname = this.mu.exprs[idx].ltname;
+            this.mu.exprs[ni].retlt = this.mu.exprs[idx].retlt;
+            this.mu.exprs[ni].line = line;
+            this.mu.exprs[ni].col = col;
+        }
+        if (a >= 0) {
+            long ca = this.clone_expr(a);
+            unsafe {
+                this.mu.exprs[ni].a = ca;
+            }
+        }
+        if (b >= 0) {
+            long cb = this.clone_expr(b);
+            unsafe {
+                this.mu.exprs[ni].b = cb;
+            }
+        }
+        if (c >= 0) {
+            long cc = this.clone_expr(c);
+            unsafe {
+                this.mu.exprs[ni].c = cc;
+            }
+        }
+        if (an > 0) {
+            // The run of the cloned arguments is reserved before the
+            // arguments are cloned (a cloned argument may itself be a call):
+            // see `reserve_args`.
+            long start = this.reserve_args(an);
+            long j = 0;
+            while (j < an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.mu.args[astart + j];
+                }
+                long ci = -1;
+                if (ai >= 0) {
+                    ci = this.clone_expr(ai);
+                }
+                this.set_arg(start + j, ci);
+                j = j + 1;
+            }
+            unsafe {
+                this.mu.exprs[ni].astart = start;
+                this.mu.exprs[ni].an = an;
+            }
+        }
+        return ni;
+    }
+
+    // buildExpr in mir_builder.cpp.  The port's HIR expression kinds are
+    // 1 int 2 float 3 string 4 char 5 bool 6 nullptr 7 this 8 ident
+    // 9 unary 10 binary 11 ternary 12 call 13 index 14 member 15 assign
+    // 16 sizeof 17 alignof 18 cast 19 init-list.
+    long build_expr(long idx) {
+        long kind = 0;
+        unsafe {
+            kind = this.ep[idx].kind;
+        }
+        if (kind == 1) {
+            return this.ex_int(idx);
+        }
+        if (kind == 2) {
+            return this.ex_float(idx);
+        }
+        if (kind == 3) {
+            return this.ex_string(idx);
+        }
+        if (kind == 4) {
+            return this.ex_char(idx);
+        }
+        if (kind == 5) {
+            return this.ex_bool(idx);
+        }
+        if (kind == 6) {
+            return this.ex_nullptr(idx);
+        }
+        if (kind == 7) {
+            return this.ex_this(idx);
+        }
+        if (kind == 8) {
+            return this.ex_ident(idx);
+        }
+        if (kind == 9) {
+            return this.ex_unary(idx);
+        }
+        if (kind == 10) {
+            return this.ex_binary(idx);
+        }
+        if (kind == 11) {
+            return this.ex_ternary(idx);
+        }
+        if (kind == 12) {
+            return this.ex_call(idx);
+        }
+        if (kind == 13) {
+            return this.ex_index(idx);
+        }
+        if (kind == 14) {
+            return this.ex_member(idx);
+        }
+        if (kind == 15) {
+            return this.ex_assign(idx);
+        }
+        if (kind == 18) {
+            return this.ex_cast(idx);
+        }
+        if (kind == 19) {
+            return this.ex_initlist(idx);
+        }
+        // The oracle's fallback: the default-constructed variant, which is
+        // an IntegerLit with the value 0, and an Unknown lifetime.
+        long i = this.add_expr(0);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].lt = 4;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_int(long idx) {
+        long i = this.add_expr(0);
+        unsafe {
+            this.mu.exprs[i].ival = this.ep[idx].ival;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_float(long idx) {
+        long i = this.add_expr(1);
+        unsafe {
+            this.mu.exprs[i].fval = this.ep[idx].fval;
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_string(long idx) {
+        long i = this.add_expr(2);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            // A string literal lives forever.
+            this.mu.exprs[i].lt = 2;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_char(long idx) {
+        long i = this.add_expr(3);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_bool(long idx) {
+        long i = this.add_expr(4);
+        unsafe {
+            this.mu.exprs[i].ival = this.ep[idx].ival;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_nullptr(long idx) {
+        long i = this.add_expr(5);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_this(long idx) {
+        long i = this.add_expr(7);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_ident(long idx) {
+        long i = this.add_expr(6);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+            // The lifetime is the one of the variable.
+            this.lookup(this.ep[idx].sval);
+            this.mu.exprs[i].lt = this.lt_kind_;
+            this.mu.exprs[i].ltname = this.lt_name_;
+        }
+        return i;
+    }
+
+    long ex_unary(long idx) {
+        long opnd = -1;
+        unsafe {
+            opnd = this.ep[idx].a;
+        }
+        long oi = this.build_expr(opnd);
+        // The lifetime of the result.
+        this.lt_kind_ = 0;
+        this.lt_name_ = "";
+        unsafe {
+            if (this.seq(this.ep[idx].sval, "&")) {
+                // The address of a variable: a local lives in the frame of
+                // the function, a parameter borrows its own lifetime and
+                // everything else is opaque.
+                if (this.mu.exprs[oi].kind == 6) {
+                    if (this.is_local(this.mu.exprs[oi].sval)) {
+                        this.lt_kind_ = 3;
+                    } else {
+                        this.lookup_param(this.mu.exprs[oi].sval);
+                    }
+                } else {
+                    this.lt_kind_ = 4;
+                }
+            } else if (this.seq(this.ep[idx].sval, "*")) {
+                // The pointee borrows the lifetime of the pointer.
+                this.lt_kind_ = this.mu.exprs[oi].lt;
+                if (this.lt_kind_ == 1) {
+                    this.lt_name_ = this.mu.exprs[oi].ltname;
+                }
+            } else if (this.seq(this.ep[idx].sval, "++") || this.seq(this.ep[idx].sval, "--")) {
+                if (this.mu.exprs[oi].type.ptr_depth > 0) {
+                    this.lt_kind_ = this.mu.exprs[oi].lt;
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = this.mu.exprs[oi].ltname;
+                    }
+                }
+            }
+        }
+        long i = this.add_expr(8);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].flag = this.ep[idx].flag;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = oi;
+            this.mu.exprs[i].lt = this.lt_kind_;
+            this.mu.exprs[i].ltname = this.lt_name_;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_binary(long idx) {
+        long lhs = -1;
+        long rhs = -1;
+        unsafe {
+            lhs = this.ep[idx].a;
+            rhs = this.ep[idx].b;
+        }
+        long li = this.build_expr(lhs);
+        long ri = this.build_expr(rhs);
+        this.lt_kind_ = 0;
+        this.lt_name_ = "";
+        unsafe {
+            if (this.seq(this.ep[idx].sval, "+") || this.seq(this.ep[idx].sval, "-")) {
+                if (this.mu.exprs[li].type.ptr_depth > 0) {
+                    this.lt_kind_ = this.mu.exprs[li].lt;
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = this.mu.exprs[li].ltname;
+                    }
+                } else if (this.mu.exprs[ri].type.ptr_depth > 0) {
+                    this.lt_kind_ = this.mu.exprs[ri].lt;
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = this.mu.exprs[ri].ltname;
+                    }
+                }
+            }
+        }
+        long i = this.add_expr(9);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = li;
+            this.mu.exprs[i].b = ri;
+            this.mu.exprs[i].lt = this.lt_kind_;
+            this.mu.exprs[i].ltname = this.lt_name_;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_ternary(long idx) {
+        long cond = -1;
+        long thenb = -1;
+        long elseb = -1;
+        unsafe {
+            cond = this.ep[idx].a;
+            thenb = this.ep[idx].b;
+            elseb = this.ep[idx].c;
+        }
+        long ci = this.build_expr(cond);
+        long ti = this.build_expr(thenb);
+        long ei = this.build_expr(elseb);
+        long tk = 0;
+        long ek = 0;
+        unsafe {
+            tk = this.mu.exprs[ti].lt;
+            ek = this.mu.exprs[ei].lt;
+            this.merge_lt(tk, this.mu.exprs[ti].ltname, ek, this.mu.exprs[ei].ltname);
+        }
+        long i = this.add_expr(10);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = ci;
+            this.mu.exprs[i].b = ti;
+            this.mu.exprs[i].c = ei;
+            this.mu.exprs[i].lt = this.lt_kind_;
+            this.mu.exprs[i].ltname = this.lt_name_;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_call(long idx) {
+        long start = -1;
+        long an = 0;
+        unsafe {
+            start = this.ep[idx].astart;
+            an = this.ep[idx].an;
+        }
+        // The run of the arguments is reserved BEFORE the arguments are
+        // built: an argument may itself be a call and the nested call
+        // pushes its own arguments into the same pool.  Reserving the run
+        // first keeps it contiguous (the nested run lands after it), so
+        // the argument at any position resolves to the right expression.
+        long argstart = this.reserve_args(an);
+        long j = 0;
+        while (j < an) {
+            long ai = -1;
+            unsafe {
+                ai = this.ha[start + j];
+            }
+            long mi = -1;
+            if (ai >= 0) {
+                mi = this.build_expr(ai);
+            }
+            this.set_arg(argstart + j, mi);
+            j = j + 1;
+        }
+        // The `move()` builtin: the result borrows the lifetime of its
+        // argument.  Every other call gets the Unknown lifetime (the
+        // oracle sets it unconditionally, mir_builder.cpp:603).
+        this.lt_kind_ = 4;
+        this.lt_name_ = "";
+        bool is_move = false;
+        unsafe {
+            is_move = this.seq(this.ep[idx].sval, "move") && an == 1;
+        }
+        if (is_move) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu.args[argstart];
+            }
+            if (ai >= 0) {
+                unsafe {
+                    this.lt_kind_ = this.mu.exprs[ai].lt;
+                    if (this.lt_kind_ == 1) {
+                        this.lt_name_ = this.mu.exprs[ai].ltname;
+                    }
+                }
+            }
+        }
+        long i = this.add_expr(11);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].astart = argstart;
+            this.mu.exprs[i].an = an;
+            this.mu.exprs[i].lt = this.lt_kind_;
+            this.mu.exprs[i].ltname = this.lt_name_;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_index(long idx) {
+        long base = -1;
+        long index = -1;
+        unsafe {
+            base = this.ep[idx].a;
+            index = this.ep[idx].b;
+        }
+        long bi = this.build_expr(base);
+        long ii = this.build_expr(index);
+        long lk = 0;
+        unsafe {
+            lk = this.mu.exprs[bi].lt;
+        }
+        long i = this.add_expr(12);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = bi;
+            this.mu.exprs[i].b = ii;
+            this.mu.exprs[i].lt = lk;
+            if (lk == 1) {
+                this.mu.exprs[i].ltname = this.mu.exprs[bi].ltname;
+            }
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_member(long idx) {
+        long base = -1;
+        unsafe {
+            base = this.ep[idx].a;
+        }
+        long bi = this.build_expr(base);
+        long lk = 0;
+        unsafe {
+            lk = this.mu.exprs[bi].lt;
+        }
+        long i = this.add_expr(13);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].flag = this.ep[idx].flag;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = bi;
+            this.mu.exprs[i].lt = lk;
+            if (lk == 1) {
+                this.mu.exprs[i].ltname = this.mu.exprs[bi].ltname;
+            }
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_assign(long idx) {
+        long lhs = -1;
+        long rhs = -1;
+        unsafe {
+            lhs = this.ep[idx].a;
+            rhs = this.ep[idx].b;
+        }
+        long li = this.build_expr(lhs);
+        long ri = this.build_expr(rhs);
+        long lk = 0;
+        unsafe {
+            lk = this.mu.exprs[ri].lt;
+        }
+        long i = this.add_expr(14);
+        unsafe {
+            this.mu.exprs[i].sval = this.ep[idx].sval;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = li;
+            this.mu.exprs[i].b = ri;
+            this.mu.exprs[i].lt = lk;
+            if (lk == 1) {
+                this.mu.exprs[i].ltname = this.mu.exprs[ri].ltname;
+            }
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_cast(long idx) {
+        long opnd = -1;
+        unsafe {
+            opnd = this.ep[idx].a;
+        }
+        long oi = this.build_expr(opnd);
+        long lk = 0;
+        unsafe {
+            lk = this.mu.exprs[oi].lt;
+        }
+        long i = this.add_expr(19);
+        unsafe {
+            this.mu.exprs[i].flag = this.ep[idx].flag;
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].a = oi;
+            this.mu.exprs[i].lt = lk;
+            if (lk == 1) {
+                this.mu.exprs[i].ltname = this.mu.exprs[oi].ltname;
+            }
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    long ex_initlist(long idx) {
+        long start = -1;
+        long an = 0;
+        unsafe {
+            start = this.ep[idx].astart;
+            an = this.ep[idx].an;
+        }
+        // The run of the elements is reserved before the elements are built
+        // (an element may itself be a call): see `reserve_args`.
+        long elstart = this.reserve_args(an);
+        long j = 0;
+        while (j < an) {
+            long ai = -1;
+            unsafe {
+                ai = this.ha[start + j];
+            }
+            long mi = -1;
+            if (ai >= 0) {
+                mi = this.build_expr(ai);
+            }
+            this.set_arg(elstart + j, mi);
+            j = j + 1;
+        }
+        long i = this.add_expr(17);
+        unsafe {
+            this.mu.exprs[i].type = this.ep[idx].type;
+            this.mu.exprs[i].astart = elstart;
+            this.mu.exprs[i].an = an;
+            this.mu.exprs[i].line = this.ep[idx].line;
+            this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    // --- the statements --------------------------------------------------
+
+    // buildStmt in mir_builder.cpp.  The port's HIR statement kinds are
+    // 1 compound 2 decl 3 if 4 while 5 dowhile 6 for 7 return 8 break
+    // 9 continue 10 nextcase 11 exprstmt 12 unsafe 13 null 14 switch.
+    void build_stmt(long idx) {
+        long kind = 0;
+        unsafe {
+            kind = this.sp[idx].kind;
+        }
+        if (kind == 1) {
+            this.st_compound(idx);
+            return;
+        }
+        if (kind == 2) {
+            this.st_decl(idx);
+            return;
+        }
+        if (kind == 3) {
+            this.st_if(idx);
+            return;
+        }
+        if (kind == 4) {
+            this.st_while(idx);
+            return;
+        }
+        if (kind == 5) {
+            this.st_dowhile(idx);
+            return;
+        }
+        if (kind == 6) {
+            this.st_for(idx);
+            return;
+        }
+        if (kind == 7) {
+            this.st_return(idx);
+            return;
+        }
+        if (kind == 8) {
+            this.st_break(idx);
+            return;
+        }
+        if (kind == 9) {
+            this.st_continue(idx);
+            return;
+        }
+        if (kind == 10) {
+            this.st_nextcase(idx);
+            return;
+        }
+        if (kind == 11) {
+            this.st_exprstmt(idx);
+            return;
+        }
+        if (kind == 12) {
+            this.st_unsafe(idx);
+            return;
+        }
+        if (kind == 14) {
+            this.st_switch(idx);
+            return;
+        }
+        // Null (and every statement the port does not model).
+        return;
+    }
+
+    // A compound statement: the statements are lowered in order and the
+    // block gets its own scope.
+    void st_compound(long idx) {
+        this.push_scope();
+        long k = -1;
+        unsafe {
+            k = this.sp[idx].sstart;
+        }
+        while (k >= 0) {
+            this.build_stmt(k);
+            unsafe {
+                k = this.sp[k].next;
+            }
+        }
+        this.pop_scope();
+    }
+
+    // A local declaration: the local becomes an `alloca` with its
+    // initializer.
+    void st_decl(long idx) {
+        long init = -1;
+        unsafe {
+            init = this.sp[idx].a;
+        }
+        long inst = this.emit(0);
+        unsafe {
+            this.mu.insts[inst].var = this.sp[idx].sval;
+            this.mu.insts[inst].type = this.sp[idx].type;
+        }
+        if (init >= 0) {
+            long ii = this.build_expr(init);
+            long lk = 0;
+            unsafe {
+                lk = this.mu.exprs[ii].lt;
+                this.mu.insts[inst].a = ii;
+                // The port's HIR statements carry no source location (the
+                // gap G7 of MIR_NOTES): the location of the initializer is
+                // used instead.
+                this.mu.insts[inst].line = this.mu.exprs[ii].line;
+                this.mu.insts[inst].col = this.mu.exprs[ii].col;
+            }
+            // The lifetime of the local is the lifetime of its initializer.
+            unsafe {
+                this.declare(this.sp[idx].sval, lk, this.mu.exprs[ii].ltname);
+            }
+        } else {
+            unsafe {
+                this.declare(this.sp[idx].sval, 0, "");
+            }
+        }
+    }
+
+    void st_return(long idx) {
+        long val = -1;
+        unsafe {
+            val = this.sp[idx].a;
+        }
+        long inst = this.emit(3);
+        if (val >= 0) {
+            long vi = this.build_expr(val);
+            unsafe {
+                this.mu.insts[inst].a = vi;
+                this.mu.insts[inst].line = this.mu.exprs[vi].line;
+                this.mu.insts[inst].col = this.mu.exprs[vi].col;
+            }
+        }
+    }
+
+    // An expression statement: an assignment becomes a `store`, everything
+    // else an `eval`.
+    void st_exprstmt(long idx) {
+        long val = -1;
+        unsafe {
+            val = this.sp[idx].a;
+        }
+        long ei = this.build_expr(val);
+        long kind = 0;
+        unsafe {
+            kind = this.mu.exprs[ei].kind;
+        }
+        if (kind != 14) {
+            long inst = this.emit(2);
+            unsafe {
+                this.mu.insts[inst].a = ei;
+                this.mu.insts[inst].line = this.mu.exprs[ei].line;
+                this.mu.insts[inst].col = this.mu.exprs[ei].col;
+            }
+            return;
+        }
+        // The compound assignment `lhs op= rhs` is expanded into
+        // `lhs = lhs op rhs`.
+        long oplen = 0;
+        bool is_compound = false;
+        unsafe {
+            oplen = this.slen(this.mu.exprs[ei].sval);
+            is_compound = oplen >= 2 && this.last_char(this.mu.exprs[ei].sval) == '=' &&
+                         this.seq(this.mu.exprs[ei].sval, "=") == false;
+        }
+        if (is_compound) {
+            long lhs = -1;
+            long rhs = -1;
+            unsafe {
+                lhs = this.mu.exprs[ei].a;
+                rhs = this.mu.exprs[ei].b;
+            }
+            long copy = this.clone_expr(lhs);
+            long bin = this.add_expr(9);
+            long lk = 0;
+            long rk = 0;
+            unsafe {
+                lk = this.mu.exprs[copy].lt;
+                rk = this.mu.exprs[rhs].lt;
+                this.mu.exprs[bin].sval = this.keep_string(this.mu.exprs[ei].sval, oplen - 1);
+                this.mu.exprs[bin].type = this.mu.exprs[rhs].type;
+                this.mu.exprs[bin].a = copy;
+                this.mu.exprs[bin].b = rhs;
+                // The lifetime of the new binary expression.
+                if (this.mu.exprs[copy].type.ptr_depth > 0) {
+                    this.mu.exprs[bin].lt = lk;
+                    this.mu.exprs[bin].ltname = this.mu.exprs[copy].ltname;
+                } else if (this.mu.exprs[rhs].type.ptr_depth > 0) {
+                    this.mu.exprs[bin].lt = rk;
+                    this.mu.exprs[bin].ltname = this.mu.exprs[rhs].ltname;
+                }
+                this.mu.exprs[ei].b = bin;
+                this.mu.exprs[ei].sval = "=";
+            }
+        }
+        long tl = -1;
+        long tv = -1;
+        unsafe {
+            tl = this.mu.exprs[ei].a;
+            tv = this.mu.exprs[ei].b;
+        }
+        long inst = this.emit(1);
+        unsafe {
+            this.mu.insts[inst].a = tl;
+            this.mu.insts[inst].b = tv;
+            this.mu.insts[inst].line = this.mu.exprs[ei].line;
+            this.mu.insts[inst].col = this.mu.exprs[ei].col;
+        }
+        // The value lifetime of the assigned variable is updated.
+        long tk = 0;
+        unsafe {
+            tk = this.mu.exprs[tl].kind;
+        }
+        if (tk == 6) {
+            long vk = 0;
+            unsafe {
+                vk = this.mu.exprs[tv].lt;
+                this.update_local_lt(this.mu.exprs[tl].sval, vk, this.mu.exprs[tv].ltname);
+            }
+        }
+    }
+
+    void st_unsafe(long idx) {
+        long body = -1;
+        unsafe {
+            body = this.sp[idx].a;
+        }
+        this.unsafe_depth_ = this.unsafe_depth_ + 1;
+        this.build_stmt(body);
+        this.unsafe_depth_ = this.unsafe_depth_ - 1;
+    }
+
+    void st_if(long idx) {
+        long cond = -1;
+        long thenb = -1;
+        long elseb = -1;
+        unsafe {
+            cond = this.sp[idx].a;
+            thenb = this.sp[idx].b;
+            elseb = this.sp[idx].c;
+        }
+        long cont = this.new_block();
+        if (thenb < 0 && elseb < 0) {
+            this.jump_to(cont);
+            this.cur_blk_ = cont;
+            return;
+        }
+        long tb = cont;
+        long eb = cont;
+        if (thenb >= 0) {
+            tb = this.new_block();
+        }
+        if (elseb >= 0) {
+            eb = this.new_block();
+        }
+        long ci = this.build_expr(cond);
+        long inst = this.emit(4);
+        unsafe {
+            this.mu.insts[inst].a = ci;
+            this.mu.insts[inst].b = tb;
+            this.mu.insts[inst].c = eb;
+            this.mu.insts[inst].line = this.mu.exprs[ci].line;
+            this.mu.insts[inst].col = this.mu.exprs[ci].col;
+        }
+        if (thenb >= 0) {
+            this.cur_blk_ = tb;
+            this.build_stmt(thenb);
+            this.jump_to(cont);
+        }
+        if (elseb >= 0) {
+            this.cur_blk_ = eb;
+            this.build_stmt(elseb);
+            this.jump_to(cont);
+        }
+        this.cur_blk_ = cont;
+    }
+
+    void st_while(long idx) {
+        long cond = -1;
+        long body = -1;
+        unsafe {
+            cond = this.sp[idx].a;
+            body = this.sp[idx].b;
+        }
+        long condb = this.new_block();
+        long bodyb = this.new_block();
+        long exitb = this.new_block();
+        this.jump_to(condb);
+        this.cur_blk_ = condb;
+        long ci = this.build_expr(cond);
+        long inst = this.emit(4);
+        unsafe {
+            this.mu.insts[inst].a = ci;
+            this.mu.insts[inst].b = bodyb;
+            this.mu.insts[inst].c = exitb;
+            this.mu.insts[inst].line = this.mu.exprs[ci].line;
+            this.mu.insts[inst].col = this.mu.exprs[ci].col;
+        }
+        this.cur_blk_ = bodyb;
+        this.push_loop(condb, -1, exitb);
+        this.build_stmt(body);
+        this.pop_loop();
+        this.jump_to(condb);
+        this.cur_blk_ = exitb;
+    }
+
+    void st_dowhile(long idx) {
+        long body = -1;
+        long cond = -1;
+        unsafe {
+            body = this.sp[idx].a;
+            cond = this.sp[idx].b;
+        }
+        long bodyb = this.new_block();
+        long condb = this.new_block();
+        long exitb = this.new_block();
+        this.jump_to(bodyb);
+        this.cur_blk_ = bodyb;
+        this.push_loop(condb, -1, exitb);
+        this.build_stmt(body);
+        this.pop_loop();
+        this.jump_to(condb);
+        this.cur_blk_ = condb;
+        long ci = this.build_expr(cond);
+        long inst = this.emit(4);
+        unsafe {
+            this.mu.insts[inst].a = ci;
+            this.mu.insts[inst].b = bodyb;
+            this.mu.insts[inst].c = exitb;
+            this.mu.insts[inst].line = this.mu.exprs[ci].line;
+            this.mu.insts[inst].col = this.mu.exprs[ci].col;
+        }
+        this.cur_blk_ = exitb;
+    }
+
+    void st_for(long idx) {
+        long init = -1;
+        long cond = -1;
+        long incr = -1;
+        long body = -1;
+        unsafe {
+            init = this.sp[idx].a;
+            cond = this.sp[idx].b;
+            incr = this.sp[idx].c;
+            body = this.sp[idx].sstart;
+        }
+        // The initializer is built in the current block.
+        this.push_scope();
+        if (init >= 0) {
+            this.build_stmt(init);
+        }
+        long condb = this.new_block();
+        long bodyb = this.new_block();
+        long incrb = this.new_block();
+        long exitb = this.new_block();
+        this.jump_to(condb);
+        this.cur_blk_ = condb;
+        if (cond >= 0) {
+            long ci = this.build_expr(cond);
+            long inst = this.emit(4);
+            unsafe {
+                this.mu.insts[inst].a = ci;
+                this.mu.insts[inst].b = bodyb;
+                this.mu.insts[inst].c = exitb;
+                this.mu.insts[inst].line = this.mu.exprs[ci].line;
+                this.mu.insts[inst].col = this.mu.exprs[ci].col;
+            }
+        } else {
+            this.jump_to(bodyb);
+        }
+        this.cur_blk_ = bodyb;
+        this.push_loop(condb, incrb, exitb);
+        this.build_stmt(body);
+        this.pop_loop();
+        this.jump_to(incrb);
+        this.cur_blk_ = incrb;
+        if (incr >= 0) {
+            long ii = this.build_expr(incr);
+            long inst = this.emit(2);
+            unsafe {
+                this.mu.insts[inst].a = ii;
+                this.mu.insts[inst].line = this.mu.exprs[ii].line;
+                this.mu.insts[inst].col = this.mu.exprs[ii].col;
+            }
+        }
+        this.jump_to(condb);
+        this.cur_blk_ = exitb;
+        this.pop_scope();
+    }
+
+    void st_break(long idx) {
+        if (this.lp_n_ > 0) {
+            this.jump_to(this.loop_exit());
+        }
+    }
+
+    void st_continue(long idx) {
+        if (this.lp_n_ > 0) {
+            long target = this.loop_incr();
+            if (target < 0) {
+                target = this.loop_cond();
+            }
+            this.jump_to(target);
+        }
+    }
+
+    void st_nextcase(long idx) {
+        if (this.lp_n_ == 0) {
+            return;
+        }
+        bool labelled = false;
+        unsafe {
+            labelled = this.slen(this.sp[idx].sval) > 0;
+        }
+        if (labelled == false) {
+            // The unlabelled form: jump to the next case clause.  The oracle
+            // uses the innermost loop context: only a switch context carries
+            // the case blocks, so a `nextcase` inside a loop that is inside a
+            // switch jumps to the exit of the loop.
+            long next = this.case_index_ + 1;
+            long ncases = this.loop_case_n();
+            if (next < ncases) {
+                this.jump_to(this.loop_case_blk(next));
+            } else {
+                this.jump_to(this.loop_exit());
+            }
+            return;
+        }
+        // The labelled form: jump to the block that the case label names.
+        // The label is looked up in the innermost loop context, so a label
+        // of an enclosing switch is not visible from a nested loop.
+        long target = 0;
+        unsafe {
+            target = (long) this.sp[idx].sval;
+        }
+        long blk = this.loop_label_blk(target);
+        if (blk >= 0) {
+            this.jump_to(blk);
+            return;
+        }
+        // The label is not a case label of this switch: the diagnostic (the
+        // location of the statement is not carried by the port's HIR, so it
+        // is reported at 0:0 - see the gap G7 of MIR_NOTES).
+        this.db_n_ = 0;
+        this.db_put("nextcase target '");
+        unsafe {
+            this.db_put(this.sp[idx].sval);
+        }
+        this.db_put("' is not a case label in this switch");
+        this.db_ch(0);
+        this.diag(0, 0, this.dbuf_);
+    }
+
+    // A switch: the exit block, then one block per case clause.  The
+    // switch instruction itself prints nothing in the dump.
+    void st_switch(long idx) {
+        long cond = -1;
+        long cstart = -1;
+        long ncases = 0;
+        unsafe {
+            cond = this.sp[idx].a;
+            cstart = this.sp[idx].sstart;
+            ncases = this.sp[idx].sn;
+        }
+        long exitb = this.new_block();
+        long base = this.sw_n_;
+        // One block per case clause, in the order of the clauses.
+        long j = 0;
+        while (j < ncases) {
+            long b = this.new_block();
+            if (this.sw_n_ >= this.sw_cap_) {
+                long ncap = this.sw_cap_ * 2 + 64;
+                unsafe {
+                    long* q = (long*) __ivy_alloc(ncap * 8);
+                    long k = 0;
+                    while (k < this.sw_n_) {
+                        q[k] = this.sw_blocks_[k];
+                        k = k + 1;
+                    }
+                    __ivy_free(this.sw_blocks_);
+                    this.sw_blocks_ = q;
+                }
+                this.sw_cap_ = ncap;
+            }
+            unsafe {
+                this.sw_blocks_[this.sw_n_] = b;
+            }
+            this.sw_n_ = this.sw_n_ + 1;
+            j = j + 1;
+        }
+        // The clauses of a switch are a linked list (a switch that is nested
+        // in a case body pushes its own clauses into the same pool, so the
+        // pool order and the source order differ).
+        //
+        // The default clause, or the exit block when there is none.
+        long defb = exitb;
+        long ci = cstart;
+        j = 0;
+        while (ci >= 0) {
+            long value = -1;
+            long nxt = -1;
+            unsafe {
+                value = this.hc[ci].value;
+                nxt = this.hc[ci].next;
+            }
+            if (value < 0) {
+                unsafe {
+                    defb = this.sw_blocks_[base + j];
+                }
+                break;
+            }
+            ci = nxt;
+            j = j + 1;
+        }
+        long inst = this.emit(6);
+        if (cond >= 0) {
+            long cex = this.build_expr(cond);
+            unsafe {
+                this.mu.insts[inst].a = cex;
+                this.mu.insts[inst].line = this.mu.exprs[cex].line;
+                this.mu.insts[inst].col = this.mu.exprs[cex].col;
+            }
+        }
+        // The arms: the case values of the clauses that are not the default
+        // one.
+        long armstart = this.mu.arm_n;
+        ci = cstart;
+        j = 0;
+        while (ci >= 0) {
+            long value = -1;
+            long nxt = -1;
+            unsafe {
+                value = this.hc[ci].value;
+                nxt = this.hc[ci].next;
+            }
+            if (value >= 0) {
+                long cval = 0;
+                long ck = 0;
+                unsafe {
+                    ck = this.ep[value].kind;
+                    cval = this.ep[value].ival;
+                }
+                if (ck == 5) {
+                    cval = cval != 0 ? 1 : 0;
+                } else if (ck != 1) {
+                    cval = 0;
+                }
+                long b = 0;
+                unsafe {
+                    b = this.sw_blocks_[base + j];
+                }
+                this.push_arm(cval, b);
+            }
+            ci = nxt;
+            j = j + 1;
+        }
+        unsafe {
+            this.mu.insts[inst].astart = armstart;
+            this.mu.insts[inst].an = this.mu.arm_n - armstart;
+            this.mu.insts[inst].b = defb;
+        }
+        // The case labels of the switch: the oracle builds the `caseLabels`
+        // map of the switch's loop context (the label of a clause names the
+        // block of that clause).
+        long lblbase = this.lbl_n_;
+        long lbln = 0;
+        ci = cstart;
+        j = 0;
+        while (ci >= 0) {
+            long label = 0;
+            long nxt = -1;
+            long b = 0;
+            unsafe {
+                label = (long) this.hc[ci].label;
+                nxt = this.hc[ci].next;
+                b = this.sw_blocks_[base + j];
+            }
+            if (label != 0) {
+                this.push_lbl(label, b);
+                lbln = lbln + 1;
+            }
+            ci = nxt;
+            j = j + 1;
+        }
+        // The bodies of the case clauses.
+        this.push_loop_sw(-1, -1, exitb, base, ncases, lblbase, lbln);
+        ci = cstart;
+        j = 0;
+        while (ci >= 0) {
+            long b = 0;
+            long first = -1;
+            long nxt = -1;
+            unsafe {
+                b = this.sw_blocks_[base + j];
+                first = this.hc[ci].sstart;
+                nxt = this.hc[ci].next;
+            }
+            this.cur_blk_ = b;
+            this.case_index_ = j;
+            long k = first;
+            while (k >= 0) {
+                this.build_stmt(k);
+                unsafe {
+                    k = this.sp[k].next;
+                }
+            }
+            this.jump_to(exitb);
+            ci = nxt;
+            j = j + 1;
+        }
+        this.pop_loop();
+        this.sw_n_ = base;
+        this.case_index_ = -1;
+        this.cur_blk_ = exitb;
+    }
+
+    // The last character of a string.
+    long last_char(const char* s) {
+        unsafe {
+            return s[this.slen(s) - 1];
+        }
+        return 0;
+    }
+
+    // The exit block of the innermost loop.
+    long loop_exit() {
+        unsafe {
+            return this.lp_exit_[this.lp_n_ - 1];
+        }
+        return -1;
+    }
+
+    // The increment block of the innermost loop (-1 when there is none).
+    long loop_incr() {
+        unsafe {
+            return this.lp_incr_[this.lp_n_ - 1];
+        }
+        return -1;
+    }
+
+    // The condition block of the innermost loop.
+    long loop_cond() {
+        unsafe {
+            return this.lp_cond_[this.lp_n_ - 1];
+        }
+        return -1;
+    }
+
+    // True when the innermost loop context is a switch (the oracle's
+    // `LoopCtx` of a switch carries the case blocks and the case labels; a
+    // loop context carries neither).
+    bool loop_is_switch() {
+        unsafe {
+            return this.lp_sw_base_[this.lp_n_ - 1] >= 0;
+        }
+        return false;
+    }
+
+    // The number of the case blocks of the innermost switch (0 when the
+    // innermost context is not a switch).
+    long loop_case_n() {
+        unsafe {
+            return this.lp_sw_n_[this.lp_n_ - 1];
+        }
+        return 0;
+    }
+
+    // The block of the `n`-th case clause of the innermost switch.
+    long loop_case_blk(long n) {
+        unsafe {
+            return this.sw_blocks_[this.lp_sw_base_[this.lp_n_ - 1] + n];
+        }
+        return -1;
+    }
+
+    // True when the two interned names are equal.  The names are kept in
+    // integer registers (`long`), so the comparison needs an unsafe block.
+    bool seq_l(long a, long b) {
+        unsafe {
+            return this.seq(reinterpret_cast<const char*>(a), reinterpret_cast<const char*>(b));
+        }
+        return false;
+    }
+
+    // The block that the case label `name` names in the innermost switch
+    // (-1 when the innermost context is not a switch or has no such label).
+    long loop_label_blk(long name) {
+        long start = -1;
+        long n = 0;
+        unsafe {
+            start = this.lp_lbl_base_[this.lp_n_ - 1];
+            n = this.lp_lbl_n_[this.lp_n_ - 1];
+        }
+        if (start < 0) {
+            return -1;
+        }
+        long k = 0;
+        while (k < n) {
+            long hit = -1;
+            unsafe {
+                if (this.seq_l(this.lbl_name_[start + k], name)) {
+                    hit = this.lbl_blk_[start + k];
+                }
+            }
+            if (hit >= 0) {
+                return hit;
+            }
+            k = k + 1;
+        }
+        return -1;
+    }
+
+    // Append a case label to the label pool.  `name` is a `const char*` kept
+    // in an integer register.
+    void push_lbl(long name, long block) {
+        if (this.lbl_n_ >= this.lbl_cap_) {
+            long ncap = this.lbl_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.lbl_n_) {
+                    q[k] = this.lbl_name_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lbl_name_);
+                this.lbl_name_ = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lbl_n_) {
+                    r[k] = this.lbl_blk_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lbl_blk_);
+                this.lbl_blk_ = r;
+            }
+            this.lbl_cap_ = ncap;
+        }
+        unsafe {
+            this.lbl_name_[this.lbl_n_] = name;
+            this.lbl_blk_[this.lbl_n_] = block;
+        }
+        this.lbl_n_ = this.lbl_n_ + 1;
+    }
+
+    void push_loop(long cond, long incr, long exit) {
+        this.push_loop_sw(cond, incr, exit, -1, 0, -1, 0);
+    }
+
+    // Push a loop context.  The switch data (`sw_base`, `sw_n`, `lbl_base`,
+    // `lbl_n`) belongs to a switch context; a loop context has none.
+    void push_loop_sw(long cond, long incr, long exit, long sw_base, long sw_n, long lbl_base, long lbl_n) {
+        if (this.lp_n_ >= this.lp_cap_) {
+            long ncap = this.lp_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.lp_n_) {
+                    q[k] = this.lp_cond_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_cond_);
+                this.lp_cond_ = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    r[k] = this.lp_incr_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_incr_);
+                this.lp_incr_ = r;
+                long* t = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    t[k] = this.lp_exit_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_exit_);
+                this.lp_exit_ = t;
+                long* u = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    u[k] = this.lp_sw_base_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_sw_base_);
+                this.lp_sw_base_ = u;
+                long* v = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    v[k] = this.lp_sw_n_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_sw_n_);
+                this.lp_sw_n_ = v;
+                long* w = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    w[k] = this.lp_lbl_base_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_lbl_base_);
+                this.lp_lbl_base_ = w;
+                long* x = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.lp_n_) {
+                    x[k] = this.lp_lbl_n_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.lp_lbl_n_);
+                this.lp_lbl_n_ = x;
+            }
+            this.lp_cap_ = ncap;
+        }
+        unsafe {
+            this.lp_cond_[this.lp_n_] = cond;
+            this.lp_incr_[this.lp_n_] = incr;
+            this.lp_exit_[this.lp_n_] = exit;
+            this.lp_sw_base_[this.lp_n_] = sw_base;
+            this.lp_sw_n_[this.lp_n_] = sw_n;
+            this.lp_lbl_base_[this.lp_n_] = lbl_base;
+            this.lp_lbl_n_[this.lp_n_] = lbl_n;
+        }
+        this.lp_n_ = this.lp_n_ + 1;
+    }
+
+    void pop_loop() {
+        if (this.lp_n_ > 0) {
+            this.lp_n_ = this.lp_n_ - 1;
+        }
+    }
+
+    // --- the functions ---------------------------------------------------
+
+    void build_function(long fi) {
+        this.cur_fn_ = fi;
+        this.unsafe_depth_ = 0;
+        this.pm_n_ = 0;
+        this.sc_n_ = 0;
+        this.scs_n_ = 0;
+        this.lp_n_ = 0;
+        this.sw_n_ = 0;
+        this.lbl_n_ = 0;
+        this.case_index_ = -1;
+        long pstart = -1;
+        long pn = 0;
+        long body = -1;
+        long ltstart = -1;
+        long ltn = 0;
+        unsafe {
+            pstart = this.hu.fns[fi].pstart;
+            pn = this.hu.fns[fi].pn;
+            body = this.hu.fns[fi].body;
+            ltstart = this.hu.fns[fi].lt_start;
+            ltn = this.hu.fns[fi].lt_n;
+        }
+        // The declared lifetimes of the function (the oracle copies them
+        // in buildFunction, so only the functions that have a body have
+        // them).
+        long ltfirst = this.mu.lt_n;
+        long k = 0;
+        while (k < ltn) {
+            this.add_lifetime(this.hir_lt_name(ltstart + k));
+            k = k + 1;
+        }
+        unsafe {
+            this.mu.fns[fi].lt_start = ltfirst;
+            this.mu.fns[fi].lt_n = ltn;
+        }
+        // The lifetimes of the parameters: a declared lifetime, else an
+        // unknown lifetime for a raw pointer, else none.
+        long j = 0;
+        while (j < pn) {
+            long kind = 0;
+            long lname = 0;
+            long ptype = 0;
+            long pname = 0;
+            unsafe {
+                ptype = this.hp[pstart + j].type.ptr_depth;
+                pname = (long) this.hp[pstart + j].name;
+                if (this.hp[pstart + j].lt != (char*)0) {
+                    kind = 1;
+                    lname = (long) this.hp[pstart + j].lt;
+                }
+            }
+            if (kind == 0 && ptype > 0) {
+                kind = 4;
+                lname = 0;
+            }
+            bool named = false;
+            unsafe {
+                named = this.slen(reinterpret_cast<const char*>(pname)) > 0;
+            }
+            if (named) {
+                if (this.pm_n_ >= this.pm_cap_) {
+                    this.grow_params();
+                }
+                unsafe {
+                    this.pm_name_[this.pm_n_] = pname;
+                    this.pm_lt_[this.pm_n_] = kind;
+                    this.pm_ltn_[this.pm_n_] = lname;
+                }
+                this.pm_n_ = this.pm_n_ + 1;
+            }
+            j = j + 1;
+        }
+        // The function-level scope.
+        this.push_scope();
+        this.cur_blk_ = this.new_block();
+        long first = -1;
+        unsafe {
+            first = this.sp[body].sstart;
+        }
+        long st = first;
+        while (st >= 0) {
+            this.build_stmt(st);
+            unsafe {
+                st = this.sp[st].next;
+            }
+        }
+        this.pop_scope();
+    }
+
+    void grow_params() {
+        long ncap = this.pm_cap_ * 2 + 64;
+        unsafe {
+            long* q = (long*) __ivy_alloc(ncap * 8);
+            long k = 0;
+            while (k < this.pm_n_) {
+                q[k] = this.pm_name_[k];
+                k = k + 1;
+            }
+            __ivy_free(this.pm_name_);
+            this.pm_name_ = q;
+            long* r = (long*) __ivy_alloc(ncap * 8);
+            k = 0;
+            while (k < this.pm_n_) {
+                r[k] = this.pm_lt_[k];
+                k = k + 1;
+            }
+            __ivy_free(this.pm_lt_);
+            this.pm_lt_ = r;
+            long* t = (long*) __ivy_alloc(ncap * 8);
+            k = 0;
+            while (k < this.pm_n_) {
+                t[k] = this.pm_ltn_[k];
+                k = k + 1;
+            }
+            __ivy_free(this.pm_ltn_);
+            this.pm_ltn_ = t;
+        }
+        this.pm_cap_ = ncap;
+    }
+
+    // The name of a declared lifetime of the HIR function.
+    const char* hir_lt_name(long i) {
+        unsafe {
+            return reinterpret_cast<const char*>(this.hlt[i]);
+        }
+        return "";
+    }
+
+    // The entry point: build() in mir_builder.cpp.
+    void build() {
+        long i = 0;
+        long n = 0;
+        unsafe {
+            n = this.hu.fn_n;
+        }
+        while (i < n) {
+            long fi = this.mu.fn_n;
+            long pstart = -1;
+            long pn = 0;
+            long body = -1;
+            long name = 0;
+            long retlt = 0;
+            long externc = 0;
+            unsafe {
+                name = (long) this.hu.fns[i].name;
+                retlt = (long) this.hu.fns[i].return_lifetime;
+                externc = this.hu.fns[i].is_extern_c;
+                pstart = this.hu.fns[i].pstart;
+                pn = this.hu.fns[i].pn;
+                body = this.hu.fns[i].body;
+                this.mu.fns[fi].name = reinterpret_cast<const char*>(name);
+                this.mu.fns[fi].ret = this.hu.fns[i].ret;
+                this.mu.fns[fi].is_extern_c = externc;
+                this.mu.fns[fi].return_lifetime = reinterpret_cast<const char*>(retlt);
+                this.mu.fns[fi].has_body = body >= 0 ? 1 : 0;
+                this.mu.fns[fi].pstart = this.mu.pa_n;
+                this.mu.fns[fi].pn = pn;
+                this.mu.fns[fi].lt_start = -1;
+                this.mu.fns[fi].lt_n = 0;
+                this.mu.fns[fi].block_start = -1;
+                this.mu.fns[fi].block_n = 0;
+            }
+            // The parameters.
+            long j = 0;
+            while (j < pn) {
+                long mp = this.add_param(pstart + j);
+                j = j + 1;
+                if (mp < 0) {
+                    break;
+                }
+            }
+            // The declared lifetimes are copied by build_function: the
+            // oracle fills them there, so a function without a body has
+            // none (the dump prints the `lifetimes:` line only for the
+            // functions that have a body).
+            this.mu.fn_n = fi + 1;
+            // The body is built after the function was pushed, so that the
+            // functions keep the order of the HIR.
+            if (body >= 0) {
+                this.build_function(fi);
+            }
+            i = i + 1;
+        }
+    }
+
+    long add_param(long hidx) {
+        long i = this.mu.pa_n;
+        if (i >= this.mu.pa_cap) {
+            this.grow_mparams();
+        }
+        unsafe {
+            this.mu.params[i].type = this.hp[hidx].type;
+            this.mu.params[i].name = this.hp[hidx].name;
+            this.mu.params[i].lt = this.hp[hidx].lt;
+            this.mu.params[i].line = this.hp[hidx].line;
+            this.mu.params[i].col = this.hp[hidx].col;
+        }
+        this.mu.pa_n = i + 1;
+        return i;
+    }
+
+    long add_lifetime(const char* name) {
+        long i = this.mu.lt_n;
+        if (i >= this.mu.lt_cap) {
+            this.grow_lts();
+        }
+        unsafe {
+            this.mu.lts[i].kind = 1;
+            this.mu.lts[i].name = name;
+        }
+        this.mu.lt_n = i + 1;
+        return i;
+    }
+};

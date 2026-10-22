@@ -1,0 +1,6 @@
+// H5.1 rule: move borrows the lifetime of its argument (phase-3 probe: r09_lt_move).
+#pragma ivy cnumber
+void f() {
+    int32 x = 1;
+    int32 y = move(x);
+}

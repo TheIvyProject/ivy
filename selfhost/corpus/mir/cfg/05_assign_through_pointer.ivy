@@ -1,0 +1,9 @@
+// H5.1 rule: an assignment through a pointer (phase-3 probe: s25_assign_through_ptr).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 0;
+        int32* p = &x;
+        *p = 5;
+    }
+}

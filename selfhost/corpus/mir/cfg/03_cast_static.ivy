@@ -1,0 +1,4 @@
+// H5.1 rule: a static_cast to another integer width (phase-1 fixture: 41_cast).
+int64 f() {
+    return static_cast<int64>(1);
+}

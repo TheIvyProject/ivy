@@ -1,0 +1,7 @@
+// H5.1 rule: a string literal has the static lifetime (phase-3 probe: r06_lt_static_string).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        const char* s = "text";
+    }
+}

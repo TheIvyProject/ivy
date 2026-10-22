@@ -1,0 +1,8 @@
+// H5.1 rule: a reinterpret_cast inside an unsafe block (phase-3 probe: e10_cast_reinterpret).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 65;
+        const char* p = reinterpret_cast<const char*>(&x);
+    }
+}

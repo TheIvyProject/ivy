@@ -1,0 +1,5 @@
+// H5.1 rule: the return of a local: the ident of the local in the ret (phase-1 fixture: 04_local_init).
+int32 f() {
+    int32 x = 7;
+    return x;
+}

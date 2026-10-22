@@ -1,0 +1,10 @@
+// H5.1 rule: a call in a condition (phase-3 probe: c06_call_in_condition).
+bool g() {
+    return true;
+}
+bool f() {
+    if (g()) {
+        return true;
+    }
+    return false;
+}

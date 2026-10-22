@@ -1,0 +1,7 @@
+// H5.1 rule: a call with a nested call at argument position 1 (phase-5 probe: f01_nested_arg_pos1).
+int32 add(int32 a, int32 b) {
+    return a + b;
+}
+int32 f() {
+    return add(1, add(2, 3));
+}

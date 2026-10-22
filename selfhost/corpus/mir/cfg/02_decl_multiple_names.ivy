@@ -1,0 +1,4 @@
+// H5.1 rule: a declaration with several names: one alloca per name (phase-1 fixture: 46_multi_decl).
+void f() {
+    int32 a = 1, b = 2;
+}

@@ -1,0 +1,8 @@
+// H5.1 rule: an if with an else: the cont block comes first, then the two branches (phase-3 probe: s02_if_else).
+int32 f(int32 a) {
+    if (a > 0) {
+        return 1;
+    } else {
+        return 2;
+    }
+}

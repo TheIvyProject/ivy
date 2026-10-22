@@ -1,0 +1,4 @@
+// H5.1 rule: a function with many parameters (phase-3 probe: d15_many_params).
+int32 f(int32 a01, int32 a02, int32 a03, int32 a04, int32 a05, int32 a06, int32 a07, int32 a08, int32 a09, int32 a10, int32 a11, int32 a12) {
+    return a01 + a12;
+}

@@ -1,0 +1,7 @@
+// H5.1 rule: a local of type bool (phase-3 probe: e22_bool_local).
+bool f() {
+    bool a = true;
+    bool b = false;
+    bool c = a && b;
+    return c;
+}

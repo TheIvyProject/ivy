@@ -1,0 +1,27 @@
+// H5.1 rule: a long function with many statements and calls (phase-3 probe: r32_many_stmts_with_calls).
+int32 g(int32 x) {
+    return x;
+}
+void f() {
+    int32 r = 0;
+    r = g(1);
+    r = g(2);
+    r = g(3);
+    r = g(4);
+    r = g(5);
+    r = g(6);
+    r = g(7);
+    r = g(8);
+    r = g(9);
+    r = g(10);
+    r = g(11);
+    r = g(12);
+    r = g(13);
+    r = g(14);
+    r = g(15);
+    r = g(16);
+    r = g(17);
+    r = g(18);
+    r = g(19);
+    r = g(20);
+}

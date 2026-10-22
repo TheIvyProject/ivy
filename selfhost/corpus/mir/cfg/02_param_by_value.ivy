@@ -1,0 +1,4 @@
+// H5.1 rule: a by-value parameter (phase-1 fixture: 07_param).
+int32 f(int32 a) {
+    return a;
+}

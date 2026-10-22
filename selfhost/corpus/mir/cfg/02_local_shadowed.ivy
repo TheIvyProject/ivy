@@ -1,0 +1,7 @@
+// H5.1 rule: a shadowed local: the inner scope declares its own binding (phase-1 fixture: 73_scope_shadow).
+void f() {
+    int32 x = 1;
+    {
+        int32 x = 2;
+    }
+}

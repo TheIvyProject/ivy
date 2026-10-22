@@ -300,7 +300,8 @@ src/                              selfhost/
    namespace van chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3,
    template xong o H4.4, ha muc `__ret` + phat sinh destructor/RAII + NRVO +
    struct construction xong o milestone RAII/DTOR, kiem tra *borrow* (MIR)
-   xong o H5.1/H5.2). Move-tracking da port xong o tang HIR (H4.6); con lai
+   xong o H5.2 - H5.1 da xong phan lowering CFG + du lieu lifetime, xem
+   `selfhost/mir/MIR_NOTES.md`). Move-tracking da port xong o tang HIR (H4.6); con lai
    tracking move o tang MIR (H5.2) + bypass `unsafe` (oracle tang HIR khong
    co - xem `selfhost/hir/MOVE_NOTES.md` §1.2/§7.4).
 - H4.2 (follow-up sau khi xac minh lai H4): member access that khong resolve duoc (`->` khong phai con tro, `.` khong phai struct, member khong ton tai) phai khoi phuc bang node mac dinh cua variant HIR (`IntegerLit`, `hir.h:106-109`) chu khong phai node `member` (kind 14) - nhu vay `buildAssign` moi them chan doan thu hai `left-hand side of assignment is not assignable` tai vi tri cua lenh gan; port sua node khoi phuc thanh kind 1 (`IntegerLit`) va them 4 file regression vao `selfhost/corpus/hir/type/` (124 file tong).
@@ -365,7 +366,8 @@ src/                              selfhost/
    constructor da port), `new`/`delete`, lambda, range-for, structured
    binding, namespace (template xong o H4.4; ha muc `__ret` +
    phat sinh destructor/RAII + NRVO + struct construction xong o milestone
-   RAII/DTOR, kiem tra *borrow* (MIR) xong o H5.1/H5.2). Move-tracking da
+   RAII/DTOR, kiem tra *borrow* (MIR) xong o H5.2 - H5.1 da xong phan
+   lowering CFG + du lieu lifetime, xem `selfhost/mir/MIR_NOTES.md`). Move-tracking da
    port xong o tang HIR (H4.6); con lai tracking move o tang MIR (H5.2) +
    bypass `unsafe` (oracle tang HIR khong co).
 - H4.4 (Template instantiation): port phan khoi tao mau (instantiate) cua
@@ -421,9 +423,10 @@ src/                              selfhost/
    co namespace), goi constructor cua mot specialization (`Box<int32>(1)` -
    port chua co constructor resolution/injection; phai goi constructor cua
    mot struct thuong (`W(1)`) cung chua ho tro, nen day la tinh nang
-   constructor chung chu phai rieng cho template), ha muc `__ret` + phat
-   sinh destructor/RAII + NRVO + struct construction (milestone RAII/DTOR),
-   kiem tra *borrow* + suy dien lifetime (MIR) (H5.1/H5.2).
+   constructor chung chu phai rieng cho template), ha muc `__ret` +
+   phat sinh destructor/RAII + NRVO + struct construction (milestone RAII/DTOR),
+   kiem tra *borrow* (MIR) xong o H5.2 (H5.1 da xong phan lowering CFG + du
+   lieu lifetime, xem `selfhost/mir/MIR_NOTES.md`).
 - H4.4 (giai chinh va xac minh lap lai - phase 6/6): xac minh lai toan bo
    24 suite (574 file) + 120 fixture rieng (ngoai corpus) de kiem tra oracle
    parity byte-for-byte, va sua port:
@@ -489,10 +492,12 @@ src/                              selfhost/
    `syntax/x10` (`lifetime<...>` + `template<...>`) **khong con bi loai** nua:
    xem H4.5 (giai chinh) ben duoi - port da reproduce dung 3 chan doan cua
    oracle (bug oracle: `parser.cpp:789` consume '<' hai lan).
-   Con lai (de H5 - MIR): borrow checker (`checkBorrow` aliasing/mutability,
-   `checkReturn` dangling + khop lifetime, `checkStore` dangling store), suy
-   dien lifetime (`mir::Expr::lifetime` Named/Static/Local/Unknown) va MIR
-   dump (` [lt: X]`, `block N`, `alloca`/`eval`/`ret`) - xem H5.1/H5.2;
+   Con lai (de H5.2 - MIR): borrow checker (`checkBorrow` aliasing/mutability,
+   `checkReturn` dangling + khop lifetime, `checkStore` dangling store) va
+   move tracker o tang MIR - xem `selfhost/mir/MIR_NOTES.md` §11.10/§11.11;
+   phan H5.1 da xong: suy dien lifetime (`mir::Expr::lifetime` Named/Static/
+   Local/Unknown) va MIR dump (` [lt: X]`, `block N`, `alloca`/`eval`/`ret`) -
+   corpus `corpus/mir/cfg/` 75 file byte-identical (xem ghi chu H5.1 ben duoi);
    ha muc `__ret` (danh gia bieu thuc tra ve truoc destructor) + phat sinh
    destructor/RAII + NRVO (`returnedLocals_`) + struct construction (can
    khoi tao mau `Res` co destructor) - canh RAII/DTOR milestone (hoac H5).
@@ -531,7 +536,7 @@ src/                              selfhost/
    HCase 24, HParam 88, HFunction 120).
    (6) **MIR-clean**: 45/45 file corpus `hir/borrow` khong co chan doan
    MIR-stage (stdout/stderr tach rieng: 0 file co stderr sau HIR dump).
-   Con lai: xem "Con lai (de H5 - MIR)" o H4.5 ben tren.
+   Con lai: xem "Con lai (de H5.2 - MIR)" o H4.5 ben tren.
 - H4.6 (Move / use-after-move - phan *tracking* o tang HIR): port phan
   tracking move cua `hir_builder.cpp` sang `hir/hir_builder.ivy` (chi file
   nay; `hir/hir.ivy` va `hir/hirdrive.ivy` khong doi - node HIR khong mang
@@ -587,7 +592,9 @@ src/                              selfhost/
   (4 file struct constructor `S s(1);`, 2 file lambda, 1 file C-style cast) -
   xem `selfhost/hir/MOVE_NOTES.md` §12.2 (bang loai + bang chung oracle).
   Con lai (de milestone sau): tracking move o tang **MIR**
-  (`mir_builder.cpp:189-220`, `:471-482`, `:556-584`, `:626-645`) - H5.2;
+  (`mir_builder.cpp:189-220`, `:471-482`, `:556-584`, `:626-645`) - H5.2
+  (H5.1 da xong phan lowering CFG + du lieu lifetime, xem
+  `selfhost/mir/MIR_NOTES.md` §11.10/§11.11);
   bypass `unsafe` (oracle tang HIR **khong co**, chi tang MIR co - `spec/
   ownership.md` §2.6 la aspirational, xem `MOVE_NOTES.md` §7.4); lambda
   (parser port chua co); struct construction `S s(1);` (milestone RAII/DTOR).
@@ -600,6 +607,95 @@ src/                              selfhost/
   `::`, 5 khong phai rule move, 59 near-duplicate) - bang day du trong
   `selfhost/hir/MOVE_NOTES.md` §12.2. Xac minh lai toan bo 25 suite
   (620 file) + suite moi (60 file) = 26 suite / 680 file byte-identical.
+- H5.1 (CFG lowering - HIR -> MIR): port phan tao MIR cua oracle
+  (`src/mir/mir.h`, `src/mir/mir_builder.cpp`, `dumpMir*` cua
+  `src/app/main.cpp`) sang 3 file moi: `selfhost/mir/mir.ivy` (model),
+  `selfhost/mir/mir_builder.ivy` (builder), `selfhost/mir/mirdrive.ivy`
+  (driver `--mir`):
+  (1) **model** - port giu **thu tu alternative** va **so thu tu** cua
+  oracle: `mir::Expr` 20 alternative (0..19), `mir::Inst::Kind` 7 (0..6),
+  `mir::Lifetime::Kind` 5 (None=0, Named=1, Static=2, Local=3,
+  Unknown=4); kich thuoc pool **do bang do** (x86-64): `MExpr` 176,
+   `MInst` 136, `MBlock` 16, `MParam` 80, `MLifetime` 16, `MFunction` 128 -
+  moi `__ivy_alloc` dung dung kich thuoc;
+  (2) **CFG** - `new_block()` / `emit()` / `jump_to()` (khong `jump` sau
+  mot `ret`); **thu tu tao block la chu dau** cua dump: `if` tao `cont`
+  roi `then` roi `else`; `while` tao `condB`, `bodyB`, `exitB`; `for` tao
+  `condB`, `bodyB`, `incrB`, `exitB` (khoi tao `init` build o block hien
+  tai, `incr` la mot `eval` trong block rieng); `switch` tao `exitB` roi
+  mot block cho moi case clause; lenh `switch` **khong in gi** trong dump;
+  (3) **statement** - tat ca 14 dang lenh cua oracle (`compound`, `null`,
+  `decl`, `if`, `while`, `do-while`, `for`, `return`, `break`, `continue`,
+  `nextcase`, `expr-stmt`, `unsafe`, `switch`);
+  (4) **expression** - tat ca 20 dang bieu thuc cua oracle, gom ca
+  `init-list` va 4 kieu `cast` (`static`/`reinterpret`/`const`/`C-style`);
+  (5) **gia gan hop** (`x += 2`) - port mo rong thanh
+  `store lhs, (clone(lhs) op rhs)`: kieu cua `Binary` moi lay theo **ve
+  phai**, `cloneExpr` tao deep copy nen target cua `store` va operand cua
+  `binary` la hai cay doc lap;
+  (6) **du lieu lifetime** - moi bieu thuc mang mot `Lifetime`
+  (`None`/`Named`/`Static`/`Local`/`Unknown`) lay tu HIR: `params_` cho
+  tham so (`Named` neu co chu thich, `Unknown` neu la con tro raw),
+  `scopes_` cho bien cuc bo (theo lifetime cua **bieu thuc khoi tao**),
+  `&<local>` -> `Local`, literal chuoi -> `Static`, moi ham goi (tru
+  `move`) -> `Unknown` (bug oracle `mir_builder.cpp:603` ghi `Unknown` vo
+  dieu kien - port reproduce nguyen ban), `merge` cho ternary; dump in hau
+  to ` [lt: X]` (CO khoang trong sau `lt:`) cho bieu thuc va ` [lt:X]`
+  (**KHONG** co khoang trong) cho tham so;
+  (7) **format dump `--mir`** - `function <ten> [ [extern "C"]]`,
+  `  return <kieu>(<tham so>)`, `  lifetimes: a b`, `  return lifetime: a`,
+  `  block N`, va cac lenh `alloca`/`store`/`eval`/`ret`/`condbranch`/`jump`
+  (+ hau to ` [unsafe]`); `condbranch`/`jump` **khong** in dich;
+  (8) **driver** `selfhost/mir/mirdrive.ivy` - doc danh sach file tu stdin,
+  in marker `=== <path> ===`, chay pipeline `lexer -> preprocessor ->
+  parser -> hir_builder -> mir_builder -> dump`; mot chan doan cua **bat
+  ky** tang thay the **toan bo** dump (oracle in chan doan ra stderr va
+  **khong** in dump - `main.cpp:1317-1323`); exit code 1 khi co chan doan,
+  2 khi khong mo duoc file, 0 ngu.
+   Corpus chinh thuc `selfhost/corpus/mir/cfg/` (75 file, 7 nhom chu de:
+   `01_` ham va `return` (10 file), `02_` bien cuc bo va khai bao (12 file),
+   `03_` bieu thuc (12 file), `04_` ham goi (13 file), `05_` lenh (13 file),
+   `06_` du lieu lifetime (9 file), `07_` hinh dang CFG (6 file)) gom 72
+   fixture cua phase 1 (recon) + phase 3 (222 probe) + 3 fixture regression
+   cua phase 5, bien lai thanh mot bo
+  dedup khong trung, byte-identical vs `ivy --mir`. Lenh:
+  `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/mir/cfg -Kinds all -Oracle --mir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder,mir,mir_builder -ModuleDirs selfhost/parsing,selfhost/hir,selfhost/mir -DriverDir selfhost/mir -Driver mirdrive`.
+  Ghi chu: corpus phai **MIR-clean** - `ivy --mir` **khong** in dump khi tang
+   MIR bao chan doan (stdout 0 byte, stderr = chan doan, exit 1), nen 8
+   fixture co chan doan MIR-stage thuoc ve **H5.2** va khong dua vao corpus
+   H5.1; 75/75 file trong corpus deu co dump that su (stdout > 0 byte).
+   Xac minh lai toan bo 26 suite (684 file) + suite moi (75 file) = 27 suite
+   / 759 file byte-identical.
+
+  Con lai (de H5.2 + cac milestone sau):
+  - **H5.2 (deferred, khong port trong H5.1)**: borrow checker (`checkBorrow`
+    + 3 chan doan, co em dash U+2014), kiem tra lifetime tren `return`
+    (`checkReturn`: dangling reference + lifetime khong khop), `checkStore`
+    (dangling store), **move tracker o tang MIR** (`markMovedOut` /
+    `isMovedOut` / `reinitialize`), va chan doan `nextcase target '<n>' is
+    not a case label in this switch`;
+  - **G7 (tien deu cho H5.2)**: `HStmt` cua port **khong** co `line`/`col`
+    (oracle co `hir::Stmt::loc`), nen chan doan `nextcase` cua port bao o
+    `0:0` thay vi `5:13`; kich thuoc va 5 edit can lam nam trong
+    `selfhost/mir/MIR_NOTES.md` §11.5;
+  - **G1-G6 (gap o tang HIR, chan block phan MIR lowering)**:
+    G1 = **virtual dispatch** - port **khong** hien thuc o tang HIR nen ca
+    `--hir` cung lech (oracle `virtual_call 'speak' slot=0`, port
+    `call 'Animal::speak'`); G2 = `new`/`delete`; G3 = khoi tao struct
+    `S s(1)`; G4 = phat sinh destructor + bien tam `__ret` + NRVO; G5 =
+    init list `{...}`; G6 = `namespace`; bang day du va bang chung oracle
+    trong `selfhost/mir/MIR_NOTES.md` §6.1;
+  - **bug codegen cua oracle** (ghi nhung, KHONG sua `src/**`): (a) mot
+    record local **song qua** mot ham goi tra ve record theo gia tri bi
+    codegen lam hong (sai khung stack) - corpus H5.1 khong co mau do;
+    (b) slot bien cuc bo duoc khoa theo **ten** (khong co scope) nen hai
+    bien cung ten o hai scope dung chung mot slot - `selfhost/mir/MIR_NOTES.md`
+    §11.6;
+  - **bug oracle khac**: `&<bien cuc bo kieu struct>` lam oracle **crash**
+    (0xC0000005) - corpus H5.1 tranh mau do; `sizeof(<bieu thuc>)` va
+    `switch` tren `enum` bi oracle tu choi; kieu C-style (`char`, `double`)
+    can `#pragma ivy cnumber`; kieu co hau to `_t` da bi oracle go bo.
+- H5.1 (follow-up sau khi xac minh lai H5.1): run cua argument cua mot ham goi bi **khong lien tuc** khi mot argument la mot ham goi long nhau (pool `MUnit.args` dung chung, nen run cua ham goi long nhau chen vao giua run cua ham goi ngoai, va tu vi tri argument >= 1 port in ra argument dau tien cua ham goi long nhau thay vi chinh ham goi do) - port sua bang cach **giu truoc** run cua argument (`reserve_args`) roi moi dien tung slot sau khi build xong (`set_arg`), sua cung 2 ban latent (`ex_initlist`, `clone_expr`), sua leak cua `substr1` (gop vao `keep_string`, 1 allocation cho moi string), sua stride cua pool `MParam` (88 -> 80, do la kich thuoc that cua struct, do bang), va them 3 file regression vao `selfhost/corpus/mir/cfg/` (75 file tong).
 
 
 ---
@@ -658,7 +754,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ☐ |
+| H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ✅ byte-identical 75 files |
 | H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ☐ |
 | H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ☐ |
 | H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy` | suite `--run` | ☐ |

@@ -1,0 +1,6 @@
+// H5.1 rule: several locals: one alloca per local, in the declaration order (phase-1 fixture: 06_two_locals).
+int32 f() {
+    int32 x = 1;
+    int32 y = 2;
+    return x + y;
+}

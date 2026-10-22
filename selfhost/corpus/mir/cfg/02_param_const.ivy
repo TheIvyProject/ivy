@@ -1,0 +1,3 @@
+// H5.1 rule: a const parameter (phase-3 probe: d04_param_const).
+void f(const int32 x) {
+}

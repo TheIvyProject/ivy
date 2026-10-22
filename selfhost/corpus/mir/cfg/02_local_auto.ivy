@@ -1,0 +1,5 @@
+// H5.1 rule: an auto local: the alloca carries the deduced type (phase-1 fixture: 52_auto).
+void f() {
+    auto a = 1;
+    auto b = 1.5;
+}

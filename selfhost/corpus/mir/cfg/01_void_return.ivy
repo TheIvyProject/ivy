@@ -1,0 +1,4 @@
+// H5.1 rule: a bare return: a ret instruction with no value (phase-1 fixture: 02_return_void).
+void f() {
+    return;
+}

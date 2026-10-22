@@ -130,6 +130,18 @@
 #      so a MIR-stage diagnostic would be printed after the HIR dump and
 #      could never match the HIR-only port)
 #
+# MIR features use the MIR oracle (`--mir`) and the mir driver:
+#   H5.1 (CFG lowering - HIR -> MIR: the MIR model, the basic blocks, the
+#     statement and the expression lowering, the compound-assignment
+#     expansion, the lifetime *data* and the `--mir` dump format):
+#     -Dir selfhost/corpus/mir/cfg -Kinds all -Oracle --mir
+#     -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder,mir,mir_builder
+#     -ModuleDirs selfhost/parsing,selfhost/hir,selfhost/mir -DriverDir selfhost/mir
+#     -Driver mirdrive
+#     (the corpus must stay MIR-clean: `ivy --mir` prints NO dump when the MIR
+#      stage reports a diagnostic, so a fixture with a MIR-stage diagnostic
+#      belongs to the H5.2 corpus, not to H5.1)
+#
 # The comparison is byte-exact: both sides are captured as raw bytes, the
 # lines are filtered at byte level and the two byte arrays are compared.
 # Only the line terminator is normalized (CR LF -> LF).  An earlier version

@@ -343,11 +343,14 @@ struct HDumper {
             if (s.a >= 0) {
                 this.dump_expr(s.a, depth + 1);
             }
-            long j = 0;
-            while (j < s.sn) {
+            // The clauses of a switch are a linked list (a switch that is
+            // nested in a case body pushes its own clauses into the same
+            // pool, so the pool order and the source order differ).
+            long j = s.sstart;
+            while (j >= 0) {
                 HCase c;
                 unsafe {
-                    c = this.cp[s.sstart + j];
+                    c = this.cp[j];
                 }
                 this.pad(depth);
                 if (c.value >= 0) {
@@ -363,7 +366,9 @@ struct HDumper {
                         k = this.sp[k].next;
                     }
                 }
-                j = j + 1;
+                unsafe {
+                    j = c.next;
+                }
             }
             return;
         }

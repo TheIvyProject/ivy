@@ -1,0 +1,9 @@
+// H5.1 rule: the prefix and the postfix increment and decrement (phase-3 probe: e06_unary_incdec).
+int32 f() {
+    int32 x = 1;
+    x++;
+    ++x;
+    x--;
+    --x;
+    return x;
+}

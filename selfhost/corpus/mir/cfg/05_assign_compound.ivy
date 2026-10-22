@@ -1,0 +1,14 @@
+// H5.1 rule: the compound assignments: the store and the expanded binary (phase-3 probe: s22_assign_compound).
+void f() {
+    int32 x = 1;
+    x += 2;
+    x -= 1;
+    x *= 3;
+    x /= 2;
+    x %= 2;
+    x &= 7;
+    x |= 8;
+    x ^= 9;
+    x <<= 1;
+    x >>= 1;
+}

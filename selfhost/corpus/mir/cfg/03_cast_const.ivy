@@ -1,0 +1,10 @@
+// H5.1 rule: a const_cast (phase-3 probe: e11_cast_const).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 1;
+        const int32* p = &x;
+        int32* q = const_cast<int32*>(p);
+        *q = 2;
+    }
+}

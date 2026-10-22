@@ -1,0 +1,11 @@
+// H5.1 rule: a switch with a default: the switch instruction itself prints nothing (phase-3 probe: s10_switch_int).
+int32 f(int32 a) {
+    switch (a) {
+        case 1:
+            return 10;
+        case 2:
+            return 20;
+        default:
+            return 0;
+    }
+}

@@ -1,0 +1,9 @@
+// H5.1 rule: returning a struct by value: no NRVO temporary without a destructor (phase-1 fixture: 60_return_struct).
+struct Point {
+    int32 x;
+};
+
+Point f() {
+    Point p;
+    return p;
+}

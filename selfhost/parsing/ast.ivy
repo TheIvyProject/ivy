@@ -290,10 +290,27 @@ export struct AStmt {
 };
 
 // A `case`/`default` clause of a switch statement. `value` is the case
-// expression pool index, or -1 for `default`. `sstart`/`sn` delimit the
-// clause body stmt indices in the stmt-stack pool.
+// expression pool index, or -1 for `default`. `sstart` is the index of the
+// first statement of the clause body (the body is a chain of statements
+// linked by their `next` field).
+//
+// `next` is the index of the next clause of the SAME switch (-1 for the
+// last one).  The clauses of a switch are a linked list and not a
+// contiguous run of the pool: a switch that is nested in a case body pushes
+// its own clauses into the same pool, so the pool order and the source
+// order differ.
+//
+// `label` is the A6 case label of `case LABEL: value:` (the empty string
+// when the clause carries no label).  The oracle keeps it in
+// `ast::Stmt::CaseClause::caseLabel` and the HIR builder copies it into
+// `hir::Stmt::CaseClause::caseLabel`, where the MIR builder uses it to
+// resolve `nextcase LABEL;`.  The label is interned by the parser, so the
+// pointer stays valid for the whole parse.
+//
+// sizeof(ACase): value(8) + sstart(8) + next(8) + label(8) = 32 bytes.
 export struct ACase {
     long value;
     long sstart;
-    long sn;
+    long next;
+    const char* label;
 };

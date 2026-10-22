@@ -1,0 +1,10 @@
+// H5.1 rule: a call with a nested call at the last position of a three-argument call (phase-5 probe: f02_nested_arg_last).
+int32 add(int32 a, int32 b) {
+    return a + b;
+}
+int32 add3(int32 a, int32 b, int32 c) {
+    return a + b + c;
+}
+int32 f() {
+    return add3(1, 2, add(3, 4));
+}

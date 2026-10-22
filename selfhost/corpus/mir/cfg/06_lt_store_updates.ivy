@@ -1,0 +1,10 @@
+// H5.1 rule: a store into a local updates the lifetime of the local (phase-3 probe: r07_lt_store_updates).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32* q = nullptr;
+        q = p;
+    }
+}

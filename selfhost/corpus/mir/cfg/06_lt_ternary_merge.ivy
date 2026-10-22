@@ -1,0 +1,9 @@
+// H5.1 rule: the lifetime of a ternary is the merge of the branches (phase-3 probe: r10_lt_ternary).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        const char* a = "x";
+        const char* b = "y";
+        const char* c = true ? a : b;
+    }
+}

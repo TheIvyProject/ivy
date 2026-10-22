@@ -1,0 +1,7 @@
+// H5.1 rule: a call with one argument (phase-3 probe: c02_call_one).
+int32 g(int32 x) {
+    return x;
+}
+int32 f() {
+    return g(1);
+}

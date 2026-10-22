@@ -1,0 +1,7 @@
+// H5.1 rule: the return of a call: the call keeps the unknown lifetime (phase-1 fixture: 11_call).
+int32 g() {
+    return 1;
+}
+int32 f() {
+    return g();
+}

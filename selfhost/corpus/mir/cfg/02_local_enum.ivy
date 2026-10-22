@@ -1,0 +1,11 @@
+// H5.1 rule: a local of an enum type, initialised with an enum constant (phase-1 fixture: 56_enum_const).
+enum Color {
+    Red,
+    Green,
+    Blue
+};
+
+int32 f() {
+    Color c = Red;
+    return 1;
+}

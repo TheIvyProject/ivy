@@ -1,0 +1,6 @@
+// H5.1 rule: the boolean operators and the short circuit (phase-3 probe: e04_bool_logic).
+bool f(int32 a, int32 b) {
+    bool p = a > b;
+    bool q = a < b;
+    return p && q || !p;
+}

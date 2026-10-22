@@ -1,0 +1,4 @@
+// H5.1 rule: a constant return value (phase-1 fixture: 03_return_const).
+int32 f() {
+    return 42;
+}

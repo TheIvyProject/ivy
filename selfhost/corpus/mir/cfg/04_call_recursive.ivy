@@ -1,0 +1,7 @@
+// H5.1 rule: a recursive call (phase-3 probe: c15_call_recursive).
+int32 fact(int32 n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}

@@ -1,0 +1,5 @@
+// H5.1 rule: a ternary with nested branches (phase-3 probe: e08_ternary_nested).
+int32 f(int32 a) {
+    int32 r = a > 0 ? (a > 10 ? 2 : 1) : (a < -10 ? -2 : -1);
+    return r;
+}

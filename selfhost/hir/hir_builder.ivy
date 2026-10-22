@@ -284,7 +284,7 @@ export struct HirBuilder {
             this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * 88);
             this.u.p_n = 0;
             this.u.c_cap = ntoks + 16;
-            this.u.cases = (HCase*) __ivy_alloc(this.u.c_cap * 24);
+            this.u.cases = (HCase*) __ivy_alloc(this.u.c_cap * 32);
             this.u.c_n = 0;
             this.u.a_cap = ntoks * 4 + 64;
             this.u.args = (long*) __ivy_alloc(this.u.a_cap * 8);
@@ -2097,6 +2097,11 @@ export struct HirBuilder {
         return i;
     }
 
+    // Append a case clause to the HIR case pool.  The pool is never full in
+    // practice (its capacity is the token count plus 16 and every clause
+    // needs at least three tokens), but when it is, the clause is NOT
+    // recorded and -1 is returned: the caller must not link it (the index
+    // would point past the end of the pool).
     long push_hcase(HCase c) {
         long i = this.u.c_n;
         if (i < this.u.c_cap) {
@@ -2104,8 +2109,9 @@ export struct HirBuilder {
                 this.u.cases[i] = c;
             }
             this.u.c_n = i + 1;
+            return i;
         }
-        return i;
+        return -1;
     }
 
     HExpr new_expr(long kind, long line, long col) {
@@ -3433,9 +3439,14 @@ export struct HirBuilder {
         long cstart = this.u.c_n;
         long ncases = 0;
         long has_default = 0;
-        long j = 0;
-        while (j < a.sn) {
-            ACase ac = this.pa.get_case(a.sstart + j);
+        // The head and the tail of the list of the clauses of this switch.
+        long head = -1;
+        long prev = -1;
+        // The clauses of the AST are a linked list (a switch that is nested
+        // in a case body pushes its own clauses into the same pool).
+        long j = a.sstart;
+        while (j >= 0) {
+            ACase ac = this.pa.get_case(j);
             long value = -1;
             if (ac.value >= 0) {
                 value = this.build_expr(ac.value);
@@ -3471,14 +3482,28 @@ export struct HirBuilder {
             HCase hc;
             hc.value = value;
             hc.sstart = first;
-            hc.sn = count;
-            this.push_hcase(hc);
-            ncases = ncases + 1;
-            j = j + 1;
+            hc.next = -1;
+            // A6: the case label of `case LABEL: value:` (the empty string
+            // when the clause carries no label).  The MIR builder resolves
+            // `nextcase LABEL;` with it.
+            hc.label = ac.label;
+            long ci = this.push_hcase(hc);
+            if (ci >= 0) {
+                if (prev < 0) {
+                    head = ci;
+                } else {
+                    unsafe {
+                        this.u.cases[prev].next = ci;
+                    }
+                }
+                prev = ci;
+                ncases = ncases + 1;
+            }
+            j = ac.next;
         }
         HStmt s = this.new_stmt(14, a.line, a.col);
         s.a = cond;
-        s.sstart = cstart;
+        s.sstart = head;
         s.sn = ncases;
         return this.push_stmt(s);
     }

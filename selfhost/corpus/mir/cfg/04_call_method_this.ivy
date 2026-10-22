@@ -1,0 +1,12 @@
+// H5.1 rule: a method called on a local: the this parameter is the first one (phase-3 probe: c10_call_method_this).
+struct Counter {
+    int32 n;
+    int32 get() {
+        return this.n;
+    }
+};
+int32 f() {
+    Counter c;
+    c.n = 5;
+    return c.get();
+}

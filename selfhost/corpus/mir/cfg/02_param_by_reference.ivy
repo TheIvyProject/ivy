@@ -1,0 +1,4 @@
+// H5.1 rule: a by-reference parameter: the reference marks the parameter type (phase-1 fixture: 08_param_ref).
+int32 f(const int32& a) {
+    return a;
+}

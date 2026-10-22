@@ -1,0 +1,7 @@
+// H5.1 rule: a nested call nested two levels deep in a non-first position (phase-5 probe: f03_nested_arg_two_levels).
+int32 add(int32 a, int32 b) {
+    return a + b;
+}
+int32 f() {
+    return add(add(1, add(2, 3)), add(4, 5));
+}

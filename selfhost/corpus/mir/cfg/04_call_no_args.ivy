@@ -1,0 +1,7 @@
+// H5.1 rule: a call without arguments (phase-3 probe: c01_call_zero).
+int32 g() {
+    return 42;
+}
+int32 f() {
+    return g();
+}

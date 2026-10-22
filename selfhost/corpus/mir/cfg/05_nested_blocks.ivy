@@ -1,0 +1,9 @@
+// H5.1 rule: a nested block: the compound pushes and pops a scope (phase-1 fixture: 20_nested_block).
+int32 f() {
+    int32 x = 1;
+    {
+        int32 y = 2;
+        x = y;
+    }
+    return x;
+}

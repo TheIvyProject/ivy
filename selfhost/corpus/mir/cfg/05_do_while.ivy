@@ -1,0 +1,7 @@
+// H5.1 rule: a do-while loop: the body block comes before the condition block (phase-3 probe: s06_dowhile).
+void f(int32 n) {
+    int32 i = 0;
+    do {
+        i = i + 1;
+    } while (i < n);
+}

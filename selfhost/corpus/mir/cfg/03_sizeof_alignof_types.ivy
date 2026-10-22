@@ -1,0 +1,12 @@
+// H5.1 rule: sizeof and alignof of the types: they are folded to integer literals at the HIR stage (phase-1 fixture: 76_sizeof).
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+int32 f() {
+    int32 a = sizeof(int32);
+    int32 b = sizeof(Point);
+    int32 c = alignof(int32);
+    return a;
+}

@@ -1,0 +1,18 @@
+// H5.1 rule: a deeply nested control flow: the blocks are numbered in the creation order (phase-3 probe: x02_deep_nesting).
+void f(int32 n) {
+    if (n > 0) {
+        while (n > 1) {
+            for (int32 i = 0; i < n; i = i + 1) {
+                if (i > 2) {
+                    switch (i) {
+                        case 3:
+                            break;
+                        default:
+                            continue;
+                    }
+                }
+            }
+            n = n - 1;
+        }
+    }
+}

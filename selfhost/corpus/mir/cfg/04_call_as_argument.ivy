@@ -1,0 +1,7 @@
+// H5.1 rule: a call as a call argument: the arguments are pushed innermost first (phase-1 fixture: 91_nested_call_arg).
+int32 g(int32 a) {
+    return a;
+}
+int32 f() {
+    return g(g(1));
+}

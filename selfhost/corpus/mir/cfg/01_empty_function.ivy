@@ -1,0 +1,3 @@
+// H5.1 rule: an empty body: the entry block is created and stays empty (phase-1 fixture: 01_empty).
+void f() {
+}

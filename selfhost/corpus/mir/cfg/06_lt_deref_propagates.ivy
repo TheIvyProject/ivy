@@ -1,0 +1,9 @@
+// H5.1 rule: the dereference of a pointer inherits its lifetime (phase-3 probe: p07_lt_deref).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        int32 x = 1;
+        int32* p = &x;
+        int32 y = *p;
+    }
+}

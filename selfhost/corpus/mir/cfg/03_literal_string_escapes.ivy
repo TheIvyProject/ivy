@@ -1,0 +1,9 @@
+// H5.1 rule: a string literal with the escapes: the raw text is kept in the dump (phase-3 probe: r22_string_escapes).
+#pragma ivy cnumber
+void f() {
+    unsafe {
+        const char* a = "a\nb";
+        const char* b = "c\td";
+        const char* c = "e\\f";
+    }
+}

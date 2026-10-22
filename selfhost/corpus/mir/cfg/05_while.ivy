@@ -1,0 +1,7 @@
+// H5.1 rule: a while loop: the condition block, the body block and the exit block (phase-3 probe: s05_while).
+void f(int32 n) {
+    int32 i = 0;
+    while (i < n) {
+        i = i + 1;
+    }
+}

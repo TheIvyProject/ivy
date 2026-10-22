@@ -1,0 +1,7 @@
+// H5.1 rule: a call with many arguments (phase-3 probe: c03_call_many).
+int32 g(int32 a, int32 b, int32 c, int32 d, int32 e) {
+    return a + b + c + d + e;
+}
+int32 f() {
+    return g(1, 2, 3, 4, 5);
+}

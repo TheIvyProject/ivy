@@ -1,0 +1,5 @@
+// H5.1 rule: arithmetic on the mixed integer widths: the int64 and the uint64 operands (phase-3 probe: p23_wide_ints).
+int64 f(int64 a, uint64 b) {
+    int64 c = a + b;
+    return c;
+}

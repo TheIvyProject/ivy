@@ -1,0 +1,11 @@
+// H5.1 rule: several functions in one unit: the order of the dump is the HIR order (phase-3 probe: x08_multi_function).
+int32 a() {
+    return 1;
+}
+int32 b(int32 x) {
+    return x;
+}
+int32 c() {
+    int32 y = 1;
+    return y;
+}

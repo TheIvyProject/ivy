@@ -1,0 +1,3 @@
+// H5.1 rule: a declaration without a body: the function has no block at all (phase-3 probe: d14_decl_only).
+int32 f(int32 x);
+int32 g();
