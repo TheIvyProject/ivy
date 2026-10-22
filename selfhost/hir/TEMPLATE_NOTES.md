@@ -3,7 +3,7 @@
 **Milestone:** H4.4 (Template instantiation) — Ivy self-host port.
 **Author:** RECONNAISSANCE agent (phase 1 of 6).
 **Date:** 2026-10-21.
-**Oracle:** `build\Release\ivy.exe` (2026-10-16). **Never rebuilt.** All statements below
+**Oracle:** `build\Release\ivy.exe` (2026-10-21 16:41:44). **Never rebuilt.** All statements below
 were verified by running that binary (`ivy --hir <file>`) on throw-away fixtures in
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h44recon\`.
 **Corpus:** `C:\Users\ASUS\AppData\Local\Temp\opencode\h44recon\corpus\` (12 canonical
@@ -43,6 +43,12 @@ The C++ oracle is the specification. The three code regions that define all of H
 | Parser: template-id call | `src/parsing/parser.cpp:2779-2831` |
 | Parser: template-id *type* | `src/parsing/parser.cpp:388-390` and `:430-432` |
 | Lexer: `>>` is ONE token | `src/parsing/lexer.cpp:115` (`{">>", TokenKind::Shr}`) |
+
+**Re-verified (H4 follow-up, 2026-10-22):** the `>>` citation above is 1-based and
+correct — `src/parsing/lexer.cpp:115` is `{">>", TokenKind::Shr}` and `:116` is
+`{"+=", TokenKind::PlusAssign}` (the file was created at commit `71ff6f0` and
+changed in three later commits; the `>>` entry moved between lines 77 and 115,
+and `:115` is correct at the current HEAD).  The `+=` entry is `:116`, not `:115`.
 
 **The oracle's HIR dump only prints `tu.functions`** (`main.cpp:578`). Structs and enums are
 *never* printed. Therefore a class-template specialization is visible in the dump **only
@@ -768,10 +774,12 @@ Risks:
   shares the pool pointer (fine — the pool is append-only, and the C++ AST does the same
   with `std::vector<Type>` by value).
 * the self-host `AType` has no `arraySize`-like template slot today; check that
-  `same_type` (`hir_builder.ivy:2758`) still ignores template args, exactly like
+  `same_type` (`hir_builder.ivy:3761`) ignores template args, exactly like
   `ast::Type::operator==`… **no**: `ast::Type::operator==` *does* compare `tplArgs`
-  (`src/parsing/ast.h:45`). The self-host `same_type` says "minus template arguments" —
-  the port must add the `tplArgs` comparison or the overload resolution will differ.
+  (`src/parsing/ast.h:45`). The self-host `same_type` said "minus template arguments" —
+  the port had to add the `tplArgs` comparison or the overload resolution would differ.
+  **Resolved in phase 4**: `same_type` now compares `tpl_n` and the template arguments
+  (`hir_builder.ivy:3767-3778`, see L5).
 
 ### Phase 3 — function templates
 
@@ -992,7 +1000,7 @@ AST records themselves (`AFunction.tpl_params`, `AType.tpl_args`, …).
 
 ### 14.3 Why `AType` still has 48 bytes
 
-`selfhost/hir/hir_builder.ivy:152` allocates the scope-type pool with a
+`selfhost/hir/hir_builder.ivy:295` allocates the scope-type pool with a
 hard-coded 48-byte stride (`__ivy_alloc(this.s_cap_ * 48)`) and that file
 must not be touched in phase 2. `AType` therefore could not grow: the three
 qualifier flags became `bool` (1 byte each — this also matches
@@ -1268,11 +1276,11 @@ had that behaviour, no change was needed.
 
 | # | Landmine | Fix |
 |---|---|---|
-| L1 | `ty_empty()` left the new `AType.tpl_args` / `AType.tpl_n` fields uninitialised (`__ivy_alloc` is `malloc`) — every `AType` the port creates had a garbage `tpl_n` | `hir_builder.ivy:967` — `ty_empty()` now sets `tpl_args = 0` and `tpl_n = 0`. Every `AType` the port builds goes through `ty_empty()` (directly or through `ty_int()`/`ty_void()`/…), so this one place covers all of them. |
-| L2 | `get_expr()`'s fallback path built an `AExpr` without initialising `tpl_args` / `tpl_n` | `hir_builder.ivy:1781` — the fallback now sets them. |
+| L1 | `ty_empty()` left the new `AType.tpl_args` / `AType.tpl_n` fields uninitialised (`__ivy_alloc` is `malloc`) — every `AType` the port creates had a garbage `tpl_n` | `hir_builder.ivy:1168` — `ty_empty()` now sets `tpl_args = 0` and `tpl_n = 0`. Every `AType` the port builds goes through `ty_empty()` (directly or through `ty_int()`/`ty_void()`/…), so this one place covers all of them. |
+| L2 | `get_expr()`'s fallback path built an `AExpr` without initialising `tpl_args` / `tpl_n` | `hir_builder.ivy:2144` — the fallback now sets them. |
 | L3 | The local `AFunction` / `AField` copies (lines 976/1023/1202-1204/1234-1235/1409 of the old file) | **No change needed**: they are copies of the parser's records, and the parser initialises the new fields (`parse_type`, `empty_type`, `fresh`, `push_method_record`). Verified — the port reads `tpl_n` only on records that come from the parser. |
 | L4 | `AType` in `ATemplateParam` (`ATemplateParam.type`) | **No change needed**: the parser's `parse_template_params` initialises it with `empty_type()`. |
-| L5 | `same_type` ignored the template arguments (the C++'s `ast::Type::operator==` compares them) | `hir_builder.ivy:2936` — `same_type` now compares `tpl_n` and the argument lists recursively. |
+| L5 | `same_type` ignored the template arguments (the C++'s `ast::Type::operator==` compares them) | `hir_builder.ivy:3761` — `same_type` now compares `tpl_n` and the argument lists recursively. |
 
 ### 15.5 Divergences from phase 1's notes
 

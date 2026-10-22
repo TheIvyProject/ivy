@@ -1,0 +1,6 @@
+// A member access on a non-struct value cannot be assigned to: the
+// failed member access is not an assignable left-hand side.
+void f() {
+    int32 x = 1;
+    x.y = 2;
+}

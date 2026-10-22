@@ -3657,6 +3657,25 @@ export struct HirBuilder {
         return this.push_expr(e);
     }
 
+    // The recovery node for a member access that failed to resolve (the
+    // `->` on a non-pointer, the member access on a non-struct and the
+    // unknown member).  The oracle (src/hir/hir_builder.cpp:3550-3577)
+    // reports the diagnostic and then returns the default-constructed
+    // `hir::Expr` with only `out->type = dummyType()` set - the node
+    // variant keeps its default alternative, which is `IntegerLit` (the
+    // first alternative of the variant, src/hir/hir.h:106-109).  The
+    // recovered expression is therefore NOT a member expression, so
+    // `build_assign` sees a non-assignable left-hand side and emits the
+    // second diagnostic ("left-hand side of assignment is not assignable")
+    // at the assignment's location.  The port must reproduce that node
+    // kind exactly: kind 1 is the port's integer literal.  A member node
+    // (kind 14) here would swallow the second diagnostic.
+    HExpr failed_member(long line, long col) {
+        HExpr bad = this.new_expr(1, line, col);
+        bad.type = this.ty_dummy();
+        return bad;
+    }
+
     long build_member(AExpr a) {
         if (a.flag == 0 && a.is_scope != 0) {
             this.db_start_ = this.db_n_;
@@ -3691,11 +3710,7 @@ export struct HirBuilder {
         if (a.flag != 0) {
             if (bt.ptr_depth == 0) {
                 this.err_arrow(a.line, a.col, bt);
-                HExpr bad = this.new_expr(14, a.line, a.col);
-                bad.sval = a.sval;
-                bad.flag = a.flag;
-                bad.a = base;
-                bad.type = this.ty_dummy();
+                HExpr bad = this.failed_member(a.line, a.col);
                 return this.push_expr(bad);
             }
             bt.ptr_depth = bt.ptr_depth - 1;
@@ -3705,21 +3720,13 @@ export struct HirBuilder {
         long si = this.find_struct(bt.base);
         if (si < 0) {
             this.err_not_struct(a.line, a.col, bt, "access member", a.sval);
-            HExpr bad = this.new_expr(14, a.line, a.col);
-            bad.sval = a.sval;
-            bad.flag = a.flag;
-            bad.a = base;
-            bad.type = this.ty_dummy();
+            HExpr bad = this.failed_member(a.line, a.col);
             return this.push_expr(bad);
         }
         AStruct sd = this.get_struct(si);
         if (this.lookup_field(sd, a.sval) == 0) {
             this.err_no_member(a.line, a.col, sd.name, a.sval);
-            HExpr bad = this.new_expr(14, a.line, a.col);
-            bad.sval = a.sval;
-            bad.flag = a.flag;
-            bad.a = base;
-            bad.type = this.ty_dummy();
+            HExpr bad = this.failed_member(a.line, a.col);
             return this.push_expr(bad);
         }
         AField f = this.found_field_;

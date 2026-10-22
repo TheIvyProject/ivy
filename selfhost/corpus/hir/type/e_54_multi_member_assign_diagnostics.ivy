@@ -1,0 +1,14 @@
+// Several failed member assignments are reported in build order: each
+// member diagnostic comes first, then the assignability diagnostic of
+// the assignment that follows it.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    int32 x = 1;
+    x.y = 2;
+    x->z = 3;
+    Point p;
+    p.w += 1;
+}

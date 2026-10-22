@@ -2216,7 +2216,7 @@ The port mirrors `lowerLifetimeAttributes` (`src/hir/hir_builder.cpp:217`) and
 ### 1.1 The declared lifetime list of a function
 
 `HirBuilder::lower_lifetime_attributes(AFunction af)`
-(`selfhost/hir/hir_builder.ivy:2603`):
+(`selfhost/hir/hir_builder.ivy:2681`):
 
 1. the **native** `lifetime<$a, $b>` names, in declaration order; a name that is
    already in the list is a duplicate (`duplicate lifetime '$a'`, at the
@@ -2243,7 +2243,7 @@ The result is stored in the HIR function record as a run of names in the
 ### 1.2 The lifetime of a parameter
 
 `HirBuilder::lower_param_attribute(long lt_start, long lt_n, AParam ap)`
-(`selfhost/hir/hir_builder.ivy:2673`):
+(`selfhost/hir/hir_builder.ivy:2751`):
 
 1. the **native** `$a` wins over the legacy form (the oracle short-circuits the
    legacy path);
@@ -2365,8 +2365,8 @@ HUnit     = ... + ltnames(8) lt_n(8)                                = +16
 
 | file:line | allocation | old | new |
 |------------|-----------|-----|-----|
-| `selfhost/hir/hir_builder.ivy:265` | `this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * N)` | 96 | **120** |
-| `selfhost/hir/hir_builder.ivy:274` | `this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * N)` | 80 | **88** |
+| `selfhost/hir/hir_builder.ivy:275` | `this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * N)` | 96 | **120** |
+| `selfhost/hir/hir_builder.ivy:284` | `this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * N)` | 80 | **88** |
 
 No other stride changed:
 
@@ -2521,8 +2521,8 @@ BYTE-IDENTICAL: True
 
 (524 bytes compared byte by byte for `syntax/x22_ptr_ret_no_lt.ivy`.)
 
-The em dash is at `selfhost/hir/hir_builder.ivy:2592`
-(`err_ptr_ret_no_lt`):
+The em dash is at `selfhost/hir/hir_builder.ivy:2668` (in `err_ptr_ret_no_lt`,
+`selfhost/hir/hir_builder.ivy:2664`):
 
 ```c
         this.db_put("' returns a pointer but has no return lifetime — ");
@@ -2708,13 +2708,25 @@ bookkeeping).
 **Repo:** `D:\project\Ivy\ivyc`  (drive **D:**).
 **HEAD at time of writing:** `17c68cf` (unchanged - nothing was committed).
 **Files changed by this phase:** `selfhost/corpus/hir/borrow/**` (new, 44
-files), `selfhost/difftest.ps1` (header comment only, **no behaviour
-change**), `PLAN.md` and this file.  **No production code was touched**:
+files - historical, the corpus has 45 files today), `selfhost/difftest.ps1`
+(header comment only, **no behaviour change**), `PLAN.md` and this file.
+**No production code was touched**:
 `selfhost/hir/{hir,hir_builder,hirdrive}.ivy` and `selfhost/parsing/**` are
 exactly as phase 3 left them.
 
 Phase 4 changes **no lifetime semantics**.  It only turns the validated
 fixtures of phases 1-3 into the official corpus and does the bookkeeping.
+
+> **Historical (phase 4) - partly superseded (H4 follow-up, 2026-10-22).**
+> The phase-4 text below is kept as the record of that phase.  Two facts have
+> changed since and are marked in place:
+> * the harness `selfhost/difftest.ps1` is **byte-exact** now - it no longer
+>   writes the expected/actual files with an **ASCII** encoding but captures
+>   both sides as raw bytes, so the em dash is compared as the real UTF-8
+>   bytes (`E2 80 94`) on both sides (see section 3.3);
+> * the H4.5 corpus `selfhost/corpus/hir/borrow/` has **45** files today
+>   (phase 4 committed all 45 of them, `e_13_lifetime_then_template.ivy`
+>   included; the notes draft was written when the corpus still had 44).
 
 ---
 
@@ -2737,7 +2749,7 @@ no `cd` was used.  `C:` was used only for the scratch fixtures under
 
 ---
 
-## 1. The corpus: 44 files, 6 topic groups + the error group
+## 1. The corpus: 44 files (historical - 45 today), 6 topic groups + the error group
 
 `selfhost/corpus/hir/borrow/` - every file is self-contained, deterministic
 and free of any temp path.  The prefix groups by topic; the `e_` prefix
@@ -2965,8 +2977,8 @@ prefix.
 ### 2.6 Near-duplicates of a file that is already in the corpus
 
 The remaining 86 candidates of the two source corpora are the *same rules*
-as the 44 corpus files (the recon's `syntax/x01`..`x44` and the phase-3
-`p01`..`p43` are largely pairwise identical).  The mapping:
+as the 44 corpus files (historical - 45 today; the recon's `syntax/x01`..`x44`
+and the phase-3 `p01`..`p43` are largely pairwise identical).  The mapping:
 
 | recon / phase-3 fixture | corpus file |
 |--------------------------|-------------|
@@ -3028,6 +3040,10 @@ PS> powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/borrow -Kind
 PASS: identical (filtered) output on 44 files
 ```
 
+(The transcript above is the **historical** phase-4 run: 44 corpus files.  The
+suite has **45** files today; the harness itself is unchanged except that it is
+byte-exact now - see section 3.3.)
+
 ### 3.2 The 24 other suites (nothing else changed)
 
 | suite | files | result |
@@ -3065,6 +3081,14 @@ With the new suite: **25 suites, 618 files, all byte-identical.**
 
 ### 3.3 A note on the em dash and the harness
 
+> **Historical (phase 4) - superseded (H4 follow-up, 2026-10-22).**  The harness is
+> **byte-exact** now: it captures both sides as raw bytes (`Get-ByteLines` /
+> `Join-ByteLines` in `selfhost/difftest.ps1`) and compares them byte by byte, so the
+> em dash is compared as the real UTF-8 bytes and the ASCII folding to `?` described
+> below no longer happens.  The text below is kept as the record of the phase-4
+> behaviour; the separate raw-byte check it describes is still the right way to
+> inspect the bytes by hand.
+
 `difftest.ps1` writes both the expected and the actual file with an
 **ASCII** encoding, so the em dash of diagnostic 10 is folded to `?` on
 both sides.  The comparison is still meaningful (a different number of
@@ -3090,7 +3114,7 @@ mojibake - the pitfall described in section 6 of the phase-3 notes).
 * `PLAN.md` -
   * the H4.5 row of the mapping table is now
     `| H4.5 | Borrow / lifetime check | ... | ✅ byte-identical 44 files |`
-    (the real number of corpus files);
+    (the real number of corpus files - the row says **45** files today);
   * a new **H4.5 note** in the "Hiện trạng" section describes the whole
     feature set (the native and the legacy syntax, the precedence rules,
     the 10 HIR-stage diagnostics, the three dump lines), the corpus, the

@@ -270,7 +270,7 @@ src/                              selfhost/
   `file:line:col: error: <message>` theo thu tu build (file co chan doan thi
   khong dump HIR). Bo sung `AType.array_size` + `AStruct.bases` (ke thua),
   `HExpr.line/col`, va float literal trong parser (render `%g` 6 chu so
-  nhu `ostream << double`). Corpus `selfhost/corpus/hir/type/` (120 file)
+  nhu `ostream << double`). Corpus `selfhost/corpus/hir/type/` (124 file)
   byte-identical vs `ivy --hir`. Lenh:
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/hir/type -Kinds all -Oracle --hir -Modules token,lexer,preprocessor,ast,parser,hir,hir_builder -ModuleDirs selfhost/parsing,selfhost/hir -DriverDir selfhost/hir -Driver hirdrive`.
   Ghi chu: oracle crash khi toan nhan tren struct (dang ky dung `lt` sau
@@ -294,7 +294,7 @@ src/                              selfhost/
   ke ca ke thua); method/operator cua base class cung duoc tim thay;
   (5) parser tu choi kieu `signed` don le (oracle: "expected a type"),
   dung nhu `unsigned`/`const` don le.
-   Corpus bo sung 9 file (120 file tong). Con lai: aggregate init, goi
+   Corpus bo sung 9 file (124 file tong). Con lai: aggregate init, goi
    constructor/destructor (constructor injection; phan *khai bao* cua
    constructor da port), `new`/`delete`, lambda, range-for,
    namespace van chua port (de milestone sau; `sizeof`/`alignof` xong o H4.3,
@@ -303,6 +303,7 @@ src/                              selfhost/
    xong o H5.1/H5.2). Move-tracking da port xong o tang HIR (H4.6); con lai
    tracking move o tang MIR (H5.2) + bypass `unsafe` (oracle tang HIR khong
    co - xem `selfhost/hir/MOVE_NOTES.md` §1.2/§7.4).
+- H4.2 (follow-up sau khi xac minh lai H4): member access that khong resolve duoc (`->` khong phai con tro, `.` khong phai struct, member khong ton tai) phai khoi phuc bang node mac dinh cua variant HIR (`IntegerLit`, `hir.h:106-109`) chu khong phai node `member` (kind 14) - nhu vay `buildAssign` moi them chan doan thu hai `left-hand side of assignment is not assignable` tai vi tri cua lenh gan; port sua node khoi phuc thanh kind 1 (`IntegerLit`) va them 4 file regression vao `selfhost/corpus/hir/type/` (124 file tong).
 - H4.3 (Constexpr folding): port phan fold hang so cua `hir_builder.cpp`
   sang `hir/hir_builder.ivy` (va `hir/hir.ivy`):
   (1) `sizeof`/`alignof` fold thanh integer literal (`typeSize`/
@@ -647,7 +648,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
 | H4.1 | Name resolution | `hir_builder.cpp`, `hir.h` | `hir/hir_builder.ivy`, `hir/hir.ivy` | `corpus/hir/name` | ✅ byte-identical 27 files |
-| H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 120 files |
+| H4.2 | Type checking | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/type` | ✅ byte-identical 124 files |
 | H4.3 | constexpr folding | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/constexpr` | ✅ byte-identical 70 files |
 | H4.4 | Template instantiation | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/template` | ✅ byte-identical 99 files |
 | H4.5 | Borrow / lifetime check | `hir_builder.cpp` | `hir/hir_builder.ivy` | `corpus/hir/borrow` | ✅ byte-identical 45 files |

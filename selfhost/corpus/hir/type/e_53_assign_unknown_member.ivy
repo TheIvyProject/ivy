@@ -1,0 +1,10 @@
+// A compound assignment to an unknown member of a struct: the failed
+// member access is not an assignable left-hand side.
+struct Point {
+    int32 x;
+};
+
+void f() {
+    Point y;
+    y.w += 1;
+}
