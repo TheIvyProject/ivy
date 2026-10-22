@@ -175,7 +175,7 @@ src/                              selfhost/
   Ghi chu: mang `const char**` (chan doan) bi loi codegen Ivy khi ghi >=2 phan
   tu, nen `Parser.dmsg_` dung `long*` + `reinterpret_cast<const char*>`.
 - H3.3 (Statement / control flow): port parser statement + control flow, dump
-  body AST byte-identical on `selfhost/corpus/parser/stmt/` (15 file) vs
+  body AST byte-identical on `selfhost/corpus/parser/stmt/` (18 file) vs
   `ivy --ast` (decl + multi-declarator (desugar compound), if/else, if
   constexpr, while, do-while, for (init decl/expr/null, cond, incr), break,
   continue, switch/case/default, nextcase, unsafe, nested block). Con cho
@@ -237,6 +237,29 @@ src/                              selfhost/
   `powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/parser/err -Kinds all -Oracle --ast -Modules token,lexer,preprocessor,ast,parser -Driver astdrive`.
   Ghi chu: thu tu build phai la `ast` truoc `parser` (parser `import ast;`);
   cac lenh H3.x da cap nhat theo thu tu nay.
+- H3.3 (follow-up sau khi xac minh lai H3): run argument cua **direct-init /
+  constructor-style declaration** (`Type var(args);`) bi **khong lien tuc**
+  khi mot argument la mot ham goi long nhau. `parse_declarator` ghi
+  `argstart = ca_n_` roi `push_carg` tung argument **trong khi parse**, nen
+  call con chen argument cua no vao cung pool `cargs_` truoc argument cua run
+  ngoai; run `[argstart, argstart+n)` chi dung khi call long nhau nam o vi tri
+  0 (`Pair p(f(1), 2);` -> run argument ngoai thanh `[int 1, f-call, int 2]`
+  voi `an = 3` thay vi `[f-call, int 2]` voi `an = 2`, tuc argument `int 1`
+  cua call long nhau bi day len dau run ngoai). Da sua
+  bang cach **stage** argument vao danh sach moc noi `argn_idx_`/`argn_next_`
+  (giong `parse_call_args`) roi moi copy thanh run lien tuc sau khi parse
+  xong; khong hardcode fixture. Ra soat ca parser cho cung lop loi (run start
+  `*_n_` ghi trong khi element co the push cung pool): `parse_call_args` (da
+  dung), direct-init (da sua), template argument list (`argstack_` +
+  `take_args`, da dung), compound/switch (dung `next` linked list),
+  field/method/enum/template-param/attribute/param/lifetime/concept-
+  requirement pools (khong co nested push cung pool trong luc parse - khong
+  reachable), braced init list (parser chua ho tro, roi vao `parse_primary`
+  error - khong co run). Them 3 file regression vao
+  `selfhost/corpus/parser/stmt/` (16/17/18, tong 18 file): call long nhau o
+  vi tri 1, vi tri cuoi cua direct-init 3 argument, va call long nhau 2 tang
+  o vi tri khong phai dau; ca 3 fail voi parser truoc khi sua va
+  byte-identical sau khi sua.
 - H4.1 (Name resolution): port buoc phan giai ten cua `hir_builder.cpp` sang
   `hir/hir.ivy`, `hir/hir_builder.ivy`, `hir/hirdrive.ivy`: khai bao scope
   (function/compound/for), shadowing, lookup local/param, enum constant
@@ -532,8 +555,8 @@ src/                              selfhost/
    AAttr 40, ALifetime 8, ALifetimeList 16, ALegacyLifetime 40,
    ALegacyLifetimeList 16, AParam 128, ATemplateParam 96, AField 72,
    AEnumerator 32, AStruct 96, AFunction 200, AEnum 96, AAlias 56,
-   AConcept 48, AExpr 168, AStmt 136, ACase 24, HExpr 144, HStmt 120,
-   HCase 24, HParam 88, HFunction 120).
+   AConcept 48, AExpr 168, AStmt 136, ACase 32, HExpr 144, HStmt 120,
+   HCase 32, HParam 88, HFunction 120).
    (6) **MIR-clean**: 45/45 file corpus `hir/borrow` khong co chan doan
    MIR-stage (stdout/stderr tach rieng: 0 file co stderr sau HIR dump).
    Con lai: xem "Con lai (de H5.2 - MIR)" o H4.5 ben tren.
@@ -664,8 +687,8 @@ src/                              selfhost/
    MIR bao chan doan (stdout 0 byte, stderr = chan doan, exit 1), nen 8
    fixture co chan doan MIR-stage thuoc ve **H5.2** va khong dua vao corpus
    H5.1; 75/75 file trong corpus deu co dump that su (stdout > 0 byte).
-   Xac minh lai toan bo 26 suite (684 file) + suite moi (75 file) = 27 suite
-   / 759 file byte-identical.
+   Xac minh lai toan bo 26 suite (687 file) + suite moi (75 file) = 27 suite
+   / 762 file byte-identical.
 
   Con lai (de H5.2 + cac milestone sau):
   - **H5.2 (deferred, khong port trong H5.1)**: borrow checker (`checkBorrow`
@@ -733,7 +756,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 |-----|-----------|---------|----------|--------|-----------|
 | H3.1 | Declaration (var/type/func) | `parser.cpp`, `ast.h` | `parsing/parser.ivy`, `parsing/ast.ivy` | `corpus/parser/decl` | ✅ byte-identical 15 files |
 | H3.2 | Expression + precedence | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/expr` | ✅ byte-identical 13 files |
-| H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 15 files |
+| H3.3 | Statement / control flow | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/stmt` | ✅ byte-identical 18 files |
 | H3.4 | Struct / enum / class | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/aggregate` | ✅ byte-identical 14 files |
 | H3.5 | Template / concept | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/template` | ✅ byte-identical 16 files |
 | H3.6 | Module / `import` / `import cpp` | `parser.cpp` | `parsing/parser.ivy` | `corpus/parser/module` | ✅ byte-identical 16 files |

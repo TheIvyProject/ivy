@@ -2538,7 +2538,9 @@ Every `__ivy_alloc` in `selfhost/parsing/parser.ivy` and
 `long` 8, `double` 8, `bool` = `i1` = 1 byte with alignment 1, every other
 member aligned to 8).  The sizes were also confirmed **empirically** with a
 `sizeof` probe through the oracle itself (`sizeof` of a record with the same
-field sequence) — every record has the size the code assumes:
+field sequence) — every record has the size the code assumes.  The table
+records the **H4.4-era** record sizes; for current sizes see `PLAN.md` and
+`selfhost/mir/MIR_NOTES.md`.
 
 | record | size | record | size |
 |---|---|---|---|

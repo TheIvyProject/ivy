@@ -3150,7 +3150,7 @@ parser, the hir and the mir groups have one each).  The shared
 | H2.7 | pp/no_include | 9 | PASS |
 | H3.1 | parser/decl | 15 | PASS |
 | H3.2 | parser/expr | 13 | PASS |
-| H3.3 | parser/stmt | 15 | PASS |
+| H3.3 | parser/stmt | 18 | PASS |
 | H3.4 | parser/aggregate | 14 | PASS |
 | H3.5 | parser/template | 16 | PASS |
 | H3.6 | parser/module | 16 | PASS |
@@ -3163,9 +3163,10 @@ parser, the hir and the mir groups have one each).  The shared
 | H4.6 | hir/move | 60 | PASS |
 | H5.1 | mir/cfg | 75 | PASS |
 
-**27 / 27 suites PASS, 759 / 759 files** (684 of the 26 pre-existing suites
+**27 / 27 suites PASS, 762 / 762 files** (687 of the 26 pre-existing suites
 + the 75 files of the H5.1 corpus, of which 72 are the phase-4 ones and 3
-are the new phase-5 regression fixtures).
+are the new phase-5 regression fixtures; the 687 include the 3 direct-init
+argument-run regression fixtures added to `parser/stmt`).
 
 The **75 files of the MIR corpus were also re-verified individually** with a
 raw byte capture (`cmd /c "... > f.bin 2> f.bin"`, the oracle's stdout and

@@ -3249,17 +3249,51 @@ export struct Parser {
             callee.col = this.peek(0).col;
             callee.sval = t.base;
             call.a = this.push_expr(callee);
-            long argstart = this.ca_n_;
-            call.astart = argstart;
+            // Stage the argument expressions in a linked list before copying
+            // them into the shared call-argument pool.  An argument may itself
+            // be a call (or contain one), and such a call pushes its own
+            // arguments into the same pool while it is parsed; recording the
+            // run start and appending as we go would leave the enclosing run
+            // non-contiguous.  Mirrors parse_call_args.
+            long head = -1;
+            long tail = -1;
             while (!this.at(")") && !this.at("eof")) {
                 long arg = this.parse_expr();
-                this.push_carg(arg);
+                if (this.argn_n_ < this.argn_cap_) {
+                    long node = this.argn_n_;
+                    unsafe {
+                        this.argn_idx_[node] = arg;
+                        this.argn_next_[node] = -1;
+                    }
+                    if (tail >= 0) {
+                        unsafe {
+                            this.argn_next_[tail] = node;
+                        }
+                    } else {
+                        head = node;
+                    }
+                    tail = node;
+                    this.argn_n_ = node + 1;
+                }
                 if (this.at(",")) {
                     this.next();
                 } else {
                     break;
                 }
             }
+            long argstart = this.ca_n_;
+            long cur = head;
+            while (cur >= 0) {
+                long idx = -1;
+                long nxt = -1;
+                unsafe {
+                    idx = this.argn_idx_[cur];
+                    nxt = this.argn_next_[cur];
+                }
+                this.push_carg(idx);
+                cur = nxt;
+            }
+            call.astart = argstart;
             call.an = this.ca_n_ - argstart;
             this.expect(")", "expected ')' after constructor arguments");
             s.a = this.push_expr(call);

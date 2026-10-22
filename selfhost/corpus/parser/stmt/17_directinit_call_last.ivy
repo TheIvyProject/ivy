@@ -1,0 +1,14 @@
+struct Triple {
+    int32 a;
+    int32 b;
+    int32 c;
+    Triple(int32 x, int32 y, int32 z) { }
+};
+
+int32 f(int32 x) {
+    return x;
+}
+
+void h() {
+    Triple t(1, 2, f(3));
+}
