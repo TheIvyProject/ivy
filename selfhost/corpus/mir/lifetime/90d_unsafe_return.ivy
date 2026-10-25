@@ -1,0 +1,6 @@
+fn f() -> const int32& {
+    int32 x = 1;
+    unsafe {
+        return x;
+    }
+}

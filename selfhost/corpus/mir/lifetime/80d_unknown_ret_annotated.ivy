@@ -1,0 +1,6 @@
+const int32& g();
+
+lifetime<$a>
+fn f(const int32& $a p) -> const int32& $a {
+    return g();
+}

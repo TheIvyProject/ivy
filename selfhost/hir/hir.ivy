@@ -44,6 +44,8 @@ export struct HStmt {
     long sstart;        // first child stmt index
     long sn;            // child stmt count
     long next;          // next sibling stmt index (-1)
+    long line;          // source line of the statement (G7: MIR diagnostics)
+    long col;           // source column of the statement
 };
 
 // A switch case clause: `value` is an expression index or -1 for default.

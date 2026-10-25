@@ -1,0 +1,9 @@
+// nextcase with a label inside an unlabeled switch.
+int32 f(int32 a) {
+    switch (a) {
+        case 1:
+            nextcase outer;
+        default:
+            return 0;
+    }
+}

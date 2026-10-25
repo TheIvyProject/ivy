@@ -1,0 +1,5 @@
+const int32& g();
+
+fn f() -> const int32& {
+    return g();
+}

@@ -1987,9 +1987,10 @@ visible from a nested loop (this is the oracle's behaviour, verified by
 reports the `nextcase` diagnostic with **the location of the statement**:
 `error(s.loc, "nextcase target '" + ... + "' is not a case label in this
 switch")` (`src/mir/mir_builder.cpp:915`).  The port's `HStmt`
-(`selfhost/hir/hir.ivy:36-47`) has **no** `line`/`col` field, so the port
-has no location to report and passes `0, 0` to `diag()`
-(`selfhost/mir/mir_builder.ivy:1988`).
+(`selfhost/hir/hir.ivy:36-47`) had **no** `line`/`col` field, so before
+H5.2 the port had no location to report and passed `0, 0` to `diag()`
+(then at `selfhost/mir/mir_builder.ivy:1988`; H5.2 added the fields and the
+call now passes the statement location at `:2723`).
 
 **Where the location comes from in the oracle.**  The AST statement's
 `loc` is the position of the **first token of the statement**
@@ -2007,8 +2008,8 @@ start.line; s.col = start.col;` where `start = this.peek(0)`).
 
 **And the port's HIR builder already passes the location around**: the
 helper `HStmt new_stmt(long kind, long line, long col)`
-(`selfhost/hir/hir_builder.ivy:2129`) receives the AST statement's
-`a.line`/`a.col` at **every** call site (21 call sites, all of the form
+(`selfhost/hir/hir_builder.ivy:2135`) receives the AST statement's
+`a.line`/`a.col` at **every** call site (19 call sites, all of the form
 `this.new_stmt(<kind>, a.line, a.col)`) - the two parameters are simply
 **discarded**.
 
@@ -2017,9 +2018,9 @@ helper `HStmt new_stmt(long kind, long line, long col)`
 | # | change | file | the impact |
 |---|---|---|---|
 | 1 | add `long line; long col;` to `HStmt` | `selfhost/hir/hir.ivy:36-47` | the record grows from **120** to **136** bytes (measured, see below) |
-| 2 | `s.line = line; s.col = col;` in `new_stmt` | `selfhost/hir/hir_builder.ivy:2129-2142` | - |
+| 2 | `s.line = line; s.col = col;` in `new_stmt` | `selfhost/hir/hir_builder.ivy:2135-2150` | - |
 | 3 | the statement pool: `* 120` -> `* 136` | `selfhost/hir/hir_builder.ivy:281` | the HIR statement pool grows by 13% (`st_cap = ntoks * 3 + 128`) |
-| 4 | the `nextcase` diagnostic: `this.diag(this.sp[idx].line, this.sp[idx].col, ...)` | `selfhost/mir/mir_builder.ivy:1988` | the location of fixture `61_nextcase_label` becomes `5:13` |
+| 4 | the `nextcase` diagnostic: `this.diag(line, col, ...)` after reading `this.sp[idx].line`/`.col` | `selfhost/mir/mir_builder.ivy:2710-2723` | the location of fixture `61_nextcase_label` is `5:13` (verified in H5.2) |
 | 5 | (for the H5.2 checks) the location of the instructions: the oracle uses `s.loc` for every `emit` (`src/mir/mir_builder.cpp:726`, `:793`, `:844`, `:861`, `:873`, `:925`), the port uses the location of the *expression* | `selfhost/mir/mir_builder.ivy` (`st_decl`, `st_return`, `st_exprstmt`, `st_if`, `st_while`, `st_dowhile`, `st_for`, `st_switch`) | the location is **not printed** by the `--mir` dump, so the dump does not change |
 
 **The measured sizes** (x86-64, the port's convention; the measurement
@@ -3074,10 +3075,11 @@ inventory of 12.2 and the counts of 12.3 were updated.
 
 `MIR_NOTES.md` cited `selfhost/mir/mir_builder.ivy:1957` for the
 `this.diag(0, 0, ...)` call of the `nextcase` diagnostic (in 11.5 and in the
-G7 table).  The call is at **`mir_builder.ivy:1988`** in the current file;
-the cited `:1957` was the `unsafe {` of the preceding `db_put` in the file
-as it was when the note was written (the file has shifted since - the
-phase-5 edits moved the line).  Both citations were corrected.
+G7 table).  The call was at `:1988` when phase 5 ended; H5.2 (G7) reads the
+statement location at **`:2710-2715`** and calls `diag` at **`:2723`** in the
+current file; the cited `:1957` was the `unsafe {` of the preceding `db_put`
+in the file as it was when the note was written (the file has shifted since -
+the phase-5 edits moved the line).  All citations were corrected.
 
 While the phase-5 edits were made, **9 further drifted citations** into the
 files that this phase touched (`mir_builder.ivy`, `parser.ivy`,
@@ -3207,3 +3209,80 @@ as before (no regression).
   written, and no `opencode.db*` was accessed anywhere on the machine.  The
   only path used under the user's profile was the pre-approved scratch
   directory `C:\Users\ASUS\AppData\Local\Temp\opencode\h51fix\`.
+
+---
+
+## 14. H5.2 - the borrow / return / store / move checks, G7, and the lifetime corpus
+
+**Scope.**  H5.2 ports the oracle checks of `src/mir/mir_builder.cpp`
+(`checkBorrow` `:315-362`, called from `:514` / `:738`; `checkReturn`
+`:228-291`; `checkStore` `:298-307`; the move tracker `:190-220`)
+and the G7 location plumbing.  The state is per function:
+
+* `BorrowState` (`mir_builder.ivy:44`, 24 B): `name`, `shared_count`,
+  `has_mutable`; appended on first use, so the scan of `check_borrow`
+  (`:1091`) goes innermost -> outermost and the permanent `&x` entries from
+  `ex_unary` end up outermost.
+* `ActiveRef` (`:54`, 32 B): `ref_var`, `source_var`, `is_mutable`,
+  `released`; a stack pushed by `push_scope` (`:808`) and truncated by
+  `release_borrows_in_scope` (`:1201`) in `pop_scope` (`:869`).
+* `MoveState` (`:63`, 16 B): `name`, `state`; innermost-scope emplace
+  (`add_move_state` `:1266`, no overwrite), queried by `is_moved_out`
+  (`:1325`).
+
+The arrays are allocated in `setup` (`bs_cap_ = u.st_n + 64` at `:664-677`,
+strides 24/32/16) and freed once in `release()` (`:745-748`); they are reset
+per function in `build_function` (`:3115`).  `seq_p` (`:2959`) is the string
+comparison helper (the port binds no `strcmp` here).
+
+**Diagnostics.**  Messages 1-3 in `check_borrow`, 4-7 in `check_return`
+(`:1365`), 8 in `check_store` (`:1467`); messages 1-3 contain the literal em
+dash U+2014 (`E2 80 94`, confirmed by a hex dump of the runtime bytes).  The
+position is the statement's `HStmt.line/col` for `st_decl` (`:2301`),
+`st_return` (`:2372`), `st_exprstmt` (`:2396`) and `st_nextcase`; the
+expression's for `ex_ident` (`:1782`) and `ex_unary` (`:1824`).
+
+**Call sites.**  `st_decl` (check + register + move emplace), `st_return`
+(`check_return`), `st_exprstmt` (`check_store` after `update_local_lt`),
+`ex_ident` (use-after-move, bypassed in an assignment LHS and in `unsafe`),
+`ex_unary` `&x` (count only, never register), `ex_call` (`move(x)`: message
+10 then mark; the result lifetime comes from the argument), `ex_assign`
+(`in_assign_lhs_` around the LHS; `reinitialize` on `=` to a bare ident).
+
+The two `nextcase` fixtures derived from the legacy `q02` / `q15` sources
+use the §7 names `61b_nextcase_in_loop.ivy` / `61c_nextcase_to_default.ivy`.
+The other six legacy fixtures keep their original names.
+
+**Unreachable at MIR.**  `check_store` (message 8) and messages 9-10 cannot
+be reached through `--mir`: the HIR builder rejects the same programs first
+(H52_NOTES 9.1).  They are ported for fidelity but have no fixture; the
+corpus pins messages 1-7 and 11 only.
+
+**G7.**  `HStmt` gained `long line; long col;` (`hir.ivy:47-48`); the
+statement pool stride went 120 -> 136 (`hir_builder.ivy:281`), `new_stmt`
+(`:2135-2150`) stores them, and `st_nextcase` (`mir_builder.ivy:2710-2723`)
+reports them.  Measured: `sizeof(HStmt) == 136`; the three nextcase
+fixtures report `5:13`, `6:17`, `6:13` (oracle-identical).
+
+**Verification.**
+* **28 / 28 suites PASS, 780 / 780 files** (H1 46, H2 105, H3 111, H4 425,
+  H5.1 75, H5.2 18).
+* The 18 lifetime fixtures were also checked individually with raw bytes:
+  **18 / 18 identical** (stdout and stderr captured separately, exit code
+included).  The 13 diagnostic fixtures have oracle stdout 0 / stderr =
+   the message / exit 1; the 5 dump fixtures have stdout > 0 / exit 0.  The
+  port's stderr is always 0 (the driver prints diagnostics on stdout).
+* The 75 cfg fixtures re-checked raw: **75 / 75 byte-identical, exit 0** -
+  no H5.1 regression.
+* Pre-fix, the 8 legacy fixtures fail with exactly the recorded output
+  (`H52_NOTES.md` 6): five print a dump, the three `nextcase` ones print
+  the message at `0:0`.
+* The byte counts of the 18 files in H52_NOTES 7 were measured with absolute
+  paths; the corpus run uses relative paths, so its counts are smaller by
+  the per-line path prefix.  The message content is identical.
+
+**Bookkeeping.**  This file's 11.5 citations are fixed (19 call sites;
+`new_stmt` `:2135-2150`; nextcase `diag` `:2710-2723`); `PLAN.md` has the
+H5.2 row and the counts.  `src/**` is untouched, the oracle was not rebuilt
+(size 27031552, mtime `2026-10-21 16:41:44`), `selfhost/difftest.ps1` is
+untouched, and no commit was made.

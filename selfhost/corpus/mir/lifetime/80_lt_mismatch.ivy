@@ -1,0 +1,5 @@
+// A lifetime mismatch at the MIR stage.
+lifetime<$a, $b>
+fn f(const int32& $a x) -> const int32& $b {
+    return x;
+}

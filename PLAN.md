@@ -690,17 +690,19 @@ src/                              selfhost/
    Xac minh lai toan bo 26 suite (687 file) + suite moi (75 file) = 27 suite
    / 762 file byte-identical.
 
-  Con lai (de H5.2 + cac milestone sau):
-  - **H5.2 (deferred, khong port trong H5.1)**: borrow checker (`checkBorrow`
-    + 3 chan doan, co em dash U+2014), kiem tra lifetime tren `return`
-    (`checkReturn`: dangling reference + lifetime khong khop), `checkStore`
-    (dangling store), **move tracker o tang MIR** (`markMovedOut` /
-    `isMovedOut` / `reinitialize`), va chan doan `nextcase target '<n>' is
-    not a case label in this switch`;
-  - **G7 (tien deu cho H5.2)**: `HStmt` cua port **khong** co `line`/`col`
-    (oracle co `hir::Stmt::loc`), nen chan doan `nextcase` cua port bao o
-    `0:0` thay vi `5:13`; kich thuoc va 5 edit can lam nam trong
-    `selfhost/mir/MIR_NOTES.md` §11.5;
+   H5.2 (da xong): borrow/return/store/move + G7, corpus
+   `selfhost/corpus/mir/lifetime` 18 file byte-identical; `HStmt` 120 -> 136
+   byte; **28 suite / 780 file** byte-identical (26 suite 687 file + 75 cfg +
+   18 lifetime).  Chi tiet o `selfhost/mir/MIR_NOTES.md` §14.
+
+  Con lai (cac milestone sau):
+  - **H5.2 (da xong)**: borrow checker (`checkBorrow` + 3 chan doan, co em
+    dash U+2014), lifetime tren `return` (`checkReturn`), `checkStore`,
+    move tracker o MIR, va G7 (`HStmt.line/col`, `nextcase` bao dung `L:C`);
+    corpus `corpus/mir/lifetime` 18 file (8 legacy + 10 moi), xem
+    `selfhost/mir/MIR_NOTES.md` §14; `checkStore` va move o MIR khong the
+    cham qua `--mir` (HIR chan truoc, `H52_NOTES.md` §9.1) nen khong co
+    fixture;
   - **G1-G6 (gap o tang HIR, chan block phan MIR lowering)**:
     G1 = **virtual dispatch** - port **khong** hien thuc o tang HIR nen ca
     `--hir` cung lech (oracle `virtual_call 'speak' slot=0`, port
@@ -778,7 +780,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
 | H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ✅ byte-identical 75 files |
-| H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ☐ |
+| H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ✅ byte-identical 18 files (+ G7 `HStmt.line/col`) |
 | H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ☐ |
 | H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy` | suite `--run` | ☐ |
 

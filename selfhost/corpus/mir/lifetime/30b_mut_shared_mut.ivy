@@ -1,0 +1,6 @@
+void f() {
+    int32 x = 1;
+    int32& a = x;
+    const int32& b = x;
+    int32& c = x;
+}

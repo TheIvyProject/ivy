@@ -278,7 +278,7 @@ export struct HirBuilder {
             this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 144);
             this.u.ex_n = 0;
             this.u.st_cap = ntoks * 3 + 128;
-            this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 120);
+            this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 136);
             this.u.st_n = 0;
             this.u.p_cap = ntoks * 2 + 64;
             this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * 88);
@@ -2144,6 +2144,8 @@ export struct HirBuilder {
         s.sstart = -1;
         s.sn = 0;
         s.next = -1;
+        s.line = line;
+        s.col = col;
         return s;
     }
 

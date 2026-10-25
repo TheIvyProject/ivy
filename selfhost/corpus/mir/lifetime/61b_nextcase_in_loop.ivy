@@ -1,0 +1,12 @@
+// A labelled nextcase inside a loop inside a switch.
+void f(int32 a, int32 b) {
+    switch (a) {
+        case one: 1:
+            for (int32 i = 0; i < b; i = i + 1) {
+                nextcase one;
+            }
+            break;
+        default:
+            break;
+    }
+}

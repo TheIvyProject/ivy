@@ -39,6 +39,32 @@ import mir;
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 
+// The borrow state of one variable (`BorrowState` of src/mir/mir_builder.cpp).
+// The fields are the name, the shared-borrow count and the mutable flag.
+export struct BorrowState {
+    const char* name;
+    long shared_count;
+    long has_mutable;
+};
+
+// One active reference binding (`ActiveRef` of src/mir/mir_builder.cpp): the
+// reference variable, the variable it borrows, the mutability and the
+// released flag.  The oracle clears `refVar` on release; the port keeps the
+// name and uses the flag (a scope is released at most once).
+export struct ActiveRef {
+    const char* ref_var;
+    const char* source_var;
+    long is_mutable;
+    long released;
+};
+
+// The move state of one binding (`MoveState` of src/mir/mir_builder.cpp):
+// 0 = Initialized, 1 = MovedOut.
+export struct MoveState {
+    const char* name;
+    long state;
+};
+
 export struct MirBuilder {
     // The HIR unit and its pools.  The HIR builder owns them; the MIR
     // builder only reads them.
@@ -77,6 +103,39 @@ export struct MirBuilder {
     long* pm_ltn_;       // (long) const char* - the lifetime names
     long pm_n_;
     long pm_cap_;
+
+    // The borrow checker (B1 in the oracle): one flat pool of borrow states
+    // plus the depth of the borrow scopes.  The oracle keeps one map per
+    // scope, but a state is only ever created through `checkBorrow` and that
+    // fallback always creates it in the *outermost* scope, so the flat pool
+    // is equivalent (see the note in check_borrow).
+    BorrowState* bs_;
+    long bs_n_;
+    long bs_cap_;
+    long bsc_n_;         // the number of open borrow scopes
+
+    // The active reference bindings: one flat pool, released per scope.  The
+    // scope stack (`ars_`) marks the first entry of every scope, like the
+    // lifetime scope stack.
+    ActiveRef* ar_;
+    long ar_n_;
+    long ar_cap_;
+    long* ars_;          // the active-ref scope stack
+    long ars_n_;
+    long ars_cap_;
+
+    // The move tracker (B3 in the oracle): one flat pool and one scope stack
+    // (the oracle keeps one map per scope).
+    MoveState* mv_;
+    long mv_n_;
+    long mv_cap_;
+    long* mvs_;          // the move-state scope stack
+    long mvs_n_;
+    long mvs_cap_;
+
+    // True while the left-hand side of an assignment is built; it bypasses
+    // the use-after-move check (the assignment re-initializes the variable).
+    long in_assign_lhs_;
 
     // The loop context stack: the condition block, the increment block and
     // the exit block of every enclosing loop (a switch pushes a context
@@ -600,6 +659,29 @@ export struct MirBuilder {
             this.pm_ltn_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
             this.pm_n_ = 0;
 
+            // The borrow states (24 bytes each, measured), the active
+            // references (32 bytes) and the move states (16 bytes).
+            this.bs_cap_ = u.st_n + 64;
+            this.bs_ = (BorrowState*) __ivy_alloc(this.bs_cap_ * 24);
+            this.bs_n_ = 0;
+            this.bsc_n_ = 0;
+
+            this.ar_cap_ = u.st_n + 64;
+            this.ar_ = (ActiveRef*) __ivy_alloc(this.ar_cap_ * 32);
+            this.ar_n_ = 0;
+            this.ars_cap_ = u.st_n + 64;
+            this.ars_ = (long*) __ivy_alloc(this.ars_cap_ * 8);
+            this.ars_n_ = 0;
+
+            this.mv_cap_ = u.st_n * 2 + 64;
+            this.mv_ = (MoveState*) __ivy_alloc(this.mv_cap_ * 16);
+            this.mv_n_ = 0;
+            this.mvs_cap_ = u.st_n + 64;
+            this.mvs_ = (long*) __ivy_alloc(this.mvs_cap_ * 8);
+            this.mvs_n_ = 0;
+
+            this.in_assign_lhs_ = 0;
+
             this.lp_cap_ = 64;
             this.lp_cond_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
             this.lp_incr_ = (long*) __ivy_alloc(this.lp_cap_ * 8);
@@ -660,6 +742,11 @@ export struct MirBuilder {
             __ivy_free(this.pm_name_);
             __ivy_free(this.pm_lt_);
             __ivy_free(this.pm_ltn_);
+            __ivy_free(this.bs_);
+            __ivy_free(this.ar_);
+            __ivy_free(this.ars_);
+            __ivy_free(this.mv_);
+            __ivy_free(this.mvs_);
             __ivy_free(this.lp_cond_);
             __ivy_free(this.lp_incr_);
             __ivy_free(this.lp_exit_);
@@ -737,15 +824,67 @@ export struct MirBuilder {
             this.sc_start_[this.scs_n_] = this.sc_n_;
         }
         this.scs_n_ = this.scs_n_ + 1;
+        // The borrow and move scopes are pushed in lockstep with the lifetime
+        // scope: the oracle does the same at every push site (compound, for
+        // and the function body).
+        this.bsc_n_ = this.bsc_n_ + 1;
+        if (this.ars_n_ >= this.ars_cap_) {
+            long ncap = this.ars_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.ars_n_) {
+                    q[k] = this.ars_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.ars_);
+                this.ars_ = q;
+            }
+            this.ars_cap_ = ncap;
+        }
+        unsafe {
+            this.ars_[this.ars_n_] = this.ar_n_;
+        }
+        this.ars_n_ = this.ars_n_ + 1;
+        if (this.mvs_n_ >= this.mvs_cap_) {
+            long ncap = this.mvs_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.mvs_n_) {
+                    q[k] = this.mvs_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.mvs_);
+                this.mvs_ = q;
+            }
+            this.mvs_cap_ = ncap;
+        }
+        unsafe {
+            this.mvs_[this.mvs_n_] = this.mv_n_;
+        }
+        this.mvs_n_ = this.mvs_n_ + 1;
     }
 
     void pop_scope() {
         if (this.scs_n_ <= 0) {
             return;
         }
+        // The oracle's pop order: the lifetime scope, the borrower release,
+        // then the move-state scope.
         this.scs_n_ = this.scs_n_ - 1;
         unsafe {
             this.sc_n_ = this.sc_start_[this.scs_n_];
+        }
+        this.release_borrows_in_scope();
+        if (this.bsc_n_ > 0) {
+            this.bsc_n_ = this.bsc_n_ - 1;
+        }
+        if (this.mvs_n_ > 0) {
+            this.mvs_n_ = this.mvs_n_ - 1;
+            unsafe {
+                this.mv_n_ = this.mvs_[this.mvs_n_];
+            }
         }
     }
 
@@ -896,6 +1035,455 @@ export struct MirBuilder {
                 }
             }
             i = i - 1;
+        }
+    }
+
+    // True when the name is a parameter of the current function (the oracle's
+    // `params_.contains(name)`).  Unlike `lookup_param` this does not write
+    // the out-parameters.
+    bool is_param(const char* name) {
+        long j = 0;
+        while (j < this.pm_n_) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.pm_name_[j]), name)) {
+                    return true;
+                }
+            }
+            j = j + 1;
+        }
+        return false;
+    }
+
+    // --- the borrow checker (B1) -----------------------------------------
+
+    // Append a borrow state and return its index.  The oracle creates the
+    // state in the outermost borrow scope when no scope has the name; because
+    // the pool is searched as a whole (innermost to outermost for a lookup,
+    // outermost to innermost for a release) and a name is never added twice,
+    // the state can be kept in the flat pool.
+    long add_borrow_state(const char* name) {
+        long i = this.bs_n_;
+        if (i >= this.bs_cap_) {
+            long ncap = this.bs_cap_ * 2 + 64;
+            unsafe {
+                BorrowState* p = (BorrowState*) __ivy_alloc(ncap * 24);
+                long k = 0;
+                while (k < this.bs_n_) {
+                    p[k] = this.bs_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.bs_);
+                this.bs_ = p;
+            }
+            this.bs_cap_ = ncap;
+        }
+        unsafe {
+            this.bs_[i].name = name;
+            this.bs_[i].shared_count = 0;
+            this.bs_[i].has_mutable = 0;
+        }
+        this.bs_n_ = i + 1;
+        return i;
+    }
+
+    // checkBorrow in mir_builder.cpp.  Returns true when the borrow is
+    // allowed; the caller registers the borrower only for a true result.
+    bool check_borrow(const char* name, long is_mut, long line, long col) {
+        if (this.unsafe_depth_ > 0) {
+            return true;
+        }
+        if (this.bsc_n_ <= 0) {
+            return true;
+        }
+        // Find the state innermost to outermost.
+        long hit = -1;
+        long j = this.bs_n_ - 1;
+        while (j >= 0) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.bs_[j].name;
+            }
+            if (this.seq_p(nm, name)) {
+                hit = j;
+                break;
+            }
+            j = j - 1;
+        }
+        if (hit < 0) {
+            hit = this.add_borrow_state(name);
+        }
+        if (is_mut != 0) {
+            long shared = 0;
+            long mut = 0;
+            unsafe {
+                shared = this.bs_[hit].shared_count;
+                mut = this.bs_[hit].has_mutable;
+            }
+            if (shared > 0) {
+                this.db_n_ = 0;
+                this.db_put("cannot create a mutable reference to '");
+                this.db_put(name);
+                this.db_put("' — it is already borrowed immutably");
+                this.db_ch(0);
+                this.diag(line, col, this.dbuf_);
+                return false;
+            }
+            if (mut != 0) {
+                this.db_n_ = 0;
+                this.db_put("cannot create a second mutable reference to '");
+                this.db_put(name);
+                this.db_put("' — only one mutable borrow at a time");
+                this.db_ch(0);
+                this.diag(line, col, this.dbuf_);
+                return false;
+            }
+            unsafe {
+                this.bs_[hit].has_mutable = 1;
+            }
+            return true;
+        }
+        long mut2 = 0;
+        unsafe {
+            mut2 = this.bs_[hit].has_mutable;
+        }
+        if (mut2 != 0) {
+            this.db_n_ = 0;
+            this.db_put("cannot create an immutable reference to '");
+            this.db_put(name);
+            this.db_put("' — it is already borrowed mutably");
+            this.db_ch(0);
+            this.diag(line, col, this.dbuf_);
+            return false;
+        }
+        long shared2 = 0;
+        unsafe {
+            shared2 = this.bs_[hit].shared_count;
+            this.bs_[hit].shared_count = shared2 + 1;
+        }
+        return true;
+    }
+
+    // registerBorrower in mir_builder.cpp: record the reference in the
+    // innermost scope's active-ref list.
+    void register_borrower(const char* ref_var, const char* source_var, long is_mut) {
+        if (this.unsafe_depth_ > 0) {
+            return;
+        }
+        if (this.ars_n_ <= 0) {
+            return;
+        }
+        if (this.ar_n_ >= this.ar_cap_) {
+            long ncap = this.ar_cap_ * 2 + 64;
+            unsafe {
+                ActiveRef* p = (ActiveRef*) __ivy_alloc(ncap * 32);
+                long k = 0;
+                while (k < this.ar_n_) {
+                    p[k] = this.ar_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.ar_);
+                this.ar_ = p;
+            }
+            this.ar_cap_ = ncap;
+        }
+        unsafe {
+            this.ar_[this.ar_n_].ref_var = ref_var;
+            this.ar_[this.ar_n_].source_var = source_var;
+            this.ar_[this.ar_n_].is_mutable = is_mut;
+            this.ar_[this.ar_n_].released = 0;
+        }
+        this.ar_n_ = this.ar_n_ + 1;
+    }
+
+    // releaseBorrowsInScope in mir_builder.cpp: release every active
+    // reference of the innermost scope and pop it.  The state search is
+    // OUTERMOST to innermost (unlike checkBorrow), the measured asymmetry.
+    void release_borrows_in_scope() {
+        if (this.ars_n_ <= 0) {
+            return;
+        }
+        long start = 0;
+        unsafe {
+            start = this.ars_[this.ars_n_ - 1];
+        }
+        long i = start;
+        while (i < this.ar_n_) {
+            long rel = 0;
+            unsafe {
+                rel = this.ar_[i].released;
+            }
+            if (rel == 0) {
+                long src = 0;
+                long ism = 0;
+                unsafe {
+                    src = (long) this.ar_[i].source_var;
+                    ism = this.ar_[i].is_mutable;
+                }
+                long hit = -1;
+                long j = 0;
+                while (j < this.bs_n_) {
+                    long nm = 0;
+                    unsafe {
+                        nm = (long) this.bs_[j].name;
+                    }
+                    if (this.seq_l(nm, src)) {
+                        hit = j;
+                        break;
+                    }
+                    j = j + 1;
+                }
+                if (hit >= 0) {
+                    if (ism != 0) {
+                        unsafe {
+                            this.bs_[hit].has_mutable = 0;
+                        }
+                    } else {
+                        long c = 0;
+                        unsafe {
+                            c = this.bs_[hit].shared_count;
+                        }
+                        if (c > 0) {
+                            unsafe {
+                                this.bs_[hit].shared_count = c - 1;
+                            }
+                        }
+                    }
+                }
+                unsafe {
+                    this.ar_[i].released = 1;
+                }
+            }
+            i = i + 1;
+        }
+        this.ar_n_ = start;
+        this.ars_n_ = this.ars_n_ - 1;
+    }
+
+    // --- the move tracker (B3) -------------------------------------------
+
+    // MoveStates.back().emplace(name, Initialized) in the oracle: an entry
+    // that already exists in the innermost move scope is NOT replaced.
+    void add_move_state(const char* name) {
+        if (this.mvs_n_ <= 0) {
+            return;
+        }
+        long start = 0;
+        unsafe {
+            start = this.mvs_[this.mvs_n_ - 1];
+        }
+        long j = start;
+        while (j < this.mv_n_) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.mv_[j].name;
+            }
+            if (this.seq_p(nm, name)) {
+                return;
+            }
+            j = j + 1;
+        }
+        if (this.mv_n_ >= this.mv_cap_) {
+            long ncap = this.mv_cap_ * 2 + 64;
+            unsafe {
+                MoveState* p = (MoveState*) __ivy_alloc(ncap * 16);
+                long k = 0;
+                while (k < this.mv_n_) {
+                    p[k] = this.mv_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.mv_);
+                this.mv_ = p;
+            }
+            this.mv_cap_ = ncap;
+        }
+        unsafe {
+            this.mv_[this.mv_n_].name = name;
+            this.mv_[this.mv_n_].state = 0;
+        }
+        this.mv_n_ = this.mv_n_ + 1;
+    }
+
+    // markMovedOut / isMovedOut / reinitialize in mir_builder.cpp: search the
+    // move scopes innermost to outermost.
+    void mark_moved_out(const char* name) {
+        long j = this.mv_n_ - 1;
+        while (j >= 0) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.mv_[j].name;
+            }
+            if (this.seq_p(nm, name)) {
+                unsafe {
+                    this.mv_[j].state = 1;
+                }
+                return;
+            }
+            j = j - 1;
+        }
+    }
+
+    bool is_moved_out(const char* name) {
+        long j = this.mv_n_ - 1;
+        while (j >= 0) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.mv_[j].name;
+            }
+            if (this.seq_p(nm, name)) {
+                long st = 0;
+                unsafe {
+                    st = this.mv_[j].state;
+                }
+                return st == 1;
+            }
+            j = j - 1;
+        }
+        return false;
+    }
+
+    void reinitialize(const char* name) {
+        long j = this.mv_n_ - 1;
+        while (j >= 0) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.mv_[j].name;
+            }
+            if (this.seq_p(nm, name)) {
+                unsafe {
+                    this.mv_[j].state = 0;
+                }
+                return;
+            }
+            j = j - 1;
+        }
+    }
+
+    // --- the lifetime checker (B2) ---------------------------------------
+
+    // checkReturn in mir_builder.cpp.  The expression is identified by its
+    // index (a record must not be kept in a local across a call).
+    void check_return(long vi, long line, long col) {
+        long ptd = 0;
+        long isref = 0;
+        long retlt = 0;
+        unsafe {
+            ptd = this.mu.fns[this.cur_fn_].ret.ptr_depth;
+            isref = this.mu.fns[this.cur_fn_].ret.is_ref ? 1 : 0;
+            retlt = (long) this.mu.fns[this.cur_fn_].return_lifetime;
+        }
+        if (ptd == 0 && isref == 0) {
+            return;
+        }
+        if (this.unsafe_depth_ > 0) {
+            return;
+        }
+        long k = 0;
+        long n = 0;
+        long ek = 0;
+        unsafe {
+            k = this.mu.exprs[vi].lt;
+            n = (long) this.mu.exprs[vi].ltname;
+            ek = this.mu.exprs[vi].kind;
+        }
+        // The Local synthesis only for a bare IdentRef whose lifetime is None.
+        if (k == 0 && ek == 6) {
+            long nm = 0;
+            unsafe {
+                nm = (long) this.mu.exprs[vi].sval;
+            }
+            bool loc = false;
+            bool par = false;
+            unsafe {
+                loc = this.is_local(reinterpret_cast<const char*>(nm));
+                par = this.is_param(reinterpret_cast<const char*>(nm));
+            }
+            if (loc && !par) {
+                k = 3;
+                n = 0;
+            } else if (par) {
+                unsafe {
+                    this.lookup_param(reinterpret_cast<const char*>(nm));
+                    n = (long) this.lt_name_;
+                }
+                k = this.lt_kind_;
+            }
+        }
+        if (k == 1) {
+            bool named = false;
+            if (retlt != 0) {
+                unsafe {
+                    named = this.slen(reinterpret_cast<const char*>(retlt)) > 0;
+                }
+            }
+            if (named) {
+                if (!this.seq_l(n, retlt)) {
+                    this.db_n_ = 0;
+                    this.db_put("returned reference has lifetime '$");
+                    if (n != 0) {
+                        unsafe {
+                            this.db_put(reinterpret_cast<const char*>(n));
+                        }
+                    }
+                    this.db_put("' but the function declares lifetime '$");
+                    unsafe {
+                        this.db_put(reinterpret_cast<const char*>(retlt));
+                    }
+                    this.db_put("'");
+                    this.db_ch(0);
+                    this.diag(line, col, this.dbuf_);
+                }
+            }
+            return;
+        }
+        if (k == 2 || k == 0) {
+            return;
+        }
+        if (k == 3) {
+            this.db_n_ = 0;
+            this.db_put("returning a reference to a local variable (dangling reference)");
+            this.db_ch(0);
+            this.diag(line, col, this.dbuf_);
+            return;
+        }
+        // Unknown.
+        bool ret_named = false;
+        if (retlt != 0) {
+            unsafe {
+                ret_named = this.slen(reinterpret_cast<const char*>(retlt)) > 0;
+            }
+        }
+        this.db_n_ = 0;
+        if (!ret_named) {
+            this.db_put("returned reference has unknown lifetime; annotate the function with lifetime<$a> and tie the return to a parameter");
+        } else {
+            this.db_put("returned reference has unknown lifetime; tie it to a parameter with lifetime annotation");
+        }
+        this.db_ch(0);
+        this.diag(line, col, this.dbuf_);
+    }
+
+    // checkStore in mir_builder.cpp.  Unreachable by a program that reaches
+    // the MIR stage (see MIR_NOTES/H52_NOTES section 9.1), kept for fidelity.
+    void check_store(long ti, long vi, long line, long col) {
+        if (this.unsafe_depth_ > 0) {
+            return;
+        }
+        long ptd = 0;
+        long isref = 0;
+        long vk = 0;
+        unsafe {
+            ptd = this.mu.exprs[ti].type.ptr_depth;
+            isref = this.mu.exprs[ti].type.is_ref ? 1 : 0;
+            vk = this.mu.exprs[vi].lt;
+        }
+        if (ptd == 0 && isref == 0) {
+            return;
+        }
+        if (vk == 3) {
+            this.db_n_ = 0;
+            this.db_put("storing a reference to a local variable into a pointer or reference slot (dangling)");
+            this.db_ch(0);
+            this.diag(line, col, this.dbuf_);
         }
     }
 
@@ -1192,6 +1780,33 @@ export struct MirBuilder {
     }
 
     long ex_ident(long idx) {
+        // B3: reading a moved-out variable is an error, unless the read is the
+        // left-hand side of an assignment (which re-initializes it) or inside
+        // an unsafe block.
+        long nm = 0;
+        long line = 0;
+        long col = 0;
+        unsafe {
+            nm = (long) this.ep[idx].sval;
+            line = this.ep[idx].line;
+            col = this.ep[idx].col;
+        }
+        if (this.in_assign_lhs_ == 0 && this.unsafe_depth_ == 0) {
+            bool moved = false;
+            unsafe {
+                moved = this.is_moved_out(reinterpret_cast<const char*>(nm));
+            }
+            if (moved) {
+                this.db_n_ = 0;
+                this.db_put("use of moved-out variable '");
+                unsafe {
+                    this.db_put(reinterpret_cast<const char*>(nm));
+                }
+                this.db_put("'");
+                this.db_ch(0);
+                this.diag(line, col, this.dbuf_);
+            }
+        }
         long i = this.add_expr(6);
         unsafe {
             this.mu.exprs[i].sval = this.ep[idx].sval;
@@ -1226,6 +1841,13 @@ export struct MirBuilder {
                     } else {
                         this.lookup_param(this.mu.exprs[oi].sval);
                     }
+                    // B1: a `&<ident>` borrow is only counted, never
+                    // registered (the oracle does not call registerBorrower
+                    // for this temporary borrow).
+                    long onm = (long) this.mu.exprs[oi].sval;
+                    long mutres = this.ep[idx].type.is_const ? 0 : 1;
+                    this.check_borrow(reinterpret_cast<const char*>(onm), mutres,
+                                      this.ep[idx].line, this.ep[idx].col);
                 } else {
                     this.lt_kind_ = 4;
                 }
@@ -1334,9 +1956,13 @@ export struct MirBuilder {
     long ex_call(long idx) {
         long start = -1;
         long an = 0;
+        long eline = 0;
+        long ecol = 0;
         unsafe {
             start = this.ep[idx].astart;
             an = this.ep[idx].an;
+            eline = this.ep[idx].line;
+            ecol = this.ep[idx].col;
         }
         // The run of the arguments is reserved BEFORE the arguments are
         // built: an argument may itself be a call and the nested call
@@ -1372,6 +1998,33 @@ export struct MirBuilder {
                 ai = this.mu.args[argstart];
             }
             if (ai >= 0) {
+                // B3: the operand is moved out (only a bare identifier is
+                // tracked; unsafe bypasses the check).
+                long ak = 0;
+                long anm = 0;
+                unsafe {
+                    ak = this.mu.exprs[ai].kind;
+                    anm = (long) this.mu.exprs[ai].sval;
+                }
+                if (ak == 6 && this.unsafe_depth_ == 0) {
+                    bool moved = false;
+                    unsafe {
+                        moved = this.is_moved_out(reinterpret_cast<const char*>(anm));
+                    }
+                    if (moved) {
+                        this.db_n_ = 0;
+                        this.db_put("'");
+                        unsafe {
+                            this.db_put(reinterpret_cast<const char*>(anm));
+                        }
+                        this.db_put("' is already moved-out");
+                        this.db_ch(0);
+                        this.diag(eline, ecol, this.dbuf_);
+                    }
+                    unsafe {
+                        this.mark_moved_out(reinterpret_cast<const char*>(anm));
+                    }
+                }
                 unsafe {
                     this.lt_kind_ = this.mu.exprs[ai].lt;
                     if (this.lt_kind_ == 1) {
@@ -1451,11 +2104,17 @@ export struct MirBuilder {
     long ex_assign(long idx) {
         long lhs = -1;
         long rhs = -1;
+        long opl = 0;
         unsafe {
             lhs = this.ep[idx].a;
             rhs = this.ep[idx].b;
+            opl = (long) this.ep[idx].sval;
         }
+        // B3: the left-hand side of an assignment bypasses the use-after-move
+        // check (a re-assignment re-initializes the variable).
+        this.in_assign_lhs_ = 1;
         long li = this.build_expr(lhs);
+        this.in_assign_lhs_ = 0;
         long ri = this.build_expr(rhs);
         long lk = 0;
         unsafe {
@@ -1473,6 +2132,24 @@ export struct MirBuilder {
             }
             this.mu.exprs[i].line = this.ep[idx].line;
             this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        // B3: a plain `=` to a bare identifier re-initializes it.
+        bool plain_eq = false;
+        unsafe {
+            plain_eq = this.seq(reinterpret_cast<const char*>(opl), "=");
+        }
+        if (plain_eq) {
+            long lk2 = 0;
+            long lnm = 0;
+            unsafe {
+                lk2 = this.mu.exprs[li].kind;
+                lnm = (long) this.mu.exprs[li].sval;
+            }
+            if (lk2 == 6) {
+                unsafe {
+                    this.reinitialize(reinterpret_cast<const char*>(lnm));
+                }
+            }
         }
         return i;
     }
@@ -1623,8 +2300,18 @@ export struct MirBuilder {
     // initializer.
     void st_decl(long idx) {
         long init = -1;
+        long line = 0;
+        long col = 0;
+        long name_l = 0;
+        long is_ref = 0;
+        long is_const = 0;
         unsafe {
             init = this.sp[idx].a;
+            line = this.sp[idx].line;
+            col = this.sp[idx].col;
+            name_l = (long) this.sp[idx].sval;
+            is_ref = this.sp[idx].type.is_ref ? 1 : 0;
+            is_const = this.sp[idx].type.is_const ? 1 : 0;
         }
         long inst = this.emit(0);
         unsafe {
@@ -1637,11 +2324,34 @@ export struct MirBuilder {
             unsafe {
                 lk = this.mu.exprs[ii].lt;
                 this.mu.insts[inst].a = ii;
-                // The port's HIR statements carry no source location (the
-                // gap G7 of MIR_NOTES): the location of the initializer is
-                // used instead.
+                // The instruction keeps the initializer's location (the
+                // oracle uses the statement's; the dump does not print it).
                 this.mu.insts[inst].line = this.mu.exprs[ii].line;
                 this.mu.insts[inst].col = this.mu.exprs[ii].col;
+            }
+            // B1: when a reference is initialized with an lvalue, enforce
+            // aliasing XOR mutability on the source variable and register
+            // the borrower so the borrow is released on scope exit.
+            if (is_ref != 0) {
+                long ik = 0;
+                long inm = 0;
+                unsafe {
+                    ik = this.mu.exprs[ii].kind;
+                    inm = (long) this.mu.exprs[ii].sval;
+                }
+                if (ik == 6) {
+                    long is_mut = is_const != 0 ? 0 : 1;
+                    bool allowed = false;
+                    unsafe {
+                        allowed = this.check_borrow(reinterpret_cast<const char*>(inm), is_mut, line, col);
+                    }
+                    if (allowed) {
+                        unsafe {
+                            this.register_borrower(reinterpret_cast<const char*>(name_l),
+                                                   reinterpret_cast<const char*>(inm), is_mut);
+                        }
+                    }
+                }
             }
             // The lifetime of the local is the lifetime of its initializer.
             unsafe {
@@ -1652,12 +2362,21 @@ export struct MirBuilder {
                 this.declare(this.sp[idx].sval, 0, "");
             }
         }
+        // B3: a new variable starts Initialized (an existing entry in the
+        // same scope is not replaced, like the oracle's `emplace`).
+        unsafe {
+            this.add_move_state(reinterpret_cast<const char*>(name_l));
+        }
     }
 
     void st_return(long idx) {
         long val = -1;
+        long line = 0;
+        long col = 0;
         unsafe {
             val = this.sp[idx].a;
+            line = this.sp[idx].line;
+            col = this.sp[idx].col;
         }
         long inst = this.emit(3);
         if (val >= 0) {
@@ -1667,6 +2386,8 @@ export struct MirBuilder {
                 this.mu.insts[inst].line = this.mu.exprs[vi].line;
                 this.mu.insts[inst].col = this.mu.exprs[vi].col;
             }
+            // B2: the return-lifetime checker is located at the statement.
+            this.check_return(vi, line, col);
         }
     }
 
@@ -1674,8 +2395,12 @@ export struct MirBuilder {
     // else an `eval`.
     void st_exprstmt(long idx) {
         long val = -1;
+        long line = 0;
+        long col = 0;
         unsafe {
             val = this.sp[idx].a;
+            line = this.sp[idx].line;
+            col = this.sp[idx].col;
         }
         long ei = this.build_expr(val);
         long kind = 0;
@@ -1754,6 +2479,11 @@ export struct MirBuilder {
                 vk = this.mu.exprs[tv].lt;
                 this.update_local_lt(this.mu.exprs[tl].sval, vk, this.mu.exprs[tv].ltname);
             }
+        }
+        // B2: reject a dangling reference store (unreachable by a program
+        // that gets here, kept for fidelity; located at the statement).
+        if (tl >= 0 && tv >= 0) {
+            this.check_store(tl, tv, line, col);
         }
     }
 
@@ -1975,9 +2705,14 @@ export struct MirBuilder {
             this.jump_to(blk);
             return;
         }
-        // The label is not a case label of this switch: the diagnostic (the
-        // location of the statement is not carried by the port's HIR, so it
-        // is reported at 0:0 - see the gap G7 of MIR_NOTES).
+        // The label is not a case label of this switch: the diagnostic is
+        // located at the statement's first token (G7).
+        long line = 0;
+        long col = 0;
+        unsafe {
+            line = this.sp[idx].line;
+            col = this.sp[idx].col;
+        }
         this.db_n_ = 0;
         this.db_put("nextcase target '");
         unsafe {
@@ -1985,7 +2720,7 @@ export struct MirBuilder {
         }
         this.db_put("' is not a case label in this switch");
         this.db_ch(0);
-        this.diag(0, 0, this.dbuf_);
+        this.diag(line, col, this.dbuf_);
     }
 
     // A switch: the exit block, then one block per case clause.  The
@@ -2219,6 +2954,15 @@ export struct MirBuilder {
         return false;
     }
 
+    // Compare a name stored in an integer register with a typed string.  The
+    // cast needs the unsafe block, so it is hidden here.
+    bool seq_p(long a, const char* b) {
+        unsafe {
+            return this.seq(reinterpret_cast<const char*>(a), b);
+        }
+        return false;
+    }
+
     // The block that the case label `name` names in the innermost switch
     // (-1 when the innermost context is not a switch or has no such label).
     long loop_label_blk(long name) {
@@ -2374,6 +3118,13 @@ export struct MirBuilder {
         this.pm_n_ = 0;
         this.sc_n_ = 0;
         this.scs_n_ = 0;
+        this.bs_n_ = 0;
+        this.bsc_n_ = 0;
+        this.ar_n_ = 0;
+        this.ars_n_ = 0;
+        this.mv_n_ = 0;
+        this.mvs_n_ = 0;
+        this.in_assign_lhs_ = 0;
         this.lp_n_ = 0;
         this.sw_n_ = 0;
         this.lbl_n_ = 0;

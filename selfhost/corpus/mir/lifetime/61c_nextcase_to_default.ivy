@@ -1,0 +1,10 @@
+// A nextcase to a label on the default clause is not possible (default has
+// no label), so this is an error case.
+int32 f(int32 a) {
+    switch (a) {
+        case 1:
+            nextcase two;
+        default:
+            return 0;
+    }
+}

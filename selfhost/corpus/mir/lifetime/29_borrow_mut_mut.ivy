@@ -1,0 +1,6 @@
+// MIR-stage borrow diagnostic: two mutable borrows of the same variable.
+void f() {
+    int32 x = 1;
+    int32& a = x;
+    int32& b = x;
+}

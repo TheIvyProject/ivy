@@ -1,0 +1,6 @@
+// A mutable borrow after a shared borrow.
+void f() {
+    int32 x = 1;
+    const int32& a = x;
+    int32& b = x;
+}
