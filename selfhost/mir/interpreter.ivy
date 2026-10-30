@@ -1,0 +1,2507 @@
+// selfhost/mir/interpreter.ivy - H5.3 P0 interpreter data model and pools.
+//
+// This module defines storage and lookup foundations only. It does not
+// evaluate MIR expressions, instructions, calls, or control flow.
+
+#pragma ivy cnumber
+export module interpreter;
+import mir;
+
+// Wrapper structs for raw pointer parameters (ivy forbids raw pointer params).
+export struct StrBuf { char* p; };
+export struct LongPtr { long* p; };
+export struct PtrBuf { char** p; };
+export struct UnitPtr { MUnit* u; };
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+
+// IValue kind tags. The numeric order is intentionally stable.
+// 0 Void, 1 Int, 2 Float, 3 Ptr, 4 Struct, 5 Str.
+// Pointer provenance is descriptive metadata; it is not a memory-safety
+// check and does not imply oracle parity for lifetime diagnostics.
+export struct IValue {
+    long kind;
+    long int_value;
+    double float_value;
+    long cell_index;
+    long pointer_is_null;
+    long provenance_kind;
+    long provenance_id;
+    const char* provenance_name;
+    long struct_index;
+    const char* string_bytes;
+    long string_length;
+};
+
+// Cell identity is an append-only index in InterpreterModel.cells. The value
+// index can change on a write; aliases retain the same cell index forever.
+export struct ICell {
+    long value_index;
+};
+
+// Interpreter-local aggregate description. It does not extend MUnit and is
+// descriptive only until the aggregate metadata phase.
+export struct IStruct {
+    const char* name;
+    long field_count;
+};
+
+// Fields are appended in registration order. `order` is per struct, so
+// interleaved registration of different structs still preserves each order.
+export struct IField {
+    long struct_index;
+    long order;
+    const char* name;
+    long cell_index;
+};
+
+// Frame indices are stable for this model's lifetime. Popping marks a frame
+// inactive but does not recycle its index or its cells/local records.
+export struct IFrame {
+    long function_index;
+    long caller_index;
+    long continuation_block;
+    long continuation_inst;
+    long block_index;
+    long inst_index;
+    long return_state;
+    long return_value;
+    long active;
+};
+
+// Local mappings are append-only. Lookup searches newest-to-oldest to permit
+// a later binding to shadow an earlier name in the same frame.
+export struct ILocal {
+    long frame_index;
+    const char* name;
+    long cell_index;
+};
+
+// Result schema only; P0 does not execute a function or map process status.
+// State codes reserved here: 0 pending, 1 returned, 2 failed, 3 terminated.
+export struct IResult {
+    long state;
+    long value_index;
+    long status;
+};
+
+// The query carries the existing MIR metadata as a struct parameter, avoiding
+// a new target field in MExpr/MUnit. P0 uses exact name matches only; params
+// are retained for a later signature-aware resolution phase.
+export struct IFunctionQuery {
+    MFunction* functions;
+    long function_count;
+    MParam* params;
+    long parameter_count;
+    const char* name;
+};
+
+// Resolution states: 0 unresolved, 1 unique name, 2 ambiguous name.
+// No executable overload selection is performed in P0.
+export struct IFunctionResolution {
+    long state;
+    long function_index;
+    long candidate_count;
+};
+
+// Shared control block for InterpreterModel instances. Survives shallow struct
+// copies (e.g. `InterpreterModel b = a; a.release(); b.release();`) by sharing
+// the released tombstone flag across all copies, preventing double-free heap
+// corruption (0xC0000374).
+export struct InterpreterControl {
+    long released;
+    long ref_count;
+};
+
+// String and character literal decoding helpers matching oracle mir_builder.cpp:41-137.
+// Free functions use wrapper structs for all pointer parameters (ivy forbids raw pointer params).
+export bool decode_body(StrBuf body, long body_len, StrBuf out_buf, LongPtr out_len) {
+    unsafe {
+        if (out_buf.p == (char*) 0 || out_len.p == (long*) 0) {
+            return false;
+        }
+        if (body.p == (char*) 0) {
+            return false;
+        }
+        long out_pos = 0;
+        long i = 0;
+        while (i < body_len) {
+            char c = body.p[i];
+            if (c != 92) { // '\\'
+                out_buf.p[out_pos] = c;
+                out_pos = out_pos + 1;
+                i = i + 1;
+            } else {
+                i = i + 1;
+                if (i >= body_len) {
+                    return false;
+                }
+                char esc = body.p[i];
+                if (esc == 110) { // 'n'
+                    out_buf.p[out_pos] = 10;
+                    out_pos = out_pos + 1;
+                } else if (esc == 116) { // 't'
+                    out_buf.p[out_pos] = 9;
+                    out_pos = out_pos + 1;
+                } else if (esc == 114) { // 'r'
+                    out_buf.p[out_pos] = 13;
+                    out_pos = out_pos + 1;
+                } else if (esc == 97) { // 'a'
+                    out_buf.p[out_pos] = 7;
+                    out_pos = out_pos + 1;
+                } else if (esc == 98) { // 'b'
+                    out_buf.p[out_pos] = 8;
+                    out_pos = out_pos + 1;
+                } else if (esc == 102) { // 'f'
+                    out_buf.p[out_pos] = 12;
+                    out_pos = out_pos + 1;
+                } else if (esc == 118) { // 'v'
+                    out_buf.p[out_pos] = 11;
+                    out_pos = out_pos + 1;
+                } else if (esc == 92) { // '\\'
+                    out_buf.p[out_pos] = 92;
+                    out_pos = out_pos + 1;
+                } else if (esc == 39) { // '\''
+                    out_buf.p[out_pos] = 39;
+                    out_pos = out_pos + 1;
+                } else if (esc == 34) { // '\"'
+                    out_buf.p[out_pos] = 34;
+                    out_pos = out_pos + 1;
+                } else if (esc == 63) { // '?'
+                    out_buf.p[out_pos] = 63;
+                    out_pos = out_pos + 1;
+                } else if (esc == 120) { // 'x' hex
+                    // Mirrors the oracle loop exactly: when two hex digits are
+                    // consumed, the oracle's `while (++i < size && count < 2)`
+                    // advances `i` once more and the surrounding loop advances
+                    // again, so the character after the last digit is skipped.
+                    long v = 0;
+                    long count = 0;
+                    long maxed = 0;
+                    while (i + 1 < body_len) {
+                        i = i + 1;
+                        char h = body.p[i];
+                        bool is_hex = false;
+                        if (h >= 48 && h <= 57) { // '0'..'9'
+                            v = v * 16 + (h - 48);
+                            is_hex = true;
+                        } else if (h >= 97 && h <= 102) { // 'a'..'f'
+                            v = v * 16 + (h - 97 + 10);
+                            is_hex = true;
+                        } else if (h >= 65 && h <= 70) { // 'A'..'F'
+                            v = v * 16 + (h - 65 + 10);
+                            is_hex = true;
+                        }
+                        if (!is_hex) {
+                            i = i - 1;
+                            break;
+                        }
+                        count = count + 1;
+                        if (count >= 2) {
+                            maxed = 1;
+                            break;
+                        }
+                    }
+                    if (maxed != 0) {
+                        i = i + 1;
+                    }
+                    out_buf.p[out_pos] = (char) v;
+                    out_pos = out_pos + 1;
+                } else if (esc >= 48 && esc <= 55) { // '0'..'7' octal
+                    long v = esc - 48;
+                    long count = 1;
+                    long maxed = 0;
+                    while (i + 1 < body_len) {
+                        i = i + 1;
+                        char o = body.p[i];
+                        if (o >= 48 && o <= 55) {
+                            v = v * 8 + (o - 48);
+                            count = count + 1;
+                            if (count >= 3) {
+                                maxed = 1;
+                                break;
+                            }
+                        } else {
+                            i = i - 1;
+                            break;
+                        }
+                    }
+                    if (maxed != 0) {
+                        i = i + 1;
+                    }
+                    out_buf.p[out_pos] = (char) v;
+                    out_pos = out_pos + 1;
+                } else {
+                    out_buf.p[out_pos] = esc;
+                    out_pos = out_pos + 1;
+                }
+                i = i + 1;
+            }
+        }
+        out_buf.p[out_pos] = 0;
+        out_len.p[0] = out_pos;
+    }
+    return true;
+}
+
+export bool decode_string_literal(StrBuf raw, StrBuf out_buf, LongPtr out_len) {
+    unsafe {
+        if (raw.p == (char*) 0 || out_buf.p == (char*) 0 || out_len.p == (long*) 0) {
+            return false;
+        }
+        long len = 0;
+        while (raw.p[len] != 0) {
+            len = len + 1;
+        }
+        long start = 0;
+        // Strip prefix: u8, L, u, U (oracle stripStringPrefix).
+        if (len - start >= 2 && raw.p[start] == 117 && raw.p[start + 1] == 56) { // u8
+            start = start + 2;
+        } else if (len - start >= 1) {
+            char p = raw.p[start];
+            if (p == 76 || p == 117 || p == 85) { // 'L', 'u', 'U'
+                start = start + 1;
+            }
+        }
+        // Raw string: R"delim(...)delim" — bytes between the first '(' and
+        // the last ')' are copied verbatim (no escapes).
+        if (len - start >= 3 && raw.p[start] == 82 && raw.p[start + 1] == 34) { // R"
+            long open = -1;
+            long close = -1;
+            long k = start;
+            while (k < len) {
+                if (raw.p[k] == 40 && open < 0) { // '('
+                    open = k;
+                }
+                if (raw.p[k] == 41) { // ')'
+                    close = k;
+                }
+                k = k + 1;
+            }
+            if (open < 0 || close < 0 || close <= open) {
+                return false;
+            }
+            long rpos = 0;
+            k = open + 1;
+            while (k < close) {
+                out_buf.p[rpos] = raw.p[k];
+                rpos = rpos + 1;
+                k = k + 1;
+            }
+            out_buf.p[rpos] = 0;
+            out_len.p[0] = rpos;
+            return true;
+        }
+        if (len - start < 2 || raw.p[start] != 34 || raw.p[len - 1] != 34) { // '"'
+            return false;
+        }
+        StrBuf body;
+        body.p = raw.p + start + 1;
+        return interpreter::decode_body(body, (len - start) - 2, out_buf, out_len);
+    }
+    return false;
+}
+
+export bool decode_char_literal(StrBuf raw, LongPtr out_val) {
+    unsafe {
+        if (raw.p == (char*) 0 || out_val.p == (long*) 0) {
+            return false;
+        }
+        long len = 0;
+        while (raw.p[len] != 0) {
+            len = len + 1;
+        }
+        long start = 0;
+        if (len - start >= 1) {
+            char p = raw.p[start];
+            if (p == 76 || p == 117 || p == 85) { // 'L', 'u', 'U'
+                start = start + 1;
+            }
+        }
+        if (len - start < 2 || raw.p[start] != 39 || raw.p[len - 1] != 39) { // '\''
+            return false;
+        }
+        long body_len = (len - start) - 2;
+        // The decoded char literal is at most body_len bytes; use a heap
+        // scratch buffer because Ivy forbids taking the address of a local
+        // array element.
+        char* scratch = (char*) __ivy_alloc(body_len + 2);
+        if (scratch == (char*) 0) {
+            return false;
+        }
+        StrBuf body;
+        body.p = raw.p + start + 1;
+        StrBuf tmpbuf;
+        tmpbuf.p = scratch;
+        long dec_len = 0;
+        LongPtr lenptr;
+        lenptr.p = &dec_len;
+        bool ok = interpreter::decode_body(body, body_len, tmpbuf, lenptr);
+        long value = 0;
+        if (ok && dec_len > 0) {
+            value = (long) (uint8) scratch[0];
+        }
+        __ivy_free((void*) scratch);
+        if (!ok || dec_len == 0) {
+            return false;
+        }
+        out_val.p[0] = value;
+        return true;
+    }
+    return false;
+}
+
+export struct InterpreterModel {
+    IValue* values;
+    long value_count;
+    long value_capacity;
+
+    ICell* cells;
+    long cell_count;
+    long cell_capacity;
+
+    IStruct* structs;
+    long struct_count;
+    long struct_capacity;
+
+    IField* fields;
+    long field_count;
+    long field_capacity;
+
+    IFrame* frames;
+    long frame_count;
+    long frame_capacity;
+
+    ILocal* locals;
+    long local_count;
+    long local_capacity;
+
+    // Each string value owns one separate byte buffer. This makes the
+    // IValue.string_bytes pointer stable when any metadata pool grows.
+    // Store pointer bits in long slots (the host long/pointer width is 64-bit).
+    // This mirrors the selfhost pools' established pointer-as-long convention;
+    // allocation still uses sizeof(char*) as the ABI stride.
+    long* string_buffers;
+    long string_buffer_count;
+    long string_buffer_capacity;
+
+    long* dline_;
+    long* dcol_;
+    long* dmsg_;
+    long diag_count_;
+    long diag_capacity_;
+
+    long current_frame;
+    long setup_done;
+    long released;
+    // Latched when native storage allocation fails. Existing data remains
+    // readable, but subsequent allocating/mutating operations fail cleanly.
+    long allocation_failed;
+    IResult result;
+    InterpreterControl* control;
+
+    bool is_released() {
+        if (this.released != 0) {
+            return true;
+        }
+        unsafe {
+            if (this.control != (InterpreterControl*) 0 && this.control->released != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void retain() {
+        unsafe {
+            if (this.control != (InterpreterControl*) 0) {
+                this.control->ref_count = this.control->ref_count + 1;
+            }
+        }
+    }
+
+    long signed_long_max() {
+        uint64 unsigned_max = 0;
+        long answer = 0;
+        unsafe {
+            unsigned_max = (uint64)0 - 1;
+            answer = (long)(unsigned_max >> 1);
+        }
+        return answer;
+    }
+
+    bool valid_pool_allocation(long capacity, long stride) {
+        if (capacity <= 0 || stride <= 0) {
+            return false;
+        }
+        return capacity <= this.signed_long_max() / stride;
+    }
+
+    bool valid_pool_growth(long capacity, long stride) {
+        if (capacity <= 0 || stride <= 0 || stride > this.signed_long_max()) {
+            return false;
+        }
+        return capacity <= (this.signed_long_max() / stride) / 2;
+    }
+
+    // The allocator strides use sizeof(the actual Ivy record), rather than
+    // hand-estimated ABI constants. Record sizes are recorded in H53_NOTES.
+    long setup() {
+        if (this.setup_done != 0) {
+            if (this.is_released() || this.allocation_failed != 0) {
+                return 0;
+            }
+            return 1;
+        }
+        // Mark the model initialized before allocating so release() can
+        // safely unwind a partially completed setup.
+        this.setup_done = 1;
+        this.released = 0;
+        this.allocation_failed = 0;
+        this.value_capacity = 4;
+        this.cell_capacity = 4;
+        this.struct_capacity = 4;
+        this.field_capacity = 4;
+        this.frame_capacity = 4;
+        this.local_capacity = 4;
+        this.string_buffer_capacity = 4;
+        this.diag_capacity_ = 4;
+        unsafe {
+            this.values = (IValue*) 0;
+            this.cells = (ICell*) 0;
+            this.structs = (IStruct*) 0;
+            this.fields = (IField*) 0;
+            this.frames = (IFrame*) 0;
+            this.locals = (ILocal*) 0;
+            this.string_buffers = (long*) 0;
+            this.dline_ = (long*) 0;
+            this.dcol_ = (long*) 0;
+            this.dmsg_ = (long*) 0;
+            this.control = (InterpreterControl*) 0;
+        }
+        this.value_count = 0;
+        this.cell_count = 0;
+        this.struct_count = 0;
+        this.field_count = 0;
+        this.frame_count = 0;
+        this.local_count = 0;
+        this.string_buffer_count = 0;
+        this.diag_count_ = 0;
+        this.current_frame = -1;
+        this.result.state = 0;
+        this.result.value_index = -1;
+        this.result.status = 0;
+        if (!this.valid_pool_allocation(this.value_capacity, sizeof(IValue)) ||
+            !this.valid_pool_allocation(this.cell_capacity, sizeof(ICell)) ||
+            !this.valid_pool_allocation(this.struct_capacity, sizeof(IStruct)) ||
+            !this.valid_pool_allocation(this.field_capacity, sizeof(IField)) ||
+            !this.valid_pool_allocation(this.frame_capacity, sizeof(IFrame)) ||
+            !this.valid_pool_allocation(this.local_capacity, sizeof(ILocal)) ||
+            !this.valid_pool_allocation(this.string_buffer_capacity, sizeof(char*)) ||
+            !this.valid_pool_allocation(this.diag_capacity_, sizeof(long))) {
+            this.allocation_failed = 1;
+            this.release();
+            return 0;
+        }
+        unsafe {
+            this.control = (InterpreterControl*) __ivy_alloc(sizeof(InterpreterControl));
+            if (this.control == (InterpreterControl*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.control->released = 0;
+            this.control->ref_count = 1;
+
+            this.values = (IValue*) __ivy_alloc(this.value_capacity * sizeof(IValue));
+            if (this.values == (IValue*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.cells = (ICell*) __ivy_alloc(this.cell_capacity * sizeof(ICell));
+            if (this.cells == (ICell*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.structs = (IStruct*) __ivy_alloc(this.struct_capacity * sizeof(IStruct));
+            if (this.structs == (IStruct*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.fields = (IField*) __ivy_alloc(this.field_capacity * sizeof(IField));
+            if (this.fields == (IField*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.frames = (IFrame*) __ivy_alloc(this.frame_capacity * sizeof(IFrame));
+            if (this.frames == (IFrame*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.locals = (ILocal*) __ivy_alloc(this.local_capacity * sizeof(ILocal));
+            if (this.locals == (ILocal*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.string_buffers = (long*) __ivy_alloc(this.string_buffer_capacity * sizeof(char*));
+            if (this.string_buffers == (long*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.dline_ = (long*) __ivy_alloc(this.diag_capacity_ * sizeof(long));
+            if (this.dline_ == (long*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.dcol_ = (long*) __ivy_alloc(this.diag_capacity_ * sizeof(long));
+            if (this.dcol_ == (long*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+            this.dmsg_ = (long*) __ivy_alloc(this.diag_capacity_ * sizeof(long));
+            if (this.dmsg_ == (long*) 0) {
+                this.allocation_failed = 1;
+                this.release();
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    bool ensure_values() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.value_count < this.value_capacity) {
+            return true;
+        }
+        long old_capacity = this.value_capacity;
+        if (!this.valid_pool_growth(old_capacity, sizeof(IValue))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = old_capacity * 2;
+        unsafe {
+            IValue* old_values = this.values;
+            IValue* new_values = (IValue*) __ivy_alloc(new_capacity * sizeof(IValue));
+            if (new_values == (IValue*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.value_count) {
+                new_values[i] = old_values[i];
+                i = i + 1;
+            }
+            __ivy_free(old_values);
+            this.values = new_values;
+        }
+        this.value_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_cells() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.cell_count < this.cell_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.cell_capacity, sizeof(ICell))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.cell_capacity * 2;
+        unsafe {
+            ICell* old_cells = this.cells;
+            ICell* new_cells = (ICell*) __ivy_alloc(new_capacity * sizeof(ICell));
+            if (new_cells == (ICell*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.cell_count) {
+                new_cells[i] = old_cells[i];
+                i = i + 1;
+            }
+            __ivy_free(old_cells);
+            this.cells = new_cells;
+        }
+        this.cell_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_structs() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.struct_count < this.struct_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.struct_capacity, sizeof(IStruct))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.struct_capacity * 2;
+        unsafe {
+            IStruct* old_structs = this.structs;
+            IStruct* new_structs = (IStruct*) __ivy_alloc(new_capacity * sizeof(IStruct));
+            if (new_structs == (IStruct*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.struct_count) {
+                new_structs[i] = old_structs[i];
+                i = i + 1;
+            }
+            __ivy_free(old_structs);
+            this.structs = new_structs;
+        }
+        this.struct_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_fields() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.field_count < this.field_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.field_capacity, sizeof(IField))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.field_capacity * 2;
+        unsafe {
+            IField* old_fields = this.fields;
+            IField* new_fields = (IField*) __ivy_alloc(new_capacity * sizeof(IField));
+            if (new_fields == (IField*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.field_count) {
+                new_fields[i] = old_fields[i];
+                i = i + 1;
+            }
+            __ivy_free(old_fields);
+            this.fields = new_fields;
+        }
+        this.field_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_frames() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.frame_count < this.frame_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.frame_capacity, sizeof(IFrame))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.frame_capacity * 2;
+        unsafe {
+            IFrame* old_frames = this.frames;
+            IFrame* new_frames = (IFrame*) __ivy_alloc(new_capacity * sizeof(IFrame));
+            if (new_frames == (IFrame*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.frame_count) {
+                new_frames[i] = old_frames[i];
+                i = i + 1;
+            }
+            __ivy_free(old_frames);
+            this.frames = new_frames;
+        }
+        this.frame_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_locals() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.local_count < this.local_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.local_capacity, sizeof(ILocal))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.local_capacity * 2;
+        unsafe {
+            ILocal* old_locals = this.locals;
+            ILocal* new_locals = (ILocal*) __ivy_alloc(new_capacity * sizeof(ILocal));
+            if (new_locals == (ILocal*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.local_count) {
+                new_locals[i] = old_locals[i];
+                i = i + 1;
+            }
+            __ivy_free(old_locals);
+            this.locals = new_locals;
+        }
+        this.local_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_string_buffers() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.string_buffer_count < this.string_buffer_capacity) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.string_buffer_capacity, sizeof(char*))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.string_buffer_capacity * 2;
+        unsafe {
+            long* old_buffers = this.string_buffers;
+            long* new_buffers = (long*) __ivy_alloc(new_capacity * sizeof(char*));
+            if (new_buffers == (long*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.string_buffer_count) {
+                new_buffers[i] = old_buffers[i];
+                i = i + 1;
+            }
+            __ivy_free((void*) old_buffers);
+            this.string_buffers = new_buffers;
+        }
+        this.string_buffer_capacity = new_capacity;
+        return true;
+    }
+
+    bool ensure_diags() {
+        if (this.allocation_failed != 0 || this.is_released()) {
+            return false;
+        }
+        if (this.diag_count_ < this.diag_capacity_) {
+            return true;
+        }
+        if (!this.valid_pool_growth(this.diag_capacity_, sizeof(long))) {
+            this.allocation_failed = 1;
+            return false;
+        }
+        long new_capacity = this.diag_capacity_ * 2;
+        unsafe {
+            long* old_line = this.dline_;
+            long* new_line = (long*) __ivy_alloc(new_capacity * sizeof(long));
+            if (new_line == (long*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long* old_col = this.dcol_;
+            long* new_col = (long*) __ivy_alloc(new_capacity * sizeof(long));
+            if (new_col == (long*) 0) {
+                __ivy_free(new_line);
+                this.allocation_failed = 1;
+                return false;
+            }
+            long* old_msg = this.dmsg_;
+            long* new_msg = (long*) __ivy_alloc(new_capacity * sizeof(long));
+            if (new_msg == (long*) 0) {
+                __ivy_free(new_line);
+                __ivy_free(new_col);
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < this.diag_count_) {
+                new_line[i] = old_line[i];
+                new_col[i] = old_col[i];
+                new_msg[i] = old_msg[i];
+                i = i + 1;
+            }
+            __ivy_free(old_line);
+            __ivy_free(old_col);
+            __ivy_free((void*) old_msg);
+            this.dline_ = new_line;
+            this.dcol_ = new_col;
+            this.dmsg_ = new_msg;
+        }
+        this.diag_capacity_ = new_capacity;
+        return true;
+    }
+
+    const char* intern_diagnostic_msg(const char* msg) {
+        if (this.is_null_name(msg)) {
+            return "";
+        }
+        if (!this.ensure_string_buffers()) {
+            return "";
+        }
+        long len = this.slen(msg);
+        unsafe {
+            char* copy = (char*) __ivy_alloc(len + 1);
+            if (copy == (char*) 0) {
+                this.allocation_failed = 1;
+                return "";
+            }
+            long i = 0;
+            while (i < len) {
+                copy[i] = msg[i];
+                i = i + 1;
+            }
+            copy[len] = 0;
+            this.string_buffers[this.string_buffer_count] = (long) copy;
+            this.string_buffer_count = this.string_buffer_count + 1;
+            return copy;
+        }
+        return "";
+    }
+
+    void error(long line, long col, const char* msg) {
+        if (this.setup_done == 0 || this.is_released()) {
+            return;
+        }
+        if (!this.ensure_diags()) {
+            return;
+        }
+        unsafe {
+            const char* saved_msg = this.intern_diagnostic_msg(msg);
+            this.dline_[this.diag_count_] = line;
+            this.dcol_[this.diag_count_] = col;
+            this.dmsg_[this.diag_count_] = (long) saved_msg;
+        }
+        this.diag_count_ = this.diag_count_ + 1;
+        this.result.state = 2; // failed
+    }
+
+    long diag_count() {
+        if (this.is_released()) {
+            return 0;
+        }
+        return this.diag_count_;
+    }
+
+    long diag_line(long i) {
+        if (this.is_released() || i < 0 || i >= this.diag_count_) {
+            return 0;
+        }
+        unsafe {
+            return this.dline_[i];
+        }
+        return 0;
+    }
+
+    long diag_col(long i) {
+        if (this.is_released() || i < 0 || i >= this.diag_count_) {
+            return 0;
+        }
+        unsafe {
+            return this.dcol_[i];
+        }
+        return 0;
+    }
+
+    const char* diag_msg(long i) {
+        if (this.is_released() || i < 0 || i >= this.diag_count_) {
+            return "";
+        }
+        unsafe {
+            return reinterpret_cast<const char*>(this.dmsg_[i]);
+        }
+        return "";
+    }
+
+    long append_value(long kind) {
+        if (this.setup_done == 0 || this.is_released() || this.allocation_failed != 0 ||
+            kind < 0 || kind > 5) {
+            return -1;
+        }
+        if (!this.ensure_values()) {
+            return -1;
+        }
+        long index = this.value_count;
+        unsafe {
+            this.values[index].kind = kind;
+            this.values[index].int_value = 0;
+            this.values[index].float_value = 0.0;
+            this.values[index].cell_index = -1;
+            this.values[index].pointer_is_null = 1;
+            this.values[index].provenance_kind = 0;
+            this.values[index].provenance_id = 0;
+            this.values[index].provenance_name = (char*) 0;
+            this.values[index].struct_index = -1;
+            this.values[index].string_bytes = (char*) 0;
+            this.values[index].string_length = 0;
+        }
+        this.value_count = this.value_count + 1;
+        return index;
+    }
+
+    long make_void() {
+        return this.append_value(0);
+    }
+
+    long make_int(long value) {
+        long index = this.append_value(1);
+        if (index < 0) {
+            return -1;
+        }
+        unsafe {
+            this.values[index].int_value = value;
+        }
+        return index;
+    }
+
+    long make_float(double value) {
+        long index = this.append_value(2);
+        if (index < 0) {
+            return -1;
+        }
+        unsafe {
+            this.values[index].float_value = value;
+        }
+        return index;
+    }
+
+    long make_pointer(long cell_index, long is_null, long provenance_kind,
+                      long provenance_id, const char* provenance_name) {
+        if (is_null == 0 && (cell_index < 0 || cell_index >= this.cell_count)) {
+            return -1;
+        }
+        long index = this.append_value(3);
+        if (index < 0) {
+            return -1;
+        }
+        unsafe {
+            if (is_null != 0) {
+                this.values[index].cell_index = -1;
+                this.values[index].pointer_is_null = 1;
+            } else {
+                this.values[index].cell_index = cell_index;
+                this.values[index].pointer_is_null = 0;
+            }
+            this.values[index].provenance_kind = provenance_kind;
+            this.values[index].provenance_id = provenance_id;
+            this.values[index].provenance_name = provenance_name;
+        }
+        return index;
+    }
+
+    long make_null_pointer() {
+        unsafe {
+            return this.make_pointer(-1, 1, 0, 0, (char*) 0);
+        }
+    }
+
+    long make_cell_pointer(long cell_index) {
+        unsafe {
+            return this.make_pointer(cell_index, 0, 0, 0, (char*) 0);
+        }
+    }
+
+    long make_struct_value(long struct_index) {
+        if (struct_index < 0 || struct_index >= this.struct_count) {
+            return -1;
+        }
+        long index = this.append_value(4);
+        if (index < 0) {
+            return -1;
+        }
+        unsafe {
+            this.values[index].struct_index = struct_index;
+        }
+        return index;
+    }
+
+    long make_string(const char* bytes, long length) {
+        if (this.setup_done == 0 || this.is_released() ||
+            this.allocation_failed != 0 || length < 0 ||
+            (length > 0 && !this.valid_pool_allocation(length, 1))) {
+            return -1;
+        }
+        if (length > 0 && this.is_null_name(bytes)) {
+            return -1;
+        }
+        if (!this.ensure_values() || !this.ensure_string_buffers()) {
+            return -1;
+        }
+        long allocation_size = length;
+        if (allocation_size == 0) {
+            allocation_size = 1;
+        }
+        long index = -1;
+        unsafe {
+            char* copy = (char*) __ivy_alloc(allocation_size);
+            if (copy == (char*) 0) {
+                this.allocation_failed = 1;
+                return -1;
+            }
+            long i = 0;
+            while (i < length) {
+                copy[i] = bytes[i];
+                i = i + 1;
+            }
+            if (length == 0) {
+                copy[0] = 0;
+            }
+            index = this.append_value(5);
+            if (index < 0) {
+                __ivy_free(copy);
+                return -1;
+            }
+            this.string_buffers[this.string_buffer_count] = (long) copy;
+            this.string_buffer_count = this.string_buffer_count + 1;
+            this.values[index].string_bytes = copy;
+            this.values[index].string_length = length;
+        }
+        return index;
+    }
+
+    long value_kind(long value_index) {
+        if (value_index < 0 || value_index >= this.value_count || this.is_released()) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.values[value_index].kind;
+        }
+        return result;
+    }
+
+    long read_int(long value_index) {
+        if (this.value_kind(value_index) != 1) {
+            return 0;
+        }
+        long result = 0;
+        unsafe {
+            result = this.values[value_index].int_value;
+        }
+        return result;
+    }
+
+    double read_float(long value_index) {
+        if (this.value_kind(value_index) != 2) {
+            return 0.0;
+        }
+        double result = 0.0;
+        unsafe {
+            result = this.values[value_index].float_value;
+        }
+        return result;
+    }
+
+    long pointer_cell(long value_index) {
+        if (this.value_kind(value_index) != 3) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            if (this.values[value_index].pointer_is_null != 0) {
+                return -1;
+            }
+            result = this.values[value_index].cell_index;
+        }
+        return result;
+    }
+
+    long pointer_is_null(long value_index) {
+        if (this.value_kind(value_index) != 3) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.values[value_index].pointer_is_null;
+        }
+        return result;
+    }
+
+    long pointer_provenance_kind(long value_index) {
+        if (this.value_kind(value_index) != 3) {
+            return -1;
+        }
+        long result = 0;
+        unsafe {
+            result = this.values[value_index].provenance_kind;
+        }
+        return result;
+    }
+
+    long pointer_provenance_id(long value_index) {
+        if (this.value_kind(value_index) != 3) {
+            return -1;
+        }
+        long result = 0;
+        unsafe {
+            result = this.values[value_index].provenance_id;
+        }
+        return result;
+    }
+
+    bool pointer_provenance_name_equals(long value_index, const char* name) {
+        if (this.value_kind(value_index) != 3 || this.is_null_name(name)) {
+            return false;
+        }
+        bool matches = false;
+        unsafe {
+            matches = this.same_name(this.values[value_index].provenance_name, name);
+        }
+        return matches;
+    }
+
+    long read_struct_index(long value_index) {
+        if (this.value_kind(value_index) != 4) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.values[value_index].struct_index;
+        }
+        return result;
+    }
+
+    long read_string_length(long value_index) {
+        if (this.value_kind(value_index) != 5) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.values[value_index].string_length;
+        }
+        return result;
+    }
+
+    long read_string_byte(long value_index, long byte_index) {
+        if (this.value_kind(value_index) != 5) {
+            return -1;
+        }
+        long length = 0;
+        long result = -1;
+        unsafe {
+            length = this.values[value_index].string_length;
+            if (byte_index < 0 || byte_index >= length) {
+                return -1;
+            }
+            result = (long) (uint8) this.values[value_index].string_bytes[byte_index];
+        }
+        return result;
+    }
+
+    long new_cell(long value_index) {
+        if (this.setup_done == 0 || this.is_released() ||
+            value_index < 0 || value_index >= this.value_count) {
+            return -1;
+        }
+        if (!this.ensure_cells()) {
+            return -1;
+        }
+        long index = this.cell_count;
+        unsafe {
+            this.cells[index].value_index = value_index;
+        }
+        this.cell_count = this.cell_count + 1;
+        return index;
+    }
+
+    long alias_cell(long cell_index) {
+        if (cell_index < 0 || cell_index >= this.cell_count || this.is_released()) {
+            return -1;
+        }
+        return cell_index;
+    }
+
+    long cell_value(long cell_index) {
+        if (cell_index < 0 || cell_index >= this.cell_count || this.is_released()) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.cells[cell_index].value_index;
+        }
+        return result;
+    }
+
+    long cell_write(long cell_index, long value_index) {
+        if (cell_index < 0 || cell_index >= this.cell_count ||
+            value_index < 0 || value_index >= this.value_count || this.is_released() ||
+            this.allocation_failed != 0) {
+            return 0;
+        }
+        unsafe {
+            this.cells[cell_index].value_index = value_index;
+        }
+        return 1;
+    }
+
+    long pointer_read(long pointer_value) {
+        long cell_index = this.pointer_cell(pointer_value);
+        if (cell_index < 0) {
+            return -1;
+        }
+        return this.cell_value(cell_index);
+    }
+
+    long pointer_write(long pointer_value, long value_index) {
+        long cell_index = this.pointer_cell(pointer_value);
+        if (cell_index < 0) {
+            return 0;
+        }
+        return this.cell_write(cell_index, value_index);
+    }
+
+    long register_struct(const char* name) {
+        if (this.setup_done == 0 || this.is_released() ||
+            this.allocation_failed != 0 || this.is_null_name(name)) {
+            return -1;
+        }
+        if (!this.ensure_structs()) {
+            return -1;
+        }
+        long index = this.struct_count;
+        unsafe {
+            this.structs[index].name = name;
+            this.structs[index].field_count = 0;
+        }
+        this.struct_count = this.struct_count + 1;
+        return index;
+    }
+
+    long slen(const char* s) {
+        if (this.is_null_name(s)) {
+            return 0;
+        }
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) {
+                i = i + 1;
+            }
+        }
+        return i;
+    }
+
+    bool same_name(const char* left, const char* right) {
+        unsafe {
+            if (left == (char*) 0 || right == (char*) 0) {
+                return left == right;
+            }
+            long i = 0;
+            while (left[i] != 0 && right[i] != 0) {
+                if (left[i] != right[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return left[i] == 0 && right[i] == 0;
+        }
+    }
+
+    bool is_null_name(const char* name) {
+        bool result = false;
+        unsafe {
+            result = name == (char*) 0;
+        }
+        return result;
+    }
+
+    long register_field(long struct_index, const char* name, long cell_index) {
+        if (this.setup_done == 0 || this.is_released() ||
+            struct_index < 0 || struct_index >= this.struct_count ||
+            this.is_null_name(name) || cell_index < 0 || cell_index >= this.cell_count ||
+            this.allocation_failed != 0) {
+            return -1;
+        }
+        if (this.lookup_field(struct_index, name) >= 0) {
+            return -2;
+        }
+        if (!this.ensure_fields()) {
+            return -1;
+        }
+        long order = 0;
+        unsafe {
+            order = this.structs[struct_index].field_count;
+        }
+        long index = this.field_count;
+        unsafe {
+            this.fields[index].struct_index = struct_index;
+            this.fields[index].order = order;
+            this.fields[index].name = name;
+            this.fields[index].cell_index = cell_index;
+            this.structs[struct_index].field_count = order + 1;
+        }
+        this.field_count = this.field_count + 1;
+        return index;
+    }
+
+    // Create one fresh "__array" instance of `size` zero-valued element
+    // cells and return the cell index that holds the array value.  Each call
+    // registers a distinct IStruct, so two arrays never share element cells.
+    // Element fields are positional (order 0..size-1) and unnamed because the
+    // interpreter indexes them by order.
+    long make_array(long count) {
+        if (this.setup_done == 0 || this.is_released() || this.allocation_failed != 0 ||
+            count < 0) {
+            return -1;
+        }
+        long struct_index = this.register_struct("__array");
+        if (struct_index < 0) {
+            return -1;
+        }
+        long i = 0;
+        while (i < count) {
+            long element_value = this.make_int(0);
+            if (element_value < 0) {
+                return -1;
+            }
+            long element_cell = this.new_cell(element_value);
+            if (element_cell < 0) {
+                return -1;
+            }
+            if (!this.ensure_fields()) {
+                return -1;
+            }
+            long order = 0;
+            long field_index = this.field_count;
+            unsafe {
+                order = this.structs[struct_index].field_count;
+                this.fields[field_index].struct_index = struct_index;
+                this.fields[field_index].order = order;
+                this.fields[field_index].name = "";
+                this.fields[field_index].cell_index = element_cell;
+                this.structs[struct_index].field_count = order + 1;
+            }
+            this.field_count = this.field_count + 1;
+            i = i + 1;
+        }
+        long array_value = this.make_struct_value(struct_index);
+        if (array_value < 0) {
+            return -1;
+        }
+        return this.new_cell(array_value);
+    }
+
+    long lookup_field_index(long struct_index, const char* name) {
+        if (struct_index < 0 || struct_index >= this.struct_count ||
+            this.is_null_name(name) || this.is_released()) {
+            return -1;
+        }
+        long i = 0;
+        while (i < this.field_count) {
+            long owner = -1;
+            bool matches = false;
+            unsafe {
+                owner = this.fields[i].struct_index;
+                const char* field_name = this.fields[i].name;
+                matches = this.same_name(field_name, name);
+            }
+            if (owner == struct_index && matches) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    long lookup_field(long struct_index, const char* name) {
+        long field_index = this.lookup_field_index(struct_index, name);
+        if (field_index < 0) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.fields[field_index].cell_index;
+        }
+        return result;
+    }
+
+    // Positional field lookup.  Array elements are registered in index order,
+    // so element `order` is the field whose per-struct order equals `order`.
+    // This avoids formatting a decimal field name just to look it up.
+    long lookup_field_order(long struct_index, long order) {
+        if (struct_index < 0 || struct_index >= this.struct_count || order < 0 ||
+            this.is_released()) {
+            return -1;
+        }
+        long i = 0;
+        while (i < this.field_count) {
+            long owner = -1;
+            long ord = -1;
+            long cell_index = -1;
+            unsafe {
+                owner = this.fields[i].struct_index;
+                ord = this.fields[i].order;
+                cell_index = this.fields[i].cell_index;
+            }
+            if (owner == struct_index && ord == order) {
+                return cell_index;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    long field_order(long field_index) {
+        if (field_index < 0 || field_index >= this.field_count || this.is_released()) {
+            return -1;
+        }
+        long result = -1;
+        unsafe {
+            result = this.fields[field_index].order;
+        }
+        return result;
+    }
+
+    long push_frame(long function_index, long continuation_block,
+                    long continuation_inst) {
+        if (this.setup_done == 0 || this.is_released() || this.allocation_failed != 0) {
+            return -1;
+        }
+        if (!this.ensure_frames()) {
+            return -1;
+        }
+        long index = this.frame_count;
+        unsafe {
+            this.frames[index].function_index = function_index;
+            this.frames[index].caller_index = this.current_frame;
+            this.frames[index].continuation_block = continuation_block;
+            this.frames[index].continuation_inst = continuation_inst;
+            this.frames[index].block_index = -1;
+            this.frames[index].inst_index = -1;
+            this.frames[index].return_state = 0;
+            this.frames[index].return_value = -1;
+            this.frames[index].active = 1;
+        }
+        this.frame_count = this.frame_count + 1;
+        this.current_frame = index;
+        return index;
+    }
+
+    // Non-allocating frame unwinding is intentionally permitted even if
+    // allocation_failed is set, allowing clean stack unwinding during error/OOM handling.
+    long pop_frame() {
+        if (this.current_frame < 0 || this.current_frame >= this.frame_count ||
+            this.is_released()) {
+            return -1;
+        }
+        long popped = this.current_frame;
+        long caller = -1;
+        unsafe {
+            if (this.frames[popped].active == 0) {
+                return -1;
+            }
+            caller = this.frames[popped].caller_index;
+            this.frames[popped].active = 0;
+        }
+        this.current_frame = caller;
+        return popped;
+    }
+
+    long bind_local(long frame_index, const char* name, long cell_index) {
+        if (this.setup_done == 0 || frame_index < 0 || frame_index >= this.frame_count ||
+            this.is_null_name(name) || cell_index < 0 || cell_index >= this.cell_count ||
+            this.is_released() || this.allocation_failed != 0) {
+            return -1;
+        }
+        long active = 0;
+        unsafe {
+            active = this.frames[frame_index].active;
+        }
+        if (active == 0) {
+            return -1;
+        }
+        if (!this.ensure_locals()) {
+            return -1;
+        }
+        long index = this.local_count;
+        unsafe {
+            this.locals[index].frame_index = frame_index;
+            this.locals[index].name = name;
+            this.locals[index].cell_index = cell_index;
+        }
+        this.local_count = this.local_count + 1;
+        return index;
+    }
+
+    long find_local(long frame_index, const char* name) {
+        if (this.setup_done == 0 || frame_index < 0 || frame_index >= this.frame_count ||
+            this.is_null_name(name) || this.is_released()) {
+            return -1;
+        }
+        long active = 0;
+        unsafe {
+            active = this.frames[frame_index].active;
+        }
+        if (active == 0) {
+            return -1;
+        }
+        long i = this.local_count - 1;
+        while (i >= 0) {
+            long owner = -1;
+            long cell_index = -1;
+            bool matches = false;
+            unsafe {
+                owner = this.locals[i].frame_index;
+                cell_index = this.locals[i].cell_index;
+                const char* local_name = this.locals[i].name;
+                matches = this.same_name(local_name, name);
+            }
+            if (owner == frame_index && matches) {
+                return cell_index;
+            }
+            i = i - 1;
+        }
+        return -1;
+    }
+
+    long set_frame_position(long frame_index, long block_index, long inst_index) {
+        if (frame_index < 0 || frame_index >= this.frame_count || this.is_released() ||
+            this.allocation_failed != 0) {
+            return 0;
+        }
+        unsafe {
+            if (this.frames[frame_index].active == 0) {
+                return 0;
+            }
+            this.frames[frame_index].block_index = block_index;
+            this.frames[frame_index].inst_index = inst_index;
+        }
+        return 1;
+    }
+
+    long set_frame_return(long frame_index, long state, long value_index) {
+        if (frame_index < 0 || frame_index >= this.frame_count ||
+            (value_index >= this.value_count) || (value_index < -1) || this.is_released() ||
+            this.allocation_failed != 0 || state < 0 || state > 3) {
+            return 0;
+        }
+        unsafe {
+            if (this.frames[frame_index].active == 0) {
+                return 0;
+            }
+            this.frames[frame_index].return_state = state;
+            this.frames[frame_index].return_value = value_index;
+        }
+        return 1;
+    }
+
+    long current_local(const char* name) {
+        return this.find_local(this.current_frame, name);
+    }
+
+    IFunctionResolution resolve_function(IFunctionQuery query) {
+        IFunctionResolution answer;
+        answer.state = 0;
+        answer.function_index = -1;
+        answer.candidate_count = 0;
+        if (this.is_null_name(query.name) || query.function_count < 0) {
+            return answer;
+        }
+        bool functions_null = false;
+        unsafe {
+            functions_null = query.functions == (MFunction*) 0;
+        }
+        if (functions_null) {
+            return answer;
+        }
+        long i = 0;
+        while (i < query.function_count) {
+            bool matches = false;
+            unsafe {
+                const char* candidate_name = query.functions[i].name;
+                matches = this.same_name(candidate_name, query.name);
+            }
+            if (matches) {
+                answer.candidate_count = answer.candidate_count + 1;
+                answer.function_index = i;
+            }
+            i = i + 1;
+        }
+        if (answer.candidate_count == 0) {
+            answer.state = 0;
+            answer.function_index = -1;
+        } else if (answer.candidate_count == 1) {
+            answer.state = 1;
+        } else {
+            answer.state = 2;
+            answer.function_index = -1;
+        }
+        return answer;
+    }
+
+    long set_result(long state, long value_index, long status) {
+        if (this.setup_done == 0 || this.is_released() || this.allocation_failed != 0 ||
+            state < 0 || state > 3 || value_index < -1 || value_index >= this.value_count) {
+            return 0;
+        }
+        this.result.state = state;
+        this.result.value_index = value_index;
+        this.result.status = status;
+        return 1;
+    }
+
+    bool is_float_base(const char* b) {
+        return this.same_name(b, "float") || this.same_name(b, "double") ||
+               this.same_name(b, "long double") || this.same_name(b, "float16_t") ||
+               this.same_name(b, "float32_t") || this.same_name(b, "float64_t") ||
+               this.same_name(b, "float128_t") || this.same_name(b, "bfloat16_t");
+    }
+
+    bool is_integer_base(const char* b) {
+        return this.same_name(b, "bool") || this.same_name(b, "char") ||
+               this.same_name(b, "short") || this.same_name(b, "int") ||
+               this.same_name(b, "long") || this.same_name(b, "long long") ||
+               this.same_name(b, "int8_t") || this.same_name(b, "int16_t") ||
+               this.same_name(b, "int32_t") || this.same_name(b, "int64_t") ||
+               this.same_name(b, "int128_t") || this.same_name(b, "uint8_t") ||
+               this.same_name(b, "uint16_t") || this.same_name(b, "uint32_t") ||
+               this.same_name(b, "uint64_t") || this.same_name(b, "uint128_t") ||
+               this.same_name(b, "size_t") || this.same_name(b, "ptrdiff_t") ||
+               this.same_name(b, "uptr_t");
+    }
+
+    // The oracle compares `Value::asStr()` for either operand.  A non-string
+    // Value's `str` payload is empty, so a non-string operand behaves like an
+    // empty byte string in the oracle's string branch.  Mirror that.
+    long string_length_loose(long value_index) {
+        if (this.value_kind(value_index) == 5) {
+            return this.read_string_length(value_index);
+        }
+        return 0;
+    }
+
+    long string_byte_loose(long value_index, long byte_index) {
+        if (this.value_kind(value_index) == 5) {
+            return this.read_string_byte(value_index, byte_index);
+        }
+        return -1;
+    }
+
+    bool equal_strings(long left_val, long right_val) {
+        long llen = this.string_length_loose(left_val);
+        long rlen = this.string_length_loose(right_val);
+        if (llen != rlen) {
+            return false;
+        }
+        long i = 0;
+        while (i < llen) {
+            if (this.string_byte_loose(left_val, i) != this.string_byte_loose(right_val, i)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    bool format_long(long val, char* buf, long* out_len) {
+        unsafe {
+            if (buf == (char*) 0 || out_len == (long*) 0) {
+                return false;
+            }
+            char digits[32];
+            long pos = 0;
+            uint64 mag = 0;
+            if (val < 0) {
+                mag = (uint64)0 - (uint64)val;
+            } else {
+                mag = (uint64)val;
+            }
+            if (mag == 0) {
+                digits[0] = 48; // '0'
+                pos = 1;
+            } else {
+                while (mag > 0) {
+                    long d = (long)(mag % 10);
+                    digits[pos] = (char)(48 + d);
+                    pos = pos + 1;
+                    mag = mag / 10;
+                }
+            }
+            long out_pos = 0;
+            if (val < 0) {
+                buf[0] = 45; // '-'
+                out_pos = 1;
+            }
+            long i = pos - 1;
+            while (i >= 0) {
+                buf[out_pos] = digits[i];
+                out_pos = out_pos + 1;
+                i = i - 1;
+            }
+            buf[out_pos] = 0;
+            out_len[0] = out_pos;
+        }
+        return true;
+    }
+
+    // Append the decimal form of `val` to a NUL-terminated message buffer.
+    void append_long(char* out, long* out_len, long val) {
+        unsafe {
+            if (out == (char*) 0 || out_len == (long*) 0) {
+                return;
+            }
+            char digits[32];
+            long pos = 0;
+            uint64 mag = 0;
+            if (val < 0) {
+                mag = (uint64)0 - (uint64)val;
+            } else {
+                mag = (uint64)val;
+            }
+            if (mag == 0) {
+                digits[0] = 48; // '0'
+                pos = 1;
+            } else {
+                while (mag > 0) {
+                    long d = (long)(mag % 10);
+                    digits[pos] = (char)(48 + d);
+                    pos = pos + 1;
+                    mag = mag / 10;
+                }
+            }
+            long cur = out_len[0];
+            if (val < 0) {
+                out[cur] = 45; // '-'
+                cur = cur + 1;
+            }
+            long i = pos - 1;
+            while (i >= 0) {
+                out[cur] = digits[i];
+                cur = cur + 1;
+                i = i - 1;
+            }
+            out[cur] = 0;
+            out_len[0] = cur;
+        }
+    }
+
+    void append_to_msg(char* out, long* out_len, const char* str) {
+        unsafe {
+            if (out == (char*) 0 || out_len == (long*) 0 || str == (char*) 0) {
+                return;
+            }
+            long cur = out_len[0];
+            long i = 0;
+            while (str[i] != 0) {
+                out[cur] = str[i];
+                cur = cur + 1;
+                i = i + 1;
+            }
+            out[cur] = 0;
+            out_len[0] = cur;
+        }
+    }
+
+    // Diagnostic messages are built in a short-lived heap scratch buffer and
+    // then interned (copied) by error(), so no caller buffer escapes. The
+    // scratch size is derived from the dynamic parts so a long identifier or
+    // operator can never overrun a fixed buffer.
+    long diagnostic_scratch_size(const char* part) {
+        return 64 + this.slen(part);
+    }
+
+    void error_undefined_var(long line, long col, const char* name) {
+        unsafe {
+            char* msg = (char*) __ivy_alloc(this.diagnostic_scratch_size(name));
+            if (msg == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            msg[0] = 0;
+            long len = 0;
+            this.append_to_msg(msg, &len, "undefined variable '");
+            this.append_to_msg(msg, &len, name);
+            this.append_to_msg(msg, &len, "'");
+            this.error(line, col, msg);
+            __ivy_free((void*) msg);
+        }
+    }
+
+    void error_unsupported_unary(long line, long col, const char* op) {
+        unsafe {
+            char* msg = (char*) __ivy_alloc(this.diagnostic_scratch_size(op));
+            if (msg == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            msg[0] = 0;
+            long len = 0;
+            this.append_to_msg(msg, &len, "IvyInterpret v0.2: unsupported unary op '");
+            this.append_to_msg(msg, &len, op);
+            this.append_to_msg(msg, &len, "'");
+            this.error(line, col, msg);
+            __ivy_free((void*) msg);
+        }
+    }
+
+    void error_unsupported_binary(long line, long col, const char* op) {
+        unsafe {
+            char* msg = (char*) __ivy_alloc(this.diagnostic_scratch_size(op));
+            if (msg == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            msg[0] = 0;
+            long len = 0;
+            this.append_to_msg(msg, &len, "IvyInterpret v0.2: unsupported binary op '");
+            this.append_to_msg(msg, &len, op);
+            this.append_to_msg(msg, &len, "'");
+            this.error(line, col, msg);
+            __ivy_free((void*) msg);
+        }
+    }
+
+    void error_index_out_of_bounds(long line, long col, long idx, long sz) {
+        unsafe {
+            char* msg = (char*) __ivy_alloc(128);
+            if (msg == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            msg[0] = 0;
+            long len = 0;
+            this.append_to_msg(msg, &len, "index out of bounds: index ");
+            this.append_long(msg, &len, idx);
+            this.append_to_msg(msg, &len, " out of range [0, ");
+            this.append_long(msg, &len, sz);
+            this.append_to_msg(msg, &len, ")");
+            this.error(line, col, msg);
+            __ivy_free((void*) msg);
+        }
+    }
+
+    // True when `op` is exactly `plain` followed by one character, e.g.
+    // plain "+" matches "+=" (the oracle strips the trailing '=' of a
+    // compound assignment operator).  This replaces copying into a local
+    // char array, which the Ivy subset cannot pass as a pointer.
+    bool compound_plain_is(const char* op, const char* plain) {
+        if (this.is_null_name(op) || this.is_null_name(plain)) {
+            return false;
+        }
+        long plen = this.slen(plain);
+        if (this.slen(op) != plen + 1) {
+            return false;
+        }
+        long i = 0;
+        unsafe {
+            while (i < plen) {
+                if (op[i] != plain[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    long lookup_local_cell(const char* name) {
+        if (this.is_null_name(name) || this.current_frame < 0) {
+            return -1;
+        }
+        long f = this.current_frame;
+        while (f >= 0 && f < this.frame_count) {
+            long c = this.find_local(f, name);
+            if (c >= 0) {
+                return c;
+            }
+            unsafe {
+                f = this.frames[f].caller_index;
+            }
+        }
+        return -1;
+    }
+
+    long lvalue_cell(MUnit* u, long expr_idx) {
+        if (this.is_released()) {
+            return -1;
+        }
+        unsafe {
+            if (u == (MUnit*) 0 || expr_idx < 0 || expr_idx >= u->ex_n) {
+                return -1;
+            }
+            long kind = u->exprs[expr_idx].kind;
+            long a_idx = u->exprs[expr_idx].a;
+            long b_idx = u->exprs[expr_idx].b;
+            long line = u->exprs[expr_idx].line;
+            long col = u->exprs[expr_idx].col;
+            const char* sval = u->exprs[expr_idx].sval;
+            if (kind == 6) { // IdentRef
+                long c = this.lookup_local_cell(sval);
+                if (c < 0) {
+                    return -1;
+                }
+                long val_idx = this.cell_value(c);
+                if (this.value_kind(val_idx) == 3 && this.pointer_is_null(val_idx) == 0) {
+                    return this.pointer_cell(val_idx);
+                }
+                return c;
+            }
+            if (kind == 7) { // This
+                long c = this.lookup_local_cell("this");
+                if (c < 0) {
+                    return -1;
+                }
+                long val_idx = this.cell_value(c);
+                if (this.value_kind(val_idx) == 3 && this.pointer_is_null(val_idx) == 0) {
+                    return this.pointer_cell(val_idx);
+                }
+                return c;
+            }
+            if (kind == 8) { // Unary
+                if (this.same_name(sval, "*")) {
+                    long v = this.eval_expr(u, a_idx);
+                    if (this.value_kind(v) == 3 && this.pointer_is_null(v) == 0) {
+                        return this.pointer_cell(v);
+                    }
+                    return -1;
+                }
+                return -1;
+            }
+            if (kind == 12) { // Index
+                long arrCell = this.lvalue_cell(u, a_idx);
+                long idxVal = this.eval_expr(u, b_idx);
+                long i = 0;
+                if (this.value_kind(idxVal) == 1) {
+                    i = this.read_int(idxVal);
+                }
+                if (arrCell >= 0) {
+                    long arrVal = this.cell_value(arrCell);
+                    if (this.value_kind(arrVal) == 4) {
+                        long st_idx = this.read_struct_index(arrVal);
+                        if (st_idx >= 0 && st_idx < this.struct_count) {
+                            const char* sname = (char*) 0;
+                            long sz = 0;
+                            sname = this.structs[st_idx].name;
+                            sz = this.structs[st_idx].field_count;
+                            if (this.same_name(sname, "__array")) {
+                                if (i < 0 || i >= sz) {
+                                    this.error_index_out_of_bounds(line, col, i, sz);
+                                    return -1;
+                                }
+                                return this.lookup_field_order(st_idx, i);
+                            }
+                        }
+                    }
+                }
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    long eval_expr(MUnit* u, long expr_idx) {
+        if (this.is_released()) {
+            return this.make_void();
+        }
+        unsafe {
+            if (u == (MUnit*) 0 || expr_idx < 0 || expr_idx >= u->ex_n) {
+                return this.make_void();
+            }
+            long kind = u->exprs[expr_idx].kind;
+            long ival = u->exprs[expr_idx].ival;
+            double fval = u->exprs[expr_idx].fval;
+            long flag = u->exprs[expr_idx].flag;
+            long a_idx = u->exprs[expr_idx].a;
+            long b_idx = u->exprs[expr_idx].b;
+            long c_idx = u->exprs[expr_idx].c;
+            long line = u->exprs[expr_idx].line;
+            long col = u->exprs[expr_idx].col;
+            const char* sval = u->exprs[expr_idx].sval;
+            const char* type_base = u->exprs[expr_idx].type.base;
+            long type_array_size = u->exprs[expr_idx].type.array_size;
+            long type_ptr_depth = u->exprs[expr_idx].type.ptr_depth;
+            bool type_is_ref = u->exprs[expr_idx].type.is_ref;
+
+        if (kind == 0) { // IntegerLit
+            return this.make_int(ival);
+        }
+        if (kind == 1) { // FloatLit
+            return this.make_float(fval);
+        }
+        if (kind == 2) { // StringLit
+            long raw_len = this.slen(sval);
+            char* buf = (char*) __ivy_alloc(raw_len + 1);
+            if (buf == (char*) 0) {
+                this.allocation_failed = 1;
+                return this.make_void();
+            }
+            StrBuf rawb;
+            rawb.p = (char*) sval;
+            StrBuf outb;
+            outb.p = buf;
+            long dec_len = 0;
+            LongPtr lenp;
+            lenp.p = &dec_len;
+            bool ok = interpreter::decode_string_literal(rawb, outb, lenp);
+            long res = -1;
+            if (ok) {
+                res = this.make_string(buf, dec_len);
+            } else {
+                res = this.make_string(buf, 0);
+            }
+            __ivy_free((void*) buf);
+            return res;
+        }
+        if (kind == 3) { // CharLit
+            long char_val = 0;
+            StrBuf rawb;
+            rawb.p = (char*) sval;
+            LongPtr valp;
+            valp.p = &char_val;
+            interpreter::decode_char_literal(rawb, valp);
+            return this.make_int(char_val);
+        }
+        if (kind == 4) { // BoolLit
+            return this.make_int(ival != 0 ? 1 : 0);
+        }
+        if (kind == 5) { // NullptrLit
+            return this.make_null_pointer();
+        }
+        if (kind == 6) { // IdentRef
+            long c = this.lookup_local_cell(sval);
+            if (c < 0) {
+                this.error_undefined_var(line, col, sval);
+                return this.make_void();
+            }
+            if (type_array_size > 0) {
+                return this.cell_value(c);
+            }
+            if (type_ptr_depth > 0 && !type_is_ref) {
+                return this.make_cell_pointer(c);
+            }
+            if (type_is_ref) {
+                long cv = this.cell_value(c);
+                if (this.value_kind(cv) == 3 && this.pointer_is_null(cv) == 0) {
+                    long pc = this.pointer_cell(cv);
+                    if (pc >= 0) {
+                        return this.cell_value(pc);
+                    }
+                }
+            }
+            return this.cell_value(c);
+        }
+        if (kind == 7) { // This
+            long c = this.lookup_local_cell("this");
+            if (c < 0) {
+                this.error(line, col, "'this' is only valid inside a method");
+                return this.make_void();
+            }
+            if (type_is_ref) {
+                long cv = this.cell_value(c);
+                if (this.value_kind(cv) == 3 && this.pointer_is_null(cv) == 0) {
+                    long pc = this.pointer_cell(cv);
+                    if (pc >= 0) {
+                        return this.cell_value(pc);
+                    }
+                }
+            }
+            return this.cell_value(c);
+        }
+        if (kind == 8) { // Unary
+            if (this.same_name(sval, "&")) {
+                long c = this.lvalue_cell(u, a_idx);
+                if (c < 0) {
+                    this.error(line, col, "cannot take address");
+                    return this.make_void();
+                }
+                return this.make_cell_pointer(c);
+            }
+            if (this.same_name(sval, "*")) {
+                long op_val = this.eval_expr(u, a_idx);
+                if (this.value_kind(op_val) != 3) {
+                    this.error(line, col, "dereference of non-pointer");
+                    return this.make_void();
+                }
+                if (this.pointer_is_null(op_val) != 0) {
+                    this.error(line, col, "null pointer dereference");
+                    return this.make_void();
+                }
+                long pc = this.pointer_cell(op_val);
+                if (pc >= 0) {
+                    return this.cell_value(pc);
+                }
+                return this.make_void();
+            }
+            bool is_prefix = flag != 0;
+            if (is_prefix && (this.same_name(sval, "++") || this.same_name(sval, "--"))) {
+                long c = this.lvalue_cell(u, a_idx);
+                if (c >= 0) {
+                    long cv = this.cell_value(c);
+                    if (this.value_kind(cv) == 1) {
+                        long cur = this.read_int(cv);
+                        long delta = this.same_name(sval, "++") ? 1 : -1;
+                        long nv = this.make_int(cur + delta);
+                        this.cell_write(c, nv);
+                        return nv;
+                    }
+                }
+            }
+            if (!is_prefix && (this.same_name(sval, "++") || this.same_name(sval, "--"))) {
+                long c = this.lvalue_cell(u, a_idx);
+                if (c >= 0) {
+                    long cv = this.cell_value(c);
+                    if (this.value_kind(cv) == 1) {
+                        long cur = this.read_int(cv);
+                        long delta = this.same_name(sval, "++") ? 1 : -1;
+                        long nv = this.make_int(cur + delta);
+                        this.cell_write(c, nv);
+                        return cv;
+                    }
+                }
+            }
+            long v = this.eval_expr(u, a_idx);
+            if (this.same_name(sval, "-")) {
+                if (this.value_kind(v) == 1) {
+                    return this.make_int(-this.read_int(v));
+                }
+                if (this.value_kind(v) == 2) {
+                    return this.make_float(-this.read_float(v));
+                }
+            }
+            if (this.same_name(sval, "!") || this.same_name(sval, "not")) {
+                long bv = 0;
+                if (this.value_kind(v) == 1) {
+                    bv = this.read_int(v);
+                } else if (this.value_kind(v) == 2) {
+                    bv = (this.read_float(v) != 0.0) ? 1 : 0;
+                }
+                return this.make_int(bv == 0 ? 1 : 0);
+            }
+            if (this.same_name(sval, "~") && this.value_kind(v) == 1) {
+                return this.make_int(~this.read_int(v));
+            }
+            if (this.same_name(sval, "+")) {
+                return v;
+            }
+            this.error_unsupported_unary(line, col, sval);
+            return this.make_void();
+        }
+        if (kind == 9) { // Binary
+            if (this.same_name(sval, "&&")) {
+                long lv = this.eval_expr(u, a_idx);
+                if (this.value_kind(lv) == 1 && this.read_int(lv) == 0) {
+                    return this.make_int(0);
+                }
+                long rv = this.eval_expr(u, b_idx);
+                long r_truth = 0;
+                if (this.value_kind(rv) == 1) {
+                    r_truth = (this.read_int(rv) != 0) ? 1 : 0;
+                } else if (this.value_kind(rv) == 2) {
+                    r_truth = (this.read_float(rv) != 0.0) ? 1 : 0;
+                }
+                return this.make_int(r_truth);
+            }
+            if (this.same_name(sval, "||")) {
+                long lv = this.eval_expr(u, a_idx);
+                if (this.value_kind(lv) == 1 && this.read_int(lv) != 0) {
+                    return this.make_int(1);
+                }
+                long rv = this.eval_expr(u, b_idx);
+                long r_truth = 0;
+                if (this.value_kind(rv) == 1) {
+                    r_truth = (this.read_int(rv) != 0) ? 1 : 0;
+                } else if (this.value_kind(rv) == 2) {
+                    r_truth = (this.read_float(rv) != 0.0) ? 1 : 0;
+                }
+                return this.make_int(r_truth);
+            }
+            if (this.same_name(sval, ",")) {
+                this.eval_expr(u, a_idx);
+                return this.eval_expr(u, b_idx);
+            }
+            long lv = this.eval_expr(u, a_idx);
+            long rv = this.eval_expr(u, b_idx);
+            long lk = this.value_kind(lv);
+            long rk = this.value_kind(rv);
+
+            if (lk == 1 && rk == 1) {
+                long l = this.read_int(lv);
+                long r = this.read_int(rv);
+                if (this.same_name(sval, "+")) return this.make_int(l + r);
+                if (this.same_name(sval, "-")) return this.make_int(l - r);
+                if (this.same_name(sval, "*")) return this.make_int(l * r);
+                if (this.same_name(sval, "/")) {
+                    if (r == 0) {
+                        this.error(line, col, "division by zero");
+                        return this.make_int(0);
+                    }
+                    return this.make_int(l / r);
+                }
+                if (this.same_name(sval, "%")) {
+                    if (r == 0) {
+                        this.error(line, col, "modulo by zero");
+                        return this.make_int(0);
+                    }
+                    return this.make_int(l % r);
+                }
+                if (this.same_name(sval, "==")) return this.make_int(l == r ? 1 : 0);
+                if (this.same_name(sval, "!=")) return this.make_int(l != r ? 1 : 0);
+                if (this.same_name(sval, "<"))  return this.make_int(l <  r ? 1 : 0);
+                if (this.same_name(sval, "<=")) return this.make_int(l <= r ? 1 : 0);
+                if (this.same_name(sval, ">"))  return this.make_int(l >  r ? 1 : 0);
+                if (this.same_name(sval, ">=")) return this.make_int(l >= r ? 1 : 0);
+                if (this.same_name(sval, "&"))  return this.make_int(l & r);
+                if (this.same_name(sval, "|"))  return this.make_int(l | r);
+                if (this.same_name(sval, "^"))  return this.make_int(l ^ r);
+                if (this.same_name(sval, "<<")) return this.make_int(l << r);
+                if (this.same_name(sval, ">>")) return this.make_int(l >> r);
+            }
+            if (lk == 2 || rk == 2) {
+                double l = (lk == 2) ? this.read_float(lv) : (double) this.read_int(lv);
+                double r = (rk == 2) ? this.read_float(rv) : (double) this.read_int(rv);
+                if (this.same_name(sval, "+")) return this.make_float(l + r);
+                if (this.same_name(sval, "-")) return this.make_float(l - r);
+                if (this.same_name(sval, "*")) return this.make_float(l * r);
+                if (this.same_name(sval, "/")) return this.make_float(l / r);
+                if (this.same_name(sval, "==")) return this.make_int(l == r ? 1 : 0);
+                if (this.same_name(sval, "!=")) return this.make_int(l != r ? 1 : 0);
+                if (this.same_name(sval, "<"))  return this.make_int(l <  r ? 1 : 0);
+                if (this.same_name(sval, "<=")) return this.make_int(l <= r ? 1 : 0);
+                if (this.same_name(sval, ">"))  return this.make_int(l >  r ? 1 : 0);
+                if (this.same_name(sval, ">=")) return this.make_int(l >= r ? 1 : 0);
+            }
+            if (lk == 5 || rk == 5) {
+                if (this.same_name(sval, "==")) {
+                    return this.make_int(this.equal_strings(lv, rv) ? 1 : 0);
+                }
+                if (this.same_name(sval, "!=")) {
+                    return this.make_int(this.equal_strings(lv, rv) ? 0 : 1);
+                }
+            }
+            if (lk == 3 || rk == 3) {
+                bool lnull = (lk == 3) ? (this.pointer_is_null(lv) != 0) : (lk == 1 ? (this.read_int(lv) == 0) : false);
+                bool rnull = (rk == 3) ? (this.pointer_is_null(rv) != 0) : (rk == 1 ? (this.read_int(rv) == 0) : false);
+                if (this.same_name(sval, "==")) return this.make_int(lnull == rnull ? 1 : 0);
+                if (this.same_name(sval, "!=")) return this.make_int(lnull != rnull ? 1 : 0);
+            }
+            this.error_unsupported_binary(line, col, sval);
+            return this.make_void();
+        }
+        if (kind == 10) { // Ternary
+            long cond = this.eval_expr(u, a_idx);
+            bool taken = false;
+            if (this.value_kind(cond) == 1) {
+                taken = (this.read_int(cond) != 0);
+            } else if (this.value_kind(cond) == 2) {
+                taken = (this.read_float(cond) != 0.0);
+            }
+            return this.eval_expr(u, taken ? b_idx : c_idx);
+        }
+        if (kind == 12) { // Index
+            long baseVal = this.eval_expr(u, a_idx);
+            long idxVal = this.eval_expr(u, b_idx);
+            long idx = 0;
+            if (this.value_kind(idxVal) == 1) {
+                idx = this.read_int(idxVal);
+            }
+            if (this.value_kind(baseVal) == 4) {
+                long st_idx = this.read_struct_index(baseVal);
+                if (st_idx >= 0 && st_idx < this.struct_count) {
+                    const char* sname = this.structs[st_idx].name;
+                    long sz = this.structs[st_idx].field_count;
+                    if (this.same_name(sname, "__array")) {
+                        if (idx < 0 || idx >= sz) {
+                            this.error_index_out_of_bounds(line, col, idx, sz);
+                            return this.make_void();
+                        }
+                        long fc = this.lookup_field_order(st_idx, idx);
+                        if (fc >= 0) {
+                            return this.cell_value(fc);
+                        }
+                        return this.make_int(0);
+                    }
+                }
+            }
+            this.error(line, col, "IvyInterpret v0.2: pointer index not yet supported");
+            return this.make_void();
+        }
+        if (kind == 14) { // Assign
+            long c = this.lvalue_cell(u, a_idx);
+            if (c < 0) {
+                this.error(line, col, "cannot assign to expression");
+                return this.make_void();
+            }
+            long cv = this.cell_value(c);
+            long target = c;
+            if (this.value_kind(cv) == 3 && this.pointer_is_null(cv) == 0) {
+                target = this.pointer_cell(cv);
+            }
+            long rhs = this.eval_expr(u, b_idx);
+            if (this.same_name(sval, "=")) {
+                this.cell_write(target, rhs);
+                return this.cell_value(target);
+            }
+            long lv = this.cell_value(target);
+            if (this.value_kind(lv) == 1 && this.value_kind(rhs) == 1) {
+                long l = this.read_int(lv);
+                long r = this.read_int(rhs);
+                long res = l;
+                if (this.compound_plain_is(sval, "+")) res = l + r;
+                else if (this.compound_plain_is(sval, "-")) res = l - r;
+                else if (this.compound_plain_is(sval, "*")) res = l * r;
+                else if (this.compound_plain_is(sval, "/") && r != 0) res = l / r;
+                else if (this.compound_plain_is(sval, "%") && r != 0) res = l % r;
+                else if (this.compound_plain_is(sval, "&")) res = l & r;
+                else if (this.compound_plain_is(sval, "|")) res = l | r;
+                else if (this.compound_plain_is(sval, "^")) res = l ^ r;
+                else if (this.compound_plain_is(sval, "<<")) res = l << r;
+                else if (this.compound_plain_is(sval, ">>")) res = l >> r;
+                else {
+                    this.error(line, col, "unsupported compound op");
+                    return this.make_void();
+                }
+                long nw = this.make_int(res);
+                this.cell_write(target, nw);
+                return nw;
+            }
+            if (this.value_kind(lv) == 2 || this.value_kind(rhs) == 2) {
+                double l = (this.value_kind(lv) == 2) ? this.read_float(lv) : (double) this.read_int(lv);
+                double r = (this.value_kind(rhs) == 2) ? this.read_float(rhs) : (double) this.read_int(rhs);
+                double res = l;
+                if (this.compound_plain_is(sval, "+")) res = l + r;
+                else if (this.compound_plain_is(sval, "-")) res = l - r;
+                else if (this.compound_plain_is(sval, "*")) res = l * r;
+                else if (this.compound_plain_is(sval, "/")) res = l / r;
+                else {
+                    this.error(line, col, "unsupported compound float op");
+                    return this.make_void();
+                }
+                long nw = this.make_float(res);
+                this.cell_write(target, nw);
+                return nw;
+            }
+            this.error(line, col, "unsupported compound assignment");
+            return this.make_void();
+        }
+        if (kind == 19) { // Cast
+            long operand = this.eval_expr(u, a_idx);
+            long op_k = this.value_kind(operand);
+            if (op_k == 1) { // int
+                if (this.is_float_base(type_base)) {
+                    return this.make_float((double) this.read_int(operand));
+                }
+                return this.make_int(this.read_int(operand));
+            }
+            if (op_k == 2) { // float
+                if (this.is_float_base(type_base)) {
+                    return this.make_float(this.read_float(operand));
+                }
+                if (this.is_integer_base(type_base)) {
+                    return this.make_int((long) this.read_float(operand));
+                }
+                return this.make_float(this.read_float(operand));
+            }
+            if (op_k == 3) { // pointer
+                if (type_ptr_depth > 0) {
+                    return operand;
+                }
+                if (this.is_integer_base(type_base)) {
+                    return this.make_int(this.pointer_is_null(operand) != 0 ? 0 : 1);
+                }
+                return operand;
+            }
+            return operand;
+        }
+
+        this.error(line, col, "IvyInterpret v0.2: unsupported expression");
+        return this.make_void();
+        }
+    }
+
+    void release() {
+        if (this.setup_done == 0 || this.is_released()) {
+            this.released = 1;
+            return;
+        }
+        unsafe {
+            if (this.control != (InterpreterControl*) 0) {
+                this.control->released = 1;
+            }
+            long i = 0;
+            while (i < this.string_buffer_count) {
+                __ivy_free((void*) this.string_buffers[i]);
+                i = i + 1;
+            }
+            if (this.string_buffers != (long*) 0) {
+                __ivy_free((void*) this.string_buffers);
+            }
+            if (this.locals != (ILocal*) 0) {
+                __ivy_free(this.locals);
+            }
+            if (this.frames != (IFrame*) 0) {
+                __ivy_free(this.frames);
+            }
+            if (this.fields != (IField*) 0) {
+                __ivy_free(this.fields);
+            }
+            if (this.structs != (IStruct*) 0) {
+                __ivy_free(this.structs);
+            }
+            if (this.cells != (ICell*) 0) {
+                __ivy_free(this.cells);
+            }
+            if (this.values != (IValue*) 0) {
+                __ivy_free(this.values);
+            }
+            if (this.dline_ != (long*) 0) {
+                __ivy_free(this.dline_);
+            }
+            if (this.dcol_ != (long*) 0) {
+                __ivy_free(this.dcol_);
+            }
+            if (this.dmsg_ != (long*) 0) {
+                __ivy_free((void*) this.dmsg_);
+            }
+        }
+        unsafe {
+            this.values = (IValue*) 0;
+            this.cells = (ICell*) 0;
+            this.structs = (IStruct*) 0;
+            this.fields = (IField*) 0;
+            this.frames = (IFrame*) 0;
+            this.locals = (ILocal*) 0;
+            this.string_buffers = (long*) 0;
+            this.dline_ = (long*) 0;
+            this.dcol_ = (long*) 0;
+            this.dmsg_ = (long*) 0;
+        }
+        this.value_count = 0;
+        this.cell_count = 0;
+        this.struct_count = 0;
+        this.field_count = 0;
+        this.frame_count = 0;
+        this.local_count = 0;
+        this.string_buffer_count = 0;
+        this.diag_count_ = 0;
+        this.value_capacity = 0;
+        this.cell_capacity = 0;
+        this.struct_capacity = 0;
+        this.field_capacity = 0;
+        this.frame_capacity = 0;
+        this.local_capacity = 0;
+        this.string_buffer_capacity = 0;
+        this.diag_capacity_ = 0;
+        this.current_frame = -1;
+        this.result.state = 0;
+        this.result.value_index = -1;
+        this.result.status = 0;
+        this.released = 1;
+        // Keep setup_done set so this released model cannot be reinitialised
+        // with recycled cell/frame identities.
+    }
+};
