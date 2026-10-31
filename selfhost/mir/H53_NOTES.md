@@ -356,7 +356,7 @@ Oracle reference: `src/mir/interpreter.cpp:308-789` (expressions/lvalues/assignm
 | Assignment | `:2333-2390` | `=` plus int/float compound `+= -= *= /= %= &= \|= ^= <<= >>=`; write-through for pointer/reference cells |
 | Cast | `:2391-2419` | int↔float, int→int, ptr→ptr pass-through, ptr→int nullness (0/1) |
 | Diagnostics | `error` (`:878`), `intern_diagnostic_msg` (`:851`), accessors (`:895-930`), builders (`:1814-1887`) | Append-only `(line, col, interned message)`; `release()` frees messages with the string-buffer pool |
-| Array values | `make_array` (`:1357`) | See §12.6 |
+| Array values | `make_array` (`:1362`) | See §12.6 |
 
 Audit fixes in this phase:
 
@@ -516,3 +516,168 @@ Compiler `sizeof` caution (observed, not introduced by P1): `sizeof` under-repor
 - Under latched `allocation_failed`, `error()` may drop a diagnostic because the tables cannot grow; the P0 OOM policy intentionally favors safe failure over diagnostic fidelity.
 - Shallow model copies share pool pointers, so pool growth through one copy can invalidate another copy's pointers before release. P1 keeps the P0 contract (release safety via `InterpreterControl`) and does not claim shared-read safety for live copies.
 - `format_long` remains as an unused helper; diagnostics use `append_long`/`append_to_msg`.
+
+---
+
+## 13. Implementation P2 — Calls, Frames, Recursion
+
+Recorded 2026-10-31 against HEAD `fd508da`. This phase edited only `selfhost/mir/interpreter.ivy` and appended this section. No `src/**` change, no oracle rebuild, no commit. The working tree contains the phase diff (not committed).
+
+### 13.1 Build evidence
+
+Scratch and private `TEMP`/`TMP`: `C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\`. From repository root, exact commands:
+
+```powershell
+$env:TEMP = 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\tmp'
+$env:TMP = $env:TEMP
+& '.\build\Release\ivy.exe' 'selfhost\mir\mir.ivy' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\src\mir.obj'
+& '.\build\Release\ivy.exe' 'selfhost\mir\interpreter.ivy' -I 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\src' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\src\interpreter.obj'
+```
+
+Both exited 0 and wrote `.ivm`/`.obj` in scratch only. Oracle identity was rechecked after the phase: 27,031,552 bytes, mtime `2026-10-21 16:41:44`.
+
+Probes were compiled with the same frozen oracle, importing the scratch `interpreter.ivm` first and the repository `mir`/parsing/HIR modules:
+
+```powershell
+& '.\build\Release\ivy.exe' 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\p2probe.ivy' -I 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\src' -I 'selfhost\parsing' -I 'selfhost\hir' -I 'selfhost\mir' -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\p2probe.exe'
+& 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p2i\p2probe.exe'
+```
+
+### 13.2 Call resolution and its gaps
+
+`resolve_call` (`interpreter.ivy:2549`) mirrors `Interpreter::call` (`src/mir/interpreter.cpp:51-92`):
+
+1. exact `MFunction.name` match with `has_body` and a signature match;
+2. `::`-suffix match (`qualified_suffix_matches`, `:2474`) with `has_body` and a signature match;
+3. legacy first same-name function with `has_body`, ignoring arity.
+
+`signature_matches` (`:2520`) implements the oracle's `matchSig`: reject when `pn > argc`; a non-extern-C function needs `pn == argc`; an `extern "C"` function may have fewer fixed parameters than arguments. Functions without a body are never selected.
+
+The port stores the already-qualified `MFunction.name` (`"ns::f"`), while the oracle stores an unqualified `name` plus `namespacePrefix`. Therefore the oracle's first pass (unqualified `f->name == name`) corresponds to the port's exact pass for unqualified callees, and the oracle's second pass (`prefix + name == requested`) to the port's `::`-suffix pass. Outcomes agree for both `f` and `ns::f` spellings.
+
+**Gap — no target pointer**: `MExpr` Call has `sval`/`astart`/`an`/`type` only, so the port cannot reproduce the oracle's `c.target` fast path or the MIR builder's type-directed overload choice (`src/mir/mir_builder.cpp:1254-1286`). Overloads that differ only in parameter types are therefore resolved by the first three name-based passes, which can pick the wrong overload. Type-based disambiguation requires adding a resolved target index/function handle to `MExpr` in a later phase; it is not approximated here.
+
+`eval_call` (`:2692`) evaluates arguments first (oracle `interpreter.cpp:905-911`), then handles `move` as a pass-through, then gates the P4 builtin families (`io::*`, `ivy::*`, `printf`, `puts`, `putchar`, `exit`, `abort`, `__ivy_alloc`, `__ivy_free`, `malloc`, `free`) with `IvyInterpret v0.2: unsupported expression`. User-defined functions with a body always resolve, so recursion and mutual recursion work without special cases. An unresolved callee produces `IvyInterpret v0.2: function 'X' not found` at `0:0` (`error_function_not_found`, `:2610`) and returns void.
+
+### 13.3 Argument evaluation
+
+`evaluate_arg_run` (`:2650`) walks the contiguous `MUnit.args[astart .. astart+an)` run strictly left to right, evaluating every argument exactly once, even when the callee is missing or gated. Argument values are kept in a short-lived heap run (`alloc_arg_values`, `:2631`) and freed after the call; the `IValue` records themselves stay in the append-only value pool. Missing/out-of-range argument indices produce a void value for that slot.
+
+Two probes confirm the order and the once-only rule:
+- three arguments `1/0`, `1%0`, `2/0` produce exactly three diagnostics in that order (`division by zero`, `modulo by zero`, `division by zero`);
+- two `1/0` arguments produce exactly two diagnostics.
+
+### 13.4 Frames and runner
+
+`run_function` (`:2934`) is the `execFunction`/`execBlock` equivalent:
+
+- `push_frame` (`:1475`) records `function_index` and sets `caller_index = current_frame`, so nested calls form a real caller chain; `pop_frame` (`:1502`) marks only that frame inactive and restores the caller. Frame records and their cells/locals are append-only and never recycled.
+- Parameters are bound after the push (see §13.5), starting at the function's `pstart`.
+- Execution starts at the function's `block_start`; the runner walks the block's instruction chain via `MBlock.first` and `MInst.next`. It stops the block when an instruction changes `IFrame.block_index` (CondBranch/Jump) or the frame returns, switches to the new block, and treats falling off a non-terminated block as an implicit return. This matches `execBlock` (`interpreter.cpp:158-175`), including the oracle quirk that a Jump to the current block advances by `next` rather than restarting.
+- The return value is read from `IFrame.return_state`/`return_value` before `pop_frame`; a missing/void return yields a void value. A missing or already-popped frame cannot be indexed: `exec_inst` validates the frame/instruction ranges and returns abandon, and `pop_frame` returns `-1` safely.
+
+`lookup_local_cell` (`:1917`) now starts at `current_frame` and walks the `caller_index` chain, not the whole local pool. That reproduces the oracle's `lookupCell` (`interpreter.cpp:108-114`), which scans **every** live frame: a callee therefore *does* see the locals of its callers (probe: a nested call reads an outer local and gets `41`, matching `--run`). What it cannot see is a local that was never bound on its caller chain, e.g. a popped frame or a popped sibling; those report `undefined variable '<name>'`. Locals are found by the latest binding in the requested frame (`find_local`, `:1555`), so same-frame shadowing works, and `find_local`/`bind_local` reject inactive frames.
+
+### 13.5 Parameter binding
+
+Binding follows `execFunction` (`interpreter.cpp:129-142`) exactly: parameters are considered up to `min(pn, argc)`; an empty parameter name is skipped. A value parameter always gets a new cell containing the argument value. A reference or pointer parameter shares the argument's cell only when the argument value is a non-null `IValue` Ptr; otherwise the value is wrapped in a new cell.
+
+Oracle parity note (probe-confirmed): the Ivy HIR lowers `f(y)` for a parameter declared `T&` as a plain `ident y`, whose evaluation yields the value, not a pointer. The oracle therefore wraps a copy, and mutating the reference parameter does **not** change the caller's `y` (`y*100+z` is 506, not 606). Cell sharing becomes observable when the argument value is a pointer, as for a pointer parameter or an address-valued MIR argument. Probe 6 builds that shape from a real unit by retyping the call argument as pointer depth 1 and the callee's first parameter as a pointer; the callee's mutation then changes the caller's local (606). Raw pointer parameter *definitions* cannot be built through the current frontend (`raw pointer parameter type requires an unsafe block` at HIR build), so the pointer-parameter path is probed at MIR level.
+
+### 13.6 Instruction coverage
+
+`exec_inst` (`:2747`) implements:
+
+| Kind | Behavior |
+|---|---|
+| 0 Alloca | Arrays become a `__array` cell with one int-0 field cell per element (`make_array`); reference allocas bind `lvalue_cell` and never copy; a reference alloca with no initializer binds a null pointer cell silently (oracle `:195-209`); an initializer uses `eval_expr`; pointer depth > 0 shares a non-null Ptr cell, else wraps; defaults are null for pointers and int 0 otherwise. Struct default construction remains a P5 gap because `MUnit` has no aggregate table. |
+| 1 Store | `lvalue_cell` target; write-through to the pointee when the target cell holds a non-null Ptr; otherwise write the target cell; no lvalue reports `cannot assign to expression`. |
+| 2 Eval | Evaluate the expression and discard its value. |
+| 3 Ret | Evaluate the value; a reference-returning function converts the lvalue cell to a Ptr (`make_cell_pointer`) so the caller can write through it; missing value is a void return. |
+| 4 CondBranch | Truthiness is int != 0 or float != 0.0, else false; sets the then/else unit-level block index. |
+| 5 Jump | Sets the unit-level target block index. |
+| 6 Switch | Still gated with `IvyInterpret v0.2: unsupported instruction` at the instruction location; implementation is P3. |
+
+`lvalue_cell` (`:1934`) also handles Call expressions (`:1982`): it evaluates the call and returns the cell of a non-null Ptr result, which is required for reference-returning call store targets (oracle `interpreter.cpp:722-730`). Probe 16 confirms the oracle's resulting behavior: with a bare reference argument the returned pointer addresses the callee's copied parameter cell, so `pick(x,y)=5` leaves `x` unchanged (result 12).
+
+### 13.7 Public API and result state
+
+- `call_by_name(MUnit* u, const char* name, long arg_start, long arg_count)` (`:3091`) evaluates the explicit `MUnit.args` run (`arg_start` may be `-1` when `arg_count == 0`), resolves, runs, and returns an `IResult`.
+- `call_main(MUnit* u)` (`:3146`) calls `main` with no arguments; `run_unit(MUnit* u)` (`:3150`) is an alias used as the unit entry point.
+- `IResult.state`: 0 pending/setup failure, 1 returned, 2 failed, 3 reserved for termination. `error()` latches `failed_` (`:403` field, body at `:882`) and sets `result.state = 2`; `call_by_name` clears `failed_` on entry and maps it to state 2. `has_failed()` exposes the latch.
+- `release()` frees every pool, diagnostic table, and owned string buffer once, resets counts, and keeps the shared `InterpreterControl` tombstone. Shallow copies remain double-release safe in both copy/release orders (probe 22/23).
+
+### 13.8 Measured layout
+
+Measured with `sizeof` (scratch `measure.ivy`; `sizeof(long) = 8`, `sizeof(char*) = 8`):
+
+| Record | `sizeof` | Change |
+|---|---:|---|
+| `InterpreterModel` | 280 | was 272 in P1 (+8 for `failed_` at offset 240) |
+| `IFrame` | 72 | unchanged |
+| `IValue` / `ICell` / `IStruct` / `IField` / `ILocal` / `IResult` / `InterpreterControl` | 88 / 8 / 16 / 32 / 24 / 24 / 16 | unchanged |
+
+`failed_` sits between `allocation_failed` (232) and `result.state` (248); `control` moves to offset 272. All allocation strides still use `sizeof` of the actual record; the P1 `sizeof(MExpr)`/`sizeof(MInst)` import caveat is unaffected because P2 does not allocate those pools.
+
+### 13.9 Probe matrix
+
+Probe `p2probe.ivy` builds every unit through the ported lexer/preprocessor/parser/HIR/MIR pipeline (`MirBuilder`) and runs the resulting live `MUnit`. Values are the `main` return; all checks also require zero diagnostics and zero active frames unless stated. Oracle ground truth was captured with the frozen `ivy --run` on the same sources.
+
+| # | Case | Assertion | Result |
+|---|---|---|---|
+| 1 | V09 two-parameter call | `add(2,3)` = 5; 2 frames | PASS |
+| 2 | nested call argument | `add(1, add(2,3))` = 6; 3 frames | PASS |
+| 3 | left-to-right, once each | three distinct diagnostics in `division`, `modulo`, `division` order | PASS |
+| 4 | value parameter copy | callee mutation invisible: 506 | PASS |
+| 5 | reference parameter, bare lvalue arg | oracle copies: 506 | PASS |
+| 6 | pointer-shaped argument + pointer parameter | shared cell, mutation visible: 606 | PASS |
+| 7 | recursion `fact(6)` | 720; 7 frames | PASS |
+| 8 | recursion `fib(10)` | 55 | PASS |
+| 9 | mutual recursion even/odd(9) | `is_even(9)*10+is_odd(9)` = 1 | PASS |
+| 10 | 200 sequential calls + `sum(200)` | 200200; 402 frames; all inactive; inc callers are main | PASS |
+| 11 | implicit return (`void f` falls off the block) | void, no diagnostics | PASS |
+| 12 | call to that function from `main` | 7 | PASS |
+| 13 | early return inside `if` | `pick(5)*10+pick(-5)` = 12 | PASS |
+| 14 | array alloca inside a callee | read/write `__array`: 7 | PASS |
+| 15 | store through a pointer local | `*p = 9` visible in the local: 9 | PASS |
+| 16 | reference-returning call lvalue | `pick(x,y)=5`; oracle writes the copied param cell: 12, no diagnostics | PASS |
+| 17 | cross-frame shadowing (callee's own binding wins over a caller's) | 941 | PASS |
+| 18 | frame caller chain | main→g→f caller indices `-1,0,1`, function indices `2,1,0` | PASS |
+| 19 | missing callee through a rewritten real Call | state 2, one diagnostic, exact text at `0:0`, void, frames popped | PASS |
+| 20 | argument diagnostics once each | two `division by zero`, state 2 | PASS |
+| 21 | arity mismatch via `call_by_name` | legacy first-name fallback runs; `undefined variable 'a'`, more unbound-parameter diagnostics, state 2 | PASS |
+| 22 | copy/release, `a.release(); b.release()` | no crash; result returned | PASS |
+| 23 | copy/release, reverse order | no crash; result returned | PASS |
+| 24 | recursion depth 420 | 420; 422 frames | PASS |
+| 25 | `call_by_name(name, arg_start, arg_count)` | explicit args run `add(4,5)` = 9 | PASS |
+| 26 | `call_by_name` missing name | state 2, exact not-found text at `0:0` | PASS |
+
+Probe output:
+
+```text
+PASS 1 .. PASS 26
+P2 probe PASS
+```
+
+Oracle cross-check values (separate frozen `ivy --run` processes): 5, 6, 7, 720, 55, 200200, 7, 12, 941, 9, 506, 12; the three-argument diagnostic order is `division by zero`, `modulo by zero`, `division by zero`.
+
+### 13.10 Recursion depth observed
+
+`sum(n)` recursion was exercised without an interpreter-side depth cap:
+
+| Depth | Result |
+|---:|---|
+| 200 | PASS (test 10; 402 frames including the 200 sequential `inc` calls) |
+| 420 | PASS (422 frames) |
+| 450 / 500 / 600 / 800 / 1000 | host stack overflow, exit code `0xC00000FD` |
+
+The limiting factor is the host's native stack: each interpreted Ivy call nests `eval_expr → eval_call → run_function → exec_inst → eval_expr`, so one Ivy frame costs several native frames. The practical limit is therefore host-stack dependent (about 420 nested calls on the default Windows stack for this build); a worker thread with a larger stack or an explicit trampoline/depth budget is the eventual fix, and no depth guard is added in P2.
+
+### 13.11 Remaining limits
+
+- **P3**: Switch remains gated with `IvyInterpret v0.2: unsupported instruction`; only CondBranch/Jump/Ret traversal is implemented.
+- **P4**: `io::*`, `ivy::*`, `printf`/`puts`/`putchar`, `exit`/`abort`, and allocator builtins are gated with `IvyInterpret v0.2: unsupported expression`; the hook (`is_gated_builtin`, `:2670`) is where P4 slots in.
+- **P5**: struct default construction, members, `new`/`delete`, init lists, lambdas, and virtual dispatch remain unsupported; `MUnit` still has no aggregate/vtable metadata.
+- **Overloads**: no `MExpr` target pointer, so parameter-type overload resolution is name/count-only (§13.2).
+- **Reference parameter aliasing**: observable only for Ptr-valued arguments; the frontend lowers `f(y)` for `T&` by value, matching the oracle's bug-compatible behavior. Raw pointer parameter definitions are rejected by the current HIR (`requires an unsafe block`), so that shape requires MIR-level construction.
+- `allocation_failed` drops further diagnostics/dynamic growth (P0 policy); shallow live copies still share pool pointers before release.

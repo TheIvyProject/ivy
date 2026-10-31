@@ -398,6 +398,9 @@ export struct InterpreterModel {
     // Latched when native storage allocation fails. Existing data remains
     // readable, but subsequent allocating/mutating operations fail cleanly.
     long allocation_failed;
+    // Oracle parity: diagnostics set `failed_` (src/mir/interpreter.cpp:101).
+    // call_by_name() clears it on entry and maps it to IResult state 2.
+    long failed_;
     IResult result;
     InterpreterControl* control;
 
@@ -459,6 +462,7 @@ export struct InterpreterModel {
         this.setup_done = 1;
         this.released = 0;
         this.allocation_failed = 0;
+        this.failed_ = 0;
         this.value_capacity = 4;
         this.cell_capacity = 4;
         this.struct_capacity = 4;
@@ -889,6 +893,7 @@ export struct InterpreterModel {
             this.dmsg_[this.diag_count_] = (long) saved_msg;
         }
         this.diag_count_ = this.diag_count_ + 1;
+        this.failed_ = 1;
         this.result.state = 2; // failed
     }
 
@@ -1937,6 +1942,8 @@ export struct InterpreterModel {
             long kind = u->exprs[expr_idx].kind;
             long a_idx = u->exprs[expr_idx].a;
             long b_idx = u->exprs[expr_idx].b;
+            long astart = u->exprs[expr_idx].astart;
+            long an = u->exprs[expr_idx].an;
             long line = u->exprs[expr_idx].line;
             long col = u->exprs[expr_idx].col;
             const char* sval = u->exprs[expr_idx].sval;
@@ -1969,6 +1976,13 @@ export struct InterpreterModel {
                         return this.pointer_cell(v);
                     }
                     return -1;
+                }
+                return -1;
+            }
+            if (kind == 11) { // Call (A5: reference-returning call lvalue)
+                long v = this.eval_call(u, astart, an, sval, line, col);
+                if (this.value_kind(v) == 3 && this.pointer_is_null(v) == 0) {
+                    return this.pointer_cell(v);
                 }
                 return -1;
             }
@@ -2019,6 +2033,8 @@ export struct InterpreterModel {
             long a_idx = u->exprs[expr_idx].a;
             long b_idx = u->exprs[expr_idx].b;
             long c_idx = u->exprs[expr_idx].c;
+            long astart = u->exprs[expr_idx].astart;
+            long an = u->exprs[expr_idx].an;
             long line = u->exprs[expr_idx].line;
             long col = u->exprs[expr_idx].col;
             const char* sval = u->exprs[expr_idx].sval;
@@ -2417,10 +2433,726 @@ export struct InterpreterModel {
             }
             return operand;
         }
+        if (kind == 11) { // Call (P2: static target resolution and frames)
+            return this.eval_call(u, astart, an, sval, line, col);
+        }
 
         this.error(line, col, "IvyInterpret v0.2: unsupported expression");
         return this.make_void();
         }
+    }
+
+    // ---- P2: call resolution, parameter binding, CFG runner ----
+
+    // Null check for borrowed C strings; the cast itself needs unsafe.
+    bool null_str(const char* p) {
+        unsafe {
+            return p == (char*) 0;
+        }
+    }
+
+    // True when `s` starts with the NUL-terminated `head`.
+    bool has_prefix(const char* s, const char* head) {
+        if (this.null_str(s) || this.null_str(head)) {
+            return false;
+        }
+        unsafe {
+            long i = 0;
+            while (head[i] != 0) {
+                if (s[i] != head[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    // The port stores the already-qualified `MFunction.name` ("ns::f"), so the
+    // oracle's `namespacePrefix + name == requested` retry (interpreter.cpp:74)
+    // becomes a "::<callee>" suffix match on the stored name.
+    bool qualified_suffix_matches(const char* full, const char* callee) {
+        if (this.null_str(full) || this.null_str(callee)) {
+            return false;
+        }
+        long flen = this.slen(full);
+        long clen = this.slen(callee);
+        if (clen <= 0 || flen <= clen + 2) {
+            return false;
+        }
+        unsafe {
+            if (full[flen - clen - 1] != 58 || full[flen - clen - 2] != 58) {
+                return false;
+            }
+            long i = 0;
+            while (i < clen) {
+                if (full[flen - clen + i] != callee[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    bool function_has_body(MUnit* u, long fn_index) {
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (unit_is_null || fn_index < 0) {
+            return false;
+        }
+        long has_body = 0;
+        long fn_n = 0;
+        unsafe {
+            fn_n = u->fn_n;
+            if (fn_index < fn_n) {
+                has_body = u->fns[fn_index].has_body;
+            }
+        }
+        return has_body != 0;
+    }
+
+    // Oracle matchSig (src/mir/interpreter.cpp:57-65): a callee never takes
+    // more parameters than arguments; every non-extern-C callee needs an exact
+    // count; extern "C" (variadic) callers may pass extra fixed arguments.
+    bool signature_matches(MUnit* u, long fn_index, long argc) {
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (unit_is_null || fn_index < 0) {
+            return false;
+        }
+        long np = 0;
+        long is_extern_c = 0;
+        unsafe {
+            np = u->fns[fn_index].pn;
+            is_extern_c = u->fns[fn_index].is_extern_c;
+        }
+        if (np > argc) {
+            return false;
+        }
+        if (is_extern_c == 0 && np != argc) {
+            return false;
+        }
+        return true;
+    }
+
+    // Three passes, exactly like the oracle's call() (interpreter.cpp:66-85):
+    //   1. exact qualified name + has_body + signature match
+    //   2. "::<callee>" suffix + has_body + signature match
+    //   3. first same-name function with a body, ignoring arity (legacy)
+    // Pointer identity is returned because MExpr.Call has no target pointer;
+    // see H53_NOTES.md §13 for the parameter-type overload gap.
+    long resolve_call(MUnit* u, const char* callee, long argc) {
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (unit_is_null || this.is_null_name(callee) || argc < 0) {
+            return -1;
+        }
+        long fn_n = 0;
+        unsafe {
+            fn_n = u->fn_n;
+        }
+        long i = 0;
+        while (i < fn_n) {
+            bool match = false;
+            long has_body = 0;
+            unsafe {
+                has_body = u->fns[i].has_body;
+                if (has_body != 0) {
+                    match = this.same_name(u->fns[i].name, callee);
+                }
+            }
+            if (match && this.signature_matches(u, i, argc)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < fn_n) {
+            bool match = false;
+            long has_body = 0;
+            unsafe {
+                has_body = u->fns[i].has_body;
+                if (has_body != 0) {
+                    match = this.qualified_suffix_matches(u->fns[i].name, callee);
+                }
+            }
+            if (match && this.signature_matches(u, i, argc)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < fn_n) {
+            bool match = false;
+            long has_body = 0;
+            unsafe {
+                has_body = u->fns[i].has_body;
+                if (has_body != 0) {
+                    match = this.same_name(u->fns[i].name, callee);
+                }
+            }
+            if (match) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    void error_function_not_found(const char* name) {
+        unsafe {
+            char* msg = (char*) __ivy_alloc(this.diagnostic_scratch_size(name));
+            if (msg == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            msg[0] = 0;
+            long len = 0;
+            this.append_to_msg(msg, &len, "IvyInterpret v0.2: function '");
+            if (!this.is_null_name(name)) {
+                this.append_to_msg(msg, &len, name);
+            }
+            this.append_to_msg(msg, &len, "' not found");
+            this.error(0, 0, msg);
+            __ivy_free((void*) msg);
+        }
+    }
+
+    // Argument value storage is a short-lived heap run of value indices; the
+    // values themselves stay in the append-only value pool.
+    long* alloc_arg_values(long count) {
+        unsafe {
+            if (count <= 0) {
+                return (long*) 0;
+            }
+            if (count > this.signed_long_max() / 8) {
+                this.allocation_failed = 1;
+                return (long*) 0;
+            }
+            long* out = (long*) __ivy_alloc((unsigned long long) count * 8);
+            if (out == (long*) 0) {
+                this.allocation_failed = 1;
+                return (long*) 0;
+            }
+            return out;
+        }
+    }
+
+    // Evaluate the contiguous `MUnit.args` run left-to-right, exactly once per
+    // argument, even when the callee turns out to be unresolved.
+    void evaluate_arg_run(MUnit* u, long arg_start, long arg_count, long* out) {
+        long j = 0;
+        while (j < arg_count) {
+            long e = -1;
+            unsafe {
+                if (u != (MUnit*) 0 && arg_start >= 0 && (arg_start + j) < u->a_n) {
+                    e = u->args[arg_start + j];
+                }
+            }
+            long v = this.make_void();
+            if (e >= 0) {
+                v = this.eval_expr(u, e);
+            }
+            unsafe {
+                if (out != (long*) 0) {
+                    out[j] = v;
+                }
+            }
+            j = j + 1;
+        }
+    }
+
+    bool is_gated_builtin(const char* name) {
+        if (this.null_str(name)) {
+            return false;
+        }
+        // P4 hook: the oracle dispatches io::*/ivy::* and the C output and
+        // allocator builtins before static resolution
+        // (src/mir/interpreter.cpp:916-992). P2 keeps them gated.
+        if (this.has_prefix(name, "io::") || this.has_prefix(name, "ivy::")) {
+            return true;
+        }
+        return this.same_name(name, "printf") || this.same_name(name, "puts") ||
+               this.same_name(name, "putchar") || this.same_name(name, "exit") ||
+               this.same_name(name, "abort") || this.same_name(name, "__ivy_alloc") ||
+               this.same_name(name, "__ivy_free") || this.same_name(name, "malloc") ||
+               this.same_name(name, "free");
+    }
+
+    // MExpr kind 11. Arguments are evaluated first (oracle evalCall,
+    // interpreter.cpp:905-911), then `move`, then the gated builtin families,
+    // then the static target.
+    long eval_call(MUnit* u, long astart, long an, const char* callee, long line, long col) {
+        long count = an;
+        if (count < 0) {
+            count = 0;
+        }
+        LongPtr vals;
+        unsafe {
+            vals.p = this.alloc_arg_values(count);
+        }
+        bool vals_missing = false;
+        unsafe {
+            vals_missing = vals.p == (long*) 0;
+        }
+        if (count > 0 && vals_missing) {
+            return this.make_void();
+        }
+        unsafe {
+            this.evaluate_arg_run(u, astart, count, vals.p);
+        }
+        long out = -1;
+        if (this.is_null_name(callee)) {
+            this.error(line, col, "IvyInterpret v0.2: unsupported expression");
+            out = this.make_void();
+        } else if (this.same_name(callee, "move")) {
+            out = this.make_void();
+            if (count > 0) {
+                unsafe {
+                    out = vals.p[0];
+                }
+            }
+        } else if (this.is_gated_builtin(callee)) {
+            this.error(line, col, "IvyInterpret v0.2: unsupported expression");
+            out = this.make_void();
+        } else {
+            long target = this.resolve_call(u, callee, count);
+            if (target < 0) {
+                this.error_function_not_found(callee);
+                out = this.make_void();
+            } else {
+                unsafe {
+                    out = this.run_function(u, target, vals.p, count);
+                }
+            }
+        }
+        unsafe {
+            if (vals.p != (long*) 0) {
+                __ivy_free((void*) vals.p);
+            }
+        }
+        return out;
+    }
+    // Execute one instruction. Returns 0 (continue with `next`), 1 (returned)
+    // or 3 (unsupported instruction; the function is abandoned). A block
+    // change is recorded in IFrame.block_index and detected by the runner,
+    // matching the oracle's curBlock comparison (interpreter.cpp:168).
+    long exec_inst(MUnit* u, long frame, long inst_idx) {
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (this.is_released() || unit_is_null || frame < 0 ||
+            frame >= this.frame_count || inst_idx < 0) {
+            return 3;
+        }
+        long kind = 0;
+        long a = -1;
+        long b = -1;
+        long c = -1;
+        long line = 0;
+        long col = 0;
+        long ptr_depth = 0;
+        long array_size = 0;
+        long is_ref = 0;
+        StrBuf var;
+        unsafe {
+            var.p = (char*) 0;
+        }
+        long in_n = 0;
+        unsafe {
+            in_n = u->in_n;
+            if (inst_idx < in_n) {
+                kind = u->insts[inst_idx].kind;
+                a = u->insts[inst_idx].a;
+                b = u->insts[inst_idx].b;
+                c = u->insts[inst_idx].c;
+                line = u->insts[inst_idx].line;
+                col = u->insts[inst_idx].col;
+                var.p = (char*) u->insts[inst_idx].var;
+                ptr_depth = u->insts[inst_idx].type.ptr_depth;
+                array_size = u->insts[inst_idx].type.array_size;
+                is_ref = u->insts[inst_idx].type.is_ref ? 1 : 0;
+            }
+        }
+        if (inst_idx >= in_n) {
+            return 3;
+        }
+        if (kind == 0) { // Alloca
+            if (array_size > 0) {
+                long arr_cell = this.make_array(array_size);
+                if (arr_cell < 0) {
+                    return 3;
+                }
+                unsafe {
+                    if (!this.is_null_name(var.p)) {
+                        this.bind_local(frame, var.p, arr_cell);
+                    }
+                }
+                return 0;
+            }
+            if (is_ref != 0) {
+                // A reference alloca aliases the referenced cell; evaluating
+                // the initializer would copy the value and break the alias.
+                // With no initializer the oracle binds a null cell silently
+                // (src/mir/interpreter.cpp:195-209).
+                if (a < 0) {
+                    unsafe {
+                        if (!this.is_null_name(var.p)) {
+                            this.bind_local(frame, var.p, this.new_cell(this.make_null_pointer()));
+                        }
+                    }
+                    return 0;
+                }
+                long target = this.lvalue_cell(u, a);
+                if (target >= 0) {
+                    unsafe {
+                        if (!this.is_null_name(var.p)) {
+                            this.bind_local(frame, var.p, target);
+                        }
+                    }
+                    return 0;
+                }
+                this.error(line, col, "cannot bind reference to non-lvalue");
+                unsafe {
+                    if (!this.is_null_name(var.p)) {
+                        this.bind_local(frame, var.p, this.new_cell(this.make_null_pointer()));
+                    }
+                }
+                return 0;
+            }
+            long init = -1;
+            if (a >= 0) {
+                init = this.eval_expr(u, a);
+            } else if (ptr_depth > 0) {
+                init = this.make_null_pointer();
+            } else {
+                // Aggregate default construction is a P5 gap: the model has no
+                // MUnit aggregate table, so scalars and arrays start at 0.
+                init = this.make_int(0);
+            }
+            unsafe {
+                if (this.is_null_name(var.p)) {
+                    return 0;
+                }
+                if (ptr_depth > 0 && init >= 0 && this.value_kind(init) == 3 &&
+                    this.pointer_is_null(init) == 0) {
+                    this.bind_local(frame, var.p, this.pointer_cell(init));
+                } else {
+                    this.bind_local(frame, var.p, this.new_cell(init));
+                }
+            }
+            return 0;
+        }
+        if (kind == 1) { // Store
+            long target = this.lvalue_cell(u, a);
+            if (target < 0) {
+                this.error(line, col, "cannot assign to expression");
+                return 0;
+            }
+            long target_value = this.cell_value(target);
+            if (target_value >= 0 && this.value_kind(target_value) == 3 &&
+                this.pointer_is_null(target_value) == 0) {
+                long pointee = this.pointer_cell(target_value);
+                if (pointee >= 0) {
+                    target = pointee;
+                }
+            }
+            long rhs = this.eval_expr(u, b);
+            this.cell_write(target, rhs);
+            return 0;
+        }
+        if (kind == 2) { // Eval
+            if (a >= 0) {
+                this.eval_expr(u, a);
+            }
+            return 0;
+        }
+        if (kind == 3) { // Ret
+            long value = -1;
+            if (a >= 0) {
+                long fn_index = -1;
+                long ret_is_ref = 0;
+                unsafe {
+                    fn_index = this.frames[frame].function_index;
+                    if (fn_index >= 0 && fn_index < u->fn_n) {
+                        ret_is_ref = u->fns[fn_index].ret.is_ref ? 1 : 0;
+                    }
+                }
+                if (ret_is_ref != 0) {
+                    // A5: return a Ptr to the referenced cell so the caller can
+                    // alias it instead of receiving a copied value.
+                    long target = this.lvalue_cell(u, a);
+                    if (target >= 0) {
+                        value = this.make_cell_pointer(target);
+                    } else {
+                        value = this.eval_expr(u, a);
+                    }
+                } else {
+                    value = this.eval_expr(u, a);
+                }
+            }
+            this.set_frame_return(frame, 1, value);
+            return 1;
+        }
+        if (kind == 4) { // CondBranch
+            long cond = this.eval_expr(u, a);
+            bool taken = false;
+            long cond_kind = this.value_kind(cond);
+            if (cond_kind == 1) {
+                taken = this.read_int(cond) != 0;
+            } else if (cond_kind == 2) {
+                taken = this.read_float(cond) != 0.0;
+            }
+            long dest = b;
+            if (!taken) {
+                dest = c;
+            }
+            this.set_frame_position(frame, dest, -1);
+            return 0;
+        }
+        if (kind == 5) { // Jump
+            this.set_frame_position(frame, b, -1);
+            return 0;
+        }
+        // Switch is P3; the gate text is self-host only (the oracle rejects
+        // neither instruction), so it is recorded in H53_NOTES.md §13.
+        this.error(line, col, "IvyInterpret v0.2: unsupported instruction");
+        return 3;
+    }
+
+    // execFunction + execBlock equivalent (src/mir/interpreter.cpp:124-175).
+    // Pushes a frame, binds parameters from the already evaluated argument
+    // values, walks blocks until a terminator/implicit end, then pops.
+    long run_function(MUnit* u, long fn_index, long* arg_values, long arg_count) {
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (this.is_released() || unit_is_null || fn_index < 0) {
+            return this.make_void();
+        }
+        long fn_n = 0;
+        long pstart = 0;
+        long pn = 0;
+        long block_start = -1;
+        long block_n = 0;
+        long pa_n = 0;
+        unsafe {
+            fn_n = u->fn_n;
+            if (fn_index >= fn_n) {
+                return this.make_void();
+            }
+            pstart = u->fns[fn_index].pstart;
+            pn = u->fns[fn_index].pn;
+            block_start = u->fns[fn_index].block_start;
+            block_n = u->fns[fn_index].block_n;
+            pa_n = u->pa_n;
+        }
+        long frame = this.push_frame(fn_index, -1, -1);
+        if (frame < 0) {
+            return this.make_void();
+        }
+        this.set_frame_position(frame, block_start, -1);
+        long limit = pn;
+        if (arg_count < limit) {
+            limit = arg_count;
+        }
+        long k = 0;
+        while (k < limit) {
+            long pidx = pstart + k;
+            StrBuf pname;
+            unsafe {
+                pname.p = (char*) 0;
+            }
+            long param_is_ref = 0;
+            long param_ptr_depth = 0;
+            unsafe {
+                if (pidx >= 0 && pidx < pa_n) {
+                    pname.p = (char*) u->params[pidx].name;
+                    param_is_ref = u->params[pidx].type.is_ref ? 1 : 0;
+                    param_ptr_depth = u->params[pidx].type.ptr_depth;
+                }
+            }
+            bool bind = false;
+            unsafe {
+                if (!this.is_null_name(pname.p)) {
+                    bind = pname.p[0] != 0;
+                }
+            }
+            if (bind) {
+                long arg_value = -1;
+                unsafe {
+                    if (arg_values != (long*) 0) {
+                        arg_value = arg_values[k];
+                    }
+                }
+                long cell = -1;
+                bool shares_arg_cell = false;
+                if (param_is_ref != 0 || param_ptr_depth > 0) {
+                    if (arg_value >= 0 && this.value_kind(arg_value) == 3 &&
+                        this.pointer_is_null(arg_value) == 0) {
+                        cell = this.pointer_cell(arg_value);
+                        shares_arg_cell = cell >= 0;
+                    }
+                }
+                if (!shares_arg_cell) {
+                    cell = this.new_cell(arg_value);
+                }
+                if (cell >= 0) {
+                    unsafe {
+                        this.bind_local(frame, pname.p, cell);
+                    }
+                }
+            }
+            k = k + 1;
+        }
+        long returned = 0;
+        long cur_block = -1;
+        if (block_start >= 0 && block_n > 0) {
+            cur_block = block_start;
+        } else {
+            returned = 1;
+        }
+        long in_n = 0;
+        long bl_n = 0;
+        unsafe {
+            in_n = u->in_n;
+            bl_n = u->bl_n;
+        }
+        while (returned == 0) {
+            if (cur_block < 0 || cur_block >= bl_n) {
+                break;
+            }
+            long first = -1;
+            unsafe {
+                first = u->blocks[cur_block].first;
+            }
+            long inst = first;
+            long changed = 0;
+            while (inst >= 0 && inst < in_n) {
+                long code = this.exec_inst(u, frame, inst);
+                if (code == 1 || code == 3) {
+                    returned = 1;
+                    changed = 1;
+                    break;
+                }
+                long next_block = -1;
+                unsafe {
+                    next_block = this.frames[frame].block_index;
+                }
+                if (next_block != cur_block) {
+                    if (next_block < 0) {
+                        returned = 1;
+                        break;
+                    }
+                    cur_block = next_block;
+                    changed = 1;
+                    break;
+                }
+                long next_inst = -1;
+                unsafe {
+                    next_inst = u->insts[inst].next;
+                }
+                inst = next_inst;
+            }
+            if (returned != 0) {
+                break;
+            }
+            if (changed == 0) {
+                // Fell off a non-terminated block: implicit return.
+                returned = 1;
+            }
+        }
+        long ret_state = 0;
+        long ret_value = -1;
+        unsafe {
+            if (frame >= 0 && frame < this.frame_count) {
+                ret_state = this.frames[frame].return_state;
+                ret_value = this.frames[frame].return_value;
+            }
+        }
+        this.pop_frame();
+        if (ret_state == 0 || ret_value < 0) {
+            return this.make_void();
+        }
+        return ret_value;
+    }
+
+    // Public P2 entry point: evaluate the `MUnit.args` run starting at
+    // `arg_start` (or pass -1 for none), resolve `name`, and run it.
+    IResult call_by_name(MUnit* u, const char* name, long arg_start, long arg_count) {
+        IResult res;
+        res.state = 0;
+        res.value_index = -1;
+        res.status = 0;
+        bool unit_is_null = false;
+        unsafe {
+            unit_is_null = u == (MUnit*) 0;
+        }
+        if (this.setup_done == 0 || this.is_released() || unit_is_null ||
+            this.is_null_name(name) || arg_count < 0) {
+            this.result = res;
+            return res;
+        }
+        this.failed_ = 0;
+        long count = arg_count;
+        LongPtr vals;
+        unsafe {
+            vals.p = this.alloc_arg_values(count);
+        }
+        bool vals_missing = false;
+        unsafe {
+            vals_missing = vals.p == (long*) 0;
+        }
+        if (count > 0 && vals_missing) {
+            res.state = 2;
+            this.result = res;
+            return res;
+        }
+        unsafe {
+            this.evaluate_arg_run(u, arg_start, count, vals.p);
+        }
+        long value = -1;
+        long target = this.resolve_call(u, name, count);
+        if (target < 0) {
+            this.error_function_not_found(name);
+        } else {
+            unsafe {
+                value = this.run_function(u, target, vals.p, count);
+            }
+        }
+        unsafe {
+            if (vals.p != (long*) 0) {
+                __ivy_free((void*) vals.p);
+            }
+        }
+        res.value_index = value;
+        res.state = 1;
+        if (this.failed_ != 0) {
+            res.state = 2;
+        }
+        this.result = res;
+        return res;
+    }
+
+    IResult call_main(MUnit* u) {
+        return this.call_by_name(u, "main", -1, 0);
+    }
+
+    IResult run_unit(MUnit* u) {
+        return this.call_main(u);
+    }
+
+    bool has_failed() {
+        return this.failed_ != 0;
     }
 
     void release() {
@@ -2488,6 +3220,7 @@ export struct InterpreterModel {
         this.local_count = 0;
         this.string_buffer_count = 0;
         this.diag_count_ = 0;
+        this.failed_ = 0;
         this.value_capacity = 0;
         this.cell_capacity = 0;
         this.struct_capacity = 0;
