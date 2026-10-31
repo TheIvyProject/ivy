@@ -1589,6 +1589,23 @@ export struct InterpreterModel {
         return 1;
     }
 
+    // Records a CFG edge. A self-edge reproduces the oracle's execBlock quirk
+    // (interpreter.cpp:162-171): execInst resets curInst to 0 and execBlock
+    // then increments it, so execution resumes at the block's second
+    // instruction. inst_index = 1 marks that resume for the runner.
+    long set_frame_edge(long frame_index, long dest) {
+        long marker = -1;
+        if (frame_index >= 0 && frame_index < this.frame_count) {
+            unsafe {
+                if (this.frames[frame_index].active != 0 &&
+                    this.frames[frame_index].block_index == dest) {
+                    marker = 1;
+                }
+            }
+        }
+        return this.set_frame_position(frame_index, dest, marker);
+    }
+
     long set_frame_return(long frame_index, long state, long value_index) {
         if (frame_index < 0 || frame_index >= this.frame_count ||
             (value_index >= this.value_count) || (value_index < -1) || this.is_released() ||
@@ -2740,6 +2757,25 @@ export struct InterpreterModel {
         }
         return out;
     }
+    // True when `block_index` is a block of `fn_index` in this unit. The
+    // oracle stores raw Block* edges, so it cannot name another function's
+    // block at all; the port must reject that case explicitly because its
+    // edges are unit-level indices (MFunction.block_start/block_n).
+    bool block_in_function(MUnit* u, long fn_index, long block_index) {
+        bool ok = false;
+        unsafe {
+            if (u != (MUnit*) 0 && fn_index >= 0 && fn_index < u->fn_n &&
+                block_index >= 0 && u->fns[fn_index].block_n > 0 &&
+                u->fns[fn_index].block_start >= 0 &&
+                block_index >= u->fns[fn_index].block_start &&
+                block_index - u->fns[fn_index].block_start < u->fns[fn_index].block_n &&
+                block_index < u->bl_n) {
+                ok = true;
+            }
+        }
+        return ok;
+    }
+
     // Execute one instruction. Returns 0 (continue with `next`), 1 (returned)
     // or 3 (unsupported instruction; the function is abandoned). A block
     // change is recorded in IFrame.block_index and detected by the runner,
@@ -2767,6 +2803,8 @@ export struct InterpreterModel {
             var.p = (char*) 0;
         }
         long in_n = 0;
+        long arm_start = -1;
+        long arm_an = 0;
         unsafe {
             in_n = u->in_n;
             if (inst_idx < in_n) {
@@ -2774,6 +2812,8 @@ export struct InterpreterModel {
                 a = u->insts[inst_idx].a;
                 b = u->insts[inst_idx].b;
                 c = u->insts[inst_idx].c;
+                arm_start = u->insts[inst_idx].astart;
+                arm_an = u->insts[inst_idx].an;
                 line = u->insts[inst_idx].line;
                 col = u->insts[inst_idx].col;
                 var.p = (char*) u->insts[inst_idx].var;
@@ -2915,15 +2955,46 @@ export struct InterpreterModel {
             if (!taken) {
                 dest = c;
             }
-            this.set_frame_position(frame, dest, -1);
+            this.set_frame_edge(frame, dest);
             return 0;
         }
         if (kind == 5) { // Jump
-            this.set_frame_position(frame, b, -1);
+            this.set_frame_edge(frame, b);
             return 0;
         }
-        // Switch is P3; the gate text is self-host only (the oracle rejects
-        // neither instruction), so it is recorded in H53_NOTES.md §13.
+        if (kind == 6) { // Switch
+            // Oracle parity (interpreter.cpp:286-300): a non-integer or
+            // absent condition evaluates to 0, the default target comes from
+            // the instruction's `b`, the first arm whose value equals the
+            // condition wins, and a missing/unknown target is a null block.
+            long cond_int = 0;
+            if (a >= 0) {
+                cond_int = this.read_int(this.eval_expr(u, a));
+            }
+            long dest = b;
+            long arm_n = 0;
+            unsafe {
+                arm_n = u->arm_n;
+            }
+            long i = arm_start;
+            long k = 0;
+            while (k < arm_an && i >= 0 && i < arm_n) {
+                long arm_value = 0;
+                long arm_block = -1;
+                unsafe {
+                    arm_value = u->arm_val[i];
+                    arm_block = u->arm_blk[i];
+                }
+                if (arm_value == cond_int) {
+                    dest = arm_block;
+                    break;
+                }
+                i = i + 1;
+                k = k + 1;
+            }
+            this.set_frame_edge(frame, dest);
+            return 0;
+        }
         this.error(line, col, "IvyInterpret v0.2: unsupported instruction");
         return 3;
     }
@@ -3022,22 +3093,35 @@ export struct InterpreterModel {
             returned = 1;
         }
         long in_n = 0;
-        long bl_n = 0;
         unsafe {
             in_n = u->in_n;
-            bl_n = u->bl_n;
         }
         while (returned == 0) {
-            if (cur_block < 0 || cur_block >= bl_n) {
+            // Oracle: an edge to a null/unknown block ends the function
+            // (execFunction's `while (!returned && curBlock)`). A block of
+            // another function has no oracle analogue because its edges are
+            // raw Block*; the port treats it as the same invalid edge rather
+            // than reading a neighbour's instructions.
+            if (!this.block_in_function(u, fn_index, cur_block)) {
+                returned = 1;
                 break;
             }
             long first = -1;
+            long last = -1;
             unsafe {
                 first = u->blocks[cur_block].first;
+                last = u->blocks[cur_block].last;
             }
+            // The builder emits a block's instructions as the contiguous
+            // chain first..last with strictly increasing `next` indices. The
+            // oracle has no first/last fields, so any disagreement is corrupt
+            // metadata with no oracle-defined behaviour: stop the block and
+            // take the ordinary implicit return instead of executing the
+            // instructions of a neighbouring block.
+            bool chain_ok = first >= 0 && last >= first && last < in_n;
             long inst = first;
             long changed = 0;
-            while (inst >= 0 && inst < in_n) {
+            while (chain_ok && inst >= 0 && inst <= last) {
                 long code = this.exec_inst(u, frame, inst);
                 if (code == 1 || code == 3) {
                     returned = 1;
@@ -3045,21 +3129,41 @@ export struct InterpreterModel {
                     break;
                 }
                 long next_block = -1;
+                long marker = -1;
                 unsafe {
                     next_block = this.frames[frame].block_index;
+                    marker = this.frames[frame].inst_index;
                 }
                 if (next_block != cur_block) {
-                    if (next_block < 0) {
+                    cur_block = next_block;
+                    changed = 1;
+                    break;
+                }
+                if (marker >= 0) {
+                    // Self-edge (see set_frame_edge): the oracle resets
+                    // curInst to 0 and execBlock increments it to 1, so the
+                    // block resumes at its second instruction.
+                    long resume = -1;
+                    unsafe {
+                        resume = u->insts[first].next;
+                    }
+                    if (resume < 0 || resume > last) {
                         returned = 1;
                         break;
                     }
-                    cur_block = next_block;
-                    changed = 1;
+                    this.set_frame_position(frame, cur_block, -1);
+                    inst = resume;
+                    continue;
+                }
+                if (inst == last) {
                     break;
                 }
                 long next_inst = -1;
                 unsafe {
                     next_inst = u->insts[inst].next;
+                }
+                if (next_inst <= inst) {
+                    break;
                 }
                 inst = next_inst;
             }

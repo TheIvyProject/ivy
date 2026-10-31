@@ -681,3 +681,150 @@ The limiting factor is the host's native stack: each interpreted Ivy call nests 
 - **Overloads**: no `MExpr` target pointer, so parameter-type overload resolution is name/count-only (§13.2).
 - **Reference parameter aliasing**: observable only for Ptr-valued arguments; the frontend lowers `f(y)` for `T&` by value, matching the oracle's bug-compatible behavior. Raw pointer parameter definitions are rejected by the current HIR (`requires an unsafe block`), so that shape requires MIR-level construction.
 - `allocation_failed` drops further diagnostics/dynamic growth (P0 policy); shallow live copies still share pool pointers before release.
+
+## 14. Implementation P3 — Complete CFG Instruction Set
+
+Recorded 2026-10-31 against HEAD `2df6a9b`. This phase edited only `selfhost/mir/interpreter.ivy` and appended this section. No `src/**` change, no oracle rebuild, no commit, no corpus file added. The working tree contains the phase diff (not committed).
+
+### 14.1 Build evidence
+
+Scratch and private `TEMP`/`TMP`: `C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\`. From repository root, exact commands:
+
+```powershell
+$env:TEMP = 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\tmp'
+$env:TMP = $env:TEMP
+& '.\build\Release\ivy.exe' 'selfhost\mir\mir.ivy' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\src\mir.obj'
+& '.\build\Release\ivy.exe' 'selfhost\mir\interpreter.ivy' -I 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\src' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\src\interpreter.obj'
+```
+
+Both exited 0 (only `.ivm`/`.obj` written in scratch). Oracle identity was rechecked after the phase: 27,031,552 bytes, mtime `2026-10-21 16:41:44`.
+
+The probes were compiled with the same frozen binary, importing the scratch `interpreter.ivm` first and the repository HIR/MIR modules:
+
+```powershell
+& '.\build\Release\ivy.exe' 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\p3probe.ivy' -I 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\src' -I 'selfhost\parsing' -I 'selfhost\hir' -I 'selfhost\mir' -o 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\p3probe.exe'
+& 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p3i\p3probe.exe'
+```
+
+### 14.2 Switch semantics
+
+`exec_inst` implements kind 6 (`interpreter.ivy:2965-2999`) exactly as `Interpreter::execInst`'s `Switch` (`src/mir/interpreter.cpp:286-300`):
+
+1. Evaluate `a` when present; the condition is `read_int(value)`, which is 0 for every non-int kind (float, string, pointer, void) and for an absent expression; booleans are kind `Int` (`BoolLit` becomes `makeInt`), so `true` stays `1` exactly as in the oracle (`interpreter.cpp:286-292`, fixture 33: oracle `2`, port `2`). The oracle's `cv.isInt() ? cv.asInt() : 0` is therefore reproduced without an extra type test.
+2. Start from the default target `b`. The oracle initialises `dest = sw.defaultBlock`, which is null when the frontend emitted no default; the port keeps the `-1`/invalid index and normalizes it as a null edge in the runner.
+3. Walk `arm_val`/`arm_blk` from `astart` for at most `an` entries, bounded by `arm_n`, and stop at the first value equal to the condition. First match wins, including when arm values are unsorted or duplicated.
+4. Record the destination as a CFG edge (self-edge handling in §14.3).
+
+No arm-run arithmetic overflows: the walk uses an entry counter (`k < an`) plus `i >= 0 && i < arm_n` rather than `astart + an`. A missing, negative, or partly out-of-range arm run therefore reads no arm outside the pools and falls back to the default. **No switch shape is gated any more**: there is no switch-specific diagnostic. A corrupt arm target, like any other invalid target, becomes a null edge (§14.3), and an unknown instruction kind still reports `IvyInterpret v0.2: unsupported instruction`.
+
+### 14.3 Block-edge hardening
+
+The oracle stores `Block*` in `FrameCtx.curBlock`; the port stores unit-level block indices, so every index must be validated against the owning function. The rules, with their oracle basis:
+
+| Rule | Port behaviour | Oracle basis |
+|---|---|---|
+| Target `-1` or outside `[block_start, block_start + block_n)` or `>= bl_n` | Null edge: the function ends with its current `return_state` (usually an implicit void return) | `execFunction` loops `while (!returned && curBlock)`; a null `curBlock` ends the function (`interpreter.cpp:144-156`) |
+| Target is a block of another function | Treated as the same null edge; the foreign block is never read | Undefined in the oracle (raw `Block*` cannot express it); port-specific normalization, documented as such |
+| `first == -1` (empty block) | Implicit return | `execBlock`: empty instruction vector falls through, then `!returned && curBlock == blk` sets returned (`:158-175`) |
+| `last < first` or `last >= in_n` | Implicit return; no instruction executed | No oracle analogue (`Block` is just a vector); corrupt metadata is stopped instead of read |
+| `next` chain ends before `last`, leaves `[first,last]`, or is non-monotonic (`next <= inst`) | Stop the block; falling off means implicit return | The oracle iterates the block's vector exactly once; a port chain that disagrees is not a valid vector |
+| Self-edge (dest == current block) | Resume at the block's **second** instruction; a one-instruction self-jump block falls off and returns | `execInst` sets `curInst = 0`, then `execBlock` increments it to 1 (`:162-171`); probe-confirmed, including the resulting infinite loop for a self-jump that is itself instruction 1 |
+| `Ret` followed by dead instructions | `Ret` returns 1 and stops the block; the trailing chain is never executed | `execInst` `Ret` sets `returned`; `execBlock` breaks (`:250-270,168`) |
+| Loop that never executes / 1000 iterations | Ordinary edges; no iteration cap in the interpreter | No cap in the oracle |
+
+Implementation points: `block_in_function` (`:2759-2781`) validates function ownership; `set_frame_edge` (`:1591-1607`) records the self-edge marker (`inst_index = 1`); the runner (`:3095-3177`) validates the current block, bounds each block to `first..last`, validates every new edge before reading it, and enforces strictly increasing `next` links. `exec_inst` still validates the frame and instruction index before touching pools.
+
+### 14.4 Fixture matrix (actual results vs oracle)
+
+Twenty-three scratch sources were run through the ported lexer → preprocessor → parser → HIR → MIR → interpreter (`p3files.exe`, which embeds the exact file bytes) and, separately, through the frozen oracle `build\Release\ivy.exe --run <file>` with one process per file, its own `TEMP`/`TMP`, and separate stdout/stderr capture. Every fixture has an `int main` whose value becomes the oracle process status; the port compares the `IResult` int value. All oracle runs had empty stdout and stderr except `13_call_order.ivy`.
+
+| File | Port result | Oracle status/stderr | Verdict |
+|---|---|---|---|
+| `01_int_ops.ivy` | int 24 | 24 | PASS |
+| `02_assign_unary.ivy` | int 74 | 74 | PASS |
+| `03_float.ivy` | int 2 | 2 | PASS |
+| `04_short_circuit.ivy` | int 1 | 1 | PASS |
+| `05_strings.ivy` | int 1 | 1 | PASS |
+| `06_refs.ivy` | int 9 | 9 | PASS |
+| `07_pointers.ivy` | int 9 | 9 | PASS |
+| `08_arrays.ivy` | int 57 | 57 | PASS |
+| `09_calls.ivy` | int 5, 2 frames | 5 | PASS |
+| `10_recursion.ivy` | int 120, 6 frames | 120 | PASS |
+| `11_cfg.ivy` | int 10 | 10 | PASS |
+| `12_switch.ivy` | int 1, 4 frames | 1 | PASS |
+| `13_call_order.ivy` | state 2; `division by zero`, `modulo by zero`, `division by zero` | status 1; same three lines at `6:19`, `6:26`, `6:33` (301 bytes of stderr) | PASS (text order and count; exact line/col offsets are source-layout dependent) |
+| `14_loops.ivy` | int 75 | 75 | PASS |
+| `20_empty_fn.ivy` | int 1 | 1 | PASS |
+| `21_ret_both.ivy` | int 12 | 12 | PASS |
+| `22_switch_loop_break.ivy` | int 14 | 14 | PASS |
+| `23_loop_never.ivy` | int 7 | 7 | PASS |
+| `24_loop_1000.ivy` | int 247 | 247 | PASS |
+| `25_rec_switch.ivy` | int 15, 7 frames | 15 | PASS |
+| `26_term_only.ivy` | int 3 | 3 | PASS |
+| `27_dead_after_ret.ivy` | int 5, 0 diagnostics | 5 | PASS |
+| `30_switch_shapes.ivy` | int 9 | 9 | PASS |
+
+`30_switch_shapes.ivy` covers default-only, no-match-without-default, an empty `switch`, unsorted first-match cases, and `nextcase` fall-through (`fall(1)=3`, `fall(2)=2`, `fall(9)=10`). `14_loops.ivy` covers `while`, `for`, `do/while`, an `if/else if/else` chain, nested loops, and `break`/`continue`. `22_switch_loop_break.ivy` covers a `switch` inside a loop with `break`. `25_rec_switch.ivy` covers recursion through a `switch`.
+
+**Divergences.** The only one is V01's documented stdout `int=24\n`: the port still gates `io::*` with `IvyInterpret v0.2: unsupported expression` (P4), so stdout assertions cannot run yet. The same staged gap applies to any §8 row that asserts printed bytes. No value, diagnostic, or frame divergence was observed on the 23 fixtures. Fixtures were written to return their assertion through `main` precisely so P3 can compare them without the P4 builtins.
+
+### 14.5 Probe matrix (44 assertions)
+
+`p3probe.ivy` embeds the fixture shapes and adds MIR-corruption probes (mutating a freshly built unit). All 44 PASS. Ids 1–25 are the fixture/edge checks above; the remainder:
+
+| # | Case | Assertion | Result |
+|---|---|---|---|
+| 26 | switch arm target `-1` | null edge, implicit void return | PASS |
+| 27 | arm run fully outside `arm_n` | no arm read, default taken, int 2 | PASS |
+| 28 | arm run starts at the last arm and overruns by 100000 | reads only the real arm, int 2 | PASS |
+| 29 | switch condition rewritten to a float literal | non-int condition acts as 0, selects `case 0`, int 5 | PASS |
+| 30 | switch condition expression removed (`a = -1`) | absent condition acts as 0, int 5 | PASS |
+| 31 | switch default target `-1`, no matching arm | null edge, implicit void return | PASS |
+| 32 | arm target in another function's block | invalid edge, implicit void return, foreign `ret` not read | PASS |
+| 33 | `CondBranch` then/else both `-1` | null edge, implicit void return | PASS |
+| 34 | `CondBranch` targets another function's block | invalid edge, implicit void return, foreign `ret` not read | PASS |
+| 35 | `blocks[i].last = first` (chain truncated) | only the declared instruction runs, implicit void return | PASS |
+| 36 | `blocks[i].first = -1` (stale `last`) | empty block, implicit void return | PASS |
+| 37 | `next` link points at itself (non-monotonic) | guard stops the block, no runaway, implicit void return | PASS |
+| 38 | single-instruction block converted to a self-jump | oracle quirk: falls off, implicit void return | PASS |
+| 39 | block `[jump(self), ret 3]` | oracle quirk: resumes at instruction 1, returns 3 | PASS |
+| 40 | copy/release after 1000-iteration loop + switch, forward order | no crash, state 1 | PASS |
+| 41 | same, reverse release order | no crash, state 1 | PASS |
+| 42 | release after `1 / 0` failure, then `call_main` on the released model | failure latch observed; post-release call is a state-0 no-op | PASS |
+| 43 | `io::println` call | still `IvyInterpret v0.2: unsupported expression`, state 2 | PASS |
+| 44 | instruction kind rewritten to 7 | `IvyInterpret v0.2: unsupported instruction`, state 2 | PASS |
+
+Probe output:
+
+```text
+PASS 1 .. PASS 39
+PASS 43
+PASS 44
+PASS 40 .. PASS 42
+P3 probe PASS
+```
+
+(The ids 43/44 appear before 40–42 because the unsupported-kind checks were inserted before the lifecycle block; the embedded file matrix prints `PASS 1 .. PASS 23` and `P3 file matrix PASS 23`.)
+
+### 14.6 Remaining limits
+
+- **P3 boundary closed**: every `MInst` kind 0–6 now executes. The only remaining `unsupported instruction` case is an out-of-range kind tag, which is not emitted by the frontend (probe 44).
+- **P4**: `io::*`, `ivy::*`, `printf`/`puts`/`putchar`, `exit`/`abort`, and the allocator builtins remain gated with `IvyInterpret v0.2: unsupported expression` (probe 43). This is the only reason the V01 stdout assertion cannot be checked yet.
+- **P5**: aggregates, members, `new`/`delete`, init lists, lambdas, virtual dispatch, and struct default construction are unchanged.
+- **P6**: the fixtures are **not** added to `corpus/interp` in P3. Decision: add them at P6, when `interpdrive.ivy` can run a source through the frontend + interpreter and emit stdout/stderr/status separately, so the harness can compare them against `--run` one process per file. Adding them now would leave files that no committed driver consumes. The exact scratch sources are recorded in the P3 probe (`p3probe.ivy`/`p3files.ivy` in the scratch directory, not the repository); at P6 they can be copied verbatim to `selfhost/corpus/interp/` and driven by the same `main`-return convention (nonzero small values 0–254 fit both the oracle process status and the `IResult` int).
+- **Overloads**: still name/count-only (§13.2); no `MExpr` target pointer.
+- **Recursion depth**: the host-stack limit from §13.10 still applies (about 420 nested calls); P3 adds no depth guard.
+- **Self-jump loops**: the port reproduces the oracle quirk, including the fact that a self-jump that is itself the block's second instruction loops forever, exactly as the oracle does. P3 does not add a timeout or iteration cap.
+- **Foreign-function block targets**: undefined in the oracle; the port normalizes them to null edges and ends the function. This is the only intentionally port-specific edge rule.
+
+### 14.7 Measured layout
+
+No record changed. Scratch `measure.ivy` against the P3 module:
+
+| Record | `sizeof` |
+|---|---:|
+| `InterpreterModel` | 280 |
+| `IFrame` | 72 |
+| `IValue` / `ICell` / `IStruct` / `IField` / `ILocal` / `IResult` / `InterpreterControl` | 88 / 8 / 16 / 32 / 24 / 24 / 16 |
+
+The new helpers add no fields; `inst_index` already existed in `IFrame` and now carries the self-edge marker (`1`) or `-1`.
