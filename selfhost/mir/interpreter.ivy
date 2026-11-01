@@ -1312,6 +1312,23 @@ export struct InterpreterModel {
         return index;
     }
 
+    // Find an already-registered struct by name; returns -1 when absent.
+    long find_struct_index(const char* name) {
+        if (this.is_null_name(name)) {
+            return -1;
+        }
+        long i = 0;
+        while (i < this.struct_count) {
+            unsafe {
+                if (this.same_name(this.structs[i].name, name)) {
+                    return i;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
     long slen(const char* s) {
         if (this.is_null_name(s)) {
             return 0;
@@ -3460,6 +3477,29 @@ export struct InterpreterModel {
                 }
                 return -1;
             }
+            if (kind == 13) { // Member (lvalue): base.field / ptr->field
+                long baseCell = this.lvalue_cell(u, a_idx);
+                long baseVal = -1;
+                if (baseCell >= 0) {
+                    baseVal = this.cell_value(baseCell);
+                }
+                long mflag = 0;
+                unsafe { mflag = u->exprs[expr_idx].flag; }
+                if (this.value_kind(baseVal) == 3 && mflag != 0) { // isArrow
+                    long pc = this.pointer_cell(baseVal);
+                    if (pc >= 0) {
+                        baseVal = this.cell_value(pc);
+                    }
+                }
+                if (this.value_kind(baseVal) == 4) {
+                    long st_idx = this.read_struct_index(baseVal);
+                    long fc = this.lookup_field(st_idx, sval);
+                    if (fc >= 0) {
+                        return fc;
+                    }
+                }
+                return -1;
+            }
         }
         return -1;
     }
@@ -3795,6 +3835,36 @@ export struct InterpreterModel {
             this.error(line, col, "IvyInterpret v0.2: pointer index not yet supported");
             return this.make_void();
         }
+        if (kind == 13) { // Member (value): base.field / ptr->field
+            long baseVal = this.eval_expr(u, a_idx);
+            if (this.value_kind(baseVal) == 3 && flag != 0) { // isArrow
+                if (this.pointer_is_null(baseVal) != 0) {
+                    this.error(line, col, "arrow on null/non-pointer");
+                    return this.make_void();
+                }
+                long pc = this.pointer_cell(baseVal);
+                if (pc < 0) {
+                    this.error(line, col, "arrow on null/non-pointer");
+                    return this.make_void();
+                }
+                baseVal = this.cell_value(pc);
+            }
+            if (this.value_kind(baseVal) != 4) {
+                this.error(line, col, "member access on non-struct");
+                return this.make_void();
+            }
+            long st_idx = this.read_struct_index(baseVal);
+            long fc = this.lookup_field(st_idx, sval);
+            if (fc < 0) {
+                this.error(line, col, "no field");
+                return this.make_void();
+            }
+            long cv = this.cell_value(fc);
+            if (cv < 0) {
+                return this.make_void();
+            }
+            return cv;
+        }
         if (kind == 14) { // Assign
             long c = this.lvalue_cell(u, a_idx);
             if (c < 0) {
@@ -3897,6 +3967,54 @@ export struct InterpreterModel {
                 return operand;
             }
             return operand;
+        }
+        if (kind == 17) { // InitList: aggregate struct value (positional elements)
+            // NOTE (P5 gap): MIR carries no per-struct field-name metadata, so
+            // elements are registered as positional fields (order 0..an-1) and
+            // named member access on user structs cannot be resolved here.
+            // Each InitList registers a fresh struct so instances do not share
+            // field cells (mirrors make_array's per-instance struct_index).
+            const char* sname = type_base;
+            long st_idx = this.register_struct(sname);
+            if (st_idx < 0) {
+                return this.make_void();
+            }
+            long sv = this.make_struct_value(st_idx);
+            if (sv < 0) {
+                return this.make_void();
+            }
+            if (!this.ensure_fields()) {
+                return this.make_void();
+            }
+            long i = 0;
+            while (i < an) {
+                long ei = -1;
+                unsafe {
+                    ei = u->args[astart + i];
+                }
+                long fv = -1;
+                if (ei >= 0) {
+                    fv = this.eval_expr(u, ei);
+                } else {
+                    fv = this.make_int(0);
+                }
+                long fc = this.new_cell(fv);
+                if (fc < 0) {
+                    return this.make_void();
+                }
+                long order = i;
+                long fi = this.field_count;
+                unsafe {
+                    this.fields[fi].struct_index = st_idx;
+                    this.fields[fi].order = order;
+                    this.fields[fi].name = (char*) "";
+                    this.fields[fi].cell_index = fc;
+                    this.structs[st_idx].field_count = order + 1;
+                }
+                this.field_count = this.field_count + 1;
+                i = i + 1;
+            }
+            return sv;
         }
         if (kind == 11) { // Call (P2: static target resolution and frames)
             return this.eval_call(u, astart, an, sval, line, col);
