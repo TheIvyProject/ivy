@@ -109,9 +109,18 @@ export struct IFunctionResolution {
 // copies (e.g. `InterpreterModel b = a; a.release(); b.release();`) by sharing
 // the released tombstone flag across all copies, preventing double-free heap
 // corruption (0xC0000374).
+// P4: the internal stream buffers also live here, so every shallow copy of an
+// InterpreterModel observes the same stdout/stderr byte streams. Buffers use
+// explicit lengths (not C strings), so embedded NUL bytes survive.
 export struct InterpreterControl {
     long released;
     long ref_count;
+    char* out_buf;
+    long out_len;
+    long out_cap;
+    char* err_buf;
+    long err_len;
+    long err_cap;
 };
 
 // String and character literal decoding helpers matching oracle mir_builder.cpp:41-137.
@@ -401,6 +410,12 @@ export struct InterpreterModel {
     // Oracle parity: diagnostics set `failed_` (src/mir/interpreter.cpp:101).
     // call_by_name() clears it on entry and maps it to IResult state 2.
     long failed_;
+    // P4: interpreted allocation ids (a monotonic model-local sequence) and
+    // the termination record. termination_kind: 0 none, 1 exit, 2 abort.
+    // termination_status is the status P6 must hand to the host process.
+    long next_heap_alloc_id_;
+    long termination_kind_;
+    long termination_status_;
     IResult result;
     InterpreterControl* control;
 
@@ -463,6 +478,9 @@ export struct InterpreterModel {
         this.released = 0;
         this.allocation_failed = 0;
         this.failed_ = 0;
+        this.next_heap_alloc_id_ = 0;
+        this.termination_kind_ = 0;
+        this.termination_status_ = 0;
         this.value_capacity = 4;
         this.cell_capacity = 4;
         this.struct_capacity = 4;
@@ -517,6 +535,12 @@ export struct InterpreterModel {
             }
             this.control->released = 0;
             this.control->ref_count = 1;
+            this.control->out_buf = (char*) 0;
+            this.control->out_len = 0;
+            this.control->out_cap = 0;
+            this.control->err_buf = (char*) 0;
+            this.control->err_len = 0;
+            this.control->err_cap = 0;
 
             this.values = (IValue*) __ivy_alloc(this.value_capacity * sizeof(IValue));
             if (this.values == (IValue*) 0) {
@@ -1684,6 +1708,12 @@ export struct InterpreterModel {
                this.same_name(b, "float128_t") || this.same_name(b, "bfloat16_t");
     }
 
+    // Oracle printValueTo renders these three bases as a character.
+    bool is_char_base(const char* b) {
+        return this.same_name(b, "char") || this.same_name(b, "int8_t") ||
+               this.same_name(b, "uint8_t");
+    }
+
     bool is_integer_base(const char* b) {
         return this.same_name(b, "bool") || this.same_name(b, "char") ||
                this.same_name(b, "short") || this.same_name(b, "int") ||
@@ -1826,6 +1856,1405 @@ export struct InterpreterModel {
             }
             out[cur] = 0;
             out_len[0] = cur;
+        }
+    }
+
+    // ---- P4: internal stdout/stderr byte buffers ----
+    // The buffers live in the shared control block, so a shallow copy of the
+    // model aliases the same streams (writes through either copy are visible
+    // through both) and release() frees them exactly once; after any copy
+    // releases, every copy reports empty streams. Lengths are explicit, so
+    // embedded NUL bytes survive and are never treated as terminators.
+
+    bool ensure_stream(long is_err, long extra) {
+        if (this.setup_done == 0 || this.is_released() ||
+            this.allocation_failed != 0 || extra < 0) {
+            return false;
+        }
+        unsafe {
+            if (this.control == (InterpreterControl*) 0) {
+                return false;
+            }
+            long cap = this.control->out_cap;
+            long len = this.control->out_len;
+            char* old = this.control->out_buf;
+            if (is_err != 0) {
+                cap = this.control->err_cap;
+                len = this.control->err_len;
+                old = this.control->err_buf;
+            }
+            if (len > this.signed_long_max() - extra) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long need = len + extra;
+            if (need <= cap) {
+                return true;
+            }
+            long new_cap = 64;
+            if (cap > 0) {
+                new_cap = cap;
+            }
+            while (new_cap < need) {
+                if (!this.valid_pool_growth(new_cap, 1)) {
+                    this.allocation_failed = 1;
+                    return false;
+                }
+                new_cap = new_cap * 2;
+            }
+            char* fresh = (char*) __ivy_alloc(new_cap);
+            if (fresh == (char*) 0) {
+                this.allocation_failed = 1;
+                return false;
+            }
+            long i = 0;
+            while (i < len && old != (char*) 0) {
+                fresh[i] = old[i];
+                i = i + 1;
+            }
+            if (old != (char*) 0) {
+                __ivy_free((void*) old);
+            }
+            if (is_err != 0) {
+                this.control->err_buf = fresh;
+                this.control->err_cap = new_cap;
+            } else {
+                this.control->out_buf = fresh;
+                this.control->out_cap = new_cap;
+            }
+        }
+        return true;
+    }
+
+    void stream_write(long is_err, const char* bytes, long length) {
+        if (length <= 0 || this.null_str(bytes)) {
+            return;
+        }
+        if (!this.ensure_stream(is_err, length)) {
+            return;
+        }
+        unsafe {
+            long len = this.control->out_len;
+            char* buf = this.control->out_buf;
+            if (is_err != 0) {
+                len = this.control->err_len;
+                buf = this.control->err_buf;
+            }
+            long i = 0;
+            while (i < length) {
+                buf[len + i] = bytes[i];
+                i = i + 1;
+            }
+            if (is_err != 0) {
+                this.control->err_len = len + length;
+            } else {
+                this.control->out_len = len + length;
+            }
+        }
+    }
+
+    void stream_byte(long is_err, long byte) {
+        if (!this.ensure_stream(is_err, 1)) {
+            return;
+        }
+        unsafe {
+            long len = this.control->out_len;
+            char* buf = this.control->out_buf;
+            if (is_err != 0) {
+                len = this.control->err_len;
+                buf = this.control->err_buf;
+            }
+            buf[len] = (char) byte;
+            if (is_err != 0) {
+                this.control->err_len = len + 1;
+            } else {
+                this.control->out_len = len + 1;
+            }
+        }
+    }
+
+    void stream_text(long is_err, const char* text) {
+        this.stream_write(is_err, text, this.slen(text));
+    }
+
+    // Decimal (signed) emission without libc.
+    void stream_long(long is_err, long value) {
+        unsafe {
+            char digits[32];
+            long pos = 0;
+            uint64 mag = 0;
+            if (value < 0) {
+                mag = (uint64) 0 - (uint64) value;
+            } else {
+                mag = (uint64) value;
+            }
+            if (mag == 0) {
+                digits[0] = 48; // '0'
+                pos = 1;
+            } else {
+                while (mag > 0) {
+                    long d = (long) (mag % 10);
+                    digits[pos] = (char) (48 + d);
+                    pos = pos + 1;
+                    mag = mag / 10;
+                }
+            }
+            if (!this.ensure_stream(is_err, pos + 1)) {
+                return;
+            }
+            long len = this.control->out_len;
+            char* buf = this.control->out_buf;
+            if (is_err != 0) {
+                len = this.control->err_len;
+                buf = this.control->err_buf;
+            }
+            if (value < 0) {
+                buf[len] = 45; // '-'
+                len = len + 1;
+            }
+            long i = pos - 1;
+            while (i >= 0) {
+                buf[len] = digits[i];
+                len = len + 1;
+                i = i - 1;
+            }
+            if (is_err != 0) {
+                this.control->err_len = len;
+            } else {
+                this.control->out_len = len;
+            }
+        }
+    }
+
+    // Unsigned decimal digits into `out`; returns the digit count.
+    long format_uint(uint64 value, char* out) {
+        unsafe {
+            if (out == (char*) 0) {
+                return 0;
+            }
+            if (value == 0) {
+                out[0] = 48;
+                return 1;
+            }
+            char rev[32];
+            long pos = 0;
+            while (value > 0) {
+                rev[pos] = (char) (48 + (long) (value % 10));
+                value = value / 10;
+                pos = pos + 1;
+            }
+            long i = 0;
+            while (i < pos) {
+                out[i] = rev[pos - 1 - i];
+                i = i + 1;
+            }
+            return pos;
+        }
+        return 0;
+    }
+
+    // ---- P4: hand-written %g / %e / %f (no libc) ----
+    // %g: 6 significant digits by default; exponential form when the decimal
+    // exponent is < -4 or >= precision; trailing zeros and a trailing '.'
+    // are stripped unless the `#` flag is present. Subnormals are pre-scaled
+    // by 1e300 so six significant digits remain representable. The routines
+    // return the byte count, or -1 for a spec the port deliberately gates.
+
+    double pow10d(long e) {
+        unsafe {
+            if (e >= 0) {
+                double r = 1.0;
+                long i = 0;
+                while (i < e) {
+                    r = r * 10.0;
+                    i = i + 1;
+                }
+                return r;
+            }
+            double p = this.pow10d(-e);
+            return 1.0 / p;
+        }
+        return 1.0;
+    }
+
+    long pow10i(long e) {
+        long r = 1;
+        long i = 0;
+        while (i < e) {
+            r = r * 10;
+            i = i + 1;
+        }
+        return r;
+    }
+
+    // Rounded n significant decimal digits of the non-negative finite `v`.
+    // Returns 0 and writes `digits[0..n-1]` plus the decimal exponent, or -1
+    // when the scaled value would exceed the signed-64 range. Guard digits
+    // (two) drive half-even rounding; an exact 50 guard is a tie.
+    long decimal_digits(double v, long n, long* exp_out, char* digits) {
+        unsafe {
+            if (v < 0.0 || n <= 0 || n > 15 ||
+                exp_out == (long*) 0 || digits == (char*) 0) {
+                return -1;
+            }
+            long e = 0;
+            double a = v;
+            if (v != 0.0) {
+                while (a >= 10.0 && e < 400) {
+                    a = a / 10.0;
+                    e = e + 1;
+                }
+                while (a < 1.0 && e > -400) {
+                    a = a * 10.0;
+                    e = e - 1;
+                }
+            }
+            long attempt = 0;
+            while (attempt < 3) {
+                double scaled = 0.0;
+                long k = n + 1 - e;
+                if (k > 308 || k < -308) {
+                    // Extreme exponent: scale the normalized mantissa, whose
+                    // magnitude is safely in [1, 10).
+                    scaled = a * this.pow10d(n + 1);
+                } else {
+                    scaled = v * this.pow10d(k);
+                }
+                if (scaled >= 9.0e18) {
+                    return -1;
+                }
+                long ip = 0;
+                if (scaled > 0.0) {
+                    ip = (long) scaled;
+                }
+                double frac = scaled - (double) ip;
+                long rem = ip % 100;
+                long keep = ip / 100;
+                long low = this.pow10i(n - 1);
+                long limit = low * 10;
+                if (keep < low && attempt < 2 && k <= 308 && k >= -308) {
+                    // The exponent estimate was one too high.
+                    e = e - 1;
+                    attempt = attempt + 1;
+                } else {
+                    if (keep < low && attempt < 2 && (k > 308 || k < -308)) {
+                        // The normalized fallback cannot change with e.
+                        return -1;
+                    }
+                    long d1 = rem / 10;
+                    long rest = rem % 10;
+                    long up = 0;
+                    if (d1 > 5) {
+                        up = 1;
+                    } else if (d1 == 5) {
+                        if (rest > 0 || frac > 1e-9) {
+                            up = 1;
+                        } else if ((keep % 2) != 0) {
+                            up = 1;
+                        }
+                    }
+                    if (up != 0) {
+                        keep = keep + 1;
+                    }
+                    if (keep >= limit) {
+                        keep = keep / 10;
+                        e = e + 1;
+                    }
+                    long x = keep;
+                    long j = n - 1;
+                    while (j >= 0) {
+                        digits[j] = (char) (48 + (x % 10));
+                        x = x / 10;
+                        j = j - 1;
+                    }
+                    exp_out[0] = e;
+                    return 0;
+                }
+            }
+            return -1;
+        }
+        return -1;
+    }
+
+    // Append the `%g` exponent suffix: e, sign, at least two digits.
+    void append_exponent(char* out, long* pos, long e) {
+        unsafe {
+            out[pos[0]] = 101; // 'e'
+            pos[0] = pos[0] + 1;
+            long ae = e;
+            if (e < 0) {
+                out[pos[0]] = 45; // '-'
+                ae = -e;
+            } else {
+                out[pos[0]] = 43; // '+'
+            }
+            pos[0] = pos[0] + 1;
+            if (ae >= 100) {
+                out[pos[0]] = (char) (48 + (ae / 100));
+                pos[0] = pos[0] + 1;
+            }
+            long rem = ae % 100;
+            out[pos[0]] = (char) (48 + (rem / 10));
+            out[pos[0] + 1] = (char) (48 + (rem % 10));
+            pos[0] = pos[0] + 2;
+        }
+    }
+
+    long format_g(double v, long precision, long alt, char* out) {
+        unsafe {
+            long pos = 0;
+            long neg = 0;
+            double a = v;
+            if (v < 0.0) {
+                neg = 1;
+                a = v * -1.0;
+            } else if (v == 0.0) {
+                if ((1.0 / v) < 0.0) {
+                    neg = 1;
+                }
+            }
+            if (a != a) {
+                out[0] = 110;
+                out[1] = 97;
+                out[2] = 110;
+                return 3;
+            }
+            if (a > 1.7976931348623157e308) {
+                if (neg != 0) {
+                    out[0] = 45;
+                    pos = 1;
+                }
+                out[pos] = 105;
+                out[pos + 1] = 110;
+                out[pos + 2] = 102;
+                return pos + 3;
+            }
+            long p = precision;
+            if (p < 0) {
+                p = 6;
+            }
+            if (p == 0) {
+                p = 1;
+            }
+            if (p > 15) {
+                return -1;
+            }
+            long e = 0;
+            char* digits = (char*) __ivy_alloc(64);
+            if (digits == (char*) 0) {
+                return -1;
+            }
+            long k = 0;
+            while (k < 24) {
+                digits[k] = 48;
+                k = k + 1;
+            }
+            if (a != 0.0) {
+                if (this.decimal_digits(a, p, &e, digits) != 0) {
+                    __ivy_free((void*) digits);
+                    return -1;
+                }
+            }
+            long nd = p;
+            if (alt == 0) {
+                while (nd > 1 && digits[nd - 1] == 48) {
+                    nd = nd - 1;
+                }
+            }
+            if (neg != 0) {
+                out[pos] = 45;
+                pos = pos + 1;
+            }
+            bool sci = false;
+            if (e < -4) {
+                sci = true;
+            }
+            if (e >= p) {
+                sci = true;
+            }
+            if (sci) {
+                out[pos] = digits[0];
+                pos = pos + 1;
+                if (nd > 1 || alt != 0) {
+                    out[pos] = 46;
+                    pos = pos + 1;
+                    long j = 1;
+                    while (j < nd) {
+                        out[pos] = digits[j];
+                        pos = pos + 1;
+                        j = j + 1;
+                    }
+                    if (alt != 0) {
+                        while (j < p) {
+                            out[pos] = 48;
+                            pos = pos + 1;
+                            j = j + 1;
+                        }
+                    }
+                }
+                this.append_exponent(out, &pos, e);
+            } else if (e >= 0) {
+                long int_digits = e + 1;
+                long j = 0;
+                while (j < nd && j < int_digits) {
+                    out[pos] = digits[j];
+                    pos = pos + 1;
+                    j = j + 1;
+                }
+                while (j < int_digits) {
+                    out[pos] = 48;
+                    pos = pos + 1;
+                    j = j + 1;
+                }
+                if (j < nd || alt != 0) {
+                    out[pos] = 46;
+                    pos = pos + 1;
+                    long stop = nd;
+                    if (alt != 0) {
+                        stop = p;
+                    }
+                    while (j < stop) {
+                        out[pos] = digits[j];
+                        pos = pos + 1;
+                        j = j + 1;
+                    }
+                }
+            } else {
+                // 0 < value < 1 in fixed notation: always at least one
+                // fractional digit, even after trailing-zero stripping
+                // collapses the mantissa to a single digit (0.1, 0.0001).
+                out[pos] = 48;
+                pos = pos + 1;
+                long stop = nd;
+                if (alt != 0) {
+                    stop = p;
+                }
+                out[pos] = 46;
+                pos = pos + 1;
+                long z = -e - 1;
+                while (z > 0) {
+                    out[pos] = 48;
+                    pos = pos + 1;
+                    z = z - 1;
+                }
+                long j = 0;
+                while (j < stop) {
+                    out[pos] = digits[j];
+                    pos = pos + 1;
+                    j = j + 1;
+                }
+            }
+            __ivy_free((void*) digits);
+            return pos;
+        }
+        return 0;
+    }
+
+    long format_e(double v, long precision, long alt, char* out) {
+        unsafe {
+            long pos = 0;
+            long neg = 0;
+            double a = v;
+            if (v < 0.0) {
+                neg = 1;
+                a = v * -1.0;
+            } else if (v == 0.0) {
+                if ((1.0 / v) < 0.0) {
+                    neg = 1;
+                }
+            }
+            if (a != a) {
+                out[0] = 110;
+                out[1] = 97;
+                out[2] = 110;
+                return 3;
+            }
+            if (a > 1.7976931348623157e308) {
+                if (neg != 0) {
+                    out[0] = 45;
+                    pos = 1;
+                }
+                out[pos] = 105;
+                out[pos + 1] = 110;
+                out[pos + 2] = 102;
+                return pos + 3;
+            }
+            long p = precision;
+            if (p < 0) {
+                p = 6;
+            }
+            if (p > 15) {
+                return -1;
+            }
+            long nd = p + 1;
+            long e = 0;
+            char* digits = (char*) __ivy_alloc(64);
+            if (digits == (char*) 0) {
+                return -1;
+            }
+            long k = 0;
+            while (k < 24) {
+                digits[k] = 48;
+                k = k + 1;
+            }
+            if (a != 0.0) {
+                if (this.decimal_digits(a, nd, &e, digits) != 0) {
+                    __ivy_free((void*) digits);
+                    return -1;
+                }
+            }
+            if (neg != 0) {
+                out[pos] = 45;
+                pos = pos + 1;
+            }
+            out[pos] = digits[0];
+            pos = pos + 1;
+            if (p > 0 || alt != 0) {
+                out[pos] = 46;
+                pos = pos + 1;
+            }
+            long j = 1;
+            while (j < nd) {
+                out[pos] = digits[j];
+                pos = pos + 1;
+                j = j + 1;
+            }
+            this.append_exponent(out, &pos, e);
+            __ivy_free((void*) digits);
+            return pos;
+        }
+        return 0;
+    }
+
+    // %f. Returns -1 for |v| >= 1e15 or a precision > 17: the port keeps
+    // those specs gated (documented divergence) instead of emitting bytes
+    // it cannot format exactly.
+    long format_f(double v, long precision, long alt, char* out) {
+        unsafe {
+            long pos = 0;
+            long neg = 0;
+            double a = v;
+            if (v < 0.0) {
+                neg = 1;
+                a = v * -1.0;
+            } else if (v == 0.0) {
+                if ((1.0 / v) < 0.0) {
+                    neg = 1;
+                }
+            }
+            if (a != a) {
+                out[0] = 110;
+                out[1] = 97;
+                out[2] = 110;
+                return 3;
+            }
+            if (a > 1.7976931348623157e308) {
+                if (neg != 0) {
+                    out[0] = 45;
+                    pos = 1;
+                }
+                out[pos] = 105;
+                out[pos + 1] = 110;
+                out[pos + 2] = 102;
+                return pos + 3;
+            }
+            long p = precision;
+            if (p < 0) {
+                p = 6;
+            }
+            if (p > 17 || a >= 1e15) {
+                return -1;
+            }
+            long ip = (long) a;
+            double frac = a - (double) ip;
+            char digits[24];
+            long k = 0;
+            while (k <= p) {
+                frac = frac * 10.0;
+                long dd = (long) frac;
+                frac = frac - (double) dd;
+                digits[k] = (char) (48 + dd);
+                k = k + 1;
+            }
+            long roundup = 0;
+            if (digits[p] > 53) {
+                roundup = 1;
+            } else if (digits[p] == 53) {
+                if (frac > 0.0) {
+                    roundup = 1;
+                } else {
+                    long last = 0;
+                    if (p > 0) {
+                        last = (long) (digits[p - 1] - 48);
+                    } else {
+                        last = ip % 10;
+                    }
+                    if ((last % 2) != 0) {
+                        roundup = 1;
+                    }
+                }
+            }
+            if (roundup != 0) {
+                long carry_all = 1;
+                k = p - 1;
+                while (k >= 0) {
+                    if (digits[k] == 57) {
+                        digits[k] = 48;
+                        k = k - 1;
+                    } else {
+                        digits[k] = (char) (digits[k] + 1);
+                        carry_all = 0;
+                        k = -1;
+                    }
+                }
+                if (carry_all != 0) {
+                    ip = ip + 1;
+                    long j = 0;
+                    while (j < p) {
+                        digits[j] = 48;
+                        j = j + 1;
+                    }
+                }
+            }
+            if (neg != 0) {
+                out[0] = 45;
+                pos = 1;
+            }
+            char ib[24];
+            long ipos = 0;
+            uint64 im = (uint64) ip;
+            if (im == 0) {
+                ib[0] = 48;
+                ipos = 1;
+            } else {
+                while (im > 0) {
+                    ib[ipos] = (char) (48 + (long) (im % 10));
+                    ipos = ipos + 1;
+                    im = im / 10;
+                }
+            }
+            long j = ipos - 1;
+            while (j >= 0) {
+                out[pos] = ib[j];
+                pos = pos + 1;
+                j = j - 1;
+            }
+            if (p > 0 || alt != 0) {
+                out[pos] = 46;
+                pos = pos + 1;
+            }
+            k = 0;
+            while (k < p) {
+                out[pos] = digits[k];
+                pos = pos + 1;
+                k = k + 1;
+            }
+            return pos;
+        }
+        return 0;
+    }
+
+    // Emit a numeric body with an optional sign and field padding.
+    void emit_field(char* body, long body_len, long sign_char, long zero_ok,
+                    long minus, long width, long is_err) {
+        if (body_len < 0) {
+            return;
+        }
+        long sign_len = 0;
+        if (sign_char != 0) {
+            sign_len = 1;
+        }
+        long total = body_len + sign_len;
+        long pad = 0;
+        if (width > total) {
+            pad = width - total;
+        }
+        if (minus != 0) {
+            if (sign_char != 0) {
+                this.stream_byte(is_err, sign_char);
+            }
+            this.stream_write(is_err, body, body_len);
+            long k = 0;
+            while (k < pad) {
+                this.stream_byte(is_err, 32);
+                k = k + 1;
+            }
+        } else if (zero_ok != 0 && pad > 0) {
+            if (sign_char != 0) {
+                this.stream_byte(is_err, sign_char);
+            }
+            long k = 0;
+            while (k < pad) {
+                this.stream_byte(is_err, 48);
+                k = k + 1;
+            }
+            this.stream_write(is_err, body, body_len);
+        } else {
+            long k = 0;
+            while (k < pad) {
+                this.stream_byte(is_err, 32);
+                k = k + 1;
+            }
+            if (sign_char != 0) {
+                this.stream_byte(is_err, sign_char);
+            }
+            this.stream_write(is_err, body, body_len);
+        }
+    }
+
+    // ---- P4: value rendering, extraction, and builtin dispatch ----
+
+    // Oracle extractString (interpreter.cpp:1079-1086): a Str value, or a
+    // pointer whose pointee is a Str.
+    long extract_string_value(long value_index) {
+        long k = this.value_kind(value_index);
+        if (k == 5) {
+            return value_index;
+        }
+        if (k == 3 && this.pointer_is_null(value_index) == 0) {
+            long cell = this.pointer_cell(value_index);
+            long pointee = this.cell_value(cell);
+            if (this.value_kind(pointee) == 5) {
+                return pointee;
+            }
+        }
+        return -1;
+    }
+
+    void stream_string_value(long is_err, long value_index) {
+        long s = this.extract_string_value(value_index);
+        if (s < 0) {
+            return;
+        }
+        long n = this.read_string_length(s);
+        if (n <= 0) {
+            return;
+        }
+        unsafe {
+            this.stream_write(is_err, this.values[s].string_bytes, n);
+        }
+    }
+
+    void stream_float(long is_err, double value) {
+        unsafe {
+            char* float_buf = (char*) __ivy_alloc(128);
+            if (float_buf == (char*) 0) {
+                this.allocation_failed = 1;
+                return;
+            }
+            long n = this.format_g(value, 6, 0, float_buf);
+            if (n > 0) {
+                this.stream_write(is_err, float_buf, n);
+            }
+            __ivy_free((void*) float_buf);
+        }
+    }
+
+    // Oracle printValueTo (interpreter.cpp:1102-1124): the MIR expression type
+    // decides char/bool rendering; the value kind decides everything else.
+    void stream_value(long is_err, long value_index, const char* type_base) {
+        long k = this.value_kind(value_index);
+        if (k == 1) {
+            long iv = this.read_int(value_index);
+            if (this.is_char_base(type_base)) {
+                this.stream_byte(is_err, iv);
+            } else if (this.same_name(type_base, "bool")) {
+                if (iv != 0) {
+                    this.stream_text(is_err, "true");
+                } else {
+                    this.stream_text(is_err, "false");
+                }
+            } else {
+                this.stream_long(is_err, iv);
+            }
+        } else if (k == 2) {
+            this.stream_float(is_err, this.read_float(value_index));
+        } else if (k == 5) {
+            this.stream_string_value(is_err, value_index);
+        } else if (k == 3) {
+            if (this.pointer_is_null(value_index) != 0) {
+                this.stream_text(is_err, "nullptr");
+            } else {
+                this.stream_text(is_err, "(ptr)");
+            }
+        } else if (k == 4) {
+            long si = this.read_struct_index(value_index);
+            this.stream_byte(is_err, 123); // '{'
+            if (si >= 0 && si < this.struct_count) {
+                unsafe {
+                    this.stream_text(is_err, this.structs[si].name);
+                }
+            }
+            this.stream_byte(is_err, 125); // '}'
+        } else if (k == 0) {
+            this.stream_text(is_err, "void");
+        }
+    }
+
+    long expr_kind(MUnit* u, long expr_idx) {
+        long k = -1;
+        unsafe {
+            if (u != (MUnit*) 0 && expr_idx >= 0 && expr_idx < u->ex_n) {
+                k = u->exprs[expr_idx].kind;
+            }
+        }
+        return k;
+    }
+
+    const char* expr_type_base(MUnit* u, long expr_idx) {
+        unsafe {
+            const char* base = (char*) 0;
+            if (u != (MUnit*) 0 && expr_idx >= 0 && expr_idx < u->ex_n) {
+                const char* t = u->exprs[expr_idx].type.base;
+                if (t != (char*) 0) {
+                    base = t;
+                }
+            }
+            if (base == (char*) 0) {
+                base = (char*) "";
+            }
+            return base;
+        }
+        return "";
+    }
+
+    // io::print / println / eprint / eprintln (interpreter.cpp:916-961).
+    // The {} format path is selected only when argument 0 is a StringLit
+    // expression; otherwise every argument is printed with its MIR type.
+    long builtin_io(MUnit* u, long astart, long an, long* vals, const char* callee) {
+        unsafe {
+        long is_err = 0;
+        long is_ln = 0;
+        if (this.same_name(callee, "io::println") ||
+            this.same_name(callee, "io::eprintln")) {
+            is_ln = 1;
+        }
+        if (this.same_name(callee, "io::eprint") ||
+            this.same_name(callee, "io::eprintln")) {
+            is_err = 1;
+        }
+        bool has_fmt = false;
+        if (an > 0 && vals != (long*) 0 && u != (MUnit*) 0 &&
+            astart >= 0 && astart < u->a_n) {
+            if (this.expr_kind(u, u->args[astart]) == 2) {
+                has_fmt = true;
+            }
+        }
+        if (has_fmt) {
+            long fmt = vals[0];
+            long fmt_len = this.read_string_length(fmt);
+            long argi = 1;
+            long i = 0;
+            while (i < fmt_len) {
+                long b = this.read_string_byte(fmt, i);
+                if (b == 123 && (i + 1) < fmt_len &&
+                    this.read_string_byte(fmt, i + 1) == 125) {
+                    if (argi < an) {
+                        long expr = -1;
+                        if (u != (MUnit*) 0 && astart >= 0 &&
+                            (astart + argi) < u->a_n) {
+                            expr = u->args[astart + argi];
+                        }
+                        this.stream_value(is_err, vals[argi],
+                                          this.expr_type_base(u, expr));
+                        argi = argi + 1;
+                    }
+                    i = i + 2;
+                } else {
+                    this.stream_byte(is_err, b);
+                    i = i + 1;
+                }
+            }
+        } else {
+            long j = 0;
+            while (j < an) {
+                long expr = -1;
+                if (u != (MUnit*) 0 && astart >= 0 &&
+                    (astart + j) < u->a_n) {
+                    expr = u->args[astart + j];
+                }
+                this.stream_value(is_err, vals[j],
+                                  this.expr_type_base(u, expr));
+                j = j + 1;
+            }
+        }
+        if (is_ln != 0) {
+            this.stream_byte(is_err, 10);
+        }
+        return this.make_void();
+        }
+    }
+
+    // ivy::print / ivy::println (interpreter.cpp:967-984): only the first
+    // argument is rendered; println adds one newline (including for zero args).
+    long builtin_ivy_print(long an, long* vals, const char* callee) {
+        unsafe {
+        long is_ln = 0;
+        if (this.same_name(callee, "ivy::println")) {
+            is_ln = 1;
+        }
+        if (an > 0 && vals != (long*) 0) {
+            this.stream_value(0, vals[0], "");
+        }
+        if (is_ln != 0) {
+            this.stream_byte(0, 10);
+        }
+        return this.make_void();
+        }
+    }
+
+    void terminate(long kind, long status) {
+        if (this.setup_done == 0 || this.is_released()) {
+            return;
+        }
+        this.termination_kind_ = kind;
+        this.termination_status_ = status;
+        this.result.state = 3;
+        this.result.value_index = -1;
+        this.result.status = status;
+    }
+
+    long builtin_printf(long* vals, long an, long line, long col) {
+        unsafe {
+        if (an <= 0 || vals == (long*) 0) {
+            return this.make_int(0);
+        }
+        long fmt = this.extract_string_value(vals[0]);
+        if (fmt < 0) {
+            return this.make_int(0);
+        }
+        long fmt_len = this.read_string_length(fmt);
+        {
+            char* buf = (char*) __ivy_alloc(1024);
+            if (buf == (char*) 0) {
+                this.allocation_failed = 1;
+                return this.make_int(0);
+            }
+            char* digits = buf + 512;
+            long total = 0;
+            long ai = 1;
+            long i = 0;
+            while (i < fmt_len) {
+                long c = this.read_string_byte(fmt, i);
+                if (c != 37) { // '%'
+                    this.stream_byte(0, c);
+                    total = total + 1;
+                    i = i + 1;
+                } else {
+                    long mark = i;
+                    i = i + 1;
+                    if (i >= fmt_len) {
+                        break;
+                    }
+                    long minus = 0;
+                    long plus = 0;
+                    long space = 0;
+                    long alt = 0;
+                    long zero = 0;
+                    long width = 0;
+                    long prec = -1;
+                    long hasprec = 0;
+                    long seen_digit = 0;
+                    while (i < fmt_len) {
+                        long fc = this.read_string_byte(fmt, i);
+                        if (fc == 45) {
+                            minus = 1;
+                            i = i + 1;
+                        } else if (fc == 43) {
+                            plus = 1;
+                            i = i + 1;
+                        } else if (fc == 32) {
+                            space = 1;
+                            i = i + 1;
+                        } else if (fc == 35) {
+                            alt = 1;
+                            i = i + 1;
+                        } else if (fc == 48 && seen_digit == 0) {
+                            zero = 1;
+                            i = i + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    while (i < fmt_len) {
+                        long dc = this.read_string_byte(fmt, i);
+                        if (dc >= 48 && dc <= 57) {
+                            if (width <= 100000) {
+                                width = width * 10 + (dc - 48);
+                            }
+                            seen_digit = 1;
+                            i = i + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (i < fmt_len && this.read_string_byte(fmt, i) == 46) {
+                        hasprec = 1;
+                        prec = 0;
+                        i = i + 1;
+                        while (i < fmt_len) {
+                            long pc = this.read_string_byte(fmt, i);
+                            if (pc >= 48 && pc <= 57) {
+                                if (prec <= 100000) {
+                                    prec = prec * 10 + (pc - 48);
+                                }
+                                i = i + 1;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    long flags_end = i;
+                    while (i < fmt_len) {
+                        long mc = this.read_string_byte(fmt, i);
+                        if (mc == 108 || mc == 104 || mc == 122 ||
+                            mc == 106 || mc == 116) {
+                            i = i + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (i >= fmt_len) {
+                        break;
+                    }
+                    long spec = this.read_string_byte(fmt, i);
+                    i = i + 1;
+                    if (spec == 37) {
+                        this.stream_byte(0, 37);
+                        total = total + 1;
+                    } else if (width > 200 || prec > 17) {
+                        this.error(line, col,
+                            "IvyInterpret v0.4: printf width/precision not supported");
+                        break;
+                    } else {
+                        long arg = -1;
+                        if (ai < an) {
+                            arg = vals[ai];
+                        }
+                        ai = ai + 1;
+                        long arg_kind = this.value_kind(arg);
+                        long sign_char = 0;
+                        long pad = 0;
+                        if (spec == 100 || spec == 105) { // d i
+                            long v = 0;
+                            if (arg_kind == 1) {
+                                v = this.read_int(arg);
+                            } else if (arg_kind == 2) {
+                                v = (long) this.read_float(arg);
+                            }
+                            long neg = 0;
+                            uint64 mag = 0;
+                            if (v < 0) {
+                                neg = 1;
+                                mag = (uint64) 0 - (uint64) v;
+                            } else {
+                                mag = (uint64) v;
+                            }
+                            long nd = 0;
+                            if (!(hasprec != 0 && prec == 0 && mag == 0)) {
+                                nd = this.format_uint(mag, digits);
+                            }
+                            long bl = 0;
+                            if (hasprec != 0) {
+                                long z = prec - nd;
+                                while (z > 0) {
+                                    buf[bl] = 48;
+                                    bl = bl + 1;
+                                    z = z - 1;
+                                }
+                            }
+                            long q = 0;
+                            while (q < nd) {
+                                buf[bl] = digits[q];
+                                bl = bl + 1;
+                                q = q + 1;
+                            }
+                            if (neg != 0) {
+                                sign_char = 45;
+                            } else if (plus != 0) {
+                                sign_char = 43;
+                            } else if (space != 0) {
+                                sign_char = 32;
+                            }
+                            long zok = 0;
+                            if (zero != 0 && minus == 0 && hasprec == 0) {
+                                zok = 1;
+                            }
+                            long body_total = bl;
+                            if (sign_char != 0) {
+                                body_total = body_total + 1;
+                            }
+                            if (width > body_total) {
+                                pad = width - body_total;
+                            }
+                            this.emit_field(buf, bl, sign_char, zok, minus, width, 0);
+                            total = total + body_total + pad;
+                        } else if (spec == 117) { // u
+                            long v = 0;
+                            if (arg_kind == 1) {
+                                v = this.read_int(arg);
+                            } else if (arg_kind == 2) {
+                                v = (long) this.read_float(arg);
+                            }
+                            uint64 mag = (uint64) v;
+                            long nd = 0;
+                            if (!(hasprec != 0 && prec == 0 && mag == 0)) {
+                                nd = this.format_uint(mag, digits);
+                            }
+                            long bl = 0;
+                            if (hasprec != 0) {
+                                long z = prec - nd;
+                                while (z > 0) {
+                                    buf[bl] = 48;
+                                    bl = bl + 1;
+                                    z = z - 1;
+                                }
+                            }
+                            long q = 0;
+                            while (q < nd) {
+                                buf[bl] = digits[q];
+                                bl = bl + 1;
+                                q = q + 1;
+                            }
+                            long zok = 0;
+                            if (zero != 0 && minus == 0 && hasprec == 0) {
+                                zok = 1;
+                            }
+                            long body_total = bl;
+                            if (width > body_total) {
+                                pad = width - body_total;
+                            }
+                            this.emit_field(buf, bl, 0, zok, minus, width, 0);
+                            total = total + body_total + pad;
+                        } else if (spec == 102 || spec == 103 || spec == 101) { // f g e
+                            double dv = 0.0;
+                            if (arg_kind == 2) {
+                                dv = this.read_float(arg);
+                            } else if (arg_kind == 1) {
+                                dv = (double) this.read_int(arg);
+                            }
+                            long pp = -1;
+                            if (hasprec != 0) {
+                                pp = prec;
+                            }
+                            long blen = -1;
+                            if (spec == 102) {
+                                blen = this.format_f(dv, pp, alt, digits);
+                            } else if (spec == 103) {
+                                blen = this.format_g(dv, pp, alt, digits);
+                            } else {
+                                blen = this.format_e(dv, pp, alt, digits);
+                            }
+                            if (blen < 0) {
+                                this.error(line, col,
+                                    "IvyInterpret v0.4: printf float spec out of supported range");
+                                break;
+                            }
+                            long off = 0;
+                            if (blen > 0 && digits[0] == 45) {
+                                sign_char = 45;
+                                off = 1;
+                            } else if (plus != 0) {
+                                sign_char = 43;
+                            } else if (space != 0) {
+                                sign_char = 32;
+                            }
+                            long zok = 0;
+                            if (zero != 0 && minus == 0) {
+                                zok = 1;
+                            }
+                            long body_total = blen - off;
+                            if (sign_char != 0) {
+                                body_total = body_total + 1;
+                            }
+                            if (width > body_total) {
+                                pad = width - body_total;
+                            }
+                            this.emit_field(digits + off, blen - off, sign_char,
+                                            zok, minus, width, 0);
+                            total = total + body_total + pad;
+                        } else if (spec == 115) { // s
+                            long sv = this.extract_string_value(arg);
+                            long sl = 0;
+                            if (sv >= 0) {
+                                sl = this.read_string_length(sv);
+                                if (sl > 0) {
+                                    this.stream_write(0, this.values[sv].string_bytes, sl);
+                                }
+                            }
+                            total = total + sl;
+                        } else if (spec == 99) { // c
+                            long cv = 0;
+                            if (arg_kind == 1) {
+                                cv = this.read_int(arg);
+                            }
+                            this.stream_byte(0, cv);
+                            total = total + 1;
+                        } else if (spec == 112) { // p
+                            this.stream_text(0, "(ptr)");
+                            total = total + 5;
+                        } else {
+                            this.stream_byte(0, 37);
+                            total = total + 1;
+                            long q = mark + 1;
+                            while (q < flags_end) {
+                                long rc = this.read_string_byte(fmt, q);
+                                this.stream_byte(0, rc);
+                                total = total + 1;
+                                q = q + 1;
+                            }
+                            this.stream_byte(0, spec);
+                            total = total + 1;
+                        }
+                    }
+                }
+            }
+            __ivy_free((void*) buf);
+            return this.make_int(total);
+        }
+        return this.make_int(0);
+        }
+    }
+
+    // All non-io/ivy::print-family builtins (interpreter.cpp:1131-1287).
+    long eval_builtin(MUnit* u, long astart, long an, long* vals,
+                      const char* callee, long line, long col) {
+        unsafe {
+        if (this.same_name(callee, "__ivy_alloc") ||
+            this.same_name(callee, "malloc")) {
+            long n = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                n = this.read_int(vals[0]);
+            }
+            if (n <= 0) {
+                n = 1;
+            }
+            this.next_heap_alloc_id_ = this.next_heap_alloc_id_ + 1;
+            long cell = this.new_cell(this.make_int(0));
+            if (cell < 0) {
+                return this.make_void();
+            }
+            return this.make_pointer(cell, 0, 3,
+                                     this.next_heap_alloc_id_, (char*) 0);
+        }
+        if (this.same_name(callee, "__ivy_free") ||
+            this.same_name(callee, "free")) {
+            if (an > 0 && vals != (long*) 0) {
+                long p = vals[0];
+                if (this.value_kind(p) == 3 && this.pointer_is_null(p) == 0) {
+                    long cell = this.pointer_cell(p);
+                    if (cell >= 0 && cell < this.cell_count) {
+                        this.values[cell].kind = 0; // Void, cell stays allocated
+                    }
+                }
+            }
+            return this.make_void();
+        }
+        if (this.same_name(callee, "puts")) {
+            long n = 0;
+            if (an > 0 && vals != (long*) 0) {
+                long s = this.extract_string_value(vals[0]);
+                if (s >= 0) {
+                    n = this.read_string_length(s);
+                    this.stream_string_value(0, vals[0]);
+                }
+            }
+            this.stream_byte(0, 10);
+            return this.make_int(n + 1);
+        }
+        if (this.same_name(callee, "putchar")) {
+            long byte = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                byte = this.read_int(vals[0]);
+            }
+            this.stream_byte(0, byte);
+            if (an > 0 && vals != (long*) 0) {
+                return vals[0];
+            }
+            return this.make_int(0);
+        }
+        if (this.same_name(callee, "printf")) {
+            return this.builtin_printf(vals, an, line, col);
+        }
+        if (this.same_name(callee, "exit")) {
+            long code = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                code = this.read_int(vals[0]);
+            }
+            this.terminate(1, code);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "abort")) {
+            // Oracle probe on this build: std::abort ends the process with
+            // status 0xC0000409 (-1073740791) and no flushed stdout.
+            this.terminate(2, -1073740791);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::print_int")) {
+            long v = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                v = this.read_int(vals[0]);
+            }
+            this.stream_long(0, v);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::print_float")) {
+            double v = 0.0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 2) {
+                v = this.read_float(vals[0]);
+            }
+            this.stream_float(0, v);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::print_str")) {
+            if (an > 0 && vals != (long*) 0) {
+                this.stream_string_value(0, vals[0]);
+            }
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::print_char")) {
+            long v = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                v = this.read_int(vals[0]);
+            }
+            this.stream_byte(0, v);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::println_int")) {
+            long v = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                v = this.read_int(vals[0]);
+            }
+            this.stream_long(0, v);
+            this.stream_byte(0, 10);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::println_float")) {
+            double v = 0.0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 2) {
+                v = this.read_float(vals[0]);
+            }
+            this.stream_float(0, v);
+            this.stream_byte(0, 10);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::println_str")) {
+            if (an > 0 && vals != (long*) 0) {
+                this.stream_string_value(0, vals[0]);
+            }
+            this.stream_byte(0, 10);
+            return this.make_void();
+        }
+        if (this.same_name(callee, "ivy::println_char")) {
+            long v = 0;
+            if (an > 0 && vals != (long*) 0 && this.value_kind(vals[0]) == 1) {
+                v = this.read_int(vals[0]);
+            }
+            this.stream_byte(0, v);
+            this.stream_byte(0, 10);
+            return this.make_void();
+        }
+        return this.make_void();
         }
     }
 
@@ -2036,7 +3465,7 @@ export struct InterpreterModel {
     }
 
     long eval_expr(MUnit* u, long expr_idx) {
-        if (this.is_released()) {
+        if (this.is_released() || this.termination_kind_ != 0) {
             return this.make_void();
         }
         unsafe {
@@ -2203,7 +3632,10 @@ export struct InterpreterModel {
                     return this.make_int(-this.read_int(v));
                 }
                 if (this.value_kind(v) == 2) {
-                    return this.make_float(-this.read_float(v));
+                    // Multiply by -1.0 instead of unary '-': the native
+                    // compiler lowers float negation to 0.0 - x, which
+                    // loses the sign of a negative zero.
+                    return this.make_float(this.read_float(v) * -1.0);
                 }
             }
             if (this.same_name(sval, "!") || this.same_name(sval, "not")) {
@@ -2422,6 +3854,22 @@ export struct InterpreterModel {
             return this.make_void();
         }
         if (kind == 19) { // Cast
+            // Oracle gap: mir_builder's post-pass walkExpr does not recurse
+            // into Cast (src/mir/mir_builder.cpp:1288-1313), so a StringLit
+            // or CharLit under a cast keeps its zero-initialised `decoded`
+            // payload: casts of literals see the empty string / integer 0.
+            long operand_kind = -1;
+            unsafe {
+                if (a_idx >= 0 && a_idx < u->ex_n) {
+                    operand_kind = u->exprs[a_idx].kind;
+                }
+            }
+            if (operand_kind == 2) { // StringLit
+                return this.make_string("", 0);
+            }
+            if (operand_kind == 3) { // CharLit
+                return this.make_int(0);
+            }
             long operand = this.eval_expr(u, a_idx);
             long op_k = this.value_kind(operand);
             if (op_k == 1) { // int
@@ -2686,26 +4134,34 @@ export struct InterpreterModel {
         }
     }
 
-    bool is_gated_builtin(const char* name) {
+    // Oracle isBuiltin (interpreter.cpp:1053-1074).
+    bool is_builtin_name(const char* name) {
         if (this.null_str(name)) {
             return false;
         }
-        // P4 hook: the oracle dispatches io::*/ivy::* and the C output and
-        // allocator builtins before static resolution
-        // (src/mir/interpreter.cpp:916-992). P2 keeps them gated.
-        if (this.has_prefix(name, "io::") || this.has_prefix(name, "ivy::")) {
+        if (this.same_name(name, "move") ||
+            this.same_name(name, "printf") || this.same_name(name, "puts") ||
+            this.same_name(name, "putchar") || this.same_name(name, "exit") ||
+            this.same_name(name, "abort") ||
+            this.same_name(name, "__ivy_alloc") || this.same_name(name, "__ivy_free") ||
+            this.same_name(name, "malloc") || this.same_name(name, "free")) {
             return true;
         }
-        return this.same_name(name, "printf") || this.same_name(name, "puts") ||
-               this.same_name(name, "putchar") || this.same_name(name, "exit") ||
-               this.same_name(name, "abort") || this.same_name(name, "__ivy_alloc") ||
-               this.same_name(name, "__ivy_free") || this.same_name(name, "malloc") ||
-               this.same_name(name, "free");
+        if (!this.has_prefix(name, "ivy::") && !this.has_prefix(name, "io::")) {
+            return false;
+        }
+        return this.same_name(name, "io::print") || this.same_name(name, "io::println") ||
+               this.same_name(name, "io::eprint") || this.same_name(name, "io::eprintln") ||
+               this.same_name(name, "ivy::print") || this.same_name(name, "ivy::println") ||
+               this.same_name(name, "ivy::print_int") || this.same_name(name, "ivy::print_float") ||
+               this.same_name(name, "ivy::print_str") || this.same_name(name, "ivy::print_char") ||
+               this.same_name(name, "ivy::println_int") || this.same_name(name, "ivy::println_float") ||
+               this.same_name(name, "ivy::println_str") || this.same_name(name, "ivy::println_char");
     }
 
-    // MExpr kind 11. Arguments are evaluated first (oracle evalCall,
-    // interpreter.cpp:905-911), then `move`, then the gated builtin families,
-    // then the static target.
+    // MExpr kind 11. Oracle evalCall order (interpreter.cpp:905-1046):
+    // arguments left-to-right, io::*, ivy::print/println, move, the other
+    // builtins, virtual dispatch (P5), the static target, then name lookup.
     long eval_call(MUnit* u, long astart, long an, const char* callee, long line, long col) {
         long count = an;
         if (count < 0) {
@@ -2726,9 +4182,23 @@ export struct InterpreterModel {
             this.evaluate_arg_run(u, astart, count, vals.p);
         }
         long out = -1;
-        if (this.is_null_name(callee)) {
+        if (this.termination_kind_ != 0) {
+            out = this.make_void();
+        } else if (this.is_null_name(callee)) {
             this.error(line, col, "IvyInterpret v0.2: unsupported expression");
             out = this.make_void();
+        } else if (this.same_name(callee, "io::print") ||
+                   this.same_name(callee, "io::println") ||
+                   this.same_name(callee, "io::eprint") ||
+                   this.same_name(callee, "io::eprintln")) {
+            unsafe {
+                out = this.builtin_io(u, astart, count, vals.p, callee);
+            }
+        } else if (this.same_name(callee, "ivy::print") ||
+                   this.same_name(callee, "ivy::println")) {
+            unsafe {
+                out = this.builtin_ivy_print(count, vals.p, callee);
+            }
         } else if (this.same_name(callee, "move")) {
             out = this.make_void();
             if (count > 0) {
@@ -2736,9 +4206,10 @@ export struct InterpreterModel {
                     out = vals.p[0];
                 }
             }
-        } else if (this.is_gated_builtin(callee)) {
-            this.error(line, col, "IvyInterpret v0.2: unsupported expression");
-            out = this.make_void();
+        } else if (this.is_builtin_name(callee)) {
+            unsafe {
+                out = this.eval_builtin(u, astart, count, vals.p, callee, line, col);
+            }
         } else {
             long target = this.resolve_call(u, callee, count);
             if (target < 0) {
@@ -2788,6 +4259,9 @@ export struct InterpreterModel {
         if (this.is_released() || unit_is_null || frame < 0 ||
             frame >= this.frame_count || inst_idx < 0) {
             return 3;
+        }
+        if (this.termination_kind_ != 0) {
+            return 4; // terminated: unwind this frame
         }
         long kind = 0;
         long a = -1;
@@ -2871,6 +4345,9 @@ export struct InterpreterModel {
             long init = -1;
             if (a >= 0) {
                 init = this.eval_expr(u, a);
+                if (this.termination_kind_ != 0) {
+                    return 4;
+                }
             } else if (ptr_depth > 0) {
                 init = this.make_null_pointer();
             } else {
@@ -2906,12 +4383,18 @@ export struct InterpreterModel {
                 }
             }
             long rhs = this.eval_expr(u, b);
+            if (this.termination_kind_ != 0) {
+                return 4;
+            }
             this.cell_write(target, rhs);
             return 0;
         }
         if (kind == 2) { // Eval
             if (a >= 0) {
                 this.eval_expr(u, a);
+            }
+            if (this.termination_kind_ != 0) {
+                return 4;
             }
             return 0;
         }
@@ -2939,11 +4422,18 @@ export struct InterpreterModel {
                     value = this.eval_expr(u, a);
                 }
             }
+            if (this.termination_kind_ != 0) {
+                this.set_frame_return(frame, 0, -1);
+                return 4;
+            }
             this.set_frame_return(frame, 1, value);
             return 1;
         }
         if (kind == 4) { // CondBranch
             long cond = this.eval_expr(u, a);
+            if (this.termination_kind_ != 0) {
+                return 4;
+            }
             bool taken = false;
             long cond_kind = this.value_kind(cond);
             if (cond_kind == 1) {
@@ -2970,6 +4460,9 @@ export struct InterpreterModel {
             long cond_int = 0;
             if (a >= 0) {
                 cond_int = this.read_int(this.eval_expr(u, a));
+                if (this.termination_kind_ != 0) {
+                    return 4;
+                }
             }
             long dest = b;
             long arm_n = 0;
@@ -3097,6 +4590,10 @@ export struct InterpreterModel {
             in_n = u->in_n;
         }
         while (returned == 0) {
+            if (this.termination_kind_ != 0) {
+                returned = 1;
+                break;
+            }
             // Oracle: an edge to a null/unknown block ends the function
             // (execFunction's `while (!returned && curBlock)`). A block of
             // another function has no oracle analogue because its edges are
@@ -3123,7 +4620,12 @@ export struct InterpreterModel {
             long changed = 0;
             while (chain_ok && inst >= 0 && inst <= last) {
                 long code = this.exec_inst(u, frame, inst);
-                if (code == 1 || code == 3) {
+                if (code == 1 || code == 3 || code == 4) {
+                    returned = 1;
+                    changed = 1;
+                    break;
+                }
+                if (this.termination_kind_ != 0) {
                     returned = 1;
                     changed = 1;
                     break;
@@ -3177,6 +4679,10 @@ export struct InterpreterModel {
         }
         long ret_state = 0;
         long ret_value = -1;
+        bool terminated = false;
+        if (this.termination_kind_ != 0) {
+            terminated = true;
+        }
         unsafe {
             if (frame >= 0 && frame < this.frame_count) {
                 ret_state = this.frames[frame].return_state;
@@ -3184,6 +4690,9 @@ export struct InterpreterModel {
             }
         }
         this.pop_frame();
+        if (terminated) {
+            return this.make_void();
+        }
         if (ret_state == 0 || ret_value < 0) {
             return this.make_void();
         }
@@ -3207,6 +4716,8 @@ export struct InterpreterModel {
             return res;
         }
         this.failed_ = 0;
+        this.termination_kind_ = 0;
+        this.termination_status_ = 0;
         long count = arg_count;
         LongPtr vals;
         unsafe {
@@ -3240,7 +4751,18 @@ export struct InterpreterModel {
         }
         res.value_index = value;
         res.state = 1;
-        if (this.failed_ != 0) {
+        if (this.termination_kind_ != 0) {
+            // echo 3: interpreted termination. The value is discarded; P6
+            // maps status to the host process (see H53_NOTES.md §15).
+            res.state = 3;
+            res.value_index = -1;
+            res.status = this.termination_status_;
+            while (this.current_frame >= 0) {
+                if (this.pop_frame() < 0) {
+                    break;
+                }
+            }
+        } else if (this.failed_ != 0) {
             res.state = 2;
         }
         this.result = res;
@@ -3259,6 +4781,89 @@ export struct InterpreterModel {
         return this.failed_ != 0;
     }
 
+    // ---- P4 public stream and termination accessors ----
+
+    long stdout_length() {
+        if (this.setup_done == 0 || this.is_released()) {
+            return 0;
+        }
+        unsafe {
+            if (this.control == (InterpreterControl*) 0) {
+                return 0;
+            }
+            return this.control->out_len;
+        }
+        return 0;
+    }
+
+    long stderr_length() {
+        if (this.setup_done == 0 || this.is_released()) {
+            return 0;
+        }
+        unsafe {
+            if (this.control == (InterpreterControl*) 0) {
+                return 0;
+            }
+            return this.control->err_len;
+        }
+        return 0;
+    }
+
+    const char* stdout_bytes() {
+        if (this.setup_done == 0 || this.is_released()) {
+            return "";
+        }
+        unsafe {
+            if (this.control == (InterpreterControl*) 0 ||
+                this.control->out_buf == (char*) 0 ||
+                this.control->out_len <= 0) {
+                return "";
+            }
+            return this.control->out_buf;
+        }
+        return "";
+    }
+
+    const char* stderr_bytes() {
+        if (this.setup_done == 0 || this.is_released()) {
+            return "";
+        }
+        unsafe {
+            if (this.control == (InterpreterControl*) 0 ||
+                this.control->err_buf == (char*) 0 ||
+                this.control->err_len <= 0) {
+                return "";
+            }
+            return this.control->err_buf;
+        }
+        return "";
+    }
+
+    long termination_kind() {
+        return this.termination_kind_;
+    }
+
+    long termination_status() {
+        return this.termination_status_;
+    }
+
+    long active_frame_count() {
+        if (this.setup_done == 0 || this.is_released()) {
+            return 0;
+        }
+        long n = 0;
+        long i = 0;
+        while (i < this.frame_count) {
+            unsafe {
+                if (this.frames[i].active != 0) {
+                    n = n + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return n;
+    }
+
     void release() {
         if (this.setup_done == 0 || this.is_released()) {
             this.released = 1;
@@ -3267,6 +4872,21 @@ export struct InterpreterModel {
         unsafe {
             if (this.control != (InterpreterControl*) 0) {
                 this.control->released = 1;
+                // P4: the shared control block owns both stream buffers. The
+                // first release frees them once and empties every alias; a
+                // later release of another shallow copy returns above.
+                if (this.control->out_buf != (char*) 0) {
+                    __ivy_free((void*) this.control->out_buf);
+                    this.control->out_buf = (char*) 0;
+                }
+                this.control->out_len = 0;
+                this.control->out_cap = 0;
+                if (this.control->err_buf != (char*) 0) {
+                    __ivy_free((void*) this.control->err_buf);
+                    this.control->err_buf = (char*) 0;
+                }
+                this.control->err_len = 0;
+                this.control->err_cap = 0;
             }
             long i = 0;
             while (i < this.string_buffer_count) {

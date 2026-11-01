@@ -781,7 +781,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 |-----|-----------|---------|----------|--------|-----------|
 | H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ✅ byte-identical 75 files |
 | H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ✅ byte-identical 18 files (+ G7 `HStmt.line/col`) |
-| H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ◐ P0 (metadata/pools) + P1 (scalar expr, lvalues, diagnostics) + P2 (calls, frames, recursion) + P3 (full CFG incl. Switch) xong; P4..P6 con lai |
+| H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ✅ P0..P3 xong; P4 (builtin dispatch, streams, formatting, termination state=3) xong, chưa commit; P5..P6 con lai |
 | H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy` | suite `--run` | ☐ |
 
 ### H6 — Codegen

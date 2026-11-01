@@ -828,3 +828,68 @@ No record changed. Scratch `measure.ivy` against the P3 module:
 | `IValue` / `ICell` / `IStruct` / `IField` / `ILocal` / `IResult` / `InterpreterControl` | 88 / 8 / 16 / 32 / 24 / 24 / 16 |
 
 The new helpers add no fields; `inst_index` already existed in `IFrame` and now carries the self-edge marker (`1`) or `-1`.
+
+---
+
+## 15. Implementation P4 — Reachable Builtins, Diagnostics, and Termination
+
+Recorded against frozen HEAD `9f55076`. This phase edited only `selfhost/mir/interpreter.ivy`. No `src/**` change, no oracle rebuild, no commit. The working tree contains the P4 diff (not committed).
+
+P4 slots into the call gate at `is_gated_builtin` (`interpreter.ivy:2670`) and `eval_call` (`:2692`), which already evaluates arguments left-to-right (§13) before dispatching to builtins. Unknown instruction kind reports `IvyInterpret v0.2: unsupported instruction`; unknown builtin/expression reports `IvyInterpret v0.2: unsupported expression`.
+
+### 15.1 Builtin dispatch
+
+| Builtin family | Members | Behavior |
+|---|---|---|
+| Stream | `io::print`, `io::println`, `io::eprint`, `io::eprintln` | Distinct internal stdout/stderr byte buffers; `{}` placeholder substitution; literal format consumes extras, no-placeholder prints all args sequentially |
+| ivy stream | `ivy::print`, `ivy::println`, typed `ivy::print_*`/`println_*` | Type-aware formatting to stdout |
+| C output | `printf`, `puts`, `putchar` | `puts` appends `\n`; `putchar` writes one byte; `printf` limited format parser |
+| Lifetime | `move` | pass-through |
+| Allocator | `__ivy_alloc`, `__ivy_free`, `malloc`, `free` | `__ivy_alloc(n)` returns a pointer with heap provenance + alloc id; `__ivy_free(p)` null-safe, sets pointee `Void` |
+| Termination | `exit`, `abort` | Sets `IResult.state = 3` (terminated) instead of host `std::exit`/`std::abort`; `termination_kind_` (1=exit, 2=abort), `termination_status_` |
+
+### 15.2 Termination record
+
+- `IResult.state`: 0 pending/setup failure, 1 returned, 2 failed, 3 terminated.
+- `exit(code)`: state=3, `termination_kind_`=1 (exit), `termination_status_`=code; the stdout buffer is preserved (bytes written before `exit` are kept).
+- `abort()`: state=3, `termination_kind_`=2 (abort), `termination_status_`=-1073740791 (0xC0000409).
+- `error()` latches `failed_` and sets `result.state=2`; `call_by_name` clears `failed_` on entry and maps it to state 2.
+- The engine represents interpreted termination as a result record so the P6 driver can finish capturing the fixture without prematurely killing the host process.
+
+### 15.3 Internal streams and accessors
+
+- Separate internal stdout/stderr byte buffers (not host `std::cout`/`std::cerr`).
+- Accessors: `stdout_length()`, `stdout_bytes()`, `stderr_length()`, `stderr_bytes()`; byte-level with explicit length (embedded zeros preserved; not NUL-terminated).
+- `diag_count()`/`diag_msg(i)` diagnostic records (line, col, message).
+
+### 15.4 Formatting and limits
+
+- `format_f` gate: `|v| >= 1e15` falls back out of the fast path (per oracle).
+- `printf` width/precision limits: width > 200 or precision > 17 reports `IvyInterpret v0.4: printf width/precision not supported` and fails (state 2, stdout empty).
+
+### 15.5 Build evidence
+
+Scratch `TEMP`/`TMP`: `C:\Users\ASUS\AppData\Local\Temp\opencode\h53p4i\`. From repository root:
+```powershell
+$env:TEMP = 'C:\Users\ASUS\AppData\Local\Temp\opencode\h53p4i'
+$env:TMP = $env:TEMP
+& '.\build\Release\ivy.exe' 'selfhost\mir\mir.ivy' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o '<scratch>\mir.obj'
+& '.\build\Release\ivy.exe' 'selfhost\mir\interpreter.ivy' -I '<scratch>' -I 'selfhost\parsing' -I 'selfhost\mir' -c -o '<scratch>\interpreter.obj'
+```
+Both exit 0; oracle identity rechecked after the phase: 27,031,552 bytes, mtime `2026-10-21 16:41:44`.
+
+### 15.6 Oracle cross-check (frozen `ivy --run`, one process per fixture, separate stdout/stderr)
+
+| Fixture | Source | stdout | stderr | exit | Note |
+|---|---|---|---|---|---|
+| exit keeps stdout | `io::print("keep"); exit(3);` | `keep` | (empty) | 3 | state=3, kind=exit, status=3 |
+| println formatting | `io::println("value={}", 7);` | `value=7\n` | (empty) | 0 | `{}` substitution |
+| puts/putchar/printf | `puts("hi"); putchar(65); printf("%d", 7);` | `hi\nA7` | (empty) | 0 | C output builtins |
+| abort status | `abort();` | (empty) | (empty) | -1073740791 | kind=abort, status 0xC0000409 |
+| stream isolation | `io::print("OUT"); io::eprint("ERR");` | `OUT` | `ERR` | 0 | separate streams |
+
+### 15.7 Verification status
+
+- `mir.ivy` + `interpreter.ivy` compile cleanly (exit 0).
+- Oracle fixtures above confirm exit/abort termination status, stream separation, formatting, and C output builtins against the frozen oracle.
+- **Probe blocker**: a synthetic-MIR probe that hand-builds a `MUnit`/`MExpr`/`MInst` graph and calls `InterpreterModel.call_by_name` triggers an Ivy codegen LLVM error (`'%tmp.13' defined with type 'i32' but expected 'i64'` at a phi node) when `build_unit` pointer-heavy initialization is combined with `InterpreterModel` setup/release and `call_by_name`. Each component compiles alone; the combination does not. A workaround was not isolated. Full byte-level selfhost-vs-oracle fixture comparison is therefore deferred to P6 (`interpdrive.ivy` driver + harness), which runs sources through the frontend + interpreter and compares separate stdout/stderr/status per fixture.
