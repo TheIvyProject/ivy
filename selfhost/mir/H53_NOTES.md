@@ -894,4 +894,38 @@ Both exit 0; oracle identity rechecked after the phase: 27,031,552 bytes, mtime 
 - Oracle fixtures above confirm exit/abort termination status, stream separation, formatting, and C output builtins against the frozen oracle.
 - **Probe blocker**: a synthetic-MIR probe that hand-builds a `MUnit`/`MExpr`/`MInst` graph and calls `InterpreterModel.call_by_name` triggers an Ivy codegen LLVM error (`'%tmp.13' defined with type 'i32' but expected 'i64'` at a phi node) when `build_unit` pointer-heavy initialization is combined with `InterpreterModel` setup/release and `call_by_name`. Each component compiles alone; the combination does not. A workaround was not isolated. Full byte-level selfhost-vs-oracle fixture comparison is therefore deferred to P6 (`interpdrive.ivy` driver + harness), which runs sources through the frontend + interpreter and compares separate stdout/stderr/status per fixture.
 
----\n\n## 16. Implementation P5 — Aggregates (Member / InitList)\n\nP5 adds aggregate expression evaluation to `eval_expr` (`interpreter.ivy`). No `src/**` change, no oracle rebuild, not yet committed.\n\n### 16.1 Member access (kind 13)\n\n- Lvalue branch (`lvalue_cell`): `base.field` / `ptr->field` resolves the base cell, dereferences the pointer when `flag` (isArrow) is set, requires the base to be a struct, then returns the field cell via `lookup_field(struct_index, sval)` (sval = field name).\n- Value branch (`eval_expr`): evaluates the base, dereferences on arrow, requires kind==Struct, looks up the field cell by name, returns `cell_value(cell)`.\n- Errors: `arrow on null/non-pointer`, `member access on non-struct`, `no field`.\n\n### 16.2 InitList (kind 17)\n\n- `type_base` is the struct name. A fresh struct is registered (`register_struct`, per-instance like `make_array`) and a struct value is created (`make_struct_value`).\n- Elements live in the unit's `args` pool at `astart`/`an`. Each element is evaluated; missing elements default to `make_int(0)`. Each element value is wrapped in a cell (`new_cell`) and registered as a positional field (`order = i`, name `""`).\n- Returns the struct value.\n\n### 16.3 Known gap (data model)\n\nMIR carries no per-struct field-name metadata (`AType` holds only `base` = struct name; struct declarations do not populate the interpreter struct registry). Consequently:\n- Named member access (`p.x`) on user structs cannot be resolved unless a field with that exact name was already registered for that `struct_index`.\n- Designated initializers (`.x = 1`) are lowered positionally by the HIR builder, so positional element order matches field order, but field names are unavailable in the interpreter.\n- Array (`__array`) indexing (kind 12) already works via `lookup_field_order` and is unaffected.\n\nFull end-to-end aggregate testing (source → frontend → interpreter → byte-compare vs oracle `--run`) is deferred to P6 (`interpdrive.ivy` driver + harness) because no driver exists yet and the synthetic-MIR probe remains blocked by the LLVM phi codegen issue.\n
+---\n\n## 16. Implementation P5 — Aggregates (Member / InitList)\n\nP5 adds aggregate expression evaluation to `eval_expr` (`interpreter.ivy`). No `src/**` change, no oracle rebuild, not yet committed.\n\n### 16.1 Member access (kind 13)\n\n- Lvalue branch (`lvalue_cell`): `base.field` / `ptr->field` resolves the base cell, dereferences the pointer when `flag` (isArrow) is set, requires the base to be a struct, then returns the field cell via `lookup_field(struct_index, sval)` (sval = field name).\n- Value branch (`eval_expr`): evaluates the base, dereferences on arrow, requires kind==Struct, looks up the field cell by name, returns `cell_value(cell)`.\n- Errors: `arrow on null/non-pointer`, `member access on non-struct`, `no field`.\n\n### 16.2 InitList (kind 17)\n\n- `type_base` is the struct name. A fresh struct is registered (`register_struct`, per-instance like `make_array`) and a struct value is created (`make_struct_value`).\n- Elements live in the unit's `args` pool at `astart`/`an`. Each element is evaluated; missing elements default to `make_int(0)`. Each element value is wrapped in a cell (`new_cell`) and registered as a positional field (`order = i`, name `""`).\n- Returns the struct value.\n\n### 16.3 Known gap (data model)\n\nMIR carries no per-struct field-name metadata (`AType` holds only `base` = struct name; struct declarations do not populate the interpreter struct registry). Consequently:\n- Named member access (`p.x`) on user structs cannot be resolved unless a field with that exact name was already registered for that `struct_index`.\n- Designated initializers (`.x = 1`) are lowered positionally by the HIR builder, so positional element order matches field order, but field names are unavailable in the interpreter.\n- Array (`__array`) indexing (kind 12) already works via `lookup_field_order` and is unaffected.\n\nFull end-to-end aggregate testing (source → frontend → interpreter → byte-compare vs oracle `--run`) is deferred to P6 (`interpdrive.ivy` driver + harness) because no driver exists yet and the synthetic-MIR probe remains blocked by the LLVM phi codegen issue.
+
+---
+
+## 17. Implementation P6 - Driver `interpdrive.ivy`
+
+P6 builds `selfhost/mir/interpdrive.ivy`, a self-host driver that reproduces the oracle `--run` pipeline end-to-end:
+- lexer → preprocessor → parser → HIR builder → MIR builder (same stage order as `mirdrive.ivy` / `src/app/main.cpp --mir`),
+- then `InterpreterModel.call_by_name(muptr, "main", -1, 0)` to run `main`,
+- host prints the interpreter's internal `stdout_bytes`/`stderr_bytes` buffers separately to host stdout/stderr,
+- exit code mapped from `IResult`: state==3 → `r.status`, state==2 → 1, else 0.
+
+### 17.1 Pointer constraint workaround
+
+Ivy forbids raw-pointer parameters/returns at file scope and forbids taking the address of a struct (`&mu` crashes the compiler). So:
+- `MUnit` (25 fields) is copied field-by-field onto the heap via `__ivy_alloc(256)`, cast to `MUnit*`, passed by value to `call_by_name`.
+- Buffer output goes through a `StreamPrinter` struct method (`print(len, bytes, is_err)`), not a free function taking `const char*`.
+- Path strings use a manual length loop; trailing `\r`/`\n` stripped before `read_file`.
+
+### 17.2 Fixture cross-check vs oracle `--run` (per process, stdout/stderr/status separate)
+
+| fixture | source | stdout | stderr | exit | vs oracle |
+| keep | `io::print("keep"); exit(3);` | `keep` | — | 3 | byte-identical |
+| value | `io::println("value={}", 7);` | `value=7\n` | — | 0 | byte-identical |
+| streams | `io::print("OUT"); io::eprint("ERR");` | `OUT` | `ERR` | 0 | byte-identical |
+| abort | `abort();` | — | — | -1073740791 (0xC0000409) | matches oracle status; host stays alive |
+| printf201 | `printf("%201d", 7);` | — | — | 1 | diverges: P4 known gap (width>200 → interpreter error), not a driver bug |
+
+### 17.3 Known gaps / next work
+
+- `printf` width > 200 or precision > 17 is an interpreter limitation (P4), not the driver.
+- Named member access / designated init on user structs remains unresolved (P5 data-model gap: no per-struct field-name metadata in MIR).
+- Harness `difftest.ps1` (temp fixed `%TEMP%\ivydiff_selfhost`, per-run `$env:TEMP`/`$env:TMP`, raw byte compare after CRLF normalization, merged stdout+stderr, exit code ignored) is P6 follow-up under H5.4.
+
+Status: `interpdrive.ivy` compiles (exit 0), links to `interpdrive.exe`, all non-printf201 fixtures byte-match the oracle. `interpdrive.ivy`, `H53_NOTES.md`, `PLAN.md` are uncommitted; commit/push awaits user request.\n
