@@ -1,0 +1,12 @@
+int32 main() {
+    int32 result = 1;
+    unsafe {
+        int32 x = 5;
+        int32* p = &x;
+        *p = 11;
+        if (x == 11) {
+            result = 0;
+        }
+    }
+    return result;
+}

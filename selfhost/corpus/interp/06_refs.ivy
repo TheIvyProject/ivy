@@ -1,0 +1,9 @@
+int32 main() {
+    int32 x = 5;
+    int32& r = x;
+    r = 9;
+    if (x == 9) {
+        return 0;
+    }
+    return 1;
+}

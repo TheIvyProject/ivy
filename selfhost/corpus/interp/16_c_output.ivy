@@ -1,0 +1,13 @@
+#pragma ivy cnumber
+
+extern "C" int puts(const char* s);
+extern "C" int putchar(int c);
+
+int32 main() {
+    int32 r1 = puts("p");
+    int32 r2 = putchar('!');
+    if (r1 == 2 && r2 == 33) {
+        return 0;
+    }
+    return 1;
+}

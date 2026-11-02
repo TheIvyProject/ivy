@@ -1,0 +1,7 @@
+int32 main() {
+    float64 v = 1.5 * 2.0;
+    if (v == 3.0 && 3.0 > 2.0) {
+        return 0;
+    }
+    return 1;
+}

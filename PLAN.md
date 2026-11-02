@@ -782,7 +782,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H5.1 | CFG lowering | `mir_builder.cpp`, `mir.h` | `mir/mir_builder.ivy`, `mir/mir.ivy` | `corpus/mir/cfg` | ✅ byte-identical 75 files |
 | H5.2 | Lifetime annotation | `mir_builder.cpp` | `mir/mir_builder.ivy` | `corpus/mir/lifetime` | ✅ byte-identical 18 files (+ G7 `HStmt.line/col`) |
 | H5.3 | Interpreter exec | `interpreter.cpp` | `mir/interpreter.ivy` | `corpus/interp` | ✅ P0..P6 xong; P5 (Member/InitList aggregates) xong; P6 driver `interpdrive.ivy` + fixture cross-check vs oracle `--run` done; commit/push pending |
-| H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy` | suite `--run` | ☐ |
+| H5.4 | `--run` outputs | `interpreter.cpp` | `mir/interpreter.ivy`, `mir/interpdrive.ivy` | `corpus/interp` | ✅ 23/23 fixture qua `selfhost/interpdiff.ps1`; V19 blocked (oracle không chẩn đoán null-deref) |
 
 ### H6 — Codegen
 

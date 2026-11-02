@@ -1,0 +1,20 @@
+int32 main() {
+    int32 ok = 1;
+    if ((6 & 3) != 2) { ok = 0; }
+    if ((4 | 1) != 5) { ok = 0; }
+    if ((7 ^ 3) != 4) { ok = 0; }
+    if ((2 << 2) != 8) { ok = 0; }
+    if ((8 >> 2) != 2) { ok = 0; }
+    bool nz = !0;
+    if (nz != true) { ok = 0; }
+    if (~0 != -1) { ok = 0; }
+    if ((1 ? 8 : 9) != 8) { ok = 0; }
+    float64 f = static_cast<float64>(3);
+    if (f != 3.0) { ok = 0; }
+    int32 i = static_cast<int32>(3.9);
+    if (i != 3) { ok = 0; }
+    if (ok == 1) {
+        return 0;
+    }
+    return 1;
+}

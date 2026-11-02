@@ -1,0 +1,5 @@
+int32 main() {
+    io::println("value={}", 7);
+    io::println("literal", 7);
+    return 0;
+}

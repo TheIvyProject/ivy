@@ -1,0 +1,10 @@
+int32 f(int32 a, int32 b) {
+    return a + b;
+}
+
+int32 main() {
+    if (f(2, 3) == 5) {
+        return 0;
+    }
+    return 1;
+}

@@ -1,0 +1,15 @@
+int32 pick(int32 x) {
+    switch (x) {
+        case 2:
+            return 20;
+        default:
+            return 90;
+    }
+}
+
+int32 main() {
+    if (pick(2) == 20 && pick(9) == 90) {
+        return 0;
+    }
+    return 1;
+}

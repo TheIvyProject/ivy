@@ -1,0 +1,9 @@
+#pragma ivy cnumber
+
+extern "C" void exit(int code);
+
+int32 main() {
+    io::println("before");
+    exit(7);
+    return 0;
+}

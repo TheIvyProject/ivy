@@ -1,0 +1,13 @@
+int32 main() {
+    int32 sum = 0;
+    int32 i = 1;
+    while (i <= 4) {
+        sum += i;
+        i++;
+    }
+    io::println("sum={}", sum);
+    if (sum == 10) {
+        return 0;
+    }
+    return 1;
+}

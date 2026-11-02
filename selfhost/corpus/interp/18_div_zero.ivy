@@ -1,0 +1,5 @@
+int32 main() {
+    int32 z = 0;
+    int32 x = 10 / z;
+    return x;
+}

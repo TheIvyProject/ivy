@@ -1,0 +1,10 @@
+int32 main() {
+    int32 x = 4;
+    int32 old = x++;
+    int32 pre = ++x;
+    x += 1;
+    if (old == 4 && pre == 6 && x == 7) {
+        return 0;
+    }
+    return 1;
+}

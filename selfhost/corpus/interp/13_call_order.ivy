@@ -1,0 +1,16 @@
+int32 mark(int32 v) {
+    io::print("{}", v);
+    return v;
+}
+
+int32 f(int32 a, int32 b, int32 c) {
+    return a * 100 + b * 10 + c;
+}
+
+int32 main() {
+    int32 r = f(mark(1), mark(2), mark(3));
+    if (r == 123) {
+        return 0;
+    }
+    return 1;
+}

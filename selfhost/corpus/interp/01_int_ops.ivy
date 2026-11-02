@@ -1,0 +1,8 @@
+int32 main() {
+    int32 v = (9 + 3) * 2;
+    io::println("int={}", v);
+    if (v == 24) {
+        return 0;
+    }
+    return 1;
+}
