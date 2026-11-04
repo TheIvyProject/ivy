@@ -1,0 +1,65 @@
+// selfhost/codegen/smoke.ivy - H6.1 end-to-end smoke for the LLVM C binding.
+//
+// Builds one tiny module through the exported `LlvmC` facade:
+//   context -> module -> i32 type -> function type -> function -> entry block
+//   -> builder -> `ret i32 42` -> verify -> print -> dispose.
+// Prints the deterministic marker `h61 smoke ok` on success and returns 0.
+//
+// The object file must be linked manually with clang + the LLVM libraries;
+// the Ivy CLI has no -l/-L flags. See build_smoke.ps1.
+
+#pragma ivy cnumber
+import codegen;
+
+extern "C" int puts(const char* s);
+
+int32 main() {
+    LlvmC api;
+    unsafe {
+        void* ctx = api.context_create();
+        if (ctx == (void*) 0) {
+            return 1;
+        }
+
+        void* m = api.module_create("h61_smoke", ctx);
+        if (m == (void*) 0) {
+            api.context_dispose(ctx);
+            return 2;
+        }
+
+        void* i32 = api.int32_type(ctx);
+        void* function_ty = api.function_type(i32, (void**) 0, 0, 0);
+        void* func = api.add_function(m, "h61_answer", function_ty);
+        void* block = api.append_block(ctx, func, "entry");
+        void* builder = api.create_builder(ctx);
+        api.position_at_end(builder, block);
+        void* forty_two = api.const_int(i32, 42, 0);
+        api.build_ret(builder, forty_two);
+        api.dispose_builder(builder);
+
+        // LLVMReturnStatusAction (2): return 1 on an invalid module instead of
+        // printing or aborting.
+        int bad = api.module_verify(m, 2);
+        if (bad != 0) {
+            api.module_dispose(m);
+            api.context_dispose(ctx);
+            return 3;
+        }
+
+        char* text = api.module_print(m);
+        if (text == (char*) 0 || text[0] == 0) {
+            if (text != (char*) 0) {
+                api.message_dispose(text);
+            }
+            api.module_dispose(m);
+            api.context_dispose(ctx);
+            return 4;
+        }
+        api.message_dispose(text);
+
+        api.module_dispose(m);
+        api.context_dispose(ctx);
+    }
+    puts("h61 smoke ok");
+    return 0;
+}

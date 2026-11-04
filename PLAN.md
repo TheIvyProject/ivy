@@ -788,7 +788,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H6.1 | LLVM C API binding (`import c`) | — | `codegen/codegen.ivy` | build smoke | ☐ |
+| H6.1 | LLVM C API binding (`import c`) | — | `codegen/codegen.ivy` | build smoke | ✅ 132 extern "C" + `LlvmC` facade; `build_smoke.ps1` PASS (2026-11-03) |
 | H6.2 | IR emitter | `codegen.cpp` | `codegen/codegen.ivy` | suite IR diff | ☐ |
 | H6.3 | Object emission | `codegen.cpp` | `codegen/codegen.ivy` | link smoke | ☐ |
 | H6.4 | Linker orchestration | `codegen.cpp` | `codegen/codegen.ivy` | e2e run | ☐ |

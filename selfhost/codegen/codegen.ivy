@@ -1,0 +1,380 @@
+// selfhost/codegen/codegen.ivy - H6.1 LLVM C API binding (`import c`).
+//
+// This module is the selfhost counterpart of the LLVM C++ API used by
+// src/codegen/codegen.cpp. It binds the LLVM *C* API (LLVM 21.1.6) instead:
+// every `extern "C"` declaration below mirrors the signature in
+// D:\Cpp\Clang\include\llvm-c\*.h, with the opaque `LLVM*Ref` handles spelled
+// as `void*` and `uint64_t`/`size_t` spelled as `unsigned long long`.
+//
+// `import c <header>` is declaration-only in Ivy: the header is never parsed
+// or compiled, so the prototypes must be repeated here. The declarations are
+// module-private; importers use the exported `LlvmC` facade (thin pass-through
+// methods), because Ivy does not export `extern "C"` declarations.
+//
+// Calling convention for pointer arrays (`LLVMTypeRef *ParamTypes`,
+// `LLVMValueRef *Args`, ...): Ivy has no `T[]` -> `T**` decay, so allocate a
+// `void*` block with `__ivy_alloc` (8 bytes per element), cast it to `void**`,
+// fill it, pass it, then free it. See H61_NOTES.md section 5.
+//
+// Binding layer only: no IR emission logic lives here yet.
+
+#pragma ivy cnumber
+export module codegen;
+
+import c <llvm-c/Core.h>;
+import c <llvm-c/Analysis.h>;
+import c <llvm-c/Target.h>;
+import c <llvm-c/TargetMachine.h>;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+
+// ---------------------------------------------------------------------------
+// Context and module lifetime
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMContextCreate();
+extern "C" void* LLVMGetGlobalContext();
+extern "C" void  LLVMContextDispose(void* c);
+
+extern "C" void* LLVMModuleCreateWithName(const char* module_id);
+extern "C" void* LLVMModuleCreateWithNameInContext(const char* module_id, void* c);
+extern "C" void  LLVMDisposeModule(void* m);
+
+extern "C" void  LLVMSetTarget(void* m, const char* triple);
+extern "C" void  LLVMSetDataLayout(void* m, const char* layout);
+
+extern "C" char* LLVMPrintModuleToString(void* m);
+extern "C" int   LLVMPrintModuleToFile(void* m, const char* filename, char** error_message);
+extern "C" void  LLVMDumpModule(void* m);
+extern "C" void  LLVMDisposeMessage(char* message);
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMVoidTypeInContext(void* c);
+extern "C" void* LLVMLabelTypeInContext(void* c);
+extern "C" void* LLVMInt1TypeInContext(void* c);
+extern "C" void* LLVMInt8TypeInContext(void* c);
+extern "C" void* LLVMInt16TypeInContext(void* c);
+extern "C" void* LLVMInt32TypeInContext(void* c);
+extern "C" void* LLVMInt64TypeInContext(void* c);
+extern "C" void* LLVMIntTypeInContext(void* c, unsigned int num_bits);
+extern "C" void* LLVMFloatTypeInContext(void* c);
+extern "C" void* LLVMDoubleTypeInContext(void* c);
+extern "C" void* LLVMPointerTypeInContext(void* c, unsigned int address_space);
+extern "C" void* LLVMFunctionType(void* return_type, void** param_types,
+                                  unsigned int param_count, int is_var_arg);
+extern "C" void* LLVMStructTypeInContext(void* c, void** element_types,
+                                         unsigned int element_count, int packed);
+extern "C" void* LLVMStructCreateNamed(void* c, const char* name);
+extern "C" void  LLVMStructSetBody(void* struct_ty, void** element_types,
+                                   unsigned int element_count, int packed);
+extern "C" void* LLVMArrayType2(void* element_type, unsigned long long element_count);
+extern "C" int   LLVMGetTypeKind(void* ty);
+extern "C" void* LLVMTypeOf(void* val);
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMConstInt(void* int_ty, unsigned long long n, int sign_extend);
+extern "C" void* LLVMConstReal(void* real_ty, double n);
+extern "C" void* LLVMConstNull(void* ty);
+extern "C" void* LLVMConstPointerNull(void* ty);
+extern "C" void* LLVMConstStringInContext(void* c, const char* str, unsigned int length,
+                                          int dont_null_terminate);
+extern "C" void* LLVMConstStructInContext(void* c, void** constant_vals,
+                                          unsigned int count, int packed);
+extern "C" void* LLVMConstArray2(void* element_ty, void** constant_vals,
+                                 unsigned long long length);
+extern "C" void* LLVMGetUndef(void* ty);
+extern "C" unsigned long long LLVMConstIntGetZExtValue(void* constant_val);
+
+// ---------------------------------------------------------------------------
+// Globals
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMAddGlobal(void* m, void* ty, const char* name);
+extern "C" void* LLVMGetNamedGlobal(void* m, const char* name);
+extern "C" void  LLVMSetInitializer(void* global_var, void* constant_val);
+extern "C" void  LLVMSetGlobalConstant(void* global_var, int is_constant);
+extern "C" void  LLVMSetLinkage(void* global, int linkage);
+extern "C" void  LLVMSetAlignment(void* v, unsigned int bytes);
+extern "C" void  LLVMSetUnnamedAddr(void* global, int has_unnamed_addr);
+
+// ---------------------------------------------------------------------------
+// Functions and parameters
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMAddFunction(void* m, const char* name, void* function_ty);
+extern "C" void* LLVMGetNamedFunction(void* m, const char* name);
+extern "C" unsigned int LLVMCountParams(void* func);
+extern "C" void* LLVMGetParam(void* func, unsigned int index);
+extern "C" void  LLVMSetFunctionCallConv(void* func, unsigned int cc);
+extern "C" void  LLVMSetParamAlignment(void* arg, unsigned int align);
+
+// ---------------------------------------------------------------------------
+// Basic blocks and builder
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMAppendBasicBlockInContext(void* c, void* func, const char* name);
+extern "C" void* LLVMGetInsertBlock(void* builder);
+extern "C" void* LLVMCreateBuilderInContext(void* c);
+extern "C" void  LLVMDisposeBuilder(void* builder);
+extern "C" void  LLVMPositionBuilderAtEnd(void* builder, void* block);
+extern "C" void  LLVMPositionBuilderBefore(void* builder, void* instr);
+
+// ---------------------------------------------------------------------------
+// Instructions
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMBuildRetVoid(void* builder);
+extern "C" void* LLVMBuildRet(void* builder, void* v);
+extern "C" void* LLVMBuildBr(void* builder, void* dest);
+extern "C" void* LLVMBuildCondBr(void* builder, void* cond, void* then_block,
+                                 void* else_block);
+extern "C" void* LLVMBuildCall2(void* builder, void* function_ty, void* func,
+                                void** args, unsigned int num_args, const char* name);
+extern "C" void* LLVMBuildLoad2(void* builder, void* ty, void* pointer_val,
+                                const char* name);
+extern "C" void* LLVMBuildStore(void* builder, void* val, void* ptr);
+extern "C" void* LLVMBuildGEP2(void* builder, void* ty, void* pointer,
+                               void** indices, unsigned int num_indices,
+                               const char* name);
+extern "C" void* LLVMBuildAlloca(void* builder, void* ty, const char* name);
+
+extern "C" void* LLVMBuildAdd(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildSub(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildMul(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildUDiv(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildSDiv(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildURem(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildSRem(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildFAdd(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildFSub(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildFMul(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildFDiv(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildFNeg(void* builder, void* v, const char* name);
+extern "C" void* LLVMBuildNeg(void* builder, void* v, const char* name);
+extern "C" void* LLVMBuildNot(void* builder, void* v, const char* name);
+extern "C" void* LLVMBuildAnd(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildOr(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildXor(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildShl(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildLShr(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildAShr(void* builder, void* lhs, void* rhs, const char* name);
+extern "C" void* LLVMBuildICmp(void* builder, int op, void* lhs, void* rhs,
+                               const char* name);
+extern "C" void* LLVMBuildFCmp(void* builder, int op, void* lhs, void* rhs,
+                               const char* name);
+extern "C" void* LLVMBuildSelect(void* builder, void* cond, void* then_val,
+                                 void* else_val, const char* name);
+extern "C" void* LLVMBuildTrunc(void* builder, void* val, void* dest_ty,
+                                const char* name);
+extern "C" void* LLVMBuildZExt(void* builder, void* val, void* dest_ty,
+                               const char* name);
+extern "C" void* LLVMBuildSExt(void* builder, void* val, void* dest_ty,
+                               const char* name);
+extern "C" void* LLVMBuildFPToUI(void* builder, void* val, void* dest_ty,
+                                 const char* name);
+extern "C" void* LLVMBuildFPToSI(void* builder, void* val, void* dest_ty,
+                                 const char* name);
+extern "C" void* LLVMBuildUIToFP(void* builder, void* val, void* dest_ty,
+                                 const char* name);
+extern "C" void* LLVMBuildSIToFP(void* builder, void* val, void* dest_ty,
+                                 const char* name);
+extern "C" void* LLVMBuildFPTrunc(void* builder, void* val, void* dest_ty,
+                                  const char* name);
+extern "C" void* LLVMBuildFPExt(void* builder, void* val, void* dest_ty,
+                                const char* name);
+extern "C" void* LLVMBuildPtrToInt(void* builder, void* val, void* dest_ty,
+                                   const char* name);
+extern "C" void* LLVMBuildIntToPtr(void* builder, void* val, void* dest_ty,
+                                   const char* name);
+extern "C" void* LLVMBuildBitCast(void* builder, void* val, void* dest_ty,
+                                  const char* name);
+extern "C" void* LLVMBuildAddrSpaceCast(void* builder, void* val, void* dest_ty,
+                                        const char* name);
+extern "C" void* LLVMBuildGlobalString(void* builder, const char* str, const char* name);
+extern "C" void* LLVMBuildGlobalStringPtr(void* builder, const char* str,
+                                          const char* name);
+extern "C" void* LLVMBuildPhi(void* builder, void* ty, const char* name);
+extern "C" void  LLVMAddIncoming(void* phi_node, void** incoming_values,
+                                 void** incoming_blocks, unsigned int count);
+extern "C" void* LLVMBuildExtractValue(void* builder, void* agg_val,
+                                       unsigned int index, const char* name);
+extern "C" void* LLVMBuildInsertValue(void* builder, void* agg_val, void* elt_val,
+                                      unsigned int index, const char* name);
+extern "C" void* LLVMBuildIsNull(void* builder, void* val, const char* name);
+extern "C" void* LLVMBuildIsNotNull(void* builder, void* val, const char* name);
+extern "C" void* LLVMBuildMemSet(void* builder, void* ptr, void* val, void* len,
+                                 unsigned int align);
+extern "C" void* LLVMBuildMemCpy(void* builder, void* dst, unsigned int dst_align,
+                                 void* src, unsigned int src_align, void* nbytes);
+extern "C" void* LLVMBuildFreeze(void* builder, void* val, const char* name);
+extern "C" void* LLVMBuildVAArg(void* builder, void* list, void* ty, const char* name);
+
+// ---------------------------------------------------------------------------
+// Verification (llvm-c/Analysis.h)
+// ---------------------------------------------------------------------------
+
+extern "C" int LLVMVerifyModule(void* m, int action, char** out_message);
+extern "C" int LLVMVerifyFunction(void* func, int action);
+
+// ---------------------------------------------------------------------------
+// Target and object emission (llvm-c/Target.h, llvm-c/TargetMachine.h)
+//
+// LLVMInitializeNativeTarget is a static inline helper in Target.h, not an
+// exported symbol, so the host X86 initializers are bound directly. They are
+// only resolved when H6.3 links the X86 target libraries.
+// ---------------------------------------------------------------------------
+
+extern "C" char* LLVMGetDefaultTargetTriple();
+extern "C" char* LLVMGetHostCPUName();
+extern "C" char* LLVMGetHostCPUFeatures();
+extern "C" int   LLVMGetTargetFromTriple(const char* triple, void** target,
+                                         char** error_message);
+extern "C" void* LLVMCreateTargetMachine(void* target, const char* triple,
+                                         const char* cpu, const char* features,
+                                         int level, int reloc, int code_model);
+extern "C" void  LLVMDisposeTargetMachine(void* target_machine);
+extern "C" void* LLVMCreateTargetDataLayout(void* target_machine);
+extern "C" void  LLVMSetModuleDataLayout(void* m, void* target_data);
+extern "C" void  LLVMDisposeTargetData(void* target_data);
+extern "C" int   LLVMTargetMachineEmitToFile(void* target_machine, void* m,
+                                             const char* filename, int codegen,
+                                             char** error_message);
+
+extern "C" void LLVMInitializeX86TargetInfo();
+extern "C" void LLVMInitializeX86Target();
+extern "C" void LLVMInitializeX86TargetMC();
+extern "C" void LLVMInitializeX86AsmPrinter();
+extern "C" void LLVMInitializeX86AsmParser();
+
+// ---------------------------------------------------------------------------
+// Exported facade
+//
+// Ivy does not export `extern "C"` declarations, so importers (the H6.1 smoke
+// driver and later emitter modules) go through this pass-through struct. The
+// methods add no policy: each one forwards to the C API unchanged.
+// ---------------------------------------------------------------------------
+
+export struct LlvmC {
+    long tag;
+
+    void* context_create() {
+        unsafe {
+            return LLVMContextCreate();
+        }
+    }
+
+    void context_dispose(void* c) {
+        unsafe {
+            LLVMContextDispose(c);
+        }
+    }
+
+    void* module_create(const char* module_id, void* c) {
+        unsafe {
+            return LLVMModuleCreateWithNameInContext(module_id, c);
+        }
+    }
+
+    void module_dispose(void* m) {
+        unsafe {
+            LLVMDisposeModule(m);
+        }
+    }
+
+    char* module_print(void* m) {
+        unsafe {
+            return LLVMPrintModuleToString(m);
+        }
+    }
+
+    void message_dispose(char* message) {
+        unsafe {
+            LLVMDisposeMessage(message);
+        }
+    }
+
+    int module_verify(void* m, int action) {
+        unsafe {
+            char* err = (char*) 0;
+            int bad = LLVMVerifyModule(m, action, &err);
+            if (err != (char*) 0) {
+                LLVMDisposeMessage(err);
+            }
+            return bad;
+        }
+    }
+
+    void* void_type(void* c) {
+        unsafe {
+            return LLVMVoidTypeInContext(c);
+        }
+    }
+
+    void* int32_type(void* c) {
+        unsafe {
+            return LLVMInt32TypeInContext(c);
+        }
+    }
+
+    void* function_type(void* return_type, void** param_types,
+                        unsigned int param_count, int is_var_arg) {
+        unsafe {
+            return LLVMFunctionType(return_type, param_types, param_count, is_var_arg);
+        }
+    }
+
+    void* add_function(void* m, const char* name, void* function_ty) {
+        unsafe {
+            return LLVMAddFunction(m, name, function_ty);
+        }
+    }
+
+    void* append_block(void* c, void* func, const char* name) {
+        unsafe {
+            return LLVMAppendBasicBlockInContext(c, func, name);
+        }
+    }
+
+    void* create_builder(void* c) {
+        unsafe {
+            return LLVMCreateBuilderInContext(c);
+        }
+    }
+
+    void position_at_end(void* builder, void* block) {
+        unsafe {
+            LLVMPositionBuilderAtEnd(builder, block);
+        }
+    }
+
+    void dispose_builder(void* builder) {
+        unsafe {
+            LLVMDisposeBuilder(builder);
+        }
+    }
+
+    void* build_ret_void(void* builder) {
+        unsafe {
+            return LLVMBuildRetVoid(builder);
+        }
+    }
+
+    void* build_ret(void* builder, void* v) {
+        unsafe {
+            return LLVMBuildRet(builder, v);
+        }
+    }
+
+    void* const_int(void* int_ty, unsigned long long n, int sign_extend) {
+        unsafe {
+            return LLVMConstInt(int_ty, n, sign_extend);
+        }
+    }
+};
