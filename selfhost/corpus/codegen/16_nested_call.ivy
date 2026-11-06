@@ -1,0 +1,11 @@
+int32 inc(int32 x) {
+    return x + 1;
+}
+
+int32 add(int32 a, int32 b) {
+    return a + b;
+}
+
+int32 main() {
+    return add(inc(1), inc(2));
+}

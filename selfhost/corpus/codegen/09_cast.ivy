@@ -1,0 +1,6 @@
+int32 main() {
+    int32 x = 7;
+    int64 y = x;
+    int32 z = y;
+    return z;
+}

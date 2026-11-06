@@ -1,0 +1,5 @@
+extern "C" int32 abs(int32 x);
+
+int32 main() {
+    return abs(-7);
+}

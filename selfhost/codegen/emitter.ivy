@@ -1,0 +1,2197 @@
+// selfhost/codegen/emitter.ivy - H6.2a+H6.2b+H6.2c textual LLVM IR emitter.
+//
+// This module is the selfhost counterpart of the textual side of
+// src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
+// same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
+//
+// The supported subset is deliberately small (H6.2a + H6.2b + H6.2c):
+//   * the `; LLVM IR emitted by ivy` header;
+//   * function definitions with entry-block alloca slots and `bb<i>` labels;
+//   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
+//   * int constants / identifiers, integer unary and binary operators,
+//     integer comparisons, local declaration/assignment, integer casts;
+//   * if/else, while and for lowered to condbr/br with the oracle's block
+//     numbering;
+//   * user function calls (including recursion, void calls and calls used as
+//     arguments), `extern "C"` calls and the MSVC name mangling of the
+//     default Windows host;
+//   * `extern "C"` declarations, emitted before every definition;
+//   * the C entry point `@main` forwarding `@ivy_main`;
+//   * string literals as `@.str.N` globals (pre-pass collection, decode and
+//     LLVM escaping), including the duplicate-global quirk of the oracle;
+//   * the `io::print`/`println`/`eprint`/`eprintln` builtins (format-string
+//     splitting, per-type argument formatting and the six runtime declares).
+//
+// Out of scope (H6.2d+): structs/aggregates, allocators, bounds checks,
+// pointers/references in signatures, floats (including float arguments to
+// io::print), wide strings, variadic functions, templates/virtual dispatch
+// and Itanium mangling.  A construct outside the subset records a diagnostic
+// and makes the driver exit nonzero instead of emitting wrong IR.
+//
+// The formatting mirrors CodeGen::lowerFunction/lowerBlock/lowerInst/
+// lowerExpr/lowerLValue/emitCast/emitEntryPoint exactly, including the
+// evaluation order that determines `%tmp.N` numbering (the unary operators
+// allocate their temporary BEFORE lowering the operand, like the oracle).
+
+#pragma ivy cnumber
+export module emitter;
+import ast;
+import mir;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+// A lowered expression value.  The oracle represents values as strings; the
+// port keeps the shapes it actually produces in this subset:
+//   kind 0 - an integer literal (printed as its decimal text);
+//   kind 1 - a `%tmp.N` temporary;
+//   kind 2 - an alloca slot `%<name>.<N>` used as an lvalue;
+//   kind 3 - a bool literal (printed as `true`/`false`, like the oracle).
+export struct VRef {
+    long kind;
+    long ival;
+    long idx;
+    const char* name;
+};
+
+// The emitter state.  `mu` points at a heap copy of the MIR unit: Ivy forbids
+// `&mu`, so setup() copies the 25 MUnit fields into a 256-byte allocation
+// (the same idiom as selfhost/mir/interpdrive.ivy).
+export struct Emitter {
+    MUnit* mu;
+    long temp_;
+    long alloca_;
+    long failed_;
+    const char* err_;
+    long err_line_;
+    long err_col_;
+    long cur_fi_;
+    long cur_block_start_;
+    long cur_block_n_;
+    const char* cur_ret_ty_;
+    long cur_is_void_;
+    // The variable table of the current function: a name and its slot index.
+    // The arrays are heap blocks so the record stays a plain value type.
+    void* vnames_;
+    void* vnums_;
+    long vn_;
+    long vcap_;
+    // Per-call argument scratch: `arg_vals_` holds VRef records (32 bytes
+    // each) and `arg_tys_` holds the final LLVM type string of every
+    // argument.  `arg_sp_` is a stack pointer so a nested call used as an
+    // argument does not clobber the arguments already lowered by its parent.
+    void* arg_vals_;
+    void* arg_tys_;
+    long arg_cap_;
+    long arg_sp_;
+    // H6.2c: string globals.  `str_bytes_` / `str_lens_` hold the byte buffer
+    // and the decoded length of every `@.str.N`, in `stringList_` order.
+    // Two interning maps point into that list:
+    //   * the pre-pass map is keyed by the oracle's `"1:" + bytes`;
+    //   * the io segment map is keyed by the raw decoded bytes (the quirk
+    //     that makes `io::print("hi")` emit both @.str.0 and @.str.1).
+    long uses_io_print_;
+    long dec_len_;
+    long str_n_;
+    long str_cap_;
+    void* str_bytes_;
+    void* str_lens_;
+    void* pm_keys_;
+    void* pm_klens_;
+    void* pm_idx_;
+    long pm_n_;
+    long pm_cap_;
+    void* sm_keys_;
+    void* sm_klens_;
+    void* sm_idx_;
+    long sm_n_;
+    long sm_cap_;
+
+    // --- setup / teardown -------------------------------------------------
+
+    void setup(MUnit u) {
+        unsafe {
+            void* raw = __ivy_alloc(256);
+            MUnit* p = (MUnit*) raw;
+            p->fns = u.fns;
+            p->fn_n = u.fn_n;
+            p->fn_cap = u.fn_cap;
+            p->exprs = u.exprs;
+            p->ex_n = u.ex_n;
+            p->ex_cap = u.ex_cap;
+            p->insts = u.insts;
+            p->in_n = u.in_n;
+            p->in_cap = u.in_cap;
+            p->blocks = u.blocks;
+            p->bl_n = u.bl_n;
+            p->bl_cap = u.bl_cap;
+            p->params = u.params;
+            p->pa_n = u.pa_n;
+            p->pa_cap = u.pa_cap;
+            p->lts = u.lts;
+            p->lt_n = u.lt_n;
+            p->lt_cap = u.lt_cap;
+            p->args = u.args;
+            p->a_n = u.a_n;
+            p->a_cap = u.a_cap;
+            p->arm_val = u.arm_val;
+            p->arm_blk = u.arm_blk;
+            p->arm_n = u.arm_n;
+            p->arm_cap = u.arm_cap;
+            this.mu = p;
+        }
+        this.temp_ = 0;
+        this.alloca_ = 0;
+        this.failed_ = 0;
+        this.err_ = "";
+        this.err_line_ = 0;
+        this.err_col_ = 0;
+        this.cur_fi_ = -1;
+        this.cur_block_start_ = 0;
+        this.cur_block_n_ = 0;
+        this.cur_ret_ty_ = "void";
+        this.cur_is_void_ = 0;
+        this.vn_ = 0;
+        this.vcap_ = 4096;
+        this.arg_cap_ = 256;
+        this.arg_sp_ = 0;
+        this.uses_io_print_ = 0;
+        this.dec_len_ = -1;
+        this.str_n_ = 0;
+        this.str_cap_ = 4096;
+        this.pm_n_ = 0;
+        this.pm_cap_ = 4096;
+        this.sm_n_ = 0;
+        this.sm_cap_ = 4096;
+        unsafe {
+            this.vnames_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
+            this.vnums_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
+            this.arg_vals_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 32);
+            this.arg_tys_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 8);
+            this.str_bytes_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
+            this.str_lens_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
+            this.pm_keys_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
+            this.pm_klens_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
+            this.pm_idx_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
+            this.sm_keys_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
+            this.sm_klens_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
+            this.sm_idx_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
+        }
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.vnames_);
+            __ivy_free(this.vnums_);
+            __ivy_free(this.arg_vals_);
+            __ivy_free(this.arg_tys_);
+            __ivy_free(this.str_bytes_);
+            __ivy_free(this.str_lens_);
+            __ivy_free(this.pm_keys_);
+            __ivy_free(this.pm_klens_);
+            __ivy_free(this.pm_idx_);
+            __ivy_free(this.sm_keys_);
+            __ivy_free(this.sm_klens_);
+            __ivy_free(this.sm_idx_);
+            __ivy_free((void*) this.mu);
+        }
+    }
+
+    long has_error() { return this.failed_; }
+    long err_line() { return this.err_line_; }
+    long err_col() { return this.err_col_; }
+    const char* err_msg() { return this.err_; }
+
+    void fail(long line, long col, const char* msg) {
+        if (this.failed_ == 0) {
+            this.failed_ = 1;
+            this.err_line_ = line;
+            this.err_col_ = col;
+            this.err_ = msg;
+        }
+    }
+
+    // --- small string helpers --------------------------------------------
+
+    bool streq(const char* a, const char* b) {
+        long i = 0;
+        unsafe {
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    // --- H6.2c: string decoding / escaping -------------------------------
+
+    // Mirror of readHexEscape/readOctalEscape helpers in codegen.cpp.
+    bool is_hex_digit(long c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+               (c >= 'A' && c <= 'F');
+    }
+
+    long hex_digit_val(long c) {
+        if (c <= '9') {
+            return c - '0';
+        }
+        return (c | 32) - 'a' + 10;
+    }
+
+    char hex_char(long v) {
+        unsafe {
+            if (v < 10) {
+                return (char) ('0' + v);
+            }
+            return (char) ('A' + (v - 10));
+        }
+        return '0';
+    }
+
+    // Mirror of CodeGen::decodeBody for a string body (without the quotes).
+    // The octal branch deliberately starts at the digit that the `switch`
+    // already consumed, exactly like readOctalEscape: this reproduces the
+    // oracle's byte-for-byte quirk `"\101"` -> 0x01.
+    long decode_body(const char* body, long n, char* out) {
+        long o = 0;
+        long i = 0;
+        unsafe {
+        while (i < n) {
+            long c = ((long) body[i]) & 255;
+            if (c != '\\') {
+                out[o] = body[i];
+                o = o + 1;
+                i = i + 1;
+                continue;
+            }
+            i = i + 1;
+            if (i >= n) {
+                this.fail(0, 0, "literal ends inside an escape sequence");
+                return -1;
+            }
+            long e = ((long) body[i]) & 255;
+            if (e == 'n') { out[o] = 10; o = o + 1; }
+            else if (e == 't') { out[o] = 9; o = o + 1; }
+            else if (e == 'r') { out[o] = 13; o = o + 1; }
+            else if (e == 'a') { out[o] = 7; o = o + 1; }
+            else if (e == 'b') { out[o] = 8; o = o + 1; }
+            else if (e == 'f') { out[o] = 12; o = o + 1; }
+            else if (e == 'v') { out[o] = 11; o = o + 1; }
+            else if (e == '\\') { out[o] = '\\'; o = o + 1; }
+            else if (e == '\'') { out[o] = '\''; o = o + 1; }
+            else if (e == '"') { out[o] = '"'; o = o + 1; }
+            else if (e == '?') { out[o] = '?'; o = o + 1; }
+            else if (e == 'x') {
+                long v = 0;
+                long cnt = 0;
+                while (i + 1 < n && cnt < 2 &&
+                       this.is_hex_digit(((long) body[i + 1]) & 255)) {
+                    i = i + 1;
+                    v = v * 16 + this.hex_digit_val(((long) body[i]) & 255);
+                    cnt = cnt + 1;
+                }
+                if (cnt == 0) {
+                    this.fail(0, 0, "invalid \\x escape in literal");
+                    return -1;
+                }
+                out[o] = (char) (v & 255);
+                o = o + 1;
+            }
+            else if (e >= '0' && e <= '7') {
+                long v = 0;
+                long cnt = 0;
+                while (i + 1 < n && cnt < 3 &&
+                       ((long) body[i + 1]) >= '0' &&
+                       ((long) body[i + 1]) <= '7') {
+                    i = i + 1;
+                    v = v * 8 + (((long) body[i]) - '0');
+                    cnt = cnt + 1;
+                }
+                out[o] = (char) (v & 255);
+                o = o + 1;
+            }
+            else {
+                this.fail(0, 0, "unknown escape sequence in literal");
+                return -1;
+            }
+            i = i + 1;
+        }
+        out[o] = 0;
+        }
+        return o;
+    }
+
+    // Mirror of CodeGen::decodeStringTyped restricted to width 1.  Returns a
+    // heap buffer (NUL-terminated) and stores its decoded length in
+    // `dec_len_`; returns 0 after recording a diagnostic on failure.  Wide
+    // prefixes (`L`, `u`, `U`) are rejected as out of scope for H6.2c;
+    // `u8` is accepted because it has width 1.
+    long decode_string(const char* raw) {
+        this.dec_len_ = -1;
+        unsafe {
+        long n = (long) __ivy_strlen(raw);
+        long off = 0;
+        if (n >= 2 && raw[0] == 'u' && raw[1] == '8') {
+            off = 2;
+        } else if (n >= 1 && (raw[0] == 'L' || raw[0] == 'u' ||
+                              raw[0] == 'U')) {
+            this.fail(0, 0, "wide string literals are out of scope for H6.2c");
+            return 0;
+        }
+        if (n - off >= 3 && raw[off] == 'R' && raw[off + 1] == '"') {
+            long open = -1;
+            long i = off + 2;
+            while (i < n) {
+                if (raw[i] == '(') {
+                    open = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            long close = -1;
+            i = n - 1;
+            while (i >= off) {
+                if (raw[i] == ')') {
+                    close = i;
+                    break;
+                }
+                i = i - 1;
+            }
+            if (open < 0 || close < 0 || close + 1 >= n ||
+                raw[n - 1] != '"') {
+                this.fail(0, 0, "malformed raw string literal");
+                return 0;
+            }
+            long len = close - open - 1;
+            char* out = (char*) __ivy_alloc((unsigned long long) (len + 1));
+            i = 0;
+            while (i < len) {
+                out[i] = raw[open + 1 + i];
+                i = i + 1;
+            }
+            out[len] = 0;
+            this.dec_len_ = len;
+            return (long) out;
+        }
+        if (n - off < 2 || raw[off] != '"' || raw[n - 1] != '"') {
+            this.fail(0, 0, "malformed string literal");
+            return 0;
+        }
+        long bodylen = (n - off) - 2;
+        char* out = (char*) __ivy_alloc((unsigned long long) (bodylen + 1));
+        long bl = this.decode_body(raw + off + 1, bodylen, out);
+        if (bl < 0) {
+            return 0;
+        }
+        this.dec_len_ = bl;
+        return (long) out;
+        }
+        return 0;
+    }
+
+    // Mirror of CodeGen::decodeChar: strips an L/u/U prefix, decodes the body
+    // and returns its first byte as an unsigned value (-1 on failure).
+    long decode_char_value(const char* raw) {
+        unsafe {
+        long n = (long) __ivy_strlen(raw);
+        long off = 0;
+        if (n >= 1 && (raw[0] == 'L' || raw[0] == 'u' || raw[0] == 'U')) {
+            off = 1;
+        }
+        if (n - off < 2 || raw[off] != '\'' || raw[n - 1] != '\'') {
+            this.fail(0, 0, "malformed character literal");
+            return -1;
+        }
+        long bodylen = (n - off) - 2;
+        char* out = (char*) __ivy_alloc((unsigned long long) (bodylen + 1));
+        long bl = this.decode_body(raw + off + 1, bodylen, out);
+        if (bl < 0) {
+            return -1;
+        }
+        if (bl == 0) {
+            this.fail(0, 0, "empty character literal");
+            return -1;
+        }
+        long v = ((long) out[0]) & 255;
+        __ivy_free(out);
+        return v;
+        }
+        return -1;
+    }
+
+    // --- H6.2c: string global tables --------------------------------------
+
+    long make_prefixed_key(const char* bytes, long n) {
+        unsafe {
+            char* k = (char*) __ivy_alloc((unsigned long long) (n + 3));
+            k[0] = '1';
+            k[1] = ':';
+            long i = 0;
+            while (i < n) {
+                k[2 + i] = bytes[i];
+                i = i + 1;
+            }
+            k[n + 2] = 0;
+            return (long) k;
+        }
+        return 0;
+    }
+
+    long map_get(void* keys, void* klens, void* idxs, long n,
+                 const char* key, long klen) {
+        long i = 0;
+        unsafe {
+            long* ka = (long*) keys;
+            long* la = (long*) klens;
+            long* ia = (long*) idxs;
+            while (i < n) {
+                if (la[i] == klen) {
+                    const char* s = reinterpret_cast<const char*>(ka[i]);
+                    long j = 0;
+                    bool eq = true;
+                    while (j < klen) {
+                        if (s[j] != key[j]) {
+                            eq = false;
+                            break;
+                        }
+                        j = j + 1;
+                    }
+                    if (eq) {
+                        return ia[i];
+                    }
+                }
+                i = i + 1;
+            }
+        }
+        return -1;
+    }
+
+    long map_add(void* keys, void* klens, void* idxs, long n, long cap,
+                 long key, long klen, long gi) {
+        if (n >= cap) {
+            this.fail(0, 0, "too many string literals for H6.2c");
+            return n;
+        }
+        unsafe {
+            long* ka = (long*) keys;
+            long* la = (long*) klens;
+            long* ia = (long*) idxs;
+            ka[n] = key;
+            la[n] = klen;
+            ia[n] = gi;
+        }
+        return n + 1;
+    }
+
+    long add_string(const char* bytes, long len) {
+        if (this.str_n_ >= this.str_cap_) {
+            this.fail(0, 0, "too many string literals for H6.2c");
+            return 0;
+        }
+        unsafe {
+            long* bp = (long*) this.str_bytes_;
+            long* lp = (long*) this.str_lens_;
+            bp[this.str_n_] = (long) bytes;
+            lp[this.str_n_] = len;
+        }
+        long gi = this.str_n_;
+        this.str_n_ = this.str_n_ + 1;
+        return gi;
+    }
+
+    // Pre-pass interning: key `"1:" + bytes`.
+    long intern_prepass(const char* raw, long line, long col) {
+        unsafe {
+            long p = this.decode_string(raw);
+            if (p == 0) {
+                if (this.failed_ == 0) {
+                    this.fail(line, col, "malformed string literal");
+                }
+                return -1;
+            }
+            long bl = this.dec_len_;
+            long key = this.make_prefixed_key((char*) p, bl);
+            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
+                                   this.pm_n_, (char*) key, bl + 2);
+            if (gi >= 0) {
+                return gi;
+            }
+            gi = this.add_string((char*) p, bl);
+            this.pm_n_ = this.map_add(this.pm_keys_, this.pm_klens_,
+                                      this.pm_idx_, this.pm_n_, this.pm_cap_,
+                                      key, bl + 2, gi);
+            return gi;
+        }
+        return -1;
+    }
+
+    // io format-segment interning: key is the raw decoded byte string (no
+    // `"1:"` prefix), which is why it never collides with the pre-pass map.
+    long intern_segment(const char* bytes, long len) {
+        unsafe {
+            long gi = this.map_get(this.sm_keys_, this.sm_klens_, this.sm_idx_,
+                                   this.sm_n_, bytes, len);
+            if (gi >= 0) {
+                return gi;
+            }
+            char* cp = (char*) __ivy_alloc((unsigned long long) (len + 1));
+            long i = 0;
+            while (i < len) {
+                cp[i] = bytes[i];
+                i = i + 1;
+            }
+            cp[len] = 0;
+            gi = this.add_string(cp, len);
+            this.sm_n_ = this.map_add(this.sm_keys_, this.sm_klens_,
+                                      this.sm_idx_, this.sm_n_, this.sm_cap_,
+                                      (long) cp, len, gi);
+            return gi;
+        }
+        return -1;
+    }
+
+    VRef emit_string_gep(long gi) {
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = getelementptr i8, ptr @.str.");
+        io::print("{}", gi);
+        this.ps(", i64 0");
+        this.nl();
+        return t;
+    }
+
+    // Mirror of CodeGen::llvmEscape: printable ASCII except `"` and `\`
+    // stays verbatim, every other byte becomes `\XX` (uppercase hex).
+    void emit_escaped(const char* bytes, long n) {
+        unsafe {
+            char* out = (char*) __ivy_alloc(
+                (unsigned long long) (n * 4 + 1));
+            long o = 0;
+            long i = 0;
+            while (i < n) {
+                long c = ((long) bytes[i]) & 255;
+                if (c >= 32 && c <= 126 && c != '"' && c != '\\') {
+                    out[o] = (char) c;
+                    o = o + 1;
+                } else {
+                    out[o] = '\\';
+                    o = o + 1;
+                    out[o] = this.hex_char(c >> 4);
+                    o = o + 1;
+                    out[o] = this.hex_char(c & 15);
+                    o = o + 1;
+                }
+                i = i + 1;
+            }
+            out[o] = 0;
+            io::print("{}", out);
+            __ivy_free(out);
+        }
+    }
+
+    // Mirror of CodeGen::emitStringConstants: every entry in collection order,
+    // `[len+1 x i8]` with the NUL terminator appended as `\00`.
+    void emit_string_constants() {
+        long i = 0;
+        unsafe {
+            while (i < this.str_n_) {
+                long* ba = (long*) this.str_bytes_;
+                long* la = (long*) this.str_lens_;
+                long bp = ba[i];
+                long bl = la[i];
+                const char* bytes = reinterpret_cast<const char*>(bp);
+                io::print("@.str.{} = private unnamed_addr constant [{} x i8] c\"",
+                          i, bl + 1);
+                this.emit_escaped(bytes, bl);
+                this.ps("\\00\"");
+                this.nl();
+                i = i + 1;
+            }
+        }
+    }
+
+    // --- variable table ---------------------------------------------------
+
+    void clear_vars() {
+        this.vn_ = 0;
+    }
+
+    void add_var(const char* name, long slot) {
+        if (this.vn_ >= this.vcap_) {
+            this.fail(0, 0, "too many variables for the H6.2a variable table");
+            return;
+        }
+        unsafe {
+            // Ivy's `const char**` indexing is unreliable, so the table keeps
+            // interned pointers in a `long*` pool (the same idiom as
+            // Parser::tnames_).
+            long* names = (long*) this.vnames_;
+            long* nums = (long*) this.vnums_;
+            names[this.vn_] = (long) name;
+            nums[this.vn_] = slot;
+        }
+        this.vn_ = this.vn_ + 1;
+    }
+
+    long find_var(const char* name) {
+        long i = this.vn_ - 1;
+        unsafe {
+            long* names = (long*) this.vnames_;
+            long* nums = (long*) this.vnums_;
+            while (i >= 0) {
+                const char* nm = reinterpret_cast<const char*>(names[i]);
+                if (this.streq(nm, name)) {
+                    return nums[i];
+                }
+                i = i - 1;
+            }
+        }
+        return -1;
+    }
+
+    // --- types ------------------------------------------------------------
+
+    const char* llvm_type(AType t, long drop_ref) {
+        if (t.array_size > 0) {
+            this.fail(0, 0, "array types are out of scope for H6.2a");
+            return "i8";
+        }
+        if (t.ptr_depth > 0 || (t.is_ref != 0 && drop_ref == 0)) {
+            return "ptr";
+        }
+        if (this.streq(t.base, "void")) return "void";
+        if (this.streq(t.base, "bool")) return "i1";
+        if (this.streq(t.base, "char")) return "i8";
+        if (this.streq(t.base, "short")) return "i16";
+        if (this.streq(t.base, "int")) return "i32";
+        if (this.streq(t.base, "long") || this.streq(t.base, "long long")) return "i64";
+        if (this.streq(t.base, "float")) return "float";
+        if (this.streq(t.base, "double") || this.streq(t.base, "long double")) return "double";
+        if (this.streq(t.base, "int8_t") || this.streq(t.base, "int8")) return "i8";
+        if (this.streq(t.base, "int16_t") || this.streq(t.base, "int16")) return "i16";
+        if (this.streq(t.base, "int32_t") || this.streq(t.base, "int32")) return "i32";
+        if (this.streq(t.base, "int64_t") || this.streq(t.base, "int64")) return "i64";
+        if (this.streq(t.base, "int128_t") || this.streq(t.base, "int128")) return "i128";
+        if (this.streq(t.base, "uint8_t") || this.streq(t.base, "uint8")) return "i8";
+        if (this.streq(t.base, "uint16_t") || this.streq(t.base, "uint16")) return "i16";
+        if (this.streq(t.base, "uint32_t") || this.streq(t.base, "uint32")) return "i32";
+        if (this.streq(t.base, "uint64_t") || this.streq(t.base, "uint64")) return "i64";
+        if (this.streq(t.base, "uint128_t") || this.streq(t.base, "uint128")) return "i128";
+        if (this.streq(t.base, "float16_t") || this.streq(t.base, "float16")) return "half";
+        if (this.streq(t.base, "float32_t") || this.streq(t.base, "float32")) return "float";
+        if (this.streq(t.base, "float64_t") || this.streq(t.base, "float64")) return "double";
+        if (this.streq(t.base, "float128_t") || this.streq(t.base, "float128")) return "fp128";
+        if (this.streq(t.base, "bfloat16_t") || this.streq(t.base, "bfloat16")) return "bfloat";
+        if (this.streq(t.base, "size_t")) return "i64";
+        if (this.streq(t.base, "ptrdiff_t")) return "i64";
+        if (this.streq(t.base, "uptr_t")) return "i64";
+        if (this.streq(t.base, "nullptr_t")) return "ptr";
+        if (this.streq(t.base, "max_align_t")) return "i8";
+        return "i8";
+    }
+
+    // Returns the bit width of an integer LLVM type ("i8" -> 8, "ptr" -> 64),
+    // or -1 when the type is not an integer (mirror of the oracle's intBits).
+    long int_bits(const char* s) {
+        if (this.streq(s, "ptr")) return 64;
+        if (this.streq(s, "i1") || this.streq(s, "bool")) return 1;
+        if (this.streq(s, "i8") || this.streq(s, "char") ||
+            this.streq(s, "int8_t") || this.streq(s, "uint8_t")) return 8;
+        if (this.streq(s, "i16") || this.streq(s, "short") ||
+            this.streq(s, "int16_t") || this.streq(s, "uint16_t")) return 16;
+        if (this.streq(s, "i32") || this.streq(s, "int") ||
+            this.streq(s, "int32_t") || this.streq(s, "uint32_t")) return 32;
+        if (this.streq(s, "i64") || this.streq(s, "long") ||
+            this.streq(s, "long long") || this.streq(s, "int64_t") ||
+            this.streq(s, "uint64_t") || this.streq(s, "size_t") ||
+            this.streq(s, "ptrdiff_t")) return 64;
+        if (this.streq(s, "i128") || this.streq(s, "int128_t") ||
+            this.streq(s, "uint128_t")) return 128;
+        return -1;
+    }
+
+    // --- output primitives ------------------------------------------------
+
+    void ps(const char* s) {
+        io::print("{}", s);
+    }
+
+    void pl(const char* s) {
+        io::print("{}", s);
+        io::print("\n");
+    }
+
+    void nl() {
+        io::print("\n");
+    }
+
+    void emit_slot(const char* name, long slot) {
+        long first = 0;
+        unsafe {
+            first = (long) name[0];
+        }
+        io::print("%");
+        if (first == 0) {
+            io::print("arg");
+        } else {
+            io::print("{}", name);
+        }
+        io::print(".{}", slot);
+    }
+
+    void emit_bb(long global) {
+        io::print("%bb{}", global - this.cur_block_start_);
+    }
+
+    VRef imm(long v) {
+        VRef r;
+        r.kind = 0;
+        r.ival = v;
+        r.idx = 0;
+        r.name = "";
+        return r;
+    }
+
+    VRef new_temp() {
+        VRef r;
+        r.kind = 1;
+        r.ival = 0;
+        r.idx = this.temp_;
+        r.name = "";
+        this.temp_ = this.temp_ + 1;
+        return r;
+    }
+
+    VRef slot_ref(const char* name, long slot) {
+        VRef r;
+        r.kind = 2;
+        r.ival = 0;
+        r.idx = slot;
+        r.name = name;
+        return r;
+    }
+
+    VRef bool_ref(long v) {
+        VRef r;
+        r.kind = 3;
+        r.ival = v;
+        r.idx = 0;
+        r.name = "";
+        return r;
+    }
+
+    void emit_val(VRef v) {
+        if (v.kind == 0) {
+            io::print("{}", v.ival);
+        } else if (v.kind == 1) {
+            io::print("%tmp.{}", v.idx);
+        } else if (v.kind == 3) {
+            if (v.ival != 0) {
+                this.ps("true");
+            } else {
+                this.ps("false");
+            }
+        } else {
+            this.emit_slot(v.name, v.idx);
+        }
+    }
+
+    // --- function lookup / mangling --------------------------------------
+
+    // The MIR function with `name`, or -1.  The oracle first matches by
+    // signature, but overloads are out of scope and the frontend rejects a
+    // prototype followed by a definition, so the name alone is unambiguous
+    // in this subset.
+    long find_fn(const char* name) {
+        long i = 0;
+        unsafe {
+            while (i < this.mu->fn_n) {
+                MFunction f = this.mu->fns[i];
+                if (this.streq(f.name, name)) {
+                    return i;
+                }
+                i = i + 1;
+            }
+        }
+        return -1;
+    }
+
+    bool is_float_base(const char* b) {
+        return this.streq(b, "float") || this.streq(b, "double") ||
+               this.streq(b, "long double") ||
+               this.streq(b, "float16") || this.streq(b, "float16_t") ||
+               this.streq(b, "float32") || this.streq(b, "float32_t") ||
+               this.streq(b, "float64") || this.streq(b, "float64_t") ||
+               this.streq(b, "float128") || this.streq(b, "float128_t") ||
+               this.streq(b, "bfloat16") || this.streq(b, "bfloat16_t");
+    }
+
+    // Reject the types whose LLVM/MSVC spelling is out of the H6.2b subset.
+    // Called for every declaration and definition, so an extern "C" symbol
+    // (which is not mangled) is diagnosed too instead of silently emitting
+    // IR for pointers, arrays or floats.
+    bool check_fn_signature(MFunction f, long line, long col) {
+        if (f.ret.array_size > 0) {
+            this.fail(line, col, "array return types are out of scope for H6.2b");
+            return false;
+        }
+        if (f.ret.ptr_depth > 0 || f.ret.is_ref != 0) {
+            this.fail(line, col, "pointer/reference return types are out of scope for H6.2b");
+            return false;
+        }
+        if (this.is_float_base(f.ret.base)) {
+            this.fail(line, col, "floating-point return types are out of scope for H6.2b");
+            return false;
+        }
+        long j = 0;
+        while (j < f.pn) {
+            MParam p;
+            unsafe {
+                p = this.mu->params[f.pstart + j];
+            }
+            if (p.type.array_size > 0) {
+                this.fail(line, col, "array parameters are out of scope for H6.2b");
+                return false;
+            }
+            if (p.type.ptr_depth > 0 || p.type.is_ref != 0) {
+                this.fail(line, col, "pointer/reference parameters are out of scope for H6.2b");
+                return false;
+            }
+            if (this.is_float_base(p.type.base)) {
+                this.fail(line, col, "floating-point parameters are out of scope for H6.2b");
+                return false;
+            }
+            j = j + 1;
+        }
+        return true;
+    }
+
+    // Mirror of CodeGen::msvcMangleType for the scalar subset.  The codes
+    // were verified against the frozen oracle (P0):
+    //   bool _N  char D  short F/G  int H/I  long J/K  long long _J/_K
+    //   int8_t C  uint8_t E  int16_t F  uint16_t G  int32_t H  uint32_t I
+    //   int64_t _J  uint64_t _K  size_t _K  ptrdiff_t J  uptr_t _K
+    //   void ?A (a void *return* is spelled X by msvcMangleFunction).
+    void emit_mangle_type(AType t, long line, long col) {
+        if (t.array_size > 0) {
+            this.fail(line, col, "array type mangling is out of scope for H6.2b");
+            return;
+        }
+        if (t.ptr_depth > 0 || t.is_ref != 0) {
+            this.fail(line, col, "pointer/reference type mangling is out of scope for H6.2b");
+            return;
+        }
+        if (this.streq(t.base, "void")) { this.ps("?A"); return; }
+        if (this.streq(t.base, "bool")) { this.ps("_N"); return; }
+        if (this.streq(t.base, "char")) { this.ps("D"); return; }
+        if (this.streq(t.base, "short")) { this.ps(t.is_unsigned != 0 ? "G" : "F"); return; }
+        if (this.streq(t.base, "int")) { this.ps(t.is_unsigned != 0 ? "I" : "H"); return; }
+        if (this.streq(t.base, "long")) { this.ps(t.is_unsigned != 0 ? "K" : "J"); return; }
+        if (this.streq(t.base, "long long")) { this.ps(t.is_unsigned != 0 ? "_K" : "_J"); return; }
+        if (this.streq(t.base, "int8_t")) { this.ps("C"); return; }
+        if (this.streq(t.base, "uint8_t")) { this.ps("E"); return; }
+        if (this.streq(t.base, "int16_t")) { this.ps("F"); return; }
+        if (this.streq(t.base, "uint16_t")) { this.ps("G"); return; }
+        if (this.streq(t.base, "int32_t")) { this.ps("H"); return; }
+        if (this.streq(t.base, "uint32_t")) { this.ps("I"); return; }
+        if (this.streq(t.base, "int64_t")) { this.ps("_J"); return; }
+        if (this.streq(t.base, "uint64_t")) { this.ps("_K"); return; }
+        if (this.streq(t.base, "int128_t") || this.streq(t.base, "uint128_t")) { this.ps("_J"); return; }
+        if (this.streq(t.base, "size_t")) { this.ps("_K"); return; }
+        if (this.streq(t.base, "ptrdiff_t")) { this.ps("J"); return; }
+        if (this.streq(t.base, "uptr_t")) { this.ps("_K"); return; }
+        if (this.streq(t.base, "max_align_t")) { this.ps("PEAV"); return; }
+        if (this.is_float_base(t.base)) {
+            this.fail(line, col, "floating-point type mangling is out of scope for H6.2b");
+            return;
+        }
+        this.fail(line, col, "type mangling is out of scope for H6.2b");
+    }
+
+    // Mirror of CodeGen::msvcMangleFunction for a global, non-extern "C"
+    // function: ?<name>@@Y<ret><params>@Z (no class/namespace scope).  The
+    // symbol is always quoted because '?' and '@' are not bare LLVM
+    // identifier characters (CodeGen::llvmGlobalName).
+    void emit_mangled_name(const char* name, long fi, long line, long col) {
+        long i = 0;
+        bool scoped = false;
+        unsafe {
+            while (name[i] != 0) {
+                if (name[i] == ':' && name[i + 1] == ':') {
+                    scoped = true;
+                    break;
+                }
+                i = i + 1;
+            }
+        }
+        if (scoped) {
+            this.fail(line, col, "namespace-qualified function names are out of scope for H6.2b");
+            return;
+        }
+        MFunction f;
+        unsafe {
+            f = this.mu->fns[fi];
+        }
+        if (!this.check_fn_signature(f, line, col)) {
+            return;
+        }
+        this.ps("\"?");
+        this.ps(name);
+        this.ps("@@Y");
+        if (this.streq(f.ret.base, "void")) {
+            this.ps("X");
+        } else {
+            this.emit_mangle_type(f.ret, line, col);
+        }
+        if (f.pn == 0) {
+            this.ps("X");
+        } else {
+            long j = 0;
+            while (j < f.pn) {
+                MParam p;
+                unsafe {
+                    p = this.mu->params[f.pstart + j];
+                }
+                this.emit_mangle_type(p.type, line, col);
+                j = j + 1;
+            }
+        }
+        this.ps("@Z\"");
+    }
+
+    // The symbol after `@`: user `main` is `ivy_main`, extern "C" names are
+    // left alone and every other function is MSVC-mangled.
+    void emit_fn_symbol(const char* name, long is_extern_c, long fi,
+                        long line, long col) {
+        if (this.streq(name, "main")) {
+            this.ps("ivy_main");
+            return;
+        }
+        if (is_extern_c != 0) {
+            this.ps(name);
+            return;
+        }
+        this.emit_mangled_name(name, fi, line, col);
+    }
+
+    // --- casts ------------------------------------------------------------
+
+    // Mirror of CodeGen::emitCast for the integer subset.  The temporary is
+    // allocated before the conversion is classified, exactly like the oracle.
+    VRef emit_cast(VRef v, const char* from, const char* to,
+                   long from_unsigned, long line, long col) {
+        if (this.streq(from, to)) {
+            return v;
+        }
+        VRef t = this.new_temp();
+        if (this.streq(to, "ptr") && !this.streq(from, "ptr") &&
+            this.int_bits(from) > 0) {
+            this.emit_val(t);
+            this.ps(" = inttoptr ");
+            this.ps(from);
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(" to ptr");
+            this.nl();
+            return t;
+        }
+        if (this.streq(from, "ptr") && !this.streq(to, "ptr") &&
+            this.int_bits(to) > 0) {
+            this.emit_val(t);
+            this.ps(" = ptrtoint ptr ");
+            this.emit_val(v);
+            this.ps(" to ");
+            this.ps(to);
+            this.nl();
+            return t;
+        }
+        long fb = this.int_bits(from);
+        long tb = this.int_bits(to);
+        if (fb > 0 && tb > 0) {
+            if (fb < tb) {
+                this.emit_val(t);
+                this.ps(from_unsigned != 0 ? " = zext " : " = sext ");
+                this.ps(from);
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(" to ");
+                this.ps(to);
+                this.nl();
+            } else if (fb > tb) {
+                this.emit_val(t);
+                this.ps(" = trunc ");
+                this.ps(from);
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(" to ");
+                this.ps(to);
+                this.nl();
+            } else {
+                return v;
+            }
+            return t;
+        }
+        this.fail(line, col, "cast is out of scope for H6.2a");
+        return v;
+    }
+
+    // --- expression lowering ---------------------------------------------
+
+    VRef lower_ident(MExpr e) {
+        long slot = this.find_var(e.sval);
+        if (slot < 0) {
+            this.fail(e.line, e.col, "internal: identifier is not in the variable table");
+            return this.imm(0);
+        }
+        if (e.type.is_ref != 0) {
+            this.fail(e.line, e.col, "reference variables are out of scope for H6.2a");
+            return this.imm(0);
+        }
+        if (e.type.array_size > 0) {
+            this.fail(e.line, e.col, "array decay is out of scope for H6.2a");
+            return this.imm(0);
+        }
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = load ");
+        this.ps(this.llvm_type(e.type, 0));
+        this.ps(", ptr ");
+        this.emit_slot(e.sval, slot);
+        this.nl();
+        return t;
+    }
+
+    VRef lower_unary(MExpr e) {
+        if (this.streq(e.sval, "+")) {
+            return this.lower_expr(e.a);
+        }
+        if (this.streq(e.sval, "-")) {
+            // The oracle allocates the temporary before lowering the operand.
+            VRef t = this.new_temp();
+            VRef op = this.lower_expr(e.a);
+            this.emit_val(t);
+            this.ps(" = sub ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.ps(" 0, ");
+            this.emit_val(op);
+            this.nl();
+            return t;
+        }
+        if (this.streq(e.sval, "!")) {
+            VRef t = this.new_temp();
+            VRef op = this.lower_expr(e.a);
+            this.emit_val(t);
+            this.ps(" = xor i1 ");
+            this.emit_val(op);
+            this.ps(", true");
+            this.nl();
+            return t;
+        }
+        if (this.streq(e.sval, "~")) {
+            VRef t = this.new_temp();
+            VRef op = this.lower_expr(e.a);
+            this.emit_val(t);
+            this.ps(" = xor ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.ps(" ");
+            this.emit_val(op);
+            this.ps(", -1");
+            this.nl();
+            return t;
+        }
+        this.fail(e.line, e.col, "unary operator is out of scope for H6.2a");
+        return this.imm(0);
+    }
+
+    bool is_cmp_op(const char* op) {
+        return this.streq(op, "==") || this.streq(op, "!=") ||
+               this.streq(op, "<") || this.streq(op, ">") ||
+               this.streq(op, "<=") || this.streq(op, ">=");
+    }
+
+    const char* cmp_name(const char* op, long is_unsigned) {
+        if (this.streq(op, "==")) return "eq";
+        if (this.streq(op, "!=")) return "ne";
+        if (this.streq(op, "<")) return is_unsigned != 0 ? "ult" : "slt";
+        if (this.streq(op, ">")) return is_unsigned != 0 ? "ugt" : "sgt";
+        if (this.streq(op, "<=")) return is_unsigned != 0 ? "ule" : "sle";
+        if (this.streq(op, ">=")) return is_unsigned != 0 ? "uge" : "sge";
+        return "eq";
+    }
+
+    VRef emit_binop(const char* op, const char* ty, VRef lc, VRef rc) {
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = ");
+        this.ps(op);
+        this.ps(" ");
+        this.ps(ty);
+        this.ps(" ");
+        this.emit_val(lc);
+        this.ps(", ");
+        this.emit_val(rc);
+        this.nl();
+        return t;
+    }
+
+    VRef lower_binary(MExpr e) {
+        if (this.streq(e.sval, "&&") || this.streq(e.sval, "||")) {
+            this.fail(e.line, e.col, "short-circuit operators are out of scope for H6.2a");
+            return this.imm(0);
+        }
+        if (this.streq(e.sval, ",")) {
+            this.fail(e.line, e.col, "the comma operator is out of scope for H6.2a");
+            return this.imm(0);
+        }
+
+        MExpr lhs;
+        MExpr rhs;
+        unsafe {
+            lhs = this.mu->exprs[e.a];
+            rhs = this.mu->exprs[e.b];
+        }
+        if (lhs.type.ptr_depth > 0 || lhs.type.is_ref != 0 ||
+            rhs.type.ptr_depth > 0 || rhs.type.is_ref != 0) {
+            this.fail(e.line, e.col, "pointer arithmetic is out of scope for H6.2a");
+            return this.imm(0);
+        }
+
+        VRef lv = this.lower_expr(e.a);
+        VRef rv = this.lower_expr(e.b);
+
+        const long is_unsigned = lhs.type.is_unsigned != 0 ? 1 : 0;
+
+        if (this.is_cmp_op(e.sval)) {
+            VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1),
+                                     this.llvm_type(lhs.type, 1), is_unsigned,
+                                     e.line, e.col);
+            VRef rc = this.emit_cast(rv, this.llvm_type(rhs.type, 1),
+                                     this.llvm_type(lhs.type, 1),
+                                     rhs.type.is_unsigned != 0 ? 1 : 0,
+                                     e.line, e.col);
+            VRef t = this.new_temp();
+            this.emit_val(t);
+            this.ps(" = icmp ");
+            this.ps(this.cmp_name(e.sval, is_unsigned));
+            this.ps(" ");
+            this.ps(this.llvm_type(lhs.type, 1));
+            this.ps(" ");
+            this.emit_val(lc);
+            this.ps(", ");
+            this.emit_val(rc);
+            this.nl();
+            return t;
+        }
+
+        VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1),
+                                 this.llvm_type(e.type, 0), is_unsigned,
+                                 e.line, e.col);
+        VRef rc = this.emit_cast(rv, this.llvm_type(rhs.type, 1),
+                                 this.llvm_type(e.type, 0),
+                                 rhs.type.is_unsigned != 0 ? 1 : 0,
+                                 e.line, e.col);
+
+        if (this.streq(e.sval, "+")) {
+            return this.emit_binop("add", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "-")) {
+            return this.emit_binop("sub", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "*")) {
+            return this.emit_binop("mul", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "/")) {
+            return this.emit_binop(is_unsigned != 0 ? "udiv" : "sdiv",
+                                   this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "%")) {
+            return this.emit_binop(is_unsigned != 0 ? "urem" : "srem",
+                                   this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "<<")) {
+            return this.emit_binop("shl", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, ">>")) {
+            return this.emit_binop(is_unsigned != 0 ? "lshr" : "ashr",
+                                   this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "&")) {
+            return this.emit_binop("and", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "|")) {
+            return this.emit_binop("or", this.llvm_type(e.type, 0), lc, rc);
+        }
+        if (this.streq(e.sval, "^")) {
+            return this.emit_binop("xor", this.llvm_type(e.type, 0), lc, rc);
+        }
+        this.fail(e.line, e.col, "binary operator is out of scope for H6.2a");
+        return this.imm(0);
+    }
+
+    VRef lower_cast(MExpr e) {
+        MExpr opnd;
+        unsafe {
+            opnd = this.mu->exprs[e.a];
+        }
+        VRef v = this.lower_expr(e.a);
+        if (this.streq(this.llvm_type(opnd.type, 1), "ptr") &&
+            this.streq(this.llvm_type(e.type, 1), "ptr")) {
+            return v;
+        }
+        return this.emit_cast(v, this.llvm_type(opnd.type, 1),
+                              this.llvm_type(e.type, 1),
+                              opnd.type.is_unsigned != 0 ? 1 : 0,
+                              e.line, e.col);
+    }
+
+    // Assignment used as a value (e.g. the increment of a `for` loop).  The
+    // oracle's lowerExpr(Assign) lowers the lvalue, lowers the rhs, stores it
+    // without an explicit cast and yields the stored value.
+    VRef lower_assign(MExpr e) {
+        MExpr lhs;
+        unsafe {
+            lhs = this.mu->exprs[e.a];
+        }
+        if (lhs.type.is_ref != 0) {
+            this.fail(e.line, e.col, "reference assignment is out of scope for H6.2a");
+            return this.imm(0);
+        }
+        VRef p = this.lower_lvalue(e.a);
+        VRef v = this.lower_expr(e.b);
+        this.ps("store ");
+        this.ps(this.llvm_type(lhs.type, 0));
+        this.ps(" ");
+        this.emit_val(v);
+        this.ps(", ptr ");
+        this.emit_val(p);
+        this.nl();
+        return v;
+    }
+
+    // Mirror of the generic Call branch of CodeGen::lowerExpr: the arguments
+    // are lowered left to right, each one cast to the callee's parameter type,
+    // and only then is the result temporary allocated.  A void call prints
+    // `call void ...` and yields no temporary.  The argument scratch is a
+    // stack so a nested call used as an argument cannot clobber the arguments
+    // its parent has already lowered.
+    VRef lower_call(MExpr e) {
+        if (this.is_io_print_name(e.sval)) {
+            return this.lower_io_print(e);
+        }
+        long fi = this.find_fn(e.sval);
+        if (fi < 0) {
+            this.fail(e.line, e.col, "call to a function without a MIR entry is out of scope for H6.2b");
+            return this.imm(0);
+        }
+        MFunction callee;
+        unsafe {
+            callee = this.mu->fns[fi];
+        }
+        if (!this.check_fn_signature(callee, e.line, e.col)) {
+            return this.imm(0);
+        }
+        long an = e.an;
+        long base = this.arg_sp_;
+        if (base + an > this.arg_cap_) {
+            this.fail(e.line, e.col, "too many call arguments for H6.2b");
+            return this.imm(0);
+        }
+        this.arg_sp_ = base + an;
+        long j = 0;
+        while (j < an) {
+            unsafe {
+                long ai = this.mu->args[e.astart + j];
+                if (ai < 0) {
+                    this.fail(e.line, e.col, "internal: missing call argument");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                MExpr a = this.mu->exprs[ai];
+                if (a.type.array_size > 0) {
+                    this.fail(e.line, e.col, "array arguments are out of scope for H6.2b");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                if (a.type.ptr_depth > 0 || a.type.is_ref != 0) {
+                    this.fail(e.line, e.col, "pointer/reference arguments are out of scope for H6.2b");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                if (this.is_float_base(a.type.base)) {
+                    this.fail(e.line, e.col, "floating-point arguments are out of scope for H6.2b");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                VRef v = this.lower_expr(ai);
+                const char* ty = this.llvm_type(a.type, 1);
+                if (j < callee.pn) {
+                    MParam p = this.mu->params[callee.pstart + j];
+                    const char* pty = this.llvm_type(p.type, 1);
+                    if (!this.streq(pty, "void") && !this.streq(pty, ty)) {
+                        v = this.emit_cast(v, ty, pty,
+                                           a.type.is_unsigned != 0 ? 1 : 0,
+                                           e.line, e.col);
+                        ty = pty;
+                    }
+                }
+                VRef* av = (VRef*) this.arg_vals_;
+                av[base + j] = v;
+                long* at = (long*) this.arg_tys_;
+                at[base + j] = (long) ty;
+            }
+            j = j + 1;
+        }
+        if (this.streq(this.llvm_type(e.type, 0), "void")) {
+            this.ps("call void @");
+            this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+            this.ps("(");
+            this.emit_call_args(base, an);
+            this.ps(")");
+            this.nl();
+            this.arg_sp_ = base;
+            return this.imm(0);
+        }
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call ");
+        this.ps(this.llvm_type(e.type, 0));
+        this.ps(" @");
+        this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+        this.ps("(");
+        this.emit_call_args(base, an);
+        this.ps(")");
+        this.nl();
+        this.arg_sp_ = base;
+        return t;
+    }
+
+    void emit_call_args(long base, long an) {
+        long j = 0;
+        unsafe {
+            long* at = (long*) this.arg_tys_;
+            VRef* av = (VRef*) this.arg_vals_;
+            while (j < an) {
+                if (j > 0) {
+                    this.ps(", ");
+                }
+                const char* ty = reinterpret_cast<const char*>(at[base + j]);
+                this.ps(ty);
+                this.ps(" ");
+                VRef v = av[base + j];
+                this.emit_val(v);
+                j = j + 1;
+            }
+        }
+    }
+
+    // --- H6.2c: pre-pass collection ---------------------------------------
+
+    bool is_io_print_name(const char* name) {
+        return this.streq(name, "io::print") ||
+               this.streq(name, "io::println") ||
+               this.streq(name, "io::eprint") ||
+               this.streq(name, "io::eprintln");
+    }
+
+    // Mirror of CodeGen::collectExpr.  The node itself is visited first (a
+    // StringLit registers a global, a Call sets the io usage flag), then the
+    // children in the oracle's order.  This order fixes the `@.str.N`
+    // numbering across the whole unit.
+    void collect_expr(long idx) {
+        if (idx < 0) {
+            return;
+        }
+        MExpr e;
+        unsafe {
+            e = this.mu->exprs[idx];
+        }
+        if (e.kind == 2) {
+            this.intern_prepass(e.sval, e.line, e.col);
+            return;
+        }
+        if (e.kind == 11) {
+            if (this.is_io_print_name(e.sval)) {
+                this.uses_io_print_ = 1;
+            }
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.mu->args[e.astart + j];
+                }
+                this.collect_expr(ai);
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 8 || e.kind == 13 || e.kind == 19) {
+            this.collect_expr(e.a);
+            return;
+        }
+        if (e.kind == 9 || e.kind == 12 || e.kind == 14) {
+            this.collect_expr(e.a);
+            this.collect_expr(e.b);
+            return;
+        }
+        if (e.kind == 10) {
+            this.collect_expr(e.a);
+            this.collect_expr(e.b);
+            this.collect_expr(e.c);
+            return;
+        }
+        if (e.kind == 17 || e.kind == 18) {
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.mu->args[e.astart + j];
+                }
+                this.collect_expr(ai);
+                j = j + 1;
+            }
+            return;
+        }
+    }
+
+    // Mirror of CodeGen::collectFunction: only the expressions reachable from
+    // an instruction are visited (a switch condition is not collected, like
+    // the oracle).
+    void collect_function(long fi) {
+        MFunction f;
+        unsafe {
+            f = this.mu->fns[fi];
+        }
+        long bi = 0;
+        while (bi < f.block_n) {
+            MBlock b;
+            unsafe {
+                b = this.mu->blocks[f.block_start + bi];
+            }
+            long ii = b.first;
+            while (ii >= 0) {
+                MInst inst;
+                unsafe {
+                    inst = this.mu->insts[ii];
+                }
+                if (inst.kind == 0 || inst.kind == 2 || inst.kind == 3 ||
+                    inst.kind == 4) {
+                    this.collect_expr(inst.a);
+                } else if (inst.kind == 1) {
+                    this.collect_expr(inst.a);
+                    this.collect_expr(inst.b);
+                }
+                ii = inst.next;
+            }
+            bi = bi + 1;
+        }
+    }
+
+    void collect_all() {
+        long fi = 0;
+        while (fi < this.mu->fn_n) {
+            this.collect_function(fi);
+            fi = fi + 1;
+        }
+    }
+
+    // --- H6.2c: io::print builtins ----------------------------------------
+
+    void emit_io_runtime() {
+        this.pl("declare void @__ivy_write_str(i32, ptr)");
+        this.pl("declare void @__ivy_write_char(i32, i8)");
+        this.pl("declare ptr @__ivy_fmt_int(i64)");
+        this.pl("declare ptr @__ivy_fmt_float(double)");
+        this.pl("declare ptr @__ivy_fmt_bool(i1)");
+        this.pl("declare void @__ivy_write_newline(i32)");
+    }
+
+    void emit_write_str(long fd, VRef v) {
+        this.ps("call void @__ivy_write_str(i32 ");
+        io::print("{}", fd);
+        this.ps(", ptr ");
+        this.emit_val(v);
+        this.ps(")");
+        this.nl();
+    }
+
+    void emit_write_char(long fd, VRef v) {
+        this.ps("call void @__ivy_write_char(i32 ");
+        io::print("{}", fd);
+        this.ps(", i8 ");
+        this.emit_val(v);
+        this.ps(")");
+        this.nl();
+    }
+
+    // Mirror of one argument branch of CodeGen::lowerIoPrint.  The temporary
+    // order is: lower the expression, then the extend temporary (if any),
+    // then the `__ivy_fmt_*` result temporary.
+    void lower_io_arg(long idx, long fd) {
+        if (idx < 0) {
+            return;
+        }
+        MExpr a;
+        unsafe {
+            a = this.mu->exprs[idx];
+        }
+        AType at = a.type;
+        if (at.ptr_depth > 0) {
+            VRef v = this.lower_expr(idx);
+            this.emit_write_str(fd, v);
+            return;
+        }
+        if (at.is_ref != 0) {
+            this.fail(a.line, a.col,
+                      "reference arguments to io::print are out of scope for H6.2c");
+            return;
+        }
+        if (this.streq(at.base, "char") || this.streq(at.base, "int8_t") ||
+            this.streq(at.base, "uint8_t")) {
+            VRef v = this.lower_expr(idx);
+            this.emit_write_char(fd, v);
+            return;
+        }
+        if (this.streq(at.base, "bool")) {
+            VRef v = this.lower_expr(idx);
+            VRef p = this.new_temp();
+            this.emit_val(p);
+            this.ps(" = call ptr @__ivy_fmt_bool(i1 ");
+            this.emit_val(v);
+            this.ps(")");
+            this.nl();
+            this.emit_write_str(fd, p);
+            return;
+        }
+        if (this.is_float_base(at.base)) {
+            this.fail(a.line, a.col,
+                      "floating-point arguments to io::print are out of scope for H6.2c");
+            return;
+        }
+        VRef v = this.lower_expr(idx);
+        unsafe {
+            const char* ty = this.llvm_type(at, 0);
+            VRef ext = v;
+            if (!this.streq(ty, "i64")) {
+                ext = this.new_temp();
+                this.emit_val(ext);
+                this.ps(at.is_unsigned != 0 ? " = zext " : " = sext ");
+                this.ps(ty);
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(" to i64");
+                this.nl();
+            }
+            VRef p = this.new_temp();
+            this.emit_val(p);
+            this.ps(" = call ptr @__ivy_fmt_int(i64 ");
+            this.emit_val(ext);
+            this.ps(")");
+            this.nl();
+            this.emit_write_str(fd, p);
+        }
+    }
+
+    // Mirror of CodeGen::lowerIoPrint.  A leading string literal is a format
+    // string split on `{}`; otherwise every argument is printed in sequence.
+    // Literal segments go through the raw-bytes interning map (not the
+    // pre-pass `"1:"` map), reproducing the duplicate-global quirk.
+    VRef lower_io_print(MExpr e) {
+        long fd = 1;
+        long is_ln = 0;
+        if (this.streq(e.sval, "io::println")) {
+            is_ln = 1;
+        } else if (this.streq(e.sval, "io::eprint")) {
+            fd = 2;
+        } else if (this.streq(e.sval, "io::eprintln")) {
+            fd = 2;
+            is_ln = 1;
+        }
+
+        long an = e.an;
+        long has_fmt = 0;
+        long fmtp = 0;
+        long fmt_len = 0;
+        if (an > 0) {
+            long ai0 = -1;
+            unsafe {
+                ai0 = this.mu->args[e.astart];
+            }
+            if (ai0 >= 0) {
+                MExpr a0;
+                unsafe {
+                    a0 = this.mu->exprs[ai0];
+                }
+                if (a0.kind == 2) {
+                    fmtp = this.decode_string(a0.sval);
+                    if (fmtp == 0) {
+                        return this.imm(0);
+                    }
+                    has_fmt = 1;
+                    fmt_len = this.dec_len_;
+                }
+            }
+        }
+
+        if (has_fmt != 0) {
+            unsafe {
+                const char* fp = reinterpret_cast<const char*>(fmtp);
+                char* seg = (char*) __ivy_alloc(
+                    (unsigned long long) (fmt_len + 1));
+                long seg_len = 0;
+                long arg_idx = 1;
+                long i = 0;
+                while (i < fmt_len) {
+                    if (i + 1 < fmt_len && fp[i] == '{' && fp[i + 1] == '}') {
+                        if (seg_len > 0) {
+                            long gi = this.intern_segment(seg, seg_len);
+                            VRef g = this.emit_string_gep(gi);
+                            this.emit_write_str(fd, g);
+                            seg_len = 0;
+                        }
+                        if (arg_idx < an) {
+                            long ai = -1;
+                            ai = this.mu->args[e.astart + arg_idx];
+                            this.lower_io_arg(ai, fd);
+                            arg_idx = arg_idx + 1;
+                        }
+                        i = i + 2;
+                    } else {
+                        seg[seg_len] = fp[i];
+                        seg_len = seg_len + 1;
+                        i = i + 1;
+                    }
+                }
+                if (seg_len > 0) {
+                    long gi = this.intern_segment(seg, seg_len);
+                    VRef g = this.emit_string_gep(gi);
+                    this.emit_write_str(fd, g);
+                }
+                __ivy_free(seg);
+            }
+        } else {
+            long ai = 0;
+            while (ai < an) {
+                long axi = -1;
+                unsafe {
+                    axi = this.mu->args[e.astart + ai];
+                }
+                this.lower_io_arg(axi, fd);
+                ai = ai + 1;
+            }
+        }
+
+        if (is_ln != 0) {
+            this.ps("call void @__ivy_write_newline(i32 ");
+            io::print("{}", fd);
+            this.ps(")");
+            this.nl();
+        }
+        return this.imm(0);
+    }
+
+    VRef lower_string(MExpr e) {
+        unsafe {
+            long p = this.decode_string(e.sval);
+            if (p == 0) {
+                if (this.failed_ == 0) {
+                    this.fail(e.line, e.col, "malformed string literal");
+                }
+                return this.imm(0);
+            }
+            long bl = this.dec_len_;
+            long key = this.make_prefixed_key((char*) p, bl);
+            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
+                                   this.pm_n_, (char*) key, bl + 2);
+            if (gi < 0) {
+                this.fail(e.line, e.col,
+                          "internal: string literal was not collected");
+                return this.imm(0);
+            }
+            return this.emit_string_gep(gi);
+        }
+        return this.imm(0);
+    }
+
+    VRef lower_expr(long idx) {
+        if (idx < 0) {
+            this.fail(0, 0, "internal: missing expression");
+            return this.imm(0);
+        }
+        MExpr e;
+        unsafe {
+            e = this.mu->exprs[idx];
+        }
+        if (e.kind == 0) {
+            return this.imm(e.ival);
+        }
+        if (e.kind == 2) {
+            return this.lower_string(e);
+        }
+        if (e.kind == 3) {
+            long cv = this.decode_char_value(e.sval);
+            if (cv < 0) {
+                return this.imm(0);
+            }
+            return this.imm(cv);
+        }
+        if (e.kind == 4) {
+            return this.bool_ref(e.ival != 0 ? 1 : 0);
+        }
+        if (e.kind == 6) {
+            return this.lower_ident(e);
+        }
+        if (e.kind == 8) {
+            return this.lower_unary(e);
+        }
+        if (e.kind == 9) {
+            return this.lower_binary(e);
+        }
+        if (e.kind == 11) {
+            return this.lower_call(e);
+        }
+        if (e.kind == 14) {
+            return this.lower_assign(e);
+        }
+        if (e.kind == 19) {
+            return this.lower_cast(e);
+        }
+        this.fail(e.line, e.col, "expression kind is out of scope for H6.2a");
+        return this.imm(0);
+    }
+
+    VRef lower_lvalue(long idx) {
+        if (idx < 0) {
+            this.fail(0, 0, "internal: missing lvalue");
+            return this.imm(0);
+        }
+        MExpr e;
+        unsafe {
+            e = this.mu->exprs[idx];
+        }
+        if (e.kind == 6) {
+            long slot = this.find_var(e.sval);
+            if (slot < 0) {
+                this.fail(e.line, e.col, "internal: lvalue is not in the variable table");
+                return this.imm(0);
+            }
+            return this.slot_ref(e.sval, slot);
+        }
+        this.fail(e.line, e.col, "lvalue is out of scope for H6.2a");
+        return this.imm(0);
+    }
+
+    // --- instruction / block lowering -------------------------------------
+
+    void lower_inst(MInst inst) {
+        if (inst.kind == 0) {
+            // Alloca: the slot itself was hoisted to the entry block; only
+            // the initializer store runs here (mirror of lowerInst).
+            long slot = this.find_var(inst.var);
+            if (slot < 0) {
+                this.fail(inst.line, inst.col, "internal: alloca is not in the variable table");
+                return;
+            }
+            if (inst.type.is_ref != 0) {
+                this.fail(inst.line, inst.col, "reference locals are out of scope for H6.2a");
+                return;
+            }
+            if (inst.type.array_size > 0) {
+                this.fail(inst.line, inst.col, "array locals are out of scope for H6.2a");
+                return;
+            }
+            if (inst.a < 0) {
+                return;
+            }
+            MExpr init;
+            unsafe {
+                init = this.mu->exprs[inst.a];
+            }
+            if (init.kind == 17) {
+                this.fail(inst.line, inst.col, "aggregate initializers are out of scope for H6.2a");
+                return;
+            }
+            VRef v = this.lower_expr(inst.a);
+            VRef c = this.emit_cast(v, this.llvm_type(init.type, 1),
+                                    this.llvm_type(inst.type, 0),
+                                    init.type.is_unsigned != 0 ? 1 : 0,
+                                    inst.line, inst.col);
+            this.ps("store ");
+            this.ps(this.llvm_type(inst.type, 0));
+            this.ps(" ");
+            this.emit_val(c);
+            this.ps(", ptr ");
+            this.emit_slot(inst.var, slot);
+            this.nl();
+            return;
+        }
+        if (inst.kind == 1) {
+            MExpr target;
+            MExpr value;
+            unsafe {
+                target = this.mu->exprs[inst.a];
+                value = this.mu->exprs[inst.b];
+            }
+            if (target.type.is_ref != 0) {
+                this.fail(inst.line, inst.col, "reference stores are out of scope for H6.2a");
+                return;
+            }
+            VRef p = this.lower_lvalue(inst.a);
+            VRef v = this.lower_expr(inst.b);
+            VRef c = this.emit_cast(v, this.llvm_type(value.type, 1),
+                                    this.llvm_type(target.type, 1),
+                                    value.type.is_unsigned != 0 ? 1 : 0,
+                                    inst.line, inst.col);
+            this.ps("store ");
+            this.ps(this.llvm_type(target.type, 1));
+            this.ps(" ");
+            this.emit_val(c);
+            this.ps(", ptr ");
+            this.emit_val(p);
+            this.nl();
+            return;
+        }
+        if (inst.kind == 2) {
+            if (inst.a >= 0) {
+                this.lower_expr(inst.a);
+            }
+            return;
+        }
+        if (inst.kind == 3) {
+            if (inst.a >= 0) {
+                MExpr rv;
+                unsafe {
+                    rv = this.mu->exprs[inst.a];
+                }
+                if (rv.type.is_ref != 0) {
+                    this.fail(inst.line, inst.col, "reference returns are out of scope for H6.2a");
+                    return;
+                }
+                VRef v = this.lower_expr(inst.a);
+                VRef c = this.emit_cast(v, this.llvm_type(rv.type, 1), this.cur_ret_ty_,
+                                        rv.type.is_unsigned != 0 ? 1 : 0,
+                                        inst.line, inst.col);
+                this.ps("ret ");
+                this.ps(this.cur_ret_ty_);
+                this.ps(" ");
+                this.emit_val(c);
+                this.nl();
+            } else {
+                this.pl("ret void");
+            }
+            return;
+        }
+        if (inst.kind == 4) {
+            VRef c = this.lower_expr(inst.a);
+            this.ps("br i1 ");
+            this.emit_val(c);
+            this.ps(", label ");
+            this.emit_bb(inst.b);
+            this.ps(", label ");
+            this.emit_bb(inst.c);
+            this.nl();
+            return;
+        }
+        if (inst.kind == 5) {
+            this.ps("br label ");
+            this.emit_bb(inst.b);
+            this.nl();
+            return;
+        }
+        this.fail(inst.line, inst.col, "instruction kind is out of scope for H6.2a");
+    }
+
+    void lower_block(long local_idx) {
+        long global = this.cur_block_start_ + local_idx;
+        io::print("bb{}:", local_idx);
+        this.nl();
+        MBlock b;
+        unsafe {
+            b = this.mu->blocks[global];
+        }
+        long i = b.first;
+        long last_kind = -1;
+        while (i >= 0) {
+            MInst inst;
+            unsafe {
+                inst = this.mu->insts[i];
+            }
+            this.lower_inst(inst);
+            last_kind = inst.kind;
+            i = inst.next;
+        }
+        if (last_kind != 3 && last_kind != 4 && last_kind != 5 && last_kind != 6) {
+            if (this.cur_is_void_ != 0) {
+                this.pl("ret void");
+            } else {
+                this.pl("unreachable");
+            }
+        }
+    }
+
+    // --- function lowering ------------------------------------------------
+
+    void lower_function(long fi) {
+        MFunction func;
+        unsafe {
+            func = this.mu->fns[fi];
+        }
+        this.temp_ = 0;
+        this.alloca_ = 0;
+        this.arg_sp_ = 0;
+        this.clear_vars();
+        this.cur_fi_ = fi;
+        this.cur_block_start_ = func.block_start;
+        this.cur_block_n_ = func.block_n;
+        this.cur_ret_ty_ = this.llvm_type(func.ret, 1);
+        this.cur_is_void_ = this.streq(this.llvm_type(func.ret, 0), "void") ? 1 : 0;
+
+        if (!this.check_fn_signature(func, 0, 0)) {
+            return;
+        }
+
+        this.ps("define ");
+        this.ps(this.llvm_type(func.ret, 0));
+        this.ps(" @");
+        this.emit_fn_symbol(func.name, func.is_extern_c, fi, 0, 0);
+        this.ps("(");
+        long i = 0;
+        while (i < func.pn) {
+            MParam p;
+            unsafe {
+                p = this.mu->params[func.pstart + i];
+            }
+            if (i > 0) {
+                this.ps(", ");
+            }
+            this.ps(this.llvm_type(p.type, 0));
+            io::print(" %arg{}", i);
+            i = i + 1;
+        }
+        this.ps(") {");
+        this.nl();
+
+        // Prologue: parameters in alloca slots.
+        i = 0;
+        while (i < func.pn) {
+            MParam p;
+            unsafe {
+                p = this.mu->params[func.pstart + i];
+            }
+            long slot = this.alloca_;
+            this.alloca_ = this.alloca_ + 1;
+            this.emit_slot(p.name, slot);
+            this.ps(" = alloca ");
+            this.ps(this.llvm_type(p.type, 0));
+            this.nl();
+            this.ps("store ");
+            this.ps(this.llvm_type(p.type, 0));
+            io::print(" %arg{}", i);
+            this.ps(", ptr ");
+            this.emit_slot(p.name, slot);
+            this.nl();
+            this.add_var(p.name, slot);
+            i = i + 1;
+        }
+
+        // Hoist every local slot to the entry block, in block/instruction
+        // order.  This is what fixes the `%name.N` numbering.
+        long bi = 0;
+        while (bi < func.block_n) {
+            MBlock b;
+            unsafe {
+                b = this.mu->blocks[func.block_start + bi];
+            }
+            long ii = b.first;
+            while (ii >= 0) {
+                MInst inst;
+                unsafe {
+                    inst = this.mu->insts[ii];
+                }
+                if (inst.kind == 0) {
+                    long slot = this.alloca_;
+                    this.alloca_ = this.alloca_ + 1;
+                    this.emit_slot(inst.var, slot);
+                    this.ps(" = alloca ");
+                    if (inst.type.is_ref != 0) {
+                        this.ps("ptr");
+                    } else {
+                        this.ps(this.llvm_type(inst.type, 0));
+                    }
+                    this.nl();
+                    this.add_var(inst.var, slot);
+                }
+                ii = inst.next;
+            }
+            bi = bi + 1;
+        }
+
+        if (func.block_n > 0) {
+            this.pl("br label %bb0");
+        } else if (this.cur_is_void_ != 0) {
+            this.pl("ret void");
+        } else {
+            this.pl("unreachable");
+        }
+
+        bi = 0;
+        while (bi < func.block_n) {
+            this.lower_block(bi);
+            bi = bi + 1;
+        }
+        this.pl("}");
+        this.nl();
+    }
+
+    // --- C entry point ----------------------------------------------------
+
+    void emit_entry_point() {
+        long fi = 0;
+        long found = -1;
+        while (fi < this.mu->fn_n) {
+            MFunction func;
+            unsafe {
+                func = this.mu->fns[fi];
+            }
+            if (this.streq(func.name, "main") && func.has_body != 0) {
+                found = fi;
+                break;
+            }
+            fi = fi + 1;
+        }
+        if (found < 0) {
+            return;
+        }
+        MFunction m;
+        unsafe {
+            m = this.mu->fns[found];
+        }
+        const long is_void = this.streq(this.llvm_type(m.ret, 0), "void") ? 1 : 0;
+        this.pl("; C1: C entry point — calls ivy_main()");
+        if (is_void != 0) {
+            this.pl("define i32 @main() {");
+            this.pl("  call void @ivy_main()");
+            this.pl("  ret i32 0");
+            this.pl("}");
+        } else {
+            this.ps("define ");
+            this.ps(this.llvm_type(m.ret, 0));
+            this.pl(" @main() {");
+            this.ps("  %r = call ");
+            this.ps(this.llvm_type(m.ret, 0));
+            this.pl(" @ivy_main()");
+            this.ps("  ret ");
+            this.ps(this.llvm_type(m.ret, 0));
+            this.pl(" %r");
+            this.pl("}");
+        }
+        this.nl();
+    }
+
+    // --- declarations -----------------------------------------------------
+
+    // Mirror of the `declare` loops of CodeGen::generate(): the signature has
+    // the parameter types only (no names) and extern "C" symbols are left
+    // unmangled.  Declarations are emitted before every definition.
+    void emit_declaration(long fi) {
+        MFunction f;
+        unsafe {
+            f = this.mu->fns[fi];
+        }
+        if (!this.check_fn_signature(f, 0, 0)) {
+            return;
+        }
+        this.ps("declare ");
+        this.ps(this.llvm_type(f.ret, 0));
+        this.ps(" @");
+        this.emit_fn_symbol(f.name, f.is_extern_c, fi, 0, 0);
+        this.ps("(");
+        long j = 0;
+        while (j < f.pn) {
+            MParam p;
+            unsafe {
+                p = this.mu->params[f.pstart + j];
+            }
+            if (j > 0) {
+                this.ps(", ");
+            }
+            this.ps(this.llvm_type(p.type, 0));
+            j = j + 1;
+        }
+        this.ps(")");
+        this.nl();
+    }
+
+    // --- driver entry -----------------------------------------------------
+
+    // Emit the whole module.  Returns 0 on success and 1 when a construct
+    // outside the H6.2b subset was found (the driver prints the diagnostic).
+    long emit() {
+        this.collect_all();
+        if (this.failed_ != 0) {
+            return 1;
+        }
+        this.pl("; LLVM IR emitted by ivy");
+        // CodeGen::generate() emits extern "C" declarations first, then the
+        // declarations of bodyless non-extern functions, then the definitions.
+        long fi = 0;
+        while (fi < this.mu->fn_n) {
+            MFunction func;
+            unsafe {
+                func = this.mu->fns[fi];
+            }
+            if (func.is_extern_c != 0 && func.has_body == 0) {
+                this.emit_declaration(fi);
+                if (this.failed_ != 0) {
+                    return 1;
+                }
+            }
+            fi = fi + 1;
+        }
+        fi = 0;
+        while (fi < this.mu->fn_n) {
+            MFunction func;
+            unsafe {
+                func = this.mu->fns[fi];
+            }
+            if (func.is_extern_c == 0 && func.has_body == 0) {
+                this.emit_declaration(fi);
+                if (this.failed_ != 0) {
+                    return 1;
+                }
+            }
+            fi = fi + 1;
+        }
+        fi = 0;
+        while (fi < this.mu->fn_n) {
+            MFunction func;
+            unsafe {
+                func = this.mu->fns[fi];
+            }
+            if (func.has_body != 0) {
+                this.lower_function(fi);
+                if (this.failed_ != 0) {
+                    return 1;
+                }
+            }
+            fi = fi + 1;
+        }
+        this.emit_entry_point();
+        if (this.failed_ != 0) {
+            return 1;
+        }
+        if (this.uses_io_print_ != 0) {
+            this.emit_io_runtime();
+        }
+        this.emit_string_constants();
+        if (this.failed_ != 0) {
+            return 1;
+        }
+        return 0;
+    }
+};

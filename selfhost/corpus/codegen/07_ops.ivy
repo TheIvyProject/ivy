@@ -1,0 +1,8 @@
+int32 main() {
+    int32 a = 7;
+    int32 b = 3;
+    int32 c = (a + b) * (a - b) / 2 % 5;
+    c = c & 6 | 1 ^ 2;
+    c = c << 1 >> 1;
+    return c;
+}

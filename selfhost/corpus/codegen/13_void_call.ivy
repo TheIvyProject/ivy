@@ -1,0 +1,8 @@
+void hello(int32 x) {
+    int32 y = x + 1;
+}
+
+int32 main() {
+    hello(4);
+    return 0;
+}

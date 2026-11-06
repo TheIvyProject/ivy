@@ -1,0 +1,6 @@
+int32 main() {
+    io::print("a\nb\t\"q\"\\end");
+    io::print("\x41");
+    io::print("\101");
+    return 0;
+}

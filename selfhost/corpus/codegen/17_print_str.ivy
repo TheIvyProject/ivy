@@ -1,0 +1,4 @@
+int32 main() {
+    io::print("hi");
+    return 0;
+}

@@ -1,0 +1,5 @@
+int32 main() {
+    io::eprint("e");
+    io::eprintln("f");
+    return 0;
+}

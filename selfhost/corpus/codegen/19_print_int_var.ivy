@@ -1,0 +1,5 @@
+int32 main() {
+    int32 x = 42;
+    io::println(x);
+    return 0;
+}

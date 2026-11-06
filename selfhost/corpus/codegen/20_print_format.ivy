@@ -1,0 +1,6 @@
+int32 main() {
+    int32 a = 1;
+    int32 b = 2;
+    io::println("x={} y={}", a, b);
+    return 0;
+}

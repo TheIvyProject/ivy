@@ -1,0 +1,9 @@
+int32 main() {
+    int32 x = 5;
+    int32 y = -x;
+    bool b = !(x == y);
+    if (b) {
+        return y;
+    }
+    return x;
+}

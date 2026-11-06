@@ -1,0 +1,9 @@
+int32 mix(int32 a, int32 b, int32 c) {
+    int32 d = a + b;
+    int32 e = d * c;
+    return e;
+}
+
+int32 main() {
+    return mix(1, 2, 3);
+}

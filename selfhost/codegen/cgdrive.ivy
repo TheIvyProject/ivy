@@ -1,0 +1,190 @@
+// selfhost/codegen/cgdrive.ivy - H6.2a driver for the selfhost textual LLVM IR
+// emitter.  Reads a source path from stdin, runs the selfhost frontend
+// (lexer -> preprocessor -> parser -> HIR -> MIR), then emits the scalar-subset
+// IR text through Emitter.  The IR goes to host stdout and the diagnostics to
+// host stderr, so the harness can compare raw bytes against `ivy --llvm`.
+//
+// Usage:
+//   ivy.exe selfhost\\codegen\\cgdrive.ivy -I selfhost\\parsing -I selfhost\\hir -I selfhost\\mir -I selfhost\\codegen -I std -o cgdrive.exe
+//   cgdrive.exe < fixture.ivy
+//
+// The pipeline mirrors the `--llvm` path of src/app/main.cpp: the frontend is
+// identical to interpdrive.ivy; the interpreter is replaced by Emitter.
+
+#pragma ivy cnumber
+import token;
+import lexer;
+import preprocessor;
+import ast;
+import parser;
+import hir;
+import hir_builder;
+import mir;
+import mir_builder;
+import emitter;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+long run() {
+    long result = 1;
+    unsafe {
+        char* path = io::read_line();
+        if (path == (char*) 0) {
+            io::eprintln("cgdrive: no path on stdin");
+            return 1;
+        }
+        uint64 np = __ivy_strlen(path);
+        while (np > 0 && (path[np - 1] == 13 || path[np - 1] == 10)) {
+            path[np - 1] = 0;
+            np = np - 1;
+        }
+
+        char* content = io::read_file(path);
+        if (content == (char*) 0) {
+            io::eprint("ivy: error: cannot open file '");
+            io::eprint(path);
+            io::eprintln("'");
+            __ivy_free(path);
+            return 2;
+        }
+
+        uint64 len = __ivy_strlen(content);
+        long cap = (long)len + 16;
+
+        Lexer lx;
+        lx.setup(content, (long)len, path);
+        lx.lex_all(cap);
+
+        long failed = 0;
+        char* fname = path;
+
+        if (!lx.had_error()) {
+            long in_n = lx.token_count();
+            long out_cap = in_n * 8 + 256;
+            Preprocessor pp;
+            pp.setup(lx.tokens(), in_n, content, (long)len, path, (long)np,
+                     out_cap, 1024);
+            pp.run();
+            long dc = pp.diag_count();
+            long di = 0;
+            bool pp_failed = false;
+            if (pp.has_line_file() != 0) {
+                fname = pp.line_file();
+            }
+            while (di < dc) {
+                long w = pp.diag_warn(di);
+                if (w == 0) {
+                    pp_failed = true;
+                }
+                io::eprint(fname);
+                io::eprint(":");
+                io::eprint("{}", pp.diag_line(di));
+                io::eprint(":");
+                io::eprint("{}", pp.diag_col(di));
+                if (w != 0) {
+                    io::eprint(": warning: ");
+                } else {
+                    io::eprint(": error: ");
+                }
+                io::eprintln("{}", pp.diag_msg(di));
+                di = di + 1;
+            }
+
+            if (!pp_failed) {
+                Parser pa;
+                pa.setup(pp.output(), pp.output_count(), pp.arena(), (long)len);
+                pa.set_cnumber(pp.cnumber_enabled());
+                pa.parse();
+                if (pa.failed() != 0) {
+                    failed = 1;
+                    long nd = pa.diag_count();
+                    long k = 0;
+                    while (k < nd) {
+                        io::eprint(fname);
+                        io::eprint(":");
+                        io::eprint("{}", pa.diag_line(k));
+                        io::eprint(":");
+                        io::eprint("{}", pa.diag_col(k));
+                        io::eprintln(": error: {}", pa.diag_msg(k));
+                        k = k + 1;
+                    }
+                } else {
+                    HirBuilder hb;
+                    hb.setup(pa, pp.output_count());
+                    hb.build();
+                    long hd = hb.diag_count();
+                    long k = 0;
+                    while (k < hd) {
+                        failed = 1;
+                        io::eprint(fname);
+                        io::eprint(":");
+                        io::eprint("{}", hb.diag_line(k));
+                        io::eprint(":");
+                        io::eprint("{}", hb.diag_col(k));
+                        io::eprintln(": error: {}", hb.diag_msg(k));
+                        k = k + 1;
+                    }
+                    if (hd == 0) {
+                        HUnit u = hb.unit();
+                        MirBuilder mb;
+                        mb.setup(u);
+                        mb.build();
+                        long md = mb.diag_count();
+                        k = 0;
+                        while (k < md) {
+                            failed = 1;
+                            io::eprint(fname);
+                            io::eprint(":");
+                            io::eprint("{}", mb.diag_line(k));
+                            io::eprint(":");
+                            io::eprint("{}", mb.diag_col(k));
+                            io::eprintln(": error: {}", mb.diag_msg(k));
+                            k = k + 1;
+                        }
+
+                        if (md == 0) {
+                            MUnit mu = mb.unit();
+                            Emitter em;
+                            em.setup(mu);
+                            long rc = em.emit();
+                            if (rc != 0) {
+                                io::eprint(fname);
+                                io::eprint(":");
+                                io::eprint("{}", em.err_line());
+                                io::eprint(":");
+                                io::eprint("{}", em.err_col());
+                                io::eprintln(": error: {}", em.err_msg());
+                                result = 1;
+                            } else {
+                                result = 0;
+                            }
+                            em.release();
+                        }
+                        mb.release();
+                    }
+                    hb.release();
+                }
+                pa.release();
+            }
+            pp.release();
+        } else {
+            failed = 1;
+        }
+        lx.release();
+
+        __ivy_free(content);
+        __ivy_free(path);
+    }
+    return result;
+}
+
+int32 main() {
+    long r = run();
+    unsafe {
+        return (int32) r;
+    }
+    return 0;
+}

@@ -1,0 +1,7 @@
+int32 main() {
+    int32 s = 0;
+    for (int32 i = 0; i < 3; i = i + 1) {
+        s = s + i;
+    }
+    return s;
+}
