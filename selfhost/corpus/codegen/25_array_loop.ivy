@@ -1,0 +1,15 @@
+int32 main() {
+    int32 a[4];
+    int32 i = 0;
+    while (i < 4) {
+        a[i] = i * 2;
+        i = i + 1;
+    }
+    int32 s = 0;
+    i = 0;
+    while (i < 4) {
+        s = s + a[i];
+        i = i + 1;
+    }
+    return s;
+}

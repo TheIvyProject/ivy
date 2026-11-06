@@ -1,0 +1,6 @@
+int32 main() {
+    int32 a[4];
+    int32 i = 2;
+    a[i] = 7;
+    return a[i];
+}

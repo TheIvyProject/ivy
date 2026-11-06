@@ -1,0 +1,7 @@
+int32 main() {
+    int32 a[3];
+    unsafe {
+        a[5] = 1;
+    }
+    return 0;
+}

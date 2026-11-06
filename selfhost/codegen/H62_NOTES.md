@@ -578,3 +578,194 @@ Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes, SHA
 `FFB376CF...313E`). Không commit/push. Không có `.obj`, `.ivm`, `.exe` trong
 cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62c\`.
+
+## 27. H6.2d - mảng một chiều + bounds check
+
+### 27.1 Phạm vi
+
+H6.2d mở rộng emitter (không viết lại) với đúng một nhóm cấu trúc:
+
+- kiểu mảng một chiều `T[N]` với `T` là scalar nguyên (`int32 a[3]`);
+- alloca mảng hoist lên entry, zeroinit tại điểm khai báo;
+- `a[i]` vừa là lvalue vừa là rvalue;
+- bounds check + panic message + `declare void @__ivy_panic(ptr, i32)`;
+- bỏ bounds check khi instruction nằm trong `unsafe`.
+
+Mọi thứ khác của H6.2a/b/c giữ nguyên byte-for-byte. Không dùng LLVM C API.
+
+Ghi chú về kind MIR: trong repo này `MExpr` kind **12** là `Index` (base ở
+`a`, index ở `b`), còn kind **13** là `Member`. Điều này đúng theo bảng kind
+trong `selfhost/mir/mir.ivy` và `MirBuilder::ex_index` (`add_expr(12)`). Mô tả
+stage ghi "kind 13 = Index" là nhầm; bản port bám theo mã nguồn và oracle.
+
+### 27.2 Kiểu mảng và zeroinit
+
+`llvm_type` trả `[N x T]` cho `array_size > 0`, với `T` là cùng `AType` nhưng
+`array_size = 0` (đúng nhánh đầu của `CodeGen::llvmType`). Chỉ scalar nguyên
+được chấp nhận; mảng con trỏ, mảng struct/float bị từ chối bằng diagnostic.
+Parser selfhost chỉ cho một hậu tố `[N]`, nên mảng nhiều chiều đã bị chặn từ
+trước.
+
+Alloca mảng đi qua vòng hoist sẵn có nên slot vẫn là `%a.<slot>` và thứ tự
+slot không đổi. Không có initializer, `lower_inst(Alloca)` phát zeroinit **tại
+điểm khai báo** (không phải trong prologue):
+
+```llvm
+%a.0 = alloca [3 x i32]
+...
+store [3 x i32] zeroinitializer, ptr %a.0
+```
+
+Vì vậy khai báo trong một block `if`/`while` sẽ đặt store zeroinit trong đúng
+block đó, giống oracle. Array initializer list bị từ chối
+(`array initializers are out of scope for H6.2d`).
+
+### 27.3 Hạ `a[i]`
+
+`lower_index_addr` dùng chung cho lvalue và rvalue, theo đúng thứ tự
+`CodeGen::lowerLValue`/`lowerExpr` nhánh `Index`:
+
+1. hạ biểu thức index trước;
+2. lấy `idxTy = llvm_type(index.type)` (giữ nguyên, không drop ref);
+3. cấp phát temporary GEP (`gep = newTemp()`);
+4. base phải là định danh mảng cục bộ; nó decay thành slot **không** cấp phát
+   temporary;
+5. bounds check (trừ `unsafe`);
+6. phát GEP sau label ok-block;
+7. rvalue mới cấp phát temporary load và phát `load <elemTy>, ptr <gep>`.
+
+GEP dùng `i32 0` cho chỉ số mảng ngoài và `idxTy` cho chỉ số phần tử:
+
+```llvm
+%tmp.0 = getelementptr [3 x i32], ptr %a.0, i32 0, i32 0
+```
+
+Index có kiểu `i64` in `i64 <idx>`; index `i32` in `i32 <idx>`.
+
+### 27.4 Thuật toán bounds check
+
+Bản port sao chép `CodeGen::emitBoundsCheck`, kể cả các quirk:
+
+- nếu `MInst.in_unsafe != 0` thì thoát ngay, không cấp phát temp, không thêm
+  chuỗi, không bật `declared_panic_`;
+- bật cờ panic;
+- **luôn** cấp phát `idx64 = newTemp()`, kể cả khi `idxTy == "i64"`; trường hợp
+  i64 temp này không bao giờ được phát, để lại lỗ hổng trong dãy `%tmp.N`;
+- cấp phát `oob = newTemp()` **trước** khi phát sext (thứ tự oracle);
+- nếu `idxTy != "i64"`: `idx64 = sext idxTy idx to i64`; ngược lại so sánh
+  trực tiếp `idx`;
+- `oob = icmp uge i64 <idxCasted>, <N>`;
+- cấp phát hai block `bb.i<K>` (panic) và `bb.i<K+1>` (ok), bộ đếm reset = 0
+  mỗi function;
+- phát `br i1 <oob>, label %bb.i<K>, label %bb.i<K+1>`;
+- block panic: intern message, cấp phát temp con trỏ message, phát
+  `getelementptr i8`, `call void @__ivy_panic(ptr <msg>, i32 <line>)`,
+  `unreachable`;
+- label ok-block;
+- GEP đã cấp phát ở bước 3 mới được phát ở đây.
+
+Ví dụ với index hằng `i32` và `N = 3` (đúng ground truth):
+
+```llvm
+%tmp.1 = sext i32 0 to i64
+%tmp.2 = icmp uge i64 %tmp.1, 3
+br i1 %tmp.2, label %bb.i0, label %bb.i1
+bb.i0:
+%tmp.3 = getelementptr i8, ptr @.str.0, i64 0
+call void @__ivy_panic(ptr %tmp.3, i32 3)
+unreachable
+bb.i1:
+%tmp.0 = getelementptr [3 x i32], ptr %a.0, i32 0, i32 0
+```
+
+Với index `i64`, `%tmp` dành cho `idx64` bị bỏ trống:
+
+```llvm
+%tmp.1 = load i64, ptr %i.1
+%tmp.4 = icmp uge i64 %tmp.1, 2
+...
+%tmp.2 = getelementptr [2 x i64], ptr %a.0, i32 0, i64 %tmp.1
+```
+
+### 27.5 Chuỗi panic và declare
+
+Message `index out of bounds (line <line>)` đi vào **map raw-bytes** (cùng map
+với segment của `io::print`), nên:
+
+- hai truy cập cùng một dòng nguồn dùng chung một `@.str.N`;
+- các dòng khác nhau nhận global kế tiếp, sau toàn bộ string pre-pass và io
+  segment (thứ tự first-seen trong lúc hạ hàm);
+- `emit_string_constants()` vẫn chạy cuối module;
+- nếu đã dùng panic, sau các global string mới phát
+  `declare void @__ivy_panic(ptr, i32)` (đúng thứ tự `generate()` của oracle).
+  Các declare runtime io vẫn nằm trước string constants.
+
+### 27.6 `unsafe`
+
+`lower_inst` gán `cur_in_unsafe_ = inst.in_unsafe` ở đầu mỗi instruction, đúng
+`CodeGen::lowerInst` (`inUnsafe_ = inst.inUnsafe`). Vì vậy `unsafe { a[5] = 1; }`
+không phát sext/icmp/br/panic/string, chỉ còn GEP và store:
+
+```llvm
+%tmp.0 = getelementptr [3 x i32], ptr %a.0, i32 0, i32 5
+store i32 1, ptr %tmp.0
+```
+
+Nếu module không có bounds check nào, không có `declare @__ivy_panic`.
+
+### 27.7 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `23_array_rw.ivy` | ghi/đọc hai index hằng, dedup message cùng dòng |
+| `24_array_var_index.ivy` | index biến `int32`, GEP `i32 %tmp` |
+| `25_array_loop.ivy` | `while` ghi rồi đọc mảng, block `bb.i` tăng dần |
+| `26_array_unsafe.ivy` | truy cập ngoài biên trong `unsafe`, không panic |
+| `27_array_compound.ivy` | `a[1] += 2`, hai lần hạ `a[1]` |
+| `28_array_types.ivy` | `int8[3]` (trunc) + `int64[2]` (không sext index) |
+
+Tất cả được oracle chấp nhận và so byte với `ivy --llvm`.
+
+### 27.8 Kết quả
+
+`cgdiff.ps1 -Dir selfhost/corpus/codegen` (2026-11-06, scratch dưới
+`...\opencode\h62d\runcg\`):
+
+```text
+[3/4] running 28 fixtures ...
+PASS 01_return_const.ivy
+...
+PASS 28_array_types.ivy
+[4/4] summary
+      PASS 28 / 28
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Regression interpreter `interpdiff.ps1 -Dir selfhost/corpus/interp`
+(scratch `...\h62d\runinterp\`): **PASS 23 / 23**, exit 0. Toàn bộ 01..22 của
+H6.2a/b/c vẫn byte-identical.
+
+### 27.9 Chưa hỗ trợ / defer
+
+1. Struct/aggregate, struct init list, `new`/`delete` (parser selfhost chưa
+   hỗ trợ).
+2. Array initializer list (`int32 a[3] = {...}`) - oracle từ chối primitive
+   array init; emitter cũng từ chối.
+3. Array parameter/return/decay ngoài `a[i]` - vẫn diagnostic.
+4. Mảng nhiều chiều, mảng con trỏ/struct/float.
+5. Float nói chung, wide string, variadic, template/virtual, Itanium mangling.
+
+### 27.10 Trạng thái H6.2d
+
+Tệp thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (mở rộng: `llvm_type` mảng, zeroinit, Index
+  lvalue/rvalue, bounds check, panic string/declare, `in_unsafe`);
+- `selfhost/corpus/codegen/23..28_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 27 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d ... 28/28` (không đánh dấu ✅).
+
+Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
+mtime 2026-10-21 16:41:44, SHA-256 `FFB376CF...313E`). Không commit/push.
+Không có `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62d\`.

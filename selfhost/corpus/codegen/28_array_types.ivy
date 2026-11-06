@@ -1,0 +1,7 @@
+int32 main() {
+    int8 a[3];
+    int64 b[2];
+    a[0] = 7;
+    b[1] = 9;
+    return a[0] + b[1];
+}
