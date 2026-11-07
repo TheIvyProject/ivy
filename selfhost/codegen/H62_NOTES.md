@@ -894,8 +894,9 @@ file.  `interpdiff.ps1` **23/23**, `build_smoke.ps1` PASS.
 ### 28.8 Chưa hỗ trợ / defer
 
 1. Struct parameter/return: emitter từ chối ở H6.2e; **đã mở ở H6.2f** (mục 29).
-2. Arrow `p->x` trên con trỏ struct: code có, nhưng parser selfhost từ chối
-   `(Point*)0` / `(Point*)__ivy_alloc(...)` nên chưa có fixture.
+2. Arrow `p->x` trên con trỏ struct: code có; **đã có fixture ở H6.2g** qua
+   `nullptr` (mục 30).  Cast `(Point*)0` / `(Point*)__ivy_alloc(...)` vẫn bị
+   parser selfhost từ chối.
 3. Struct initializer list / designated init, `new`/`delete`: parser selfhost
    chưa hỗ trợ.
 4. Struct template, kế thừa, method, virtual dispatch.
@@ -1013,8 +1014,9 @@ emitter (xem 29.8).
 ### 29.7 Chưa hỗ trợ / defer
 
 1. Pointer/reference/array/float trong signature: vẫn diagnostic H6.2b.
-2. Arrow `p->x` trên con trỏ struct: code có, nhưng parser selfhost từ chối
-   `(Point*)0` / `(Point*)__ivy_alloc(...)` nên chưa có fixture.
+2. Arrow `p->x` trên con trỏ struct: code có; **đã có fixture ở H6.2g** qua
+   `nullptr` (mục 30).  Cast `(Point*)0` / `(Point*)__ivy_alloc(...)` vẫn bị
+   parser selfhost từ chối.
 3. Struct initializer list / designated init, `new`/`delete`: parser selfhost
    chưa hỗ trợ.
 4. Struct template, kế thừa, method, virtual dispatch.
@@ -1043,3 +1045,98 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2f
 theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
 làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62f\`.
+
+## 30. H6.2g - `nullptr` + arrow `->`
+
+### 30.1 Phạm vi
+
+H6.2g mở đường có fixture cho arrow (phần code H6.2e trước đó chưa được test):
+
+- literal `nullptr` trong `unsafe`, gán cho biến con trỏ struct;
+- `p->x` đọc/ghi member qua con trỏ;
+- arrow lồng `p->in.a` (GEP nối tiếp);
+- biến cục bộ kiểu `Point*` với `alloca ptr` + `store ptr null`.
+
+`&q` vẫn ngoài phạm vi: HIR selfhost báo `struct 'Point' has no matching
+operator '&'` (và oracle bị crash ở chính input đó), nên không thể làm
+fixture.  Cast `(Point*)0` / `(Point*)__ivy_alloc(...)` vẫn bị parser selfhost
+từ chối.
+
+### 30.2 Ground truth oracle
+
+```llvm
+%p.0 = alloca ptr
+br label %bb0
+bb0:
+store ptr null, ptr %p.0
+%tmp.0 = load ptr, ptr %p.0
+%tmp.1 = getelementptr %struct.Point, ptr %tmp.0, i32 0, i32 0
+store i32 1, ptr %tmp.1
+```
+
+- `nullptr` không sinh temporary: in thẳng `null`;
+- `store ptr null` (không phải `inttoptr`);
+- arrow = `load ptr` từ slot rồi GEP `%struct.X, ptr <loaded>, i32 0, i32 <field>`;
+- nested arrow dùng GEP nối tiếp trên cùng giá trị pointer.
+
+### 30.3 Emitter
+
+- `VRef` thêm kind 4 = `nullptr`; `emit_val` in `null`;
+- `lower_expr` kind 5 -> `null_ref()`;
+- `emit_cast`: giữ nguyên `null` khi target là `ptr` (mirror oracle
+  `if (value == "null" && to == "ptr") return "null";`);
+- `llvm_type` map cả `nullptr` (HIR selfhost) và `nullptr_t` (oracle) -> `ptr`;
+- nhánh arrow trong `lower_member_addr` (đã viết ở H6.2e) giờ được chạy thật:
+  giảm `ptr_depth`, `lower_expr` base, rồi GEP.
+
+### 30.4 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `41_struct_arrow_nullptr.ivy` | `Point* p = nullptr`, ghi/đọc `p->x`, `p->y` |
+| `42_struct_arrow_read.ivy` | ghi `p->x` rồi đọc lại qua arrow |
+| `43_struct_arrow_nested.ivy` | `Outer* p = nullptr`, `p->tag`, `p->in.a` |
+
+### 30.5 Kết quả
+
+`cgdiff.ps1 -Dir selfhost/corpus/codegen` (2026-11-07, scratch dưới
+`...\opencode\h62g\run6\`):
+
+```text
+[3/4] running 43 fixtures ...
+PASS 01_return_const.ivy
+...
+PASS 43_struct_arrow_nested.ivy
+[4/4] summary
+      PASS 43 / 43
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 40 fixture H6.2a–f vẫn byte-identical.
+
+### 30.6 Chưa hỗ trợ / defer
+
+1. `&q` trên struct: HIR selfhost từ chối; oracle crash cùng input.
+2. Cast `(Point*)0`, `(Point*)__ivy_alloc(...)`: parser selfhost từ chối.
+3. Pointer/reference/array/float trong signature.
+4. Struct initializer list / designated init, `new`/`delete`.
+5. Struct template, kế thừa, method, virtual dispatch.
+6. Mảng struct, struct chứa mảng, float trong struct.
+7. Allocator, array parameter/return/decay, mảng nhiều chiều, float, wide
+   string, variadic, Itanium mangling.
+
+### 30.7 Trạng thái H6.2g
+
+Tệp thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (`nullptr` kind 4, `llvm_type`, `emit_cast`,
+  header);
+- `selfhost/corpus/codegen/41..43_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 30 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d+e+f+g ... 43/43` (không đánh dấu ✅).
+
+Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2g
+theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
+làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62g\`.

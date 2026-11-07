@@ -789,7 +789,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
 | H6.1 | LLVM C API binding (`import c`) | — | `codegen/codegen.ivy` | build smoke | ✅ 132 extern "C" + `LlvmC` facade; `build_smoke.ps1` PASS (2026-11-03) |
-| H6.2 | IR emitter | `codegen.cpp` | `codegen/emitter.ivy`, `codegen/cgdrive.ivy` | `corpus/codegen` | ◐ H6.2a+b+c+d+e+f: tập con scalar + tham số/call/khai báo/MSVC mangling + string literal & `io::print`/`println`/`eprint`/`eprintln` + mảng một chiều (`[N x T]`, zeroinit, `a[i]`, bounds check & `@__ivy_panic`) + struct cục bộ (`%struct.Name`, zeroinit, member `.` lồng, copy toàn bộ) + struct param/return by value (mangling fallback `H`) byte-identical 40/40 qua `codegen/cgdiff.ps1` (2026-11-07); H6.2g+ (arrow có fixture, allocator/array params/decay/multi-dim/float) chưa |
+| H6.2 | IR emitter | `codegen.cpp` | `codegen/emitter.ivy`, `codegen/cgdrive.ivy` | `corpus/codegen` | ◐ H6.2a+b+c+d+e+f+g: tập con scalar + tham số/call/khai báo/MSVC mangling + string literal & `io::print`/`println`/`eprint`/`eprintln` + mảng một chiều (`[N x T]`, zeroinit, `a[i]`, bounds check & `@__ivy_panic`) + struct cục bộ (`%struct.Name`, zeroinit, member `.` lồng, copy toàn bộ) + struct param/return by value (mangling fallback `H`) + `nullptr` & arrow `p->x` (kể cả nested) byte-identical 43/43 qua `codegen/cgdiff.ps1` (2026-11-07); H6.2h+ (allocator/pointer signature/array params/decay/multi-dim/float) chưa |
 | H6.3 | Object emission | `codegen.cpp` | `codegen/codegen.ivy` | link smoke | ☐ |
 | H6.4 | Linker orchestration | `codegen.cpp` | `codegen/codegen.ivy` | e2e run | ☐ |
 

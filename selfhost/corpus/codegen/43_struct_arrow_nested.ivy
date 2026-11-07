@@ -1,0 +1,12 @@
+struct Inner { int32 a; };
+struct Outer { int32 tag; Inner in; };
+
+int32 main() {
+    unsafe {
+        Outer* p = nullptr;
+        p->tag = 1;
+        p->in.a = 2;
+        return p->in.a;
+    }
+    return 0;
+}

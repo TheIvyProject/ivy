@@ -31,14 +31,16 @@
 //     and rvalue (nested members chain GEPs), and the arrow `->` lowering;
 //   * H6.2f: struct parameters and return values passed by value
 //     (`%struct.Point %arg0`, `define %struct.Point @...`), with the oracle's
-//     MSVC mangling fallback `H` for a struct type.
+//     MSVC mangling fallback `H` for a struct type;
+//   * H6.2g: `nullptr` locals (`store ptr null`) and the arrow `p->x` form
+//     on a struct pointer, including nested `p->in.a`.
 //
 // Out of scope (H6.3+): allocators, pointers/references in signatures, floats
 // (including float arguments to io::print), wide strings, variadic functions,
 // templates/virtual dispatch, Itanium mangling, arrays of structs/pointers,
 // array/struct initializer lists, array parameters or return types, array
 // decay outside `a[i]`, multi-dimensional arrays, `new`/`delete`, and the
-// arrow form on a null/allocator cast (the selfhost parser rejects `(T*)0`
+// arrow form on an allocator/`(T*)` cast (the selfhost parser rejects `(T*)0`
 // and `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
 // diagnostic and makes the driver exit nonzero instead of emitting wrong IR.
 //
@@ -62,7 +64,8 @@ extern "C" unsigned long long __ivy_strlen(const char* s);
 //   kind 0 - an integer literal (printed as its decimal text);
 //   kind 1 - a `%tmp.N` temporary;
 //   kind 2 - an alloca slot `%<name>.<N>` used as an lvalue;
-//   kind 3 - a bool literal (printed as `true`/`false`, like the oracle).
+//   kind 3 - a bool literal (printed as `true`/`false`, like the oracle);
+//   kind 4 - the `nullptr` literal (printed as `null`).
 export struct VRef {
     long kind;
     long ival;
@@ -982,7 +985,7 @@ export struct Emitter {
         if (this.streq(t.base, "size_t")) return "i64";
         if (this.streq(t.base, "ptrdiff_t")) return "i64";
         if (this.streq(t.base, "uptr_t")) return "i64";
-        if (this.streq(t.base, "nullptr_t")) return "ptr";
+        if (this.streq(t.base, "nullptr_t") || this.streq(t.base, "nullptr")) return "ptr";
         if (this.streq(t.base, "max_align_t")) return "i8";
         return "i8";
     }
@@ -1049,6 +1052,17 @@ export struct Emitter {
         return r;
     }
 
+    // H6.2g: the `nullptr` literal.  The oracle lowers NullptrLit to the
+    // string "null" and emitCast keeps it when the target is `ptr`.
+    VRef null_ref() {
+        VRef r;
+        r.kind = 4;
+        r.ival = 0;
+        r.idx = 0;
+        r.name = "";
+        return r;
+    }
+
     VRef new_temp() {
         VRef r;
         r.kind = 1;
@@ -1088,6 +1102,8 @@ export struct Emitter {
             } else {
                 this.ps("false");
             }
+        } else if (v.kind == 4) {
+            this.ps("null");
         } else {
             this.emit_slot(v.name, v.idx);
         }
@@ -1281,6 +1297,11 @@ export struct Emitter {
     VRef emit_cast(VRef v, const char* from, const char* to,
                    long from_unsigned, long line, long col) {
         if (this.streq(from, to)) {
+            return v;
+        }
+        // H6.2g: CodeGen::emitCast keeps the literal `null` when the target
+        // is a pointer (`if (value == "null" && to == "ptr") return "null";`).
+        if (v.kind == 4 && this.streq(to, "ptr")) {
             return v;
         }
         VRef t = this.new_temp();
@@ -2138,6 +2159,9 @@ export struct Emitter {
         }
         if (e.kind == 4) {
             return this.bool_ref(e.ival != 0 ? 1 : 0);
+        }
+        if (e.kind == 5) {
+            return this.null_ref();
         }
         if (e.kind == 6) {
             return this.lower_ident(e);

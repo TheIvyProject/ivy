@@ -1,0 +1,11 @@
+struct Point { int32 x; int32 y; };
+
+int32 main() {
+    unsafe {
+        Point* p = nullptr;
+        p->x = 1;
+        p->y = 2;
+        return p->x + p->y;
+    }
+    return 0;
+}
