@@ -1118,7 +1118,8 @@ Exit 0. Toàn bộ 40 fixture H6.2a–f vẫn byte-identical.
 
 1. `&q` trên struct: HIR selfhost từ chối; oracle crash cùng input.
 2. Cast `(Point*)0`, `(Point*)__ivy_alloc(...)`: parser selfhost từ chối.
-3. Pointer/reference/array/float trong signature.
+3. Pointer/array/float trong signature; reference parameter + reference cục bộ
+   **đã mở ở H6.2h** (mục 31).
 4. Struct initializer list / designated init, `new`/`delete`.
 5. Struct template, kế thừa, method, virtual dispatch.
 6. Mảng struct, struct chứa mảng, float trong struct.
@@ -1140,3 +1141,147 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2g
 theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
 làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62g\`.
+
+## 31. H6.2h - tham số reference (`T&`) và reference cục bộ
+
+### 31.1 Phạm vi
+
+H6.2h mở kiểu tham chiếu trong signature và trong khai báo cục bộ:
+
+- tham số `T&` (kể cả `Point&` và nhiều tham số reference);
+- truyền địa chỉ lvalue của đối số tại call site;
+- đọc/ghi qua tham chiếu (hai load cho rvalue, một load cho lvalue);
+- forwarding: tham số reference truyền tiếp cho tham số reference khác;
+- khai báo cục bộ `T& r = x;` (alias tới slot của `x`);
+- symbol MSVC dùng `AAV` cho kiểu reference.
+
+Vẫn ngoài phạm vi: raw pointer parameter/return (`T*`), reference return
+(`T& f()`), array parameter/return/decay, float, struct reference return,
+và mọi cấu trúc chưa có trong các tầng trước.
+
+### 31.2 Ground truth oracle
+
+```llvm
+define i32 @"?bump@@YHAAV@Z"(ptr %arg0) {
+%r.0 = alloca ptr
+store ptr %arg0, ptr %r.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %r.0          ; lowerLValue(r)
+%tmp.1 = load ptr, ptr %r.0          ; lowerExpr(r): địa chỉ
+%tmp.2 = load i32, ptr %tmp.1        ; lowerExpr(r): giá trị
+%tmp.3 = add i32 %tmp.2, 1
+store i32 %tmp.3, ptr %tmp.0
+%tmp.4 = load ptr, ptr %r.0
+%tmp.5 = load i32, ptr %tmp.4
+ret i32 %tmp.5
+}
+
+define i32 @ivy_main() {
+%x.0 = alloca i32
+...
+%tmp.0 = call i32 @"?bump@@YHAAV@Z"(ptr %x.0)
+ret i32 %tmp.0
+}
+```
+
+- tham số reference có LLVM type `ptr`, slot là `alloca ptr`, prologue
+  `store ptr %argN, ptr %<name>.<slot>`;
+- rvalue của biến reference = `load ptr` (lấy địa chỉ) rồi `load <T>`;
+- lvalue của biến reference = chỉ `load ptr` (địa chỉ đối tượng);
+- call site truyền `ptr <slot lvalue>` (không load giá trị);
+- reference cục bộ: slot `alloca ptr`, init `store ptr <lowerLValue(init)>`.
+
+### 31.3 Mangling
+
+`CodeGen::msvcMangleType` kiểm tra pointer/reference trước các kiểu scalar:
+
+```cpp
+if (t.pointerDepth > 0 || t.isReference) return t.isReference ? "AAV" : "PAV";
+```
+
+nên `int32 bump(int32& r)` thành `?bump@@YHAAV@Z`; `void swap(int32&, int32&)`
+thành `?swap@@YXAAVAAV@Z`; `int32 add(int32&, int32)` thành
+`?add@@YHAAVH@Z`; `int32 sum(Point&)` cũng là `?sum@@YHAAV@Z` (không phụ
+thuộc tên struct).
+
+### 31.4 Emitter
+
+- `Emitter` thêm mảng song song `vrefs_` (mirror `varIsRef_`) và
+  `add_var(name, slot, is_ref)` / `is_ref_var(name)`;
+- `check_fn_signature` chỉ còn từ chối `ptr_depth > 0`; reference parameter
+  được đi qua; reference return vẫn bị từ chối;
+- `emit_mangle_type` in `AAV` cho `is_ref`, `PAV` cho pointer;
+- `llvm_type` đã map reference (khi `drop_ref == 0`) thành `ptr`, và
+  `drop_ref == 1` thành kiểu giá trị;
+- `lower_function` đăng ký `p.type.is_ref` vào bảng biến và dùng `ptr` cho
+  prologue (đã generic từ H6.2a);
+- `lower_ident`: biến reference -> `load ptr` rồi `load <T>`;
+- `lower_lvalue` (kind 6): biến reference -> `load ptr`;
+- `lower_assign` / `lower_inst` Store: bỏ chốt từ chối; kiểu store dùng
+  `llvm_type(type, 1)` (strip reference);
+- `lower_inst` Return: bỏ chốt từ chối; `lower_expr` xử lý reference;
+- `lower_binary`: chỉ từ chối `ptr_depth`, cho phép toán hạng reference;
+- `lower_call`: nếu param là reference thì `lower_lvalue(arg)` + type `ptr`,
+  ngược lại giữ nguyên lower/cast như cũ;
+- `lower_inst` Alloca: reference cục bộ -> `store ptr <lower_lvalue(init)>,
+  ptr slot`;
+- `lower_io_arg` vẫn từ chối reference (io::print trên `T&` chưa có fixture).
+
+### 31.5 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `44_ref_param.ivy` | `int32 bump(int32& r)` ghi/đọc qua reference |
+| `45_ref_swap.ivy` | `void swap(int32&, int32&)` hai reference |
+| `46_ref_forward.ivy` | `outer(int32&)` gọi `inner(int32&)` (forwarding) |
+| `47_struct_ref_param.ivy` | `int32 sum(Point& p)` member qua reference |
+| `48_ref_local.ivy` | `int32& r = x;` reference cục bộ |
+| `49_ref_mixed.ivy` | `int32 add(int32&, int32)` trộn reference + value |
+
+### 31.6 Kết quả
+
+`cgdiff.ps1 -Dir selfhost/corpus/codegen` (2026-11-07, scratch dưới
+`...\opencode\h62h\run\`):
+
+```text
+[3/4] running 49 fixtures ...
+PASS 01_return_const.ivy
+...
+PASS 49_ref_mixed.ivy
+[4/4] summary
+      PASS 49 / 49
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 43 fixture H6.2a–g vẫn byte-identical.
+
+### 31.7 Chưa hỗ trợ / defer
+
+1. Raw pointer parameter/return (`T*`): oracle yêu cầu `unsafe` trong
+   signature ("raw pointer parameter type requires an unsafe block") và
+   parser từ chối `int32* get()`; chưa có cú pháp selfhost/oracle thống nhất.
+2. Reference return (`T& f()`): vẫn diagnostic H6.2b.
+3. Array parameter/return/decay, mảng nhiều chiều.
+4. Float, wide string, variadic, Itanium mangling.
+5. `&q` trên struct (HIR selfhost từ chối; oracle crash cùng input), cast
+   `(Point*)0` / `(Point*)__ivy_alloc(...)`, initializer list, `new`/`delete`,
+   template/kế thừa/method/virtual.
+6. io::print trên biểu thức reference.
+
+### 31.8 Trạng thái H6.2h
+
+Tệp thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (bảng `vrefs_`, `add_var`/`is_ref_var`,
+  `check_fn_signature`, `emit_mangle_type`, `lower_ident`, `lower_lvalue`,
+  `lower_assign`, `lower_binary`, `lower_call`, Alloca/Store/Return, header);
+- `selfhost/corpus/codegen/44..49_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 31 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d+e+f+g+h ... 49/49` (không đánh dấu ✅).
+
+Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2h
+theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
+làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62h\`.

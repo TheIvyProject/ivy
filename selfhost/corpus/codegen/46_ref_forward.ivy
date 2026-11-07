@@ -1,0 +1,13 @@
+int32 inner(int32& r) {
+    r = r + 2;
+    return r;
+}
+
+int32 outer(int32& r) {
+    return inner(r);
+}
+
+int32 main() {
+    int32 x = 1;
+    return outer(x);
+}

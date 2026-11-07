@@ -1,0 +1,12 @@
+struct Point { int32 x; int32 y; };
+
+int32 sum(Point& p) {
+    return p.x + p.y;
+}
+
+int32 main() {
+    Point q;
+    q.x = 1;
+    q.y = 2;
+    return sum(q);
+}

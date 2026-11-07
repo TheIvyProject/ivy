@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a+H6.2b+H6.2c+H6.2d+H6.2e textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2h textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a + H6.2b + H6.2c + H6.2d + H6.2e):
+// The supported subset is deliberately small (H6.2a..H6.2h):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -33,15 +33,20 @@
 //     (`%struct.Point %arg0`, `define %struct.Point @...`), with the oracle's
 //     MSVC mangling fallback `H` for a struct type;
 //   * H6.2g: `nullptr` locals (`store ptr null`) and the arrow `p->x` form
-//     on a struct pointer, including nested `p->in.a`.
+//     on a struct pointer, including nested `p->in.a`;
+//   * H6.2h: reference parameters and reference locals (`int32& r`): a
+//     `ptr %argN`/`alloca ptr` slot that holds the referenced address, the
+//     two-load rvalue and the one-load lvalue, call sites passing
+//     `ptr <lvalue slot>`, and the oracle's `AAV` MSVC mangling.
 //
-// Out of scope (H6.3+): allocators, pointers/references in signatures, floats
-// (including float arguments to io::print), wide strings, variadic functions,
-// templates/virtual dispatch, Itanium mangling, arrays of structs/pointers,
-// array/struct initializer lists, array parameters or return types, array
-// decay outside `a[i]`, multi-dimensional arrays, `new`/`delete`, and the
-// arrow form on an allocator/`(T*)` cast (the selfhost parser rejects `(T*)0`
-// and `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
+// Out of scope (H6.3+): allocators, raw pointer parameters/returns,
+// reference returns, floats (including float arguments
+// to io::print), wide strings, variadic functions, templates/virtual
+// dispatch, Itanium mangling, arrays of structs/pointers, array/struct
+// initializer lists, array parameters or return types, array decay outside
+// `a[i]`, multi-dimensional arrays, `new`/`delete`, and the arrow form on an
+// allocator/`(T*)` cast (the selfhost parser rejects `(T*)0` and
+// `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
 // diagnostic and makes the driver exit nonzero instead of emitting wrong IR.
 //
 // The formatting mirrors CodeGen::lowerFunction/lowerBlock/lowerInst/
@@ -99,6 +104,10 @@ export struct Emitter {
     // The arrays are heap blocks so the record stays a plain value type.
     void* vnames_;
     void* vnums_;
+    // H6.2h: parallel flag array, the oracle's `varIsRef_`.  A reference
+    // parameter's slot holds the address of the referenced object, so the
+    // variable table must remember which slots are references.
+    void* vrefs_;
     long vn_;
     long vcap_;
     // Per-call argument scratch: `arg_vals_` holds VRef records (32 bytes
@@ -200,6 +209,7 @@ export struct Emitter {
         unsafe {
             this.vnames_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vnums_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
+            this.vrefs_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.arg_vals_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 32);
             this.arg_tys_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 8);
             this.str_bytes_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
@@ -217,6 +227,7 @@ export struct Emitter {
         unsafe {
             __ivy_free(this.vnames_);
             __ivy_free(this.vnums_);
+            __ivy_free(this.vrefs_);
             __ivy_free(this.arg_vals_);
             __ivy_free(this.arg_tys_);
             __ivy_free(this.str_bytes_);
@@ -869,7 +880,7 @@ export struct Emitter {
         this.vn_ = 0;
     }
 
-    void add_var(const char* name, long slot) {
+    void add_var(const char* name, long slot, long is_ref) {
         if (this.vn_ >= this.vcap_) {
             this.fail(0, 0, "too many variables for the H6.2a variable table");
             return;
@@ -880,8 +891,10 @@ export struct Emitter {
             // Parser::tnames_).
             long* names = (long*) this.vnames_;
             long* nums = (long*) this.vnums_;
+            long* refs = (long*) this.vrefs_;
             names[this.vn_] = (long) name;
             nums[this.vn_] = slot;
+            refs[this.vn_] = is_ref;
         }
         this.vn_ = this.vn_ + 1;
     }
@@ -900,6 +913,24 @@ export struct Emitter {
             }
         }
         return -1;
+    }
+
+    // H6.2h: mirror of the oracle's `varIsRef_` lookup.  Returns 1 when the
+    // variable's alloca holds an address (reference parameter).
+    long is_ref_var(const char* name) {
+        long i = this.vn_ - 1;
+        unsafe {
+            long* names = (long*) this.vnames_;
+            long* refs = (long*) this.vrefs_;
+            while (i >= 0) {
+                const char* nm = reinterpret_cast<const char*>(names[i]);
+                if (this.streq(nm, name)) {
+                    return refs[i];
+                }
+                i = i - 1;
+            }
+        }
+        return 0;
     }
 
     // --- types ------------------------------------------------------------
@@ -1166,8 +1197,8 @@ export struct Emitter {
                 this.fail(line, col, "array parameters are out of scope for H6.2b");
                 return false;
             }
-            if (p.type.ptr_depth > 0 || p.type.is_ref != 0) {
-                this.fail(line, col, "pointer/reference parameters are out of scope for H6.2b");
+            if (p.type.ptr_depth > 0) {
+                this.fail(line, col, "pointer parameters are out of scope for H6.2h");
                 return false;
             }
             if (this.is_float_base(p.type.base)) {
@@ -1190,10 +1221,10 @@ export struct Emitter {
             this.fail(line, col, "array type mangling is out of scope for H6.2b");
             return;
         }
-        if (t.ptr_depth > 0 || t.is_ref != 0) {
-            this.fail(line, col, "pointer/reference type mangling is out of scope for H6.2b");
-            return;
-        }
+        // H6.2h: the oracle's msvcMangleType maps every pointer/reference to
+        // the same placeholder ("AAV" for a reference, "PAV" otherwise).
+        if (t.is_ref != 0) { this.ps("AAV"); return; }
+        if (t.ptr_depth > 0) { this.ps("PAV"); return; }
         if (this.streq(t.base, "void")) { this.ps("?A"); return; }
         if (this.streq(t.base, "bool")) { this.ps("_N"); return; }
         if (this.streq(t.base, "char")) { this.ps("D"); return; }
@@ -1364,9 +1395,23 @@ export struct Emitter {
             this.fail(e.line, e.col, "internal: identifier is not in the variable table");
             return this.imm(0);
         }
-        if (e.type.is_ref != 0) {
-            this.fail(e.line, e.col, "reference variables are out of scope for H6.2a");
-            return this.imm(0);
+        if (this.is_ref_var(e.sval) != 0 || e.type.is_ref != 0) {
+            // H6.2h: reference variable (reference parameter).  The slot holds
+            // the address of the referenced object; load it, then load the
+            // value through it (CodeGen::lowerExpr's IdentRef reference case).
+            VRef addr = this.new_temp();
+            this.emit_val(addr);
+            this.ps(" = load ptr, ptr ");
+            this.emit_slot(e.sval, slot);
+            this.nl();
+            VRef t = this.new_temp();
+            this.emit_val(t);
+            this.ps(" = load ");
+            this.ps(this.llvm_type(e.type, 1));
+            this.ps(", ptr ");
+            this.emit_val(addr);
+            this.nl();
+            return t;
         }
         if (e.type.array_size > 0) {
             this.fail(e.line, e.col, "array decay is out of scope for H6.2d");
@@ -1573,8 +1618,7 @@ export struct Emitter {
             lhs = this.mu->exprs[e.a];
             rhs = this.mu->exprs[e.b];
         }
-        if (lhs.type.ptr_depth > 0 || lhs.type.is_ref != 0 ||
-            rhs.type.ptr_depth > 0 || rhs.type.is_ref != 0) {
+        if (lhs.type.ptr_depth > 0 || rhs.type.ptr_depth > 0) {
             this.fail(e.line, e.col, "pointer arithmetic is out of scope for H6.2a");
             return this.imm(0);
         }
@@ -1675,14 +1719,10 @@ export struct Emitter {
         unsafe {
             lhs = this.mu->exprs[e.a];
         }
-        if (lhs.type.is_ref != 0) {
-            this.fail(e.line, e.col, "reference assignment is out of scope for H6.2a");
-            return this.imm(0);
-        }
         VRef p = this.lower_lvalue(e.a);
         VRef v = this.lower_expr(e.b);
         this.ps("store ");
-        this.ps(this.llvm_type(lhs.type, 0));
+        this.ps(this.llvm_type(lhs.type, 1));
         this.ps(" ");
         this.emit_val(v);
         this.ps(", ptr ");
@@ -1735,8 +1775,8 @@ export struct Emitter {
                     this.arg_sp_ = base;
                     return this.imm(0);
                 }
-                if (a.type.ptr_depth > 0 || a.type.is_ref != 0) {
-                    this.fail(e.line, e.col, "pointer/reference arguments are out of scope for H6.2b");
+                if (a.type.ptr_depth > 0) {
+                    this.fail(e.line, e.col, "pointer arguments are out of scope for H6.2b");
                     this.arg_sp_ = base;
                     return this.imm(0);
                 }
@@ -1745,17 +1785,30 @@ export struct Emitter {
                     this.arg_sp_ = base;
                     return this.imm(0);
                 }
-                VRef v = this.lower_expr(ai);
-                const char* ty = this.llvm_type(a.type, 1);
+                VRef v;
+                const char* ty = "i8";
                 if (j < callee.pn) {
                     MParam p = this.mu->params[callee.pstart + j];
-                    const char* pty = this.llvm_type(p.type, 1);
-                    if (!this.streq(pty, "void") && !this.streq(pty, ty)) {
-                        v = this.emit_cast(v, ty, pty,
-                                           a.type.is_unsigned != 0 ? 1 : 0,
-                                           e.line, e.col);
-                        ty = pty;
+                    if (p.type.is_ref != 0) {
+                        // H6.2h: pass by reference - emit the address of the
+                        // lvalue and pass it as `ptr` (CodeGen::lowerExpr's
+                        // Call branch for a reference parameter).
+                        v = this.lower_lvalue(ai);
+                        ty = "ptr";
+                    } else {
+                        v = this.lower_expr(ai);
+                        ty = this.llvm_type(a.type, 1);
+                        const char* pty = this.llvm_type(p.type, 1);
+                        if (!this.streq(pty, "void") && !this.streq(pty, ty)) {
+                            v = this.emit_cast(v, ty, pty,
+                                               a.type.is_unsigned != 0 ? 1 : 0,
+                                               e.line, e.col);
+                            ty = pty;
+                        }
                     }
+                } else {
+                    v = this.lower_expr(ai);
+                    ty = this.llvm_type(a.type, 1);
                 }
                 VRef* av = (VRef*) this.arg_vals_;
                 av[base + j] = v;
@@ -2230,6 +2283,16 @@ export struct Emitter {
                 this.fail(e.line, e.col, "internal: lvalue is not in the variable table");
                 return this.imm(0);
             }
+            if (this.is_ref_var(e.sval) != 0 || e.type.is_ref != 0) {
+                // H6.2h: a reference variable's slot holds the address of the
+                // referenced object (CodeGen::lowerLValue's IdentRef case).
+                VRef t = this.new_temp();
+                this.emit_val(t);
+                this.ps(" = load ptr, ptr ");
+                this.emit_slot(e.sval, slot);
+                this.nl();
+                return t;
+            }
             return this.slot_ref(e.sval, slot);
         }
         if (e.kind == 12) {
@@ -2257,7 +2320,18 @@ export struct Emitter {
                 return;
             }
             if (inst.type.is_ref != 0) {
-                this.fail(inst.line, inst.col, "reference locals are out of scope for H6.2a");
+                // H6.2h: a reference local aliases the referenced object; the
+                // slot already holds a `ptr` and the init is an lvalue whose
+                // address is stored (CodeGen::lowerInst's Alloca reference
+                // branch).
+                if (inst.a >= 0) {
+                    VRef addr = this.lower_lvalue(inst.a);
+                    this.ps("store ptr ");
+                    this.emit_val(addr);
+                    this.ps(", ptr ");
+                    this.emit_slot(inst.var, slot);
+                    this.nl();
+                }
                 return;
             }
             if (inst.type.array_size > 0) {
@@ -2321,10 +2395,6 @@ export struct Emitter {
                 target = this.mu->exprs[inst.a];
                 value = this.mu->exprs[inst.b];
             }
-            if (target.type.is_ref != 0) {
-                this.fail(inst.line, inst.col, "reference stores are out of scope for H6.2a");
-                return;
-            }
             VRef p = this.lower_lvalue(inst.a);
             VRef v = this.lower_expr(inst.b);
             VRef c = this.emit_cast(v, this.llvm_type(value.type, 1),
@@ -2351,10 +2421,6 @@ export struct Emitter {
                 MExpr rv;
                 unsafe {
                     rv = this.mu->exprs[inst.a];
-                }
-                if (rv.type.is_ref != 0) {
-                    this.fail(inst.line, inst.col, "reference returns are out of scope for H6.2a");
-                    return;
                 }
                 VRef v = this.lower_expr(inst.a);
                 VRef c = this.emit_cast(v, this.llvm_type(rv.type, 1), this.cur_ret_ty_,
@@ -2482,7 +2548,7 @@ export struct Emitter {
             this.ps(", ptr ");
             this.emit_slot(p.name, slot);
             this.nl();
-            this.add_var(p.name, slot);
+            this.add_var(p.name, slot, p.type.is_ref != 0 ? 1 : 0);
             i = i + 1;
         }
 
@@ -2511,7 +2577,7 @@ export struct Emitter {
                         this.ps(this.llvm_type(inst.type, 0));
                     }
                     this.nl();
-                    this.add_var(inst.var, slot);
+                    this.add_var(inst.var, slot, inst.type.is_ref != 0 ? 1 : 0);
                 }
                 ii = inst.next;
             }

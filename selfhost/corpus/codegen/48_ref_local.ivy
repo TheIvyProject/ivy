@@ -1,0 +1,6 @@
+int32 main() {
+    int32 x = 5;
+    int32& r = x;
+    r = r + 1;
+    return r;
+}
