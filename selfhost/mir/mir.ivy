@@ -128,6 +128,24 @@ export struct MFunction {
     long has_body;       // 0 = declaration only
 };
 
+// H6.2e: a struct field in MIR.  The type is already alias/template resolved
+// by the HIR builder; the index in the struct's field run is the GEP index.
+export struct MField {
+    const char* name;
+    AType type;
+};
+
+// H6.2e: a struct/class definition in MIR.  `fields` points into the
+// contiguous `MUnit.fields` pool.  The order is the source order of the
+// accepted declarations (the emitter prints them in this order).
+export struct MStruct {
+    const char* name;
+    MField* fields;
+    long nfields;
+    long line;
+    long col;
+};
+
 // A whole MIR translation unit.  The pools are owned by MirBuilder.
 export struct MUnit {
     MFunction* fns;
@@ -158,4 +176,11 @@ export struct MUnit {
     long* arm_blk;
     long arm_n;
     long arm_cap;
+    // H6.2e: the struct definitions and the contiguous field run.
+    MStruct* structs;
+    long st_n;
+    long st_cap;
+    MField* fields;
+    long fld_n;
+    long fld_cap;
 };

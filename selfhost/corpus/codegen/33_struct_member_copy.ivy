@@ -1,0 +1,10 @@
+struct Inner { int32 a; int32 b; };
+struct Outer { int32 tag; Inner in; };
+
+int32 main() {
+    Outer o;
+    o.in.a = 1;
+    o.in.b = 2;
+    Inner q = o.in;
+    return q.a + q.b;
+}

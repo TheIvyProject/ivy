@@ -321,6 +321,23 @@ export struct HirBuilder {
                 li = li + 1;
             }
 
+            // H6.2e: the exported struct definitions and their fields.  The
+            // field pool is sized from the parser's declarations; the extra
+            // slack covers structs synthesised during template instantiation.
+            long total_fields = 8;
+            long sfi = 0;
+            while (sfi < nstructs) {
+                AStruct sf = this.get_struct(sfi);
+                total_fields = total_fields + sf.nfields;
+                sfi = sfi + 1;
+            }
+            this.u.struct_cap = nstructs + 8;
+            this.u.structs = (HStruct*) __ivy_alloc(this.u.struct_cap * 40);
+            this.u.struct_n = 0;
+            this.u.fld_cap = total_fields;
+            this.u.fields = (HField*) __ivy_alloc(this.u.fld_cap * 56);
+            this.u.fld_n = 0;
+
             this.cst_bname_ = (long*) __ivy_alloc((ntoks + 16) * 8);
             this.cst_bint_ = (long*) __ivy_alloc((ntoks + 16) * 8);
             this.cst_bi_ = (long*) __ivy_alloc((ntoks + 16) * 8);
@@ -459,6 +476,8 @@ export struct HirBuilder {
             __ivy_free(this.u.params);
             __ivy_free(this.u.cases);
             __ivy_free(this.u.args);
+            __ivy_free(this.u.structs);
+            __ivy_free(this.u.fields);
             __ivy_free(this.snm_);
             __ivy_free(this.sty_);
             __ivy_free(this.smv_);
@@ -3041,6 +3060,41 @@ export struct HirBuilder {
             }
             // The field layout is needed by `sizeof` / `alignof`.
             this.layout_struct(i);
+            // H6.2e: export the definition (name + resolved field types) so
+            // the MIR and the emitter can emit `%struct.Name` and resolve
+            // member accesses.  Only accepted (non-template, non-duplicate)
+            // declarations reach this point, matching the oracle's HIR.
+            long hsi = this.u.struct_n;
+            if (hsi < this.u.struct_cap) {
+                unsafe {
+                    this.u.structs[hsi].name = sd.name;
+                    this.u.structs[hsi].fields = this.u.fields + this.u.fld_n;
+                    this.u.structs[hsi].nfields = 0;
+                    this.u.structs[hsi].line = sd.line;
+                    this.u.structs[hsi].col = sd.col;
+                }
+                long fj = 0;
+                while (fj < sd.nfields) {
+                    AField sf;
+                    unsafe {
+                        sf = sd.fields[fj];
+                    }
+                    AType ft = this.resolve_template_struct_type(
+                        this.resolve_alias(sf.type), sf.line, sf.col);
+                    long fi = this.u.fld_n;
+                    if (fi < this.u.fld_cap) {
+                        unsafe {
+                            this.u.fields[fi].name = sf.name;
+                            this.u.fields[fi].type = ft;
+                            this.u.structs[hsi].nfields =
+                                this.u.structs[hsi].nfields + 1;
+                        }
+                        this.u.fld_n = fi + 1;
+                    }
+                    fj = fj + 1;
+                }
+                this.u.struct_n = hsi + 1;
+            }
             long j = 0;
             while (j < sd.nmethods) {
                 AFunction mf;

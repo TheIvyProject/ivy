@@ -1,0 +1,10 @@
+struct S { bool b; int8 i8; int64 i64; uint32 u; };
+
+int32 main() {
+    S s;
+    s.b = true;
+    s.i8 = 1;
+    s.i64 = 2;
+    s.u = 3;
+    return s.i8;
+}

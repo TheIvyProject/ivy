@@ -769,3 +769,153 @@ Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
 mtime 2026-10-21 16:41:44, SHA-256 `FFB376CF...313E`). Không commit/push.
 Không có `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62d\`.
+
+## 28. H6.2e - struct cục bộ, member, copy và nested
+
+### 28.1 Phạm vi
+
+H6.2e chỉ mở đúng phần struct mà frontend selfhost đã dựng được:
+
+- định nghĩa `struct`/`class` không template, không trùng tên;
+- biến cục bộ kiểu struct (kể cả trong block lồng nhau);
+- gán/đọc member bằng `.`, kể cả member lồng `o.in.a`;
+- copy toàn bộ struct (`Point q = p;` và `q = p;`);
+- zeroinit struct chưa khởi tạo;
+- in định nghĩa `%struct.Name = type { ... }`, kể cả struct không dùng.
+
+Struct parameter/return bị từ chối rõ ràng (`struct parameters/return types
+are out of scope for H6.2e`) vì mangling struct chưa port.  Arrow `->` đã có
+code lowering nhưng không có fixture: parser selfhost từ chối cast
+`(Point*)0` và `(Point*)__ivy_alloc(...)`, nên không tạo được con trỏ struct.
+
+### 28.2 Pool HIR
+
+`selfhost/hir/hir.ivy` thêm:
+
+```ivy
+export struct HField { const char* name; AType type; };
+export struct HStruct { const char* name; HField* fields; long nfields; long line; long col; };
+```
+
+`HUnit` thêm `structs`/`struct_n`/`struct_cap` và `fields`/`fld_n`/`fld_cap`.
+`HirBuilder.setup` cấp phát pool theo `struct_count()` + tổng `nfields` (có
+slack); `build_structs` export sau `layout_struct(i)` với kiểu field đã
+`resolve_template_struct_type(resolve_alias(...))`; `release` free cả hai pool.
+Chỉ declaration được chấp nhận mới vào pool, đúng như oracle bỏ template và
+bản trùng.
+
+Lưu ý: `HUnit` đã có `st_n` là **số statement**.  Lần đầu đặt tên struct count
+là `st_n` đã ghi đè, làm unit không struct đọc rác (`st_n=7`) và emitter in
+`%struct.?2???` rồi crash.  Tên đúng là `struct_n`/`struct_cap`.
+
+### 28.3 Pool MIR
+
+`selfhost/mir/mir.ivy` thêm `MField`/`MStruct` (cùng shape với HIR) và
+`MUnit.structs`/`st_n`/`st_cap`, `MUnit.fields`/`fld_n`/`fld_cap`.
+`MirBuilder.setup` cấp phát từ `u.struct_n`/`u.fld_n`; `build` copy struct
+**trước** vòng function (giữ thứ tự source); `release` free.  `MStruct.fields`
+trỏ vào run field liên tục, nên index trong run chính là GEP field index.
+
+### 28.4 Emitter
+
+- `setup` copy thêm 6 field struct vào bản `MUnit` heap (nâng allocation
+  256 -> 320 byte).
+- `make_struct_type_name` / `find_struct` / `find_field` / `is_struct_type`:
+  helper tra cứu; tên `%struct.<name>` cấp phát heap và leak như spelling
+  `[N x T]`.
+- `emit_struct_defs` in ngay sau header `; LLVM IR emitted by ivy`, trước
+  mọi `declare`; mỗi struct một dòng, field ngăn bằng `, `; nếu có ít nhất
+  một struct thì in thêm một dòng trống.
+- `llvm_type`: struct value -> `%struct.<name>`; struct pointer vẫn là `ptr`
+  (nhánh pointer đứng trước).
+- `lower_member_addr`: base value đi qua `lower_lvalue`, base arrow đi qua
+  `lower_expr` rồi giảm `ptr_depth`; phát
+  `getelementptr %struct.X, ptr <base>, i32 0, i32 <field>`.
+- `lower_expr` kind 13: member rvalue = địa chỉ + `load` kiểu field.
+- `lower_lvalue` kind 13: member lvalue = địa chỉ GEP (nested tự nối tiếp).
+- `lower_inst` decl: struct chưa khởi tạo phát
+  `store %struct.X zeroinitializer, ptr %slot` tại điểm khai báo (alloca đã
+  hoist từ entry block); struct có init đi qua store chung nên thành
+  `load %struct.X` + `store %struct.X` (copy toàn bộ).
+- `check_fn_signature`: từ chối struct return và struct parameter.
+
+### 28.5 Quirk oracle đã khớp
+
+```llvm
+%struct.Point = type { i32, i32 }
+%struct.Empty = type {  }
+```
+
+- empty struct có **hai space** giữa `{` và `}`;
+- một dòng trống sau block struct (khi có struct);
+- định nghĩa đứng sau header, trước extern declare, theo thứ tự source;
+- struct không dùng vẫn in;
+- local struct chưa khởi tạo: `store %struct.X zeroinitializer, ptr %p.0`;
+- copy: `%tmp.N = load %struct.X, ptr %src` rồi
+  `store %struct.X %tmp.N, ptr %dst`;
+- member: GEP `i32 0, i32 <idx>`, field index là số thứ tự trong struct;
+- nested member nối GEP liên tiếp trên cùng base;
+- `emit_cast` trả nguyên value khi from == to nên struct copy không sinh cast.
+
+### 28.6 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `29_struct_local.ivy` | struct local, ghi/đọc hai field |
+| `30_struct_copy.ivy` | copy khởi tạo `Point q = p` + gán `r = q` |
+| `31_struct_nested.ivy` | `Outer` chứa `Inner`, member lồng `o.in.a` |
+| `32_struct_fields.ivy` | field `bool`/`int8`/`int64`/`uint32` |
+| `33_struct_member_copy.ivy` | copy member struct sang local `Inner q = o.in` |
+| `34_struct_multi.ivy` | nhiều struct, có `struct Empty {}` |
+| `35_struct_inner_block.ivy` | struct local trong block `if` |
+| `36_struct_copy_write.ivy` | copy rồi sửa bản copy, bản gốc không đổi |
+
+Tất cả được oracle chấp nhận và so byte với `ivy --llvm`.
+
+### 28.7 Kết quả
+
+`cgdiff.ps1 -Dir selfhost/corpus/codegen` (2026-11-06, scratch dưới
+`...\opencode\h62e\run3\`):
+
+```text
+[3/4] running 36 fixtures ...
+PASS 01_return_const.ivy
+...
+PASS 36_struct_copy_write.ivy
+[4/4] summary
+      PASS 36 / 36
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Regression HIR (byte-identical): name 27, type 124, constexpr 70,
+template 99, borrow 45, move 60 file.  Regression MIR: cfg 75, lifetime 18
+file.  `interpdiff.ps1` **23/23**, `build_smoke.ps1` PASS.
+
+### 28.8 Chưa hỗ trợ / defer
+
+1. Struct parameter/return: emitter từ chối; mangling struct chưa port.
+2. Arrow `p->x` trên con trỏ struct: code có, nhưng parser selfhost từ chối
+   `(Point*)0` / `(Point*)__ivy_alloc(...)` nên chưa có fixture.
+3. Struct initializer list / designated init, `new`/`delete`: parser selfhost
+   chưa hỗ trợ.
+4. Struct template, kế thừa, method, virtual dispatch.
+5. Mảng struct, struct chứa mảng, float trong struct.
+6. Allocator, pointer/reference trong signature, array parameter/return/decay,
+   mảng nhiều chiều, float, wide string, variadic, Itanium mangling.
+
+### 28.9 Trạng thái H6.2e
+
+Tệp thêm/sửa:
+
+- `selfhost/hir/hir.ivy`, `selfhost/hir/hir_builder.ivy` (pool `HStruct`/`HField`);
+- `selfhost/mir/mir.ivy`, `selfhost/mir/mir_builder.ivy` (pool `MStruct`/`MField`);
+- `selfhost/codegen/emitter.ivy` (struct type, member, copy, zeroinit, reject
+  signature);
+- `selfhost/corpus/codegen/29..36_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 28 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d+e ... 36/36` (không đánh dấu ✅).
+
+Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không commit/push.
+Không có `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62e\`.

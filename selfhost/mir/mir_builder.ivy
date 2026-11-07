@@ -639,6 +639,16 @@ export struct MirBuilder {
             this.mu.arm_blk = (long*) __ivy_alloc(narm * 8);
             this.mu.arm_n = 0;
 
+            // H6.2e: the struct definitions and their field run.
+            long nst = u.struct_n + 8;
+            this.mu.st_cap = nst;
+            this.mu.structs = (MStruct*) __ivy_alloc(nst * 40);
+            this.mu.st_n = 0;
+            long nfld = u.fld_n + 8;
+            this.mu.fld_cap = nfld;
+            this.mu.fields = (MField*) __ivy_alloc(nfld * 56);
+            this.mu.fld_n = 0;
+
             this.mu.fn_cap = u.fn_n + 16;
             this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 128);
             this.mu.fn_n = 0;
@@ -735,6 +745,8 @@ export struct MirBuilder {
             __ivy_free(this.mu.args);
             __ivy_free(this.mu.arm_val);
             __ivy_free(this.mu.arm_blk);
+            __ivy_free(this.mu.structs);
+            __ivy_free(this.mu.fields);
             __ivy_free(this.sc_name_);
             __ivy_free(this.sc_lt_);
             __ivy_free(this.sc_ltn_);
@@ -3249,6 +3261,45 @@ export struct MirBuilder {
 
     // The entry point: build() in mir_builder.cpp.
     void build() {
+        // H6.2e: copy the struct definitions first (source order), so the
+        // emitter can print `%struct.Name` and resolve members.
+        long si = 0;
+        while (si < this.hu.struct_n) {
+            HStruct hs;
+            unsafe {
+                hs = this.hu.structs[si];
+            }
+            long mi = this.mu.st_n;
+            if (mi < this.mu.st_cap) {
+                unsafe {
+                    this.mu.structs[mi].name = hs.name;
+                    this.mu.structs[mi].fields = this.mu.fields + this.mu.fld_n;
+                    this.mu.structs[mi].nfields = 0;
+                    this.mu.structs[mi].line = hs.line;
+                    this.mu.structs[mi].col = hs.col;
+                }
+                long fj = 0;
+                while (fj < hs.nfields) {
+                    HField hf;
+                    unsafe {
+                        hf = hs.fields[fj];
+                    }
+                    long mf = this.mu.fld_n;
+                    if (mf < this.mu.fld_cap) {
+                        unsafe {
+                            this.mu.fields[mf].name = hf.name;
+                            this.mu.fields[mf].type = hf.type;
+                            this.mu.structs[mi].nfields =
+                                this.mu.structs[mi].nfields + 1;
+                        }
+                        this.mu.fld_n = mf + 1;
+                    }
+                    fj = fj + 1;
+                }
+                this.mu.st_n = mi + 1;
+            }
+            si = si + 1;
+        }
         long i = 0;
         long n = 0;
         unsafe {

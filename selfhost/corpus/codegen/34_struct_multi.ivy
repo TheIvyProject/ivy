@@ -1,0 +1,12 @@
+struct Empty { };
+struct A { int32 a; };
+struct B { int64 b; };
+
+int32 main() {
+    Empty e;
+    A x;
+    B y;
+    x.a = 1;
+    y.b = 2;
+    return x.a;
+}

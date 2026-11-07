@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a+H6.2b+H6.2c+H6.2d textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a+H6.2b+H6.2c textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a + H6.2b + H6.2c + H6.2d):
+// The supported subset is deliberately small (H6.2a + H6.2b + H6.2c):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -20,19 +20,13 @@
 //   * string literals as `@.str.N` globals (pre-pass collection, decode and
 //     LLVM escaping), including the duplicate-global quirk of the oracle;
 //   * the `io::print`/`println`/`eprint`/`eprintln` builtins (format-string
-//     splitting, per-type argument formatting and the six runtime declares);
-//   * H6.2d: one-dimensional arrays of integer scalars (`int32 a[3]`), their
-//     `[N x T]` LLVM type, the zero-initializer store at the declaration
-//     point, `a[i]` as lvalue and rvalue, and the oracle's bounds check with
-//     its panic-message globals and `@__ivy_panic` declaration.
+//     splitting, per-type argument formatting and the six runtime declares).
 //
-// Out of scope (H6.2e+): structs/aggregates, allocators, pointers/references
-// in signatures, floats (including float arguments to io::print), wide
-// strings, variadic functions, templates/virtual dispatch, Itanium mangling,
-// arrays of structs/pointers, array initializer lists, array parameters or
-// return types, array decay outside `a[i]` and multi-dimensional arrays.  A
-// construct outside the subset records a diagnostic and makes the driver exit
-// nonzero instead of emitting wrong IR.
+// Out of scope (H6.2d+): structs/aggregates, allocators, bounds checks,
+// pointers/references in signatures, floats (including float arguments to
+// io::print), wide strings, variadic functions, templates/virtual dispatch
+// and Itanium mangling.  A construct outside the subset records a diagnostic
+// and makes the driver exit nonzero instead of emitting wrong IR.
 //
 // The formatting mirrors CodeGen::lowerFunction/lowerBlock/lowerInst/
 // lowerExpr/lowerLValue/emitCast/emitEntryPoint exactly, including the
@@ -69,12 +63,6 @@ export struct Emitter {
     MUnit* mu;
     long temp_;
     long alloca_;
-    // H6.2d: the oracle's `inUnsafe_` (copied from the current instruction),
-    // its `inlineBlock_` counter for `bb.i<N>` and the `declaredIvyPanic_`
-    // flag that decides whether the module ends with `declare @__ivy_panic`.
-    long cur_in_unsafe_;
-    long ib_;
-    long declared_panic_;
     long failed_;
     const char* err_;
     long err_line_;
@@ -156,9 +144,6 @@ export struct Emitter {
         }
         this.temp_ = 0;
         this.alloca_ = 0;
-        this.cur_in_unsafe_ = 0;
-        this.ib_ = 0;
-        this.declared_panic_ = 0;
         this.failed_ = 0;
         this.err_ = "";
         this.err_line_ = 0;
@@ -244,83 +229,6 @@ export struct Emitter {
         return false;
     }
 
-    // Writes the decimal spelling of a non-negative `v` at `buf[o..]` and
-    // returns the next free offset.  Used by the `[N x T]` array type and the
-    // bounds-check panic message, neither of which can go through io::print
-    // because they must produce a C string.
-    long put_uint(char* buf, long o, long v) {
-        unsafe {
-            if (v == 0) {
-                buf[o] = '0';
-                return o + 1;
-            }
-            long digits = 0;
-            long x = v;
-            while (x > 0) {
-                digits = digits + 1;
-                x = x / 10;
-            }
-            long end = o + digits;
-            long p = end - 1;
-            x = v;
-            while (x > 0) {
-                buf[p] = (char) ('0' + (x % 10));
-                x = x / 10;
-                p = p - 1;
-            }
-            return end;
-        }
-        return o;
-    }
-
-    // Builds the LLVM spelling of `T[N]`, mirroring CodeGen::llvmType's array
-    // branch: `[N x T]`.  The element is the same type with array_size = 0.
-    // The buffer is returned as a `long` (the pointer-cast idiom used by
-    // make_prefixed_key) so the lifetime checker sees no borrowed reference.
-    long make_array_type(long n, const char* elem) {
-        unsafe {
-            long elen = (long) __ivy_strlen(elem);
-            char* buf = (char*) __ivy_alloc((unsigned long long) (elen + 48));
-            long o = 0;
-            buf[o] = '['; o = o + 1;
-            o = this.put_uint(buf, o, n);
-            buf[o] = ' '; o = o + 1;
-            buf[o] = 'x'; o = o + 1;
-            buf[o] = ' '; o = o + 1;
-            long i = 0;
-            while (i < elen) {
-                buf[o] = elem[i];
-                o = o + 1;
-                i = i + 1;
-            }
-            buf[o] = ']'; o = o + 1;
-            buf[o] = 0;
-            return (long) buf;
-        }
-        return 0;
-    }
-
-    // Builds `index out of bounds (line <line>)` in a heap buffer.  The
-    // caller frees it after the raw-bytes string table has copied the key.
-    long make_panic_msg(long line) {
-        unsafe {
-            char* buf = (char*) __ivy_alloc(64);
-            const char* pre = "index out of bounds (line ";
-            long o = 0;
-            long i = 0;
-            while (pre[i] != 0) {
-                buf[o] = pre[i];
-                o = o + 1;
-                i = i + 1;
-            }
-            o = this.put_uint(buf, o, line);
-            buf[o] = ')'; o = o + 1;
-            buf[o] = 0;
-            return (long) buf;
-        }
-        return 0;
-    }
-
     // --- H6.2c: string decoding / escaping -------------------------------
 
     // Mirror of readHexEscape/readOctalEscape helpers in codegen.cpp.
@@ -337,13 +245,10 @@ export struct Emitter {
     }
 
     char hex_char(long v) {
-        unsafe {
-            if (v < 10) {
-                return (char) ('0' + v);
-            }
-            return (char) ('A' + (v - 10));
+        if (v < 10) {
+            return (char) ('0' + v);
         }
-        return '0';
+        return (char) ('A' + (v - 10));
     }
 
     // Mirror of CodeGen::decodeBody for a string body (without the quotes).
@@ -520,8 +425,8 @@ export struct Emitter {
     // --- H6.2c: string global tables --------------------------------------
 
     long make_prefixed_key(const char* bytes, long n) {
+        char* k = (char*) __ivy_alloc((unsigned long long) (n + 3));
         unsafe {
-            char* k = (char*) __ivy_alloc((unsigned long long) (n + 3));
             k[0] = '1';
             k[1] = ':';
             long i = 0;
@@ -530,9 +435,8 @@ export struct Emitter {
                 i = i + 1;
             }
             k[n + 2] = 0;
-            return (long) k;
         }
-        return 0;
+        return (long) k;
     }
 
     long map_get(void* keys, void* klens, void* idxs, long n,
@@ -599,53 +503,47 @@ export struct Emitter {
 
     // Pre-pass interning: key `"1:" + bytes`.
     long intern_prepass(const char* raw, long line, long col) {
-        unsafe {
-            long p = this.decode_string(raw);
-            if (p == 0) {
-                if (this.failed_ == 0) {
-                    this.fail(line, col, "malformed string literal");
-                }
-                return -1;
+        long p = this.decode_string(raw);
+        if (p == 0) {
+            if (this.failed_ == 0) {
+                this.fail(line, col, "malformed string literal");
             }
-            long bl = this.dec_len_;
-            long key = this.make_prefixed_key((char*) p, bl);
-            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
-                                   this.pm_n_, (char*) key, bl + 2);
-            if (gi >= 0) {
-                return gi;
-            }
-            gi = this.add_string((char*) p, bl);
-            this.pm_n_ = this.map_add(this.pm_keys_, this.pm_klens_,
-                                      this.pm_idx_, this.pm_n_, this.pm_cap_,
-                                      key, bl + 2, gi);
+            return -1;
+        }
+        long bl = this.dec_len_;
+        long key = this.make_prefixed_key((const char*) p, bl);
+        long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
+                               this.pm_n_, (const char*) key, bl + 2);
+        if (gi >= 0) {
             return gi;
         }
-        return -1;
+        gi = this.add_string((const char*) p, bl);
+        this.pm_n_ = this.map_add(this.pm_keys_, this.pm_klens_, this.pm_idx_,
+                                  this.pm_n_, this.pm_cap_, key, bl + 2, gi);
+        return gi;
     }
 
     // io format-segment interning: key is the raw decoded byte string (no
     // `"1:"` prefix), which is why it never collides with the pre-pass map.
     long intern_segment(const char* bytes, long len) {
+        long gi = this.map_get(this.sm_keys_, this.sm_klens_, this.sm_idx_,
+                               this.sm_n_, bytes, len);
+        if (gi >= 0) {
+            return gi;
+        }
+        char* cp = (char*) __ivy_alloc((unsigned long long) (len + 1));
+        long i = 0;
         unsafe {
-            long gi = this.map_get(this.sm_keys_, this.sm_klens_, this.sm_idx_,
-                                   this.sm_n_, bytes, len);
-            if (gi >= 0) {
-                return gi;
-            }
-            char* cp = (char*) __ivy_alloc((unsigned long long) (len + 1));
-            long i = 0;
             while (i < len) {
                 cp[i] = bytes[i];
                 i = i + 1;
             }
             cp[len] = 0;
-            gi = this.add_string(cp, len);
-            this.sm_n_ = this.map_add(this.sm_keys_, this.sm_klens_,
-                                      this.sm_idx_, this.sm_n_, this.sm_cap_,
-                                      (long) cp, len, gi);
-            return gi;
         }
-        return -1;
+        gi = this.add_string(cp, len);
+        this.sm_n_ = this.map_add(this.sm_keys_, this.sm_klens_, this.sm_idx_,
+                                  this.sm_n_, this.sm_cap_, (long) cp, len, gi);
+        return gi;
     }
 
     VRef emit_string_gep(long gi) {
@@ -658,91 +556,13 @@ export struct Emitter {
         return t;
     }
 
-    // Mirror of CodeGen::emitBoundsCheck.  `idx` is the already-lowered index
-    // value and `idx_ty` its LLVM type; `n` is the array length.  The GEP
-    // temporary is NOT allocated here: the caller allocates it before this
-    // call and emits the GEP after the ok-block label.
-    //
-    // The oracle allocates `idx64` unconditionally, even when the index is
-    // already i64 (where it is never emitted).  That leaves a gap in the
-    // `%tmp.N` numbering and is reproduced here on purpose.
-    void emit_bounds_check(VRef idx, const char* idx_ty, long n,
-                           long line, long col) {
-        if (this.cur_in_unsafe_ != 0) {
-            return;
-        }
-        this.declared_panic_ = 1;
-        VRef idx64 = this.new_temp();
-        VRef oob = this.new_temp();
-        if (!this.streq(idx_ty, "i64")) {
-            this.emit_val(idx64);
-            this.ps(" = sext ");
-            this.ps(idx_ty);
-            this.ps(" ");
-            this.emit_val(idx);
-            this.ps(" to i64");
-            this.nl();
-        }
-        this.emit_val(oob);
-        this.ps(" = icmp uge i64 ");
-        if (this.streq(idx_ty, "i64")) {
-            this.emit_val(idx);
-        } else {
-            this.emit_val(idx64);
-        }
-        this.ps(", ");
-        io::print("{}", n);
-        this.nl();
-
-        long panic_b = this.ib_;
-        this.ib_ = this.ib_ + 1;
-        long ok_b = this.ib_;
-        this.ib_ = this.ib_ + 1;
-        this.ps("br i1 ");
-        this.emit_val(oob);
-        this.ps(", label %bb.i");
-        io::print("{}", panic_b);
-        this.ps(", label %bb.i");
-        io::print("{}", ok_b);
-        this.nl();
-
-        io::print("bb.i{}:", panic_b);
-        this.nl();
-        // The message goes through the raw-bytes map (the io-segment map), so
-        // identical messages dedup across functions and io segments.
-        long mp = this.make_panic_msg(line);
-        unsafe {
-            const char* mb = reinterpret_cast<const char*>(mp);
-            long mlen = (long) __ivy_strlen(mb);
-            long gi = this.intern_segment(mb, mlen);
-            __ivy_free((void*) mp);
-            VRef msg = this.new_temp();
-            this.emit_val(msg);
-            this.ps(" = getelementptr i8, ptr @.str.");
-            io::print("{}", gi);
-            this.ps(", i64 0");
-            this.nl();
-            this.ps("call void @__ivy_panic(ptr ");
-            this.emit_val(msg);
-            this.ps(", i32 ");
-            io::print("{}", line);
-            this.ps(")");
-            this.nl();
-        }
-        this.pl("unreachable");
-
-        io::print("bb.i{}:", ok_b);
-        this.nl();
-    }
-
     // Mirror of CodeGen::llvmEscape: printable ASCII except `"` and `\`
     // stays verbatim, every other byte becomes `\XX` (uppercase hex).
     void emit_escaped(const char* bytes, long n) {
+        char* out = (char*) __ivy_alloc((unsigned long long) (n * 4 + 1));
+        long o = 0;
+        long i = 0;
         unsafe {
-            char* out = (char*) __ivy_alloc(
-                (unsigned long long) (n * 4 + 1));
-            long o = 0;
-            long i = 0;
             while (i < n) {
                 long c = ((long) bytes[i]) & 255;
                 if (c >= 32 && c <= 126 && c != '"' && c != '\\') {
@@ -759,29 +579,34 @@ export struct Emitter {
                 i = i + 1;
             }
             out[o] = 0;
-            io::print("{}", out);
-            __ivy_free(out);
         }
+        io::print("{}", out);
+        __ivy_free(out);
     }
 
     // Mirror of CodeGen::emitStringConstants: every entry in collection order,
     // `[len+1 x i8]` with the NUL terminator appended as `\00`.
     void emit_string_constants() {
         long i = 0;
-        unsafe {
-            while (i < this.str_n_) {
+        while (i < this.str_n_) {
+            long bp = 0;
+            long bl = 0;
+            unsafe {
                 long* ba = (long*) this.str_bytes_;
                 long* la = (long*) this.str_lens_;
-                long bp = ba[i];
-                long bl = la[i];
-                const char* bytes = reinterpret_cast<const char*>(bp);
-                io::print("@.str.{} = private unnamed_addr constant [{} x i8] c\"",
-                          i, bl + 1);
-                this.emit_escaped(bytes, bl);
-                this.ps("\\00\"");
-                this.nl();
-                i = i + 1;
+                bp = ba[i];
+                bl = la[i];
             }
+            const char* bytes = "";
+            unsafe {
+                bytes = reinterpret_cast<const char*>(bp);
+            }
+            io::print("@.str.{} = private unnamed_addr constant [{} x i8] c\"",
+                      i, bl + 1);
+            this.emit_escaped(bytes, bl);
+            this.ps("\\00\"");
+            this.nl();
+            i = i + 1;
         }
     }
 
@@ -826,47 +651,9 @@ export struct Emitter {
 
     // --- types ------------------------------------------------------------
 
-    // True for the base names that denote an integer scalar.  H6.2d arrays
-    // are restricted to these elements: a struct/pointer/float element (or an
-    // unknown name, which llvm_type would otherwise spell `i8`) is rejected.
-    bool is_int_base_name(const char* b) {
-        return this.streq(b, "bool") || this.streq(b, "char") ||
-               this.streq(b, "short") || this.streq(b, "int") ||
-               this.streq(b, "long") || this.streq(b, "long long") ||
-               this.streq(b, "int8_t") || this.streq(b, "int8") ||
-               this.streq(b, "int16_t") || this.streq(b, "int16") ||
-               this.streq(b, "int32_t") || this.streq(b, "int32") ||
-               this.streq(b, "int64_t") || this.streq(b, "int64") ||
-               this.streq(b, "int128_t") || this.streq(b, "int128") ||
-               this.streq(b, "uint8_t") || this.streq(b, "uint8") ||
-               this.streq(b, "uint16_t") || this.streq(b, "uint16") ||
-               this.streq(b, "uint32_t") || this.streq(b, "uint32") ||
-               this.streq(b, "uint64_t") || this.streq(b, "uint64") ||
-               this.streq(b, "uint128_t") || this.streq(b, "uint128") ||
-               this.streq(b, "size_t") || this.streq(b, "ptrdiff_t") ||
-               this.streq(b, "uptr_t");
-    }
-
     const char* llvm_type(AType t, long drop_ref) {
-        // H6.2d: array type T[N] -> `[N x T]` (CodeGen::llvmType's first
-        // branch).  Only a one-dimensional array of an integer scalar is in
-        // scope; the parser already rejects a second `[N]` suffix.
         if (t.array_size > 0) {
-            AType elem = t;
-            elem.array_size = 0;
-            if (elem.ptr_depth > 0 || elem.is_ref != 0) {
-                this.fail(0, 0, "arrays of pointers are out of scope for H6.2d");
-                return "i8";
-            }
-            if (!this.is_int_base_name(elem.base)) {
-                this.fail(0, 0, "array element type is out of scope for H6.2d");
-                return "i8";
-            }
-            long ap = this.make_array_type(t.array_size,
-                                           this.llvm_type(elem, 0));
-            unsafe {
-                return reinterpret_cast<const char*>(ap);
-            }
+            this.fail(0, 0, "array types are out of scope for H6.2a");
             return "i8";
         }
         if (t.ptr_depth > 0 || (t.is_ref != 0 && drop_ref == 0)) {
@@ -1261,7 +1048,7 @@ export struct Emitter {
             return this.imm(0);
         }
         if (e.type.array_size > 0) {
-            this.fail(e.line, e.col, "array decay is out of scope for H6.2d");
+            this.fail(e.line, e.col, "array decay is out of scope for H6.2a");
             return this.imm(0);
         }
         VRef t = this.new_temp();
@@ -1272,64 +1059,6 @@ export struct Emitter {
         this.emit_slot(e.sval, slot);
         this.nl();
         return t;
-    }
-
-    // Resolve the base of an array index to its alloca slot.  The only base
-    // in scope is a local array identifier: the oracle's lowerExpr decays an
-    // array IdentRef to its slot address without allocating a temporary.
-    // Pointer indexing and every other decay form are rejected.
-    long array_base_slot(MExpr base, long line, long col) {
-        if (base.type.array_size <= 0) {
-            this.fail(line, col, "pointer indexing is out of scope for H6.2d");
-            return -1;
-        }
-        if (base.kind != 6) {
-            this.fail(line, col, "array decay is out of scope for H6.2d");
-            return -1;
-        }
-        long slot = this.find_var(base.sval);
-        if (slot < 0) {
-            this.fail(line, col, "internal: array base is not in the variable table");
-        }
-        return slot;
-    }
-
-    // Shared Index lowering (MExpr kind 12, the oracle's M::Index): lowers
-    // the index, allocates the GEP temporary, emits the bounds check and then
-    // the GEP, and returns the element address.  The oracle allocates the GEP
-    // temporary BEFORE the bounds-check temporaries but emits it after the
-    // ok-block label; that ordering fixes the `%tmp.N` numbering.
-    VRef lower_index_addr(MExpr e) {
-        MExpr base;
-        MExpr ix;
-        unsafe {
-            base = this.mu->exprs[e.a];
-            ix = this.mu->exprs[e.b];
-        }
-        long slot = this.array_base_slot(base, e.line, e.col);
-        if (slot < 0) {
-            return this.imm(0);
-        }
-        VRef idx = this.lower_expr(e.b);
-        unsafe {
-            const char* idx_ty = this.llvm_type(ix.type, 0);
-            VRef gep = this.new_temp();
-            VRef ba = this.slot_ref(base.sval, slot);
-            this.emit_bounds_check(idx, idx_ty, base.type.array_size,
-                                   e.line, e.col);
-            this.emit_val(gep);
-            this.ps(" = getelementptr ");
-            this.ps(this.llvm_type(base.type, 0));
-            this.ps(", ptr ");
-            this.emit_val(ba);
-            this.ps(", i32 0, ");
-            this.ps(idx_ty);
-            this.ps(" ");
-            this.emit_val(idx);
-            this.nl();
-            return gep;
-        }
-        return this.imm(0);
     }
 
     VRef lower_unary(MExpr e) {
@@ -1839,27 +1568,25 @@ export struct Emitter {
             return;
         }
         VRef v = this.lower_expr(idx);
-        unsafe {
-            const char* ty = this.llvm_type(at, 0);
-            VRef ext = v;
-            if (!this.streq(ty, "i64")) {
-                ext = this.new_temp();
-                this.emit_val(ext);
-                this.ps(at.is_unsigned != 0 ? " = zext " : " = sext ");
-                this.ps(ty);
-                this.ps(" ");
-                this.emit_val(v);
-                this.ps(" to i64");
-                this.nl();
-            }
-            VRef p = this.new_temp();
-            this.emit_val(p);
-            this.ps(" = call ptr @__ivy_fmt_int(i64 ");
+        const char* ty = this.llvm_type(at, 0);
+        VRef ext = v;
+        if (!this.streq(ty, "i64")) {
+            ext = this.new_temp();
             this.emit_val(ext);
-            this.ps(")");
+            this.ps(at.is_unsigned != 0 ? " = zext " : " = sext ");
+            this.ps(ty);
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(" to i64");
             this.nl();
-            this.emit_write_str(fd, p);
         }
+        VRef p = this.new_temp();
+        this.emit_val(p);
+        this.ps(" = call ptr @__ivy_fmt_int(i64 ");
+        this.emit_val(ext);
+        this.ps(")");
+        this.nl();
+        this.emit_write_str(fd, p);
     }
 
     // Mirror of CodeGen::lowerIoPrint.  A leading string literal is a format
@@ -1904,41 +1631,40 @@ export struct Emitter {
         }
 
         if (has_fmt != 0) {
+            const char* fp = reinterpret_cast<const char*>(fmtp);
+            char* seg = (char*) __ivy_alloc((unsigned long long) (fmt_len + 1));
+            long seg_len = 0;
+            long arg_idx = 1;
+            long i = 0;
             unsafe {
-                const char* fp = reinterpret_cast<const char*>(fmtp);
-                char* seg = (char*) __ivy_alloc(
-                    (unsigned long long) (fmt_len + 1));
-                long seg_len = 0;
-                long arg_idx = 1;
-                long i = 0;
-                while (i < fmt_len) {
-                    if (i + 1 < fmt_len && fp[i] == '{' && fp[i + 1] == '}') {
-                        if (seg_len > 0) {
-                            long gi = this.intern_segment(seg, seg_len);
-                            VRef g = this.emit_string_gep(gi);
-                            this.emit_write_str(fd, g);
-                            seg_len = 0;
-                        }
-                        if (arg_idx < an) {
-                            long ai = -1;
-                            ai = this.mu->args[e.astart + arg_idx];
-                            this.lower_io_arg(ai, fd);
-                            arg_idx = arg_idx + 1;
-                        }
-                        i = i + 2;
-                    } else {
-                        seg[seg_len] = fp[i];
-                        seg_len = seg_len + 1;
-                        i = i + 1;
+            while (i < fmt_len) {
+                if (i + 1 < fmt_len && fp[i] == '{' && fp[i + 1] == '}') {
+                    if (seg_len > 0) {
+                        long gi = this.intern_segment(seg, seg_len);
+                        VRef g = this.emit_string_gep(gi);
+                        this.emit_write_str(fd, g);
+                        seg_len = 0;
                     }
+                    if (arg_idx < an) {
+                        long ai = -1;
+                        ai = this.mu->args[e.astart + arg_idx];
+                        this.lower_io_arg(ai, fd);
+                        arg_idx = arg_idx + 1;
+                    }
+                    i = i + 2;
+                } else {
+                    seg[seg_len] = fp[i];
+                    seg_len = seg_len + 1;
+                    i = i + 1;
                 }
-                if (seg_len > 0) {
-                    long gi = this.intern_segment(seg, seg_len);
-                    VRef g = this.emit_string_gep(gi);
-                    this.emit_write_str(fd, g);
-                }
-                __ivy_free(seg);
             }
+            }
+            if (seg_len > 0) {
+                long gi = this.intern_segment(seg, seg_len);
+                VRef g = this.emit_string_gep(gi);
+                this.emit_write_str(fd, g);
+            }
+            __ivy_free(seg);
         } else {
             long ai = 0;
             while (ai < an) {
@@ -1961,26 +1687,23 @@ export struct Emitter {
     }
 
     VRef lower_string(MExpr e) {
-        unsafe {
-            long p = this.decode_string(e.sval);
-            if (p == 0) {
-                if (this.failed_ == 0) {
-                    this.fail(e.line, e.col, "malformed string literal");
-                }
-                return this.imm(0);
+        long p = this.decode_string(e.sval);
+        if (p == 0) {
+            if (this.failed_ == 0) {
+                this.fail(e.line, e.col, "malformed string literal");
             }
-            long bl = this.dec_len_;
-            long key = this.make_prefixed_key((char*) p, bl);
-            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
-                                   this.pm_n_, (char*) key, bl + 2);
-            if (gi < 0) {
-                this.fail(e.line, e.col,
-                          "internal: string literal was not collected");
-                return this.imm(0);
-            }
-            return this.emit_string_gep(gi);
+            return this.imm(0);
         }
-        return this.imm(0);
+        long bl = this.dec_len_;
+        long key = this.make_prefixed_key((const char*) p, bl);
+        long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
+                               this.pm_n_, (const char*) key, bl + 2);
+        if (gi < 0) {
+            this.fail(e.line, e.col,
+                      "internal: string literal was not collected");
+            return this.imm(0);
+        }
+        return this.emit_string_gep(gi);
     }
 
     VRef lower_expr(long idx) {
@@ -2020,21 +1743,6 @@ export struct Emitter {
         if (e.kind == 11) {
             return this.lower_call(e);
         }
-        if (e.kind == 12) {
-            // Index as an rvalue: address + load of the element type.
-            VRef gep = this.lower_index_addr(e);
-            if (gep.kind == 0) {
-                return gep;
-            }
-            VRef t = this.new_temp();
-            this.emit_val(t);
-            this.ps(" = load ");
-            this.ps(this.llvm_type(e.type, 0));
-            this.ps(", ptr ");
-            this.emit_val(gep);
-            this.nl();
-            return t;
-        }
         if (e.kind == 14) {
             return this.lower_assign(e);
         }
@@ -2062,19 +1770,13 @@ export struct Emitter {
             }
             return this.slot_ref(e.sval, slot);
         }
-        if (e.kind == 12) {
-            return this.lower_index_addr(e);
-        }
-        this.fail(e.line, e.col, "lvalue is out of scope for H6.2d");
+        this.fail(e.line, e.col, "lvalue is out of scope for H6.2a");
         return this.imm(0);
     }
 
     // --- instruction / block lowering -------------------------------------
 
     void lower_inst(MInst inst) {
-        // CodeGen::lowerInst propagates the instruction's unsafe flag to the
-        // expression lowering of this instruction (bounds checks consult it).
-        this.cur_in_unsafe_ = inst.in_unsafe;
         if (inst.kind == 0) {
             // Alloca: the slot itself was hoisted to the entry block; only
             // the initializer store runs here (mirror of lowerInst).
@@ -2088,20 +1790,7 @@ export struct Emitter {
                 return;
             }
             if (inst.type.array_size > 0) {
-                // H6.2d: an uninitialized array is zero-initialized at the
-                // declaration point (the alloca itself was hoisted).  An
-                // initializer list is not in scope (the oracle rejects a
-                // primitive array initializer in the frontend).
-                if (inst.a >= 0) {
-                    this.fail(inst.line, inst.col,
-                              "array initializers are out of scope for H6.2d");
-                    return;
-                }
-                this.ps("store ");
-                this.ps(this.llvm_type(inst.type, 0));
-                this.ps(" zeroinitializer, ptr ");
-                this.emit_slot(inst.var, slot);
-                this.nl();
+                this.fail(inst.line, inst.col, "array locals are out of scope for H6.2a");
                 return;
             }
             if (inst.a < 0) {
@@ -2243,9 +1932,6 @@ export struct Emitter {
         this.temp_ = 0;
         this.alloca_ = 0;
         this.arg_sp_ = 0;
-        // H6.2d: `%tmp.N` and `bb.i<K>` both restart for every function.
-        this.ib_ = 0;
-        this.cur_in_unsafe_ = 0;
         this.clear_vars();
         this.cur_fi_ = fi;
         this.cur_block_start_ = func.block_start;
@@ -2493,12 +2179,6 @@ export struct Emitter {
         this.emit_string_constants();
         if (this.failed_ != 0) {
             return 1;
-        }
-        // H6.2d: like CodeGen::generate(), the panic declaration follows the
-        // string constants because emitBoundsCheck() adds its message globals
-        // (and sets this flag) while functions are lowered.
-        if (this.declared_panic_ != 0) {
-            this.pl("declare void @__ivy_panic(ptr, i32)");
         }
         return 0;
     }
