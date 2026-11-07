@@ -893,7 +893,7 @@ file.  `interpdiff.ps1` **23/23**, `build_smoke.ps1` PASS.
 
 ### 28.8 Chưa hỗ trợ / defer
 
-1. Struct parameter/return: emitter từ chối; mangling struct chưa port.
+1. Struct parameter/return: emitter từ chối ở H6.2e; **đã mở ở H6.2f** (mục 29).
 2. Arrow `p->x` trên con trỏ struct: code có, nhưng parser selfhost từ chối
    `(Point*)0` / `(Point*)__ivy_alloc(...)` nên chưa có fixture.
 3. Struct initializer list / designated init, `new`/`delete`: parser selfhost
@@ -919,3 +919,127 @@ Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không commit/push.
 Không có `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62e\`.
+
+## 29. H6.2f - struct parameter/return + mangling
+
+### 29.1 Phạm vi
+
+H6.2f mở struct **by value** trong signature:
+
+- tham số struct (kể cả struct lồng nhau);
+- giá trị trả về kiểu struct;
+- hàm vừa nhận vừa trả struct;
+- symbol MSVC của hàm có struct dùng đúng fallback của oracle.
+
+Vẫn ngoài phạm vi: pointer/reference/array/float trong signature, struct
+template/kế thừa/method, và arrow có fixture (xem 29.7).
+
+### 29.2 Ground truth oracle
+
+```llvm
+define i32 @"?sum@@YHH@Z"(%struct.Point %arg0) {
+%p.0 = alloca %struct.Point
+store %struct.Point %arg0, ptr %p.0
+...
+}
+
+define %struct.Point @"?make@@YHX@Z"() {
+...
+%tmp.2 = load %struct.Point, ptr %p.0
+ret %struct.Point %tmp.2
+}
+```
+
+- tham số struct đi thẳng bằng `%struct.Point %argN`, rồi được materialize
+  vào alloca + `store` y như scalar;
+- call: `load %struct.Point` từ slot rồi truyền value;
+- return: `load` rồi `ret %struct.Point`;
+- không có `byval`/`sret` attribute trong textual IR của oracle.
+
+### 29.3 Mangling
+
+`CodeGen::msvcMangleType` rơi xuống `return "H";` cho kiểu không nhận ra, nên
+struct by value cũng thành `H`:
+
+```text
+?sum@@YHH@Z          int32 sum(Point)
+?make@@YHX@Z         Point make()
+?add@@YHHH@Z         Point add(Point, Point)
+```
+
+Đây là hành vi **của oracle**, không phải MSVC struct mangling thật
+(`U...`); port giữ nguyên để byte-identical.  Emitter thêm sau nhánh float:
+
+```ivy
+if (this.is_struct_type(t)) { this.ps("H"); return; }
+```
+
+### 29.4 Emitter
+
+- bỏ hai chốt từ chối struct return/parameter trong `check_fn_signature`;
+- `llvm_type` đã map struct value -> `%struct.Name` từ H6.2e;
+- `lower_function` (alloca + store `%argN`), `lower_call` (load + truyền) và
+  `lower_inst` return (`ret`) vốn đã generic nên không cần nhánh mới;
+- `emit_cast` trả nguyên value khi from == to, nên struct param/return không
+  sinh cast.
+
+### 29.5 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `37_struct_param.ivy` | `int32 sum(Point p)` |
+| `38_struct_return.ivy` | `Point make()` + `Point p = make()` |
+| `39_struct_param_return.ivy` | `Point add(Point, Point)` |
+| `40_struct_nested_param.ivy` | tham số `Outer` chứa `Inner` |
+
+### 29.6 Kết quả
+
+`cgdiff.ps1 -Dir selfhost/corpus/codegen` (2026-11-07, scratch dưới
+`...\opencode\h62f\run5\`):
+
+```text
+[3/4] running 40 fixtures ...
+PASS 01_return_const.ivy
+...
+PASS 40_struct_nested_param.ivy
+[4/4] summary
+      PASS 40 / 40
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 36 fixture H6.2a–e vẫn byte-identical sau khi phục hồi
+emitter (xem 29.8).
+
+### 29.7 Chưa hỗ trợ / defer
+
+1. Pointer/reference/array/float trong signature: vẫn diagnostic H6.2b.
+2. Arrow `p->x` trên con trỏ struct: code có, nhưng parser selfhost từ chối
+   `(Point*)0` / `(Point*)__ivy_alloc(...)` nên chưa có fixture.
+3. Struct initializer list / designated init, `new`/`delete`: parser selfhost
+   chưa hỗ trợ.
+4. Struct template, kế thừa, method, virtual dispatch.
+5. Mảng struct, struct chứa mảng, float trong struct.
+6. MSVC struct mangling thật (`U...`): oracle không làm, port cũng không.
+7. Allocator, array parameter/return/decay, mảng nhiều chiều, float, wide
+   string, variadic, Itanium mangling.
+
+### 29.8 Trạng thái H6.2f
+
+Tệp thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (mangling fallback `H`, bỏ reject signature,
+  phục hồi H6.2d/e — xem ghi chú sự cố bên dưới);
+- `selfhost/corpus/codegen/37..40_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 29 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d+e+f ... 40/40` (không đánh dấu ✅).
+
+Sự cố: commit `2cb9856` (H6.2e) đã ghi nhầm `emitter.ivy` phiên bản H6.2c
+(mất H6.2d/e) do trạng thái working tree bị phục hồi ngoài ý muốn trong lúc
+phiên bị tạm dừng.  H6.2f khôi phục emitter H6.2d từ `f0684dd`, áp lại toàn
+bộ H6.2e, rồi thêm H6.2f; `cgdiff.ps1` 40/40 xác nhận lại cả 36 fixture cũ.
+
+Không sửa `src/**`, không rebuild oracle đóng băng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2f
+theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
+làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62f\`.

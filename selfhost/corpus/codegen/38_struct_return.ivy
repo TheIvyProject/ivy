@@ -1,0 +1,13 @@
+struct Point { int32 x; int32 y; };
+
+Point make() {
+    Point p;
+    p.x = 1;
+    p.y = 2;
+    return p;
+}
+
+int32 main() {
+    Point p = make();
+    return p.x;
+}

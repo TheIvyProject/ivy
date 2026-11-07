@@ -1,0 +1,19 @@
+struct Point { int32 x; int32 y; };
+
+Point add(Point a, Point b) {
+    Point r;
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}
+
+int32 main() {
+    Point a;
+    a.x = 1;
+    a.y = 2;
+    Point b;
+    b.x = 3;
+    b.y = 4;
+    Point c = add(a, b);
+    return c.x;
+}
