@@ -1285,3 +1285,122 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2h
 theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
 làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62h\`.
+## 32. H6.2i - reference return (`T& f()`)
+
+### 32.1 Phạm vi
+
+H6.2i mở kiểu trả về reference:
+
+- `T& f(...)` -> `define ptr`, `ret ptr <địa chỉ lvalue>`;
+- call site trả `call ptr`; dùng như rvalue thì thêm `load <T>`;
+- `T& r = f(...)` (reference cục bộ khởi tạo từ call, dùng raw pointer);
+- call reference làm lhs (`f(x) = v`) và làm đối số reference (`g(f(x))`);
+- struct reference return (`Point& get(Point&)`) copy by value qua `load`/`store`;
+- mangling `AAV` cho kiểu trả về reference.
+
+Ngoài phạm vi: raw pointer return (`T*`), array parameter/return/decay,
+float, wide string, variadic, multi-dim, initializer list, `new`/`delete`.
+
+### 32.2 Ground truth oracle
+
+```llvm
+define ptr @"?get@@YAAVAAV@Z"(ptr %arg0) {
+%r.0 = alloca ptr
+store ptr %arg0, ptr %r.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %r.0
+ret ptr %tmp.0
+}
+
+define i32 @ivy_main() {
+%x.0 = alloca i32
+br label %bb0
+bb0:
+store i32 1, ptr %x.0
+%tmp.0 = call ptr @"?get@@YAAVAAV@Z"(ptr %x.0)
+%tmp.1 = load i32, ptr %tmp.0
+ret i32 %tmp.1
+}
+```
+
+Struct reference return (`Point r = get(q);`):
+
+```llvm
+%tmp.2 = call ptr @"?get@@YAAVAAV@Z"(ptr %q.0)
+%tmp.3 = load %struct.Point, ptr %tmp.2
+store %struct.Point %tmp.3, ptr %r.1
+```
+
+- `Return` của hàm trả reference dùng `lowerLValue(value)` rồi `ret ptr`;
+- `lowerLValue` của call reference dùng raw pointer (`lowerCallPtr`),
+  không auto-load; `lowerExpr` của call reference load giá trị;
+- tham số của hàm trả reference vẫn là tham số reference (`ptr`).
+
+### 32.3 Emitter
+
+- thêm `cur_ret_ref_` và `suppress_ref_load_` (mirror `suppressRefLoad_`);
+- `check_fn_signature` chỉ còn chặn `f.ret.ptr_depth > 0`; reference return
+  được đi qua;
+- `lower_function` đặt `cur_ret_ref_ = func.ret.is_ref != 0`;
+- `lower_inst` Return: nếu `cur_ret_ref_` -> `ret ptr <lower_lvalue>`;
+- `lower_call`: sau `call`, nếu `e.type.is_ref` và không suppress ->
+  `load <T>, ptr <call result>`;
+- thêm `lower_call_ptr` và nhánh `kind == 11` trong `lower_lvalue`;
+- `llvm_type`: khi `drop_ref == 1`, tra struct với `is_ref` đã xoá để
+  `Point&` -> `%struct.Point` (sửa lỗi cast của `Point r = get(q);`).
+
+### 32.4 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `50_ref_return.ivy` | `int32& get(int32&)` trả reference, dùng làm rvalue |
+| `51_ref_local_call.ivy` | `int32& y = get(x);` reference cục bộ từ call |
+| `52_ref_call_lhs.ivy` | `get(x) = 5;` call reference làm lhs |
+| `53_ref_call_arg.ivy` | `bump(get(x))` call reference làm đối số |
+| `54_ref_pick.ivy` | `pick(int32&, int32&)` trả một trong hai reference |
+| `55_struct_ref_return.ivy` | `Point& get(Point&)` copy struct by value |
+| `56_ref_call_binary.ivy` | `get(x) + 1` call reference trong biểu thức |
+
+### 32.5 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62i\tmp` (2026-11-08):
+
+```text
+[3/4] running 56 fixtures ...
+...
+PASS 56_ref_call_binary.ivy
+[4/4] summary
+      PASS 56 / 56
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 49 fixture H6.2a-h vẫn byte-identical.
+
+### 32.6 Chưa hỗ trợ / defer
+
+1. Raw pointer parameter/return (`T*`): oracle yêu cầu unsafe trong
+   signature; chưa có cú pháp selfhost/oracle thống nhất.
+2. Array parameter/return/decay, mảng nhiều chiều.
+3. Float (`float32`/`float64`), wide string, variadic, Itanium mangling.
+4. `&q` trên struct (HIR selfhost từ chối; oracle crash cùng input), cast
+   `(Point*)0` / `(Point*)__ivy_alloc(...)`, initializer list, `new`/`delete`,
+   template/kế thừa/method/virtual.
+5. io::print trên biểu thức reference.
+
+### 32.7 Trạng thái H6.2i
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (`cur_ret_ref_`, `suppress_ref_load_`,
+  `check_fn_signature`, `lower_function`, Return, `lower_call`,
+  `lower_call_ptr`, `lower_lvalue` kind 11, `llvm_type`, header);
+- `selfhost/corpus/codegen/50..56_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 32 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a+b+c+d+e+f+g+h+i ... 56/56`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2i
+theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
+làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62i\`.

@@ -1,0 +1,9 @@
+int32& pick(int32& a, int32& b) {
+    return a;
+}
+
+int32 main() {
+    int32 x = 1;
+    int32 y = 2;
+    return pick(x, y) + 10;
+}

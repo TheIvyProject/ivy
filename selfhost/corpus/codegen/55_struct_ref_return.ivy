@@ -1,0 +1,13 @@
+struct Point { int32 x; int32 y; };
+
+Point& get(Point& p) {
+    return p;
+}
+
+int32 main() {
+    Point q;
+    q.x = 1;
+    q.y = 2;
+    Point r = get(q);
+    return r.x;
+}

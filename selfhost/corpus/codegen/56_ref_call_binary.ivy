@@ -1,0 +1,8 @@
+int32& get(int32& r) {
+    return r;
+}
+
+int32 main() {
+    int32 x = 4;
+    return get(x) + 1;
+}

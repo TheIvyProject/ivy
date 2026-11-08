@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2h textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2i textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2h):
+// The supported subset is deliberately small (H6.2a..H6.2i):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -37,16 +37,19 @@
 //   * H6.2h: reference parameters and reference locals (`int32& r`): a
 //     `ptr %argN`/`alloca ptr` slot that holds the referenced address, the
 //     two-load rvalue and the one-load lvalue, call sites passing
-//     `ptr <lvalue slot>`, and the oracle's `AAV` MSVC mangling.
+//     `ptr <lvalue slot>`, and the oracle's `AAV` MSVC mangling;
+//   * H6.2i: reference returns (`T& f()`): `define ptr`, `ret ptr` of the
+//     returned lvalue's address, call sites yielding `call ptr` plus a value
+//     load for rvalue use, and the raw-pointer call path for reference
+//     lvalues/locals (`suppressRefLoad_`).
 //
-// Out of scope (H6.3+): allocators, raw pointer parameters/returns,
-// reference returns, floats (including float arguments
-// to io::print), wide strings, variadic functions, templates/virtual
-// dispatch, Itanium mangling, arrays of structs/pointers, array/struct
-// initializer lists, array parameters or return types, array decay outside
-// `a[i]`, multi-dimensional arrays, `new`/`delete`, and the arrow form on an
-// allocator/`(T*)` cast (the selfhost parser rejects `(T*)0` and
-// `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
+// Out of scope (H6.3+): allocators, raw pointer parameters/returns, floats
+// (including float arguments to io::print), wide strings, variadic functions,
+// templates/virtual dispatch, Itanium mangling, arrays of structs/pointers,
+// array/struct initializer lists, array parameters or return types, array
+// decay outside `a[i]`, multi-dimensional arrays, `new`/`delete`, and the
+// arrow form on an allocator/`(T*)` cast (the selfhost parser rejects `(T*)0`
+// and `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
 // diagnostic and makes the driver exit nonzero instead of emitting wrong IR.
 //
 // The formatting mirrors CodeGen::lowerFunction/lowerBlock/lowerInst/
@@ -100,6 +103,11 @@ export struct Emitter {
     long cur_block_n_;
     const char* cur_ret_ty_;
     long cur_is_void_;
+    // H6.2i: the current function returns a reference (`define ptr`, `ret ptr`
+    // of an lvalue address) and a flag mirroring the oracle's
+    // `suppressRefLoad_` for lowerCallPtr.
+    long cur_ret_ref_;
+    long suppress_ref_load_;
     // The variable table of the current function: a name and its slot index.
     // The arrays are heap blocks so the record stays a plain value type.
     void* vnames_;
@@ -194,6 +202,8 @@ export struct Emitter {
         this.cur_block_n_ = 0;
         this.cur_ret_ty_ = "void";
         this.cur_is_void_ = 0;
+        this.cur_ret_ref_ = 0;
+        this.suppress_ref_load_ = 0;
         this.vn_ = 0;
         this.vcap_ = 4096;
         this.arg_cap_ = 256;
@@ -983,8 +993,13 @@ export struct Emitter {
         }
         // H6.2e: a struct value is `%struct.<name>`.  Struct pointers were
         // handled above as `ptr`.
-        if (this.is_struct_type(t)) {
-            long sp = this.make_struct_type_name(t.base);
+        // H6.2i: when drop_ref asks for the referent value type, a struct
+        // reference (`Point&`) denotes `%struct.Point`, so look the struct
+        // up with the reference cleared (is_struct_type rejects is_ref).
+        AType sv = t;
+        sv.is_ref = 0;
+        if (this.is_struct_type(sv)) {
+            long sp = this.make_struct_type_name(sv.base);
             unsafe {
                 return reinterpret_cast<const char*>(sp);
             }
@@ -1179,8 +1194,8 @@ export struct Emitter {
             this.fail(line, col, "array return types are out of scope for H6.2b");
             return false;
         }
-        if (f.ret.ptr_depth > 0 || f.ret.is_ref != 0) {
-            this.fail(line, col, "pointer/reference return types are out of scope for H6.2b");
+        if (f.ret.ptr_depth > 0) {
+            this.fail(line, col, "pointer return types are out of scope for H6.2i");
             return false;
         }
         if (this.is_float_base(f.ret.base)) {
@@ -1838,7 +1853,29 @@ export struct Emitter {
         this.ps(")");
         this.nl();
         this.arg_sp_ = base;
+        if (e.type.is_ref != 0 && this.suppress_ref_load_ == 0) {
+            // H6.2i: a reference-returning call yields a pointer; load the
+            // value for an rvalue use (CodeGen::lowerExpr's Call branch).
+            VRef loaded = this.new_temp();
+            this.emit_val(loaded);
+            this.ps(" = load ");
+            this.ps(this.llvm_type(e.type, 1));
+            this.ps(", ptr ");
+            this.emit_val(t);
+            this.nl();
+            return loaded;
+        }
         return t;
+    }
+
+    // H6.2i: mirror of CodeGen::lowerCallPtr - emit a reference-returning
+    // call and return its raw pointer (no auto-load).  Used by lowerLValue
+    // for a reference call (e.g. the initializer of `T& r = f();`).
+    VRef lower_call_ptr(MExpr e) {
+        this.suppress_ref_load_ = 1;
+        VRef v = this.lower_call(e);
+        this.suppress_ref_load_ = 0;
+        return v;
     }
 
     void emit_call_args(long base, long an) {
@@ -2295,6 +2332,15 @@ export struct Emitter {
             }
             return this.slot_ref(e.sval, slot);
         }
+        if (e.kind == 11) {
+            if (e.type.is_ref != 0) {
+                // H6.2i: a reference-returning call is an lvalue whose address
+                // is the call's raw pointer result.
+                return this.lower_call_ptr(e);
+            }
+            this.fail(e.line, e.col, "a by-value call is not an lvalue in H6.2i");
+            return this.imm(0);
+        }
         if (e.kind == 12) {
             return this.lower_index_addr(e);
         }
@@ -2418,6 +2464,15 @@ export struct Emitter {
         }
         if (inst.kind == 3) {
             if (inst.a >= 0) {
+                if (this.cur_ret_ref_ != 0) {
+                    // H6.2i: a reference return yields the address of the
+                    // returned lvalue (CodeGen::lowerInst's Ret branch).
+                    VRef addr = this.lower_lvalue(inst.a);
+                    this.ps("ret ptr ");
+                    this.emit_val(addr);
+                    this.nl();
+                    return;
+                }
                 MExpr rv;
                 unsafe {
                     rv = this.mu->exprs[inst.a];
@@ -2503,6 +2558,7 @@ export struct Emitter {
         this.cur_block_n_ = func.block_n;
         this.cur_ret_ty_ = this.llvm_type(func.ret, 1);
         this.cur_is_void_ = this.streq(this.llvm_type(func.ret, 0), "void") ? 1 : 0;
+        this.cur_ret_ref_ = func.ret.is_ref != 0 ? 1 : 0;
 
         if (!this.check_fn_signature(func, 0, 0)) {
             return;
