@@ -1,0 +1,8 @@
+int32 f(int32 x) { return x + 1; }
+int32 g(int32 x) { return x + 2; }
+
+int32 main() {
+    int32 a = 1;
+    int32 r = a != 0 ? f(10) : g(20);
+    return r;
+}

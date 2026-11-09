@@ -1,0 +1,7 @@
+int32 pick(int32 a, int32 b) {
+    return a < b ? a : b;
+}
+
+int32 main() {
+    return pick(3, 2);
+}

@@ -1,0 +1,7 @@
+int32 f() { return 0; }
+int32 g() { return 1; }
+
+int32 main() {
+    bool r = f() != 0 && g() != 0;
+    return r ? 1 : 0;
+}

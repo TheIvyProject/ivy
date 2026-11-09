@@ -1,0 +1,7 @@
+int32 main() {
+    int32 a = 1;
+    int32 b = 0;
+    int32 c = 1;
+    int32 r = a != 0 ? (b != 0 ? 10 : 20) : (c != 0 ? 30 : 40);
+    return r;
+}

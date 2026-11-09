@@ -1,0 +1,9 @@
+int32 add(int32 a, int32 b) {
+    return a + b;
+}
+
+int32 main() {
+    int32 a = 1;
+    int32 r = add(a != 0 ? 10 : 20, 5);
+    return r;
+}

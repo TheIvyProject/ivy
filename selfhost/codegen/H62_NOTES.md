@@ -1519,3 +1519,114 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
 H6.2j theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
 trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62j\`.
+
+### 34. H6.2k — short-circuit, ternary và switch
+
+#### 34.1 Phạm vi
+
+H6.2k đóng nốt các khoảng trống control-flow của emitter:
+
+- `&&` / `||`: short-circuit bằng hai inline block (`bb.i<N>`) và một
+  `phi i1`, nhánh hằng là `false` (`&&`) hoặc `true` (`||`);
+- ternary `c ? a : b`: ba inline block (then/else/merge) và
+  `phi <ty>` ở merge block;
+- `switch` (MIR instruction kind 6): in
+  `switch <ty> <cond>, label %<default> [ ... ]` với từng arm
+  `    <ty> <value>, label %<bb>`, kể cả khi `default` đứng trước các
+  `case` trong nguồn;
+- `do/while`, `break`, `continue` vốn đã đi qua CFG jump của MIR từ
+  H6.2a; H6.2k thêm fixture regression để khóa hành vi.
+
+Comma operator vẫn ngoài phạm vi: frontend oracle từ chối cú pháp
+(`expected ')' to close parenthesized expression`).
+
+#### 34.2 Thiết kế
+
+- Thêm tracking `cur_blk_inline_` / `cur_blk_idx_` mirror `curBlock_`
+  của oracle (một cặp thay cho `std::string`):
+  - `lower_block` đặt `(0, local_idx)`;
+  - `emit_bounds_check` đặt `(1, panic_b)` rồi `(1, ok_b)`;
+  - `lower_binary` (`&&`/`||`) và `lower_ternary` cập nhật sau mỗi
+    nhánh.
+- PHI predecessor được đọc lại **sau khi** lower nhánh, nên ternary
+  lồng ternary hoặc `&&` lồng `&&` vẫn trỏ đúng block cuối
+  (`rhsEnd`/`thenEnd`/`elseEnd` của oracle).
+- Thứ tự cấp inline block khớp oracle:
+  - `&&`/`||`: `evalB`, `mergeB`;
+  - ternary: `thenB`, `elseB`, `mergeB`.
+- `lower_ternary` dùng `llvm_type(e.type, 0)` cho kiểu PHI.
+- `lower_inst` kind 6: cond `-1` không in gì; arm value in thập phân;
+  block in qua `emit_bb` (global → local).
+- Helper mới: `emit_blk_ref` (`%bb<local>` / `%bb.i<N>`) và
+  `emit_inline_label`.
+
+#### 34.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `74_ternary_basic.ivy` | `c ? 10 : 20` |
+| `75_ternary_nested.ivy` | ternary lồng trong cả hai nhánh |
+| `76_ternary_and.ivy` | điều kiện ternary là `&&` |
+| `77_shortcircuit.ivy` | `&&` và `||` cơ bản |
+| `78_shortcircuit_nested.ivy` | `&&` lồng `&&` |
+| `79_or_ternary.ivy` | `||` với ternary ở rhs |
+| `80_or_chain.ivy` | chuỗi `||` ba toán hạng |
+| `81_ternary_float.ivy` | ternary trả `float64` |
+| `82_ternary_arg.ivy` | ternary làm đối số call |
+| `83_ternary_ret.ivy` | ternary trong `return` |
+| `84_ternary_call.ivy` | hai nhánh gọi hàm khác nhau |
+| `85_shortcircuit_call.ivy` | `&&` với call hai vế |
+| `86_switch_basic.ivy` | `switch` 2 case + default, mỗi case `return` |
+| `87_switch_expr.ivy` | cond là biểu thức `x + 1` |
+| `88_switch_nodefault.ivy` | không có `default` (nhánh exit) |
+| `89_switch_default_first.ivy` | `default` đứng trước các `case` |
+| `90_switch_i8.ivy` | `switch` trên `int8` |
+| `91_switch_nested.ivy` | `switch` lồng trong case |
+| `92_dowhile.ivy` | `do { } while` (regression) |
+| `93_loop_break_continue.ivy` | `break`/`continue` trong `for` |
+| `94_and_if.ivy` | `&&` trong điều kiện `if` |
+
+#### 34.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62k\tmp` (2026-11-09):
+
+```text
+[3/4] running 94 fixtures ...
+...
+PASS 94_and_if.ivy
+[4/4] summary
+      PASS 94 / 94
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 73 fixture H6.2a-j vẫn byte-identical.
+
+#### 34.5 Giới hạn / defer
+
+1. `switch` dạng `case ...: ... break;` hoặc `nextcase;` bị frontend
+   oracle từ chối (`Ivy forbids implicit fallthrough...`), nên fixture
+   dùng `return` trong từng case; selfhost khớp đúng lỗi đó.
+2. Comma operator: frontend oracle từ chối cú pháp.
+3. Các mục ngoài phạm vi của H6.2i/j giữ nguyên (raw pointer signature,
+   array param/decay/multi-dim, wide string, variadic, template/virtual,
+   Itanium mangling, initializer list, `new`/`delete`, `io::print` trên
+   biểu thức reference).
+
+#### 34.6 Trạng thái H6.2k
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (`cur_blk_inline_`, `cur_blk_idx_`,
+  `emit_blk_ref`, `emit_inline_label`, tracking trong
+  `emit_bounds_check`/`lower_block`, nhánh `&&`/`||` trong
+  `lower_binary`, `lower_ternary`, `lower_expr` kind 10,
+  `lower_inst` kind 6, header);
+- `selfhost/corpus/codegen/74..94_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 34 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..k ... 94/94`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
+H6.2k theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
+trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62k\`.

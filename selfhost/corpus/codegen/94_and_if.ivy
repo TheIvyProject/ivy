@@ -1,0 +1,8 @@
+int32 main() {
+    int32 a = 1;
+    int32 b = 1;
+    if (a != 0 && b != 0) {
+        return 1;
+    }
+    return 0;
+}

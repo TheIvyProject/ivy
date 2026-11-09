@@ -1,0 +1,7 @@
+int32 main() {
+    int32 a = 1;
+    int32 b = 0;
+    bool c = a != 0 && b != 0;
+    bool d = a != 0 || b != 0;
+    return c ? 1 : 0;
+}

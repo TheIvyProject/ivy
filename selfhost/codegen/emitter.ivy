@@ -1,17 +1,17 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2j textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2k textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2j):
+// The supported subset is deliberately small (H6.2a..H6.2k):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
 //   * int constants / identifiers, integer unary and binary operators,
 //     integer comparisons, local declaration/assignment, integer casts;
-//   * if/else, while and for lowered to condbr/br with the oracle's block
-//     numbering;
+//   * if/else, while, for, do/while and break/continue lowered to
+//     condbr/br with the oracle's block numbering;
 //   * user function calls (including recursion, void calls and calls used as
 //     arguments), `extern "C"` calls and the MSVC name mangling of the
 //     default Windows host;
@@ -48,6 +48,9 @@
 //     sitofp/uitofp/fptosi/fpext/fptrunc casts, float parameters/returns
 //     (MSVC `M`/`N` mangling), and float arguments to io::print through
 //     `__ivy_fmt_float`.
+//   * H6.2k: short-circuit `&&`/`||` and the conditional operator `?:`
+//     (inline `bb.i<N>` blocks plus an i1/typed PHI), and the `switch`
+//     statement (MIR kind 6) with its arm table and default label.
 //
 // Out of scope (H6.3+): allocators, raw pointer parameters/returns,
 // wide strings, variadic functions, templates/virtual dispatch, Itanium
@@ -111,6 +114,11 @@ export struct Emitter {
     long cur_fi_;
     long cur_block_start_;
     long cur_block_n_;
+    // H6.2k: the oracle's `curBlock_` (either "bb<local>" or "bb.i<N>") as a
+    // pair, so a ternary/short-circuit PHI can name its real predecessor even
+    // when a nested expression allocated inline blocks.
+    long cur_blk_inline_;
+    long cur_blk_idx_;
     const char* cur_ret_ty_;
     long cur_is_void_;
     // H6.2i: the current function returns a reference (`define ptr`, `ret ptr`
@@ -817,6 +825,8 @@ export struct Emitter {
 
         io::print("bb.i{}:", panic_b);
         this.nl();
+        this.cur_blk_inline_ = 1;
+        this.cur_blk_idx_ = panic_b;
         // The message goes through the raw-bytes map (the io-segment map), so
         // identical messages dedup across functions and io segments.
         long mp = this.make_panic_msg(line);
@@ -842,6 +852,8 @@ export struct Emitter {
 
         io::print("bb.i{}:", ok_b);
         this.nl();
+        this.cur_blk_inline_ = 1;
+        this.cur_blk_idx_ = ok_b;
     }
 
     // Mirror of CodeGen::llvmEscape: printable ASCII except `"` and `\`
@@ -1097,6 +1109,21 @@ export struct Emitter {
 
     void emit_bb(long global) {
         io::print("%bb{}", global - this.cur_block_start_);
+    }
+
+    // H6.2k: the block reference of the oracle's `curBlock_` state.  A
+    // function block prints `%bb<local>`; an inline block `%bb.i<N>`.
+    void emit_blk_ref(long is_inline, long idx) {
+        if (is_inline != 0) {
+            io::print("%bb.i{}", idx);
+        } else {
+            io::print("%bb{}", idx);
+        }
+    }
+
+    void emit_inline_label(long idx) {
+        io::print("bb.i{}:", idx);
+        this.nl();
     }
 
     VRef imm(long v) {
@@ -1810,8 +1837,53 @@ export struct Emitter {
 
     VRef lower_binary(MExpr e) {
         if (this.streq(e.sval, "&&") || this.streq(e.sval, "||")) {
-            this.fail(e.line, e.col, "short-circuit operators are out of scope for H6.2a");
-            return this.imm(0);
+            // H6.2k: short-circuit `&&`/`||` (CodeGen::lowerExpr Binary).
+            // The lhs is lowered in the current block, then a branch picks the
+            // rhs block or the merge block; the merge block ends in an i1 PHI
+            // whose constant arm is `false` for `&&` and `true` for `||`.
+            long is_and = this.streq(e.sval, "&&") ? 1 : 0;
+            VRef lv = this.lower_expr(e.a);
+            long prev_inline = this.cur_blk_inline_;
+            long prev_idx = this.cur_blk_idx_;
+            long eval_b = this.ib_;
+            this.ib_ = this.ib_ + 1;
+            long merge_b = this.ib_;
+            this.ib_ = this.ib_ + 1;
+            this.ps("br i1 ");
+            this.emit_val(lv);
+            this.ps(", label ");
+            this.emit_blk_ref(1, is_and != 0 ? eval_b : merge_b);
+            this.ps(", label ");
+            this.emit_blk_ref(1, is_and != 0 ? merge_b : eval_b);
+            this.nl();
+
+            this.cur_blk_inline_ = 1;
+            this.cur_blk_idx_ = eval_b;
+            this.emit_inline_label(eval_b);
+            VRef rv = this.lower_expr(e.b);
+            long rhs_inline = this.cur_blk_inline_;
+            long rhs_idx = this.cur_blk_idx_;
+            this.ps("br label ");
+            this.emit_blk_ref(1, merge_b);
+            this.nl();
+
+            this.cur_blk_inline_ = 1;
+            this.cur_blk_idx_ = merge_b;
+            this.emit_inline_label(merge_b);
+
+            VRef p = this.new_temp();
+            this.emit_val(p);
+            this.ps(" = phi i1 [ ");
+            this.ps(is_and != 0 ? "false" : "true");
+            this.ps(", ");
+            this.emit_blk_ref(prev_inline, prev_idx);
+            this.ps(" ], [ ");
+            this.emit_val(rv);
+            this.ps(", ");
+            this.emit_blk_ref(rhs_inline, rhs_idx);
+            this.ps(" ]");
+            this.nl();
+            return p;
         }
         if (this.streq(e.sval, ",")) {
             this.fail(e.line, e.col, "the comma operator is out of scope for H6.2a");
@@ -1949,6 +2021,68 @@ export struct Emitter {
         this.emit_val(p);
         this.nl();
         return v;
+    }
+
+    // H6.2k: the conditional operator `c ? a : b` (CodeGen::lowerExpr
+    // Ternary).  Three inline blocks (then/else/merge) and a PHI in the merge
+    // block; nested short-circuits/ternaries update the current block, so the
+    // PHI predecessors are read back from the tracking fields.
+    VRef lower_ternary(MExpr e) {
+        VRef cond = this.lower_expr(e.a);
+        long then_b = this.ib_;
+        this.ib_ = this.ib_ + 1;
+        long else_b = this.ib_;
+        this.ib_ = this.ib_ + 1;
+        long merge_b = this.ib_;
+        this.ib_ = this.ib_ + 1;
+
+        this.ps("br i1 ");
+        this.emit_val(cond);
+        this.ps(", label ");
+        this.emit_blk_ref(1, then_b);
+        this.ps(", label ");
+        this.emit_blk_ref(1, else_b);
+        this.nl();
+
+        this.cur_blk_inline_ = 1;
+        this.cur_blk_idx_ = then_b;
+        this.emit_inline_label(then_b);
+        VRef tv = this.lower_expr(e.b);
+        long then_inline = this.cur_blk_inline_;
+        long then_idx = this.cur_blk_idx_;
+        this.ps("br label ");
+        this.emit_blk_ref(1, merge_b);
+        this.nl();
+
+        this.cur_blk_inline_ = 1;
+        this.cur_blk_idx_ = else_b;
+        this.emit_inline_label(else_b);
+        VRef ev = this.lower_expr(e.c);
+        long else_inline = this.cur_blk_inline_;
+        long else_idx = this.cur_blk_idx_;
+        this.ps("br label ");
+        this.emit_blk_ref(1, merge_b);
+        this.nl();
+
+        this.cur_blk_inline_ = 1;
+        this.cur_blk_idx_ = merge_b;
+        this.emit_inline_label(merge_b);
+
+        VRef p = this.new_temp();
+        this.emit_val(p);
+        this.ps(" = phi ");
+        this.ps(this.llvm_type(e.type, 0));
+        this.ps(" [ ");
+        this.emit_val(tv);
+        this.ps(", ");
+        this.emit_blk_ref(then_inline, then_idx);
+        this.ps(" ], [ ");
+        this.emit_val(ev);
+        this.ps(", ");
+        this.emit_blk_ref(else_inline, else_idx);
+        this.ps(" ]");
+        this.nl();
+        return p;
     }
 
     // Mirror of the generic Call branch of CodeGen::lowerExpr: the arguments
@@ -2484,6 +2618,9 @@ export struct Emitter {
         if (e.kind == 9) {
             return this.lower_binary(e);
         }
+        if (e.kind == 10) {
+            return this.lower_ternary(e);
+        }
         if (e.kind == 11) {
             return this.lower_call(e);
         }
@@ -2730,11 +2867,53 @@ export struct Emitter {
             this.nl();
             return;
         }
+        if (inst.kind == 6) {
+            // H6.2k: `switch` (CodeGen::lowerInst Switch).  A missing
+            // condition prints nothing (the oracle's `if (!sw.cond) return`).
+            if (inst.a < 0) {
+                return;
+            }
+            MExpr ce;
+            unsafe {
+                ce = this.mu->exprs[inst.a];
+            }
+            VRef c = this.lower_expr(inst.a);
+            this.ps("switch ");
+            this.ps(this.llvm_type(ce.type, 0));
+            this.ps(" ");
+            this.emit_val(c);
+            this.ps(", label ");
+            this.emit_bb(inst.b);
+            this.ps(" [");
+            this.nl();
+            long k = 0;
+            while (k < inst.an) {
+                long av = 0;
+                long ab = 0;
+                unsafe {
+                    av = this.mu->arm_val[inst.astart + k];
+                    ab = this.mu->arm_blk[inst.astart + k];
+                }
+                this.ps("    ");
+                this.ps(this.llvm_type(ce.type, 0));
+                this.ps(" ");
+                io::print("{}", av);
+                this.ps(", label ");
+                this.emit_bb(ab);
+                this.nl();
+                k = k + 1;
+            }
+            this.ps("  ]");
+            this.nl();
+            return;
+        }
         this.fail(inst.line, inst.col, "instruction kind is out of scope for H6.2a");
     }
 
     void lower_block(long local_idx) {
         long global = this.cur_block_start_ + local_idx;
+        this.cur_blk_inline_ = 0;
+        this.cur_blk_idx_ = local_idx;
         io::print("bb{}:", local_idx);
         this.nl();
         MBlock b;

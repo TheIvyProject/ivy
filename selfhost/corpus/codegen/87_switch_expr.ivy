@@ -1,0 +1,11 @@
+int32 f(int32 x) {
+    switch (x + 1) {
+    case 1: return 10;
+    case 3: return 30;
+    default: return 0;
+    }
+}
+
+int32 main() {
+    return f(2);
+}

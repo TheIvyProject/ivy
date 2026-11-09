@@ -1,0 +1,11 @@
+int32 f(int8 c) {
+    switch (c) {
+    case 1: return 1;
+    case 2: return 2;
+    default: return 0;
+    }
+}
+
+int32 main() {
+    return f(2);
+}

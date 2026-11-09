@@ -1,0 +1,9 @@
+int32 main() {
+    int32 s = 0;
+    for (int32 i = 0; i < 10; i++) {
+        if (i == 2) { continue; }
+        if (i == 5) { break; }
+        s = s + i;
+    }
+    return s;
+}

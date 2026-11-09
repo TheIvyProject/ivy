@@ -1,0 +1,6 @@
+int32 main() {
+    int32 a = 1;
+    int32 b = 2;
+    int32 c = a < b ? 10 : 20;
+    return c;
+}
