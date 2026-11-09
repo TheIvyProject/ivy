@@ -1,0 +1,9 @@
+void show(float64& r) {
+    io::println("{}", r);
+}
+
+int32 main() {
+    float64 x = 1.5;
+    show(x);
+    return 0;
+}

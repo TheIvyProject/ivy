@@ -1,0 +1,8 @@
+struct Inner { int32 x; };
+struct Outer { Inner in; };
+
+int32 main() {
+    Outer a[2];
+    a[0].in.x = 3;
+    return a[0].in.x;
+}

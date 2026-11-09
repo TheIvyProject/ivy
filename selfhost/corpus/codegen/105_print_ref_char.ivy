@@ -1,0 +1,9 @@
+void show(int8& r) {
+    io::println("{}", r);
+}
+
+int32 main() {
+    int8 x = 65;
+    show(x);
+    return 0;
+}

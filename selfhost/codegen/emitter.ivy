@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2k textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2l textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2k):
+// The supported subset is deliberately small (H6.2a..H6.2l):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -21,10 +21,10 @@
 //     LLVM escaping), including the duplicate-global quirk of the oracle;
 //   * the `io::print`/`println`/`eprint`/`eprintln` builtins (format-string
 //     splitting, per-type argument formatting and the six runtime declares);
-//   * H6.2d: one-dimensional arrays of integer scalars (`int32 a[3]`), their
-//     `[N x T]` LLVM type, the zero-initializer store at the declaration
-//     point, `a[i]` as lvalue and rvalue, and the oracle's bounds check with
-//     its panic-message globals and `@__ivy_panic` declaration;
+//   * H6.2d: one-dimensional arrays (`int32 a[3]`), their `[N x T]` LLVM
+//     type, the zero-initializer store at the declaration point, `a[i]` as
+//     lvalue and rvalue, and the oracle's bounds check with its
+//     panic-message globals and `@__ivy_panic` declaration;
 //   * H6.2e: struct definitions (`%struct.Name = type { ... }`, unused ones
 //     included, in source order), struct locals with the zeroinitializer
 //     store, whole-struct copies (load/store), member access `.` as lvalue
@@ -51,10 +51,15 @@
 //   * H6.2k: short-circuit `&&`/`||` and the conditional operator `?:`
 //     (inline `bb.i<N>` blocks plus an i1/typed PHI), and the `switch`
 //     statement (MIR kind 6) with its arm table and default label.
+//   * H6.2l: arrays of floating-point scalars (`float64 a[3]`) and arrays of
+//     structs (`Point a[2]`): the `[N x T]` element type, element member
+//     chains (`a[i].x`), whole-element copies and float formatting of an
+//     element; plus reference arguments to `io::print` (bug-compatible with
+//     the oracle's `sext ptr` spelling).
 //
 // Out of scope (H6.3+): allocators, raw pointer parameters/returns,
 // wide strings, variadic functions, templates/virtual dispatch, Itanium
-// mangling, arrays of structs/pointers, array/struct initializer lists,
+// mangling, arrays of pointers, array/struct initializer lists,
 // array parameters or return types, array decay outside `a[i]`,
 // multi-dimensional arrays, `new`/`delete`, and the arrow form on an
 // allocator/`(T*)` cast (the selfhost parser rejects `(T*)0` and
@@ -990,8 +995,9 @@ export struct Emitter {
 
     const char* llvm_type(AType t, long drop_ref) {
         // H6.2d: array type T[N] -> `[N x T]` (CodeGen::llvmType's first
-        // branch).  Only a one-dimensional array of an integer scalar is in
-        // scope; the parser already rejects a second `[N]` suffix.
+        // branch).  H6.2l: a one-dimensional array may hold an integer
+        // scalar, a floating-point scalar or a struct value; the parser
+        // already rejects a second `[N]` suffix and raw pointer arrays.
         if (t.array_size > 0) {
             AType elem = t;
             elem.array_size = 0;
@@ -999,7 +1005,19 @@ export struct Emitter {
                 this.fail(0, 0, "arrays of pointers are out of scope for H6.2d");
                 return "i8";
             }
-            if (!this.is_int_base_name(elem.base)) {
+            AType ev = elem;
+            ev.is_ref = 0;
+            long elem_ok = 0;
+            if (this.is_int_base_name(elem.base)) {
+                elem_ok = 1;
+            }
+            if (this.is_float_base(elem.base)) {
+                elem_ok = 1;
+            }
+            if (this.is_struct_type(ev)) {
+                elem_ok = 1;
+            }
+            if (elem_ok == 0) {
                 this.fail(0, 0, "array element type is out of scope for H6.2d");
                 return "i8";
             }
@@ -2387,11 +2405,11 @@ export struct Emitter {
             this.emit_write_str(fd, v);
             return;
         }
-        if (at.is_ref != 0) {
-            this.fail(a.line, a.col,
-                      "reference arguments to io::print are out of scope for H6.2c");
-            return;
-        }
+        // H6.2l: a reference argument takes the same branch as its referent
+        // (CodeGen::lowerIoArg never special-cases isReference).  The oracle
+        // spells the operand type with llvmType(at), which is `ptr` for a
+        // reference, so the extension line is reproduced verbatim even though
+        // that IR is not valid for a later backend pass.
         if (this.streq(at.base, "char") || this.streq(at.base, "int8_t") ||
             this.streq(at.base, "uint8_t")) {
             VRef v = this.lower_expr(idx);

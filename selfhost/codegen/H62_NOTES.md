@@ -1630,3 +1630,89 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
 H6.2k theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
 trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62k\`.
+
+### 35. H6.2l — mảng float/struct và io::print reference
+
+#### 35.1 Phạm vi
+
+- Mở rộng phần tử mảng một chiều từ chỉ số nguyên sang:
+  - số thực (`float32`/`float64`, kể cả alias `float32_t`/`float64_t`);
+  - struct (`Point a[2]`).
+- `a[i]` với phần tử float/struct: GEP `[N x T]`, load/store đúng kiểu,
+  member chain `a[i].x` (kể cả struct lồng nhau), whole-element copy
+  `a[1] = a[0]`, float formatting của `a[i]`.
+- `io::print` trên biểu thức reference: dùng đúng nhánh của referent
+  (char/bool/float/int) như oracle.
+
+#### 35.2 Thiết kế
+
+- `llvm_type` nhánh array: thay điều kiện "chỉ int" bằng
+  `elem_ok = int | float | struct`; pointer/reference element vẫn bị
+  từ chối (`arrays of pointers are out of scope`).
+- Struct element được tra với `is_ref` đã xóa (`is_struct_type(ev)`).
+- `make_array_type` không đổi: `[N x <llvm_type(elem)>]` tự sinh
+  `[3 x double]`, `[2 x %struct.P]`.
+- `lower_index_addr`, `lower_member_addr`, bounds check dùng lại nguyên
+  vẹn; chỉ kiểu phần tử thay đổi.
+- `lower_io_arg`: bỏ fail `is_ref`. Oracle không special-case reference
+  và dùng `llvmType(at)` (trả `ptr` cho reference), nên selfhost in lại
+  đúng `sext ptr ...` / `fpext ptr ...` — bug-compatible, IR này không
+  hợp lệ cho backend về sau nhưng khớp byte oracle.
+
+#### 35.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `95_float_array.ivy` | `float64 a[3]`, gán và in phần tử |
+| `96_float32_array.ivy` | `float32 a[2]` |
+| `97_float_array_loop.ivy` | `a[i] = a[i] + 0.5` trong `for` |
+| `98_struct_array.ivy` | `P a[2]`, `a[i].x`/`a[i].y` |
+| `99_struct_array_copy.ivy` | `a[1] = a[0]` whole-struct copy |
+| `100_struct_array_nested.ivy` | `Outer a[2]`, `a[0].in.x` |
+| `101_struct_array_float.ivy` | struct chứa `float64` trong mảng |
+| `102_bool_array.ivy` | mảng `bool` (regression int base) |
+| `103_print_ref.ivy` | `io::println("{}", r)` với `int32&` |
+| `104_print_ref_float.ivy` | reference `float64&` (bug-compat `fpext ptr`) |
+| `105_print_ref_char.ivy` | reference `int8&` → `__ivy_write_char` |
+
+#### 35.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62l\tmp` (2026-11-09):
+
+```text
+[3/4] running 105 fixtures ...
+...
+PASS 99_struct_array_copy.ivy
+[4/4] summary
+      PASS 105 / 105
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 94 fixture H6.2a-k vẫn byte-identical.
+
+#### 35.5 Giới hạn / defer
+
+1. Mảng con trỏ (`int32* a[2]`): parser yêu cầu `unsafe` cho khai báo raw
+   pointer, nên chưa có cú pháp nguồn hợp lệ.
+2. Mảng là field của struct (`struct S { int32 a[2]; }`): parser từ chối
+   (`expected ';' after field declaration`).
+3. Enum type trong `llvm_type`/mangling: cần bảng enum xuyên HIR/MIR
+   (dự kiến H6.2m).
+4. Initializer list, `new`/`delete`, static local, raw pointer
+   param/return, array param/decay/multi-dim: vẫn ngoài phạm vi.
+
+#### 35.6 Trạng thái H6.2l
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (nhánh array trong `llvm_type`,
+  `lower_io_arg`, header);
+- `selfhost/corpus/codegen/95..105_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 35 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..l ... 105/105`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
+H6.2l theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
+trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62l\`.

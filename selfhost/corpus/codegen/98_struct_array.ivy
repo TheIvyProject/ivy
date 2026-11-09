@@ -1,0 +1,8 @@
+struct P { int32 x; int32 y; };
+
+int32 main() {
+    P a[2];
+    a[0].x = 1;
+    a[1].y = 2;
+    return a[0].x;
+}

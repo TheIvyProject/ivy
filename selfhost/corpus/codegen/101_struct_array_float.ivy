@@ -1,0 +1,8 @@
+struct V { float64 x; };
+
+int32 main() {
+    V a[2];
+    a[0].x = 1.5;
+    io::println("{}", a[1].x);
+    return 0;
+}

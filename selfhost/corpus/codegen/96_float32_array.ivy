@@ -1,0 +1,6 @@
+int32 main() {
+    float32 a[2];
+    a[0] = 1.5;
+    io::println("{}", a[0]);
+    return 0;
+}

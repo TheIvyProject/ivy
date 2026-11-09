@@ -1,0 +1,7 @@
+int32 main() {
+    float64 a[3];
+    for (int32 i = 0; i < 3; i++) {
+        a[i] = a[i] + 0.5;
+    }
+    return 0;
+}

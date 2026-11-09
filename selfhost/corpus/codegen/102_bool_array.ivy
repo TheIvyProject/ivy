@@ -1,0 +1,5 @@
+int32 main() {
+    bool a[2];
+    a[0] = true;
+    return a[0] ? 1 : 0;
+}
