@@ -1,0 +1,14 @@
+struct Vec { float64 x; float64 y; };
+
+float64 sum(Vec v) {
+    return v.x + v.y;
+}
+
+int32 main() {
+    Vec a;
+    a.x = 1.5;
+    a.y = 2.25;
+    float64 s = sum(a);
+    io::println("{}", s);
+    return 0;
+}

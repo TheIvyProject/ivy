@@ -1,0 +1,5 @@
+int32 main() {
+    float32 x = 1.5;
+    io::println("{}", x);
+    return 0;
+}

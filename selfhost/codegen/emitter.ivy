@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2i textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2j textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2i):
+// The supported subset is deliberately small (H6.2a..H6.2j):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -41,15 +41,21 @@
 //   * H6.2i: reference returns (`T& f()`): `define ptr`, `ret ptr` of the
 //     returned lvalue's address, call sites yielding `call ptr` plus a value
 //     load for rvalue use, and the raw-pointer call path for reference
-//     lvalues/locals (`suppressRefLoad_`).
+//     lvalues/locals (`suppressRefLoad_`);
+//   * H6.2j: floating-point scalars (`float`/`double`/`float32_t`/
+//     `float64_t`): `std::to_string`-formatted literals, fadd/fsub/fmul/
+//     fdiv/frem, ordered fcmp predicates, `++`/`--` via fadd 1.0,
+//     sitofp/uitofp/fptosi/fpext/fptrunc casts, float parameters/returns
+//     (MSVC `M`/`N` mangling), and float arguments to io::print through
+//     `__ivy_fmt_float`.
 //
-// Out of scope (H6.3+): allocators, raw pointer parameters/returns, floats
-// (including float arguments to io::print), wide strings, variadic functions,
-// templates/virtual dispatch, Itanium mangling, arrays of structs/pointers,
-// array/struct initializer lists, array parameters or return types, array
-// decay outside `a[i]`, multi-dimensional arrays, `new`/`delete`, and the
-// arrow form on an allocator/`(T*)` cast (the selfhost parser rejects `(T*)0`
-// and `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
+// Out of scope (H6.3+): allocators, raw pointer parameters/returns,
+// wide strings, variadic functions, templates/virtual dispatch, Itanium
+// mangling, arrays of structs/pointers, array/struct initializer lists,
+// array parameters or return types, array decay outside `a[i]`,
+// multi-dimensional arrays, `new`/`delete`, and the arrow form on an
+// allocator/`(T*)` cast (the selfhost parser rejects `(T*)0` and
+// `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
 // diagnostic and makes the driver exit nonzero instead of emitting wrong IR.
 //
 // The formatting mirrors CodeGen::lowerFunction/lowerBlock/lowerInst/
@@ -79,6 +85,10 @@ export struct VRef {
     long ival;
     long idx;
     const char* name;
+    // H6.2j: the value of a floating-point literal (kind 5).  The other
+    // kinds leave it 0.0.  A literal has no temporary, so emit_val prints
+    // its `std::to_string` text directly.
+    double fval;
 };
 
 // The emitter state.  `mu` points at a heap copy of the MIR unit: Ivy forbids
@@ -118,7 +128,7 @@ export struct Emitter {
     void* vrefs_;
     long vn_;
     long vcap_;
-    // Per-call argument scratch: `arg_vals_` holds VRef records (32 bytes
+    // Per-call argument scratch: `arg_vals_` holds VRef records (40 bytes
     // each) and `arg_tys_` holds the final LLVM type string of every
     // argument.  `arg_sp_` is a stack pointer so a nested call used as an
     // argument does not clobber the arguments already lowered by its parent.
@@ -220,7 +230,7 @@ export struct Emitter {
             this.vnames_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vnums_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vrefs_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
-            this.arg_vals_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 32);
+            this.arg_vals_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 40);
             this.arg_tys_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 8);
             this.str_bytes_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
             this.str_lens_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
@@ -1091,6 +1101,7 @@ export struct Emitter {
 
     VRef imm(long v) {
         VRef r;
+        r.fval = 0.0;
         r.kind = 0;
         r.ival = v;
         r.idx = 0;
@@ -1102,6 +1113,7 @@ export struct Emitter {
     // string "null" and emitCast keeps it when the target is `ptr`.
     VRef null_ref() {
         VRef r;
+        r.fval = 0.0;
         r.kind = 4;
         r.ival = 0;
         r.idx = 0;
@@ -1111,6 +1123,7 @@ export struct Emitter {
 
     VRef new_temp() {
         VRef r;
+        r.fval = 0.0;
         r.kind = 1;
         r.ival = 0;
         r.idx = this.temp_;
@@ -1121,6 +1134,7 @@ export struct Emitter {
 
     VRef slot_ref(const char* name, long slot) {
         VRef r;
+        r.fval = 0.0;
         r.kind = 2;
         r.ival = 0;
         r.idx = slot;
@@ -1130,11 +1144,60 @@ export struct Emitter {
 
     VRef bool_ref(long v) {
         VRef r;
+        r.fval = 0.0;
         r.kind = 3;
         r.ival = v;
         r.idx = 0;
         r.name = "";
         return r;
+    }
+
+    // H6.2j: a floating-point literal.  The oracle lowers FloatLit with
+    // std::to_string(value), i.e. printf("%f"): fixed notation with exactly
+    // six fractional digits.
+    VRef float_lit(double v) {
+        VRef r;
+        r.kind = 5;
+        r.ival = 0;
+        r.idx = 0;
+        r.name = "";
+        r.fval = v;
+        return r;
+    }
+
+    // Print std::to_string(v) for the literal subset.  The integer part is
+    // taken first (it fits i64 up to 2^63) and only the fractional part is
+    // scaled by 1e6, so ordinary large literals do not overflow the scaled
+    // value.  Anything at or above 2^63 would need big-integer formatting
+    // and is rejected explicitly instead of emitting wrong IR.
+    void emit_double_lit(double v) {
+        if (v < 0.0) {
+            this.ps("-");
+            v = -v;
+        }
+        if (v >= 9223372036854775808.0) {
+            this.fail(0, 0, "large floating-point literals are out of scope for H6.2j");
+            return;
+        }
+        long ip = 0;
+        long frac = 0;
+        unsafe {
+            ip = (long) v;
+            frac = (long) ((v - (double) ip) * 1000000.0 + 0.5);
+        }
+        if (frac >= 1000000) {
+            ip = ip + 1;
+            frac = frac - 1000000;
+        }
+        io::print("{}", ip);
+        this.ps(".");
+        long div = 100000;
+        while (div > 0) {
+            long d = frac / div;
+            io::print("{}", d);
+            frac = frac - d * div;
+            div = div / 10;
+        }
     }
 
     void emit_val(VRef v) {
@@ -1150,6 +1213,8 @@ export struct Emitter {
             }
         } else if (v.kind == 4) {
             this.ps("null");
+        } else if (v.kind == 5) {
+            this.emit_double_lit(v.fval);
         } else {
             this.emit_slot(v.name, v.idx);
         }
@@ -1185,10 +1250,18 @@ export struct Emitter {
                this.streq(b, "bfloat16") || this.streq(b, "bfloat16_t");
     }
 
-    // Reject the types whose LLVM/MSVC spelling is out of the H6.2b subset.
+    // H6.2j: mirror of the oracle's isFpType, which classifies the LLVM
+    // spelling of a floating-point type (CodeGen::emitCast).
+    bool is_fp_ir(const char* s) {
+        return this.streq(s, "half") || this.streq(s, "bfloat") ||
+               this.streq(s, "float") || this.streq(s, "double") ||
+               this.streq(s, "fp128") || this.streq(s, "x86_fp80");
+    }
+
+    // Reject the types whose LLVM/MSVC spelling is out of the H6.2 subset.
     // Called for every declaration and definition, so an extern "C" symbol
     // (which is not mangled) is diagnosed too instead of silently emitting
-    // IR for pointers, arrays or floats.
+    // IR for pointers or arrays.
     bool check_fn_signature(MFunction f, long line, long col) {
         if (f.ret.array_size > 0) {
             this.fail(line, col, "array return types are out of scope for H6.2b");
@@ -1196,10 +1269,6 @@ export struct Emitter {
         }
         if (f.ret.ptr_depth > 0) {
             this.fail(line, col, "pointer return types are out of scope for H6.2i");
-            return false;
-        }
-        if (this.is_float_base(f.ret.base)) {
-            this.fail(line, col, "floating-point return types are out of scope for H6.2b");
             return false;
         }
         long j = 0;
@@ -1214,10 +1283,6 @@ export struct Emitter {
             }
             if (p.type.ptr_depth > 0) {
                 this.fail(line, col, "pointer parameters are out of scope for H6.2h");
-                return false;
-            }
-            if (this.is_float_base(p.type.base)) {
-                this.fail(line, col, "floating-point parameters are out of scope for H6.2b");
                 return false;
             }
             j = j + 1;
@@ -1247,6 +1312,9 @@ export struct Emitter {
         if (this.streq(t.base, "int")) { this.ps(t.is_unsigned != 0 ? "I" : "H"); return; }
         if (this.streq(t.base, "long")) { this.ps(t.is_unsigned != 0 ? "K" : "J"); return; }
         if (this.streq(t.base, "long long")) { this.ps(t.is_unsigned != 0 ? "_K" : "_J"); return; }
+        // H6.2j: MSVC floating-point codes (CodeGen::msvcMangleType).
+        if (this.streq(t.base, "float")) { this.ps("M"); return; }
+        if (this.streq(t.base, "double") || this.streq(t.base, "long double")) { this.ps("N"); return; }
         if (this.streq(t.base, "int8_t")) { this.ps("C"); return; }
         if (this.streq(t.base, "uint8_t")) { this.ps("E"); return; }
         if (this.streq(t.base, "int16_t")) { this.ps("F"); return; }
@@ -1259,11 +1327,12 @@ export struct Emitter {
         if (this.streq(t.base, "size_t")) { this.ps("_K"); return; }
         if (this.streq(t.base, "ptrdiff_t")) { this.ps("J"); return; }
         if (this.streq(t.base, "uptr_t")) { this.ps("_K"); return; }
+        if (this.streq(t.base, "float16_t") || this.streq(t.base, "float16")) { this.ps("M"); return; }
+        if (this.streq(t.base, "float32_t") || this.streq(t.base, "float32")) { this.ps("M"); return; }
+        if (this.streq(t.base, "float64_t") || this.streq(t.base, "float64")) { this.ps("N"); return; }
+        if (this.streq(t.base, "float128_t") || this.streq(t.base, "float128")) { this.ps("N"); return; }
+        if (this.streq(t.base, "bfloat16_t") || this.streq(t.base, "bfloat16")) { this.ps("M"); return; }
         if (this.streq(t.base, "max_align_t")) { this.ps("PEAV"); return; }
-        if (this.is_float_base(t.base)) {
-            this.fail(line, col, "floating-point type mangling is out of scope for H6.2b");
-            return;
-        }
         // H6.2f: the oracle's msvcMangleType falls back to "H" (int) for a
         // type it does not know, and a struct by value takes that path.
         if (this.is_struct_type(t)) { this.ps("H"); return; }
@@ -1396,6 +1465,67 @@ export struct Emitter {
             } else {
                 return v;
             }
+            return t;
+        }
+        // H6.2j: float <-> float (fpext / fptrunc), mirroring
+        // CodeGen::emitCast.  Unsupported pairs keep the value unchanged.
+        if (this.is_fp_ir(from) && this.is_fp_ir(to)) {
+            if (this.streq(from, "float") && this.streq(to, "double")) {
+                this.emit_val(t);
+                this.ps(" = fpext float ");
+                this.emit_val(v);
+                this.ps(" to double");
+                this.nl();
+            } else if (this.streq(from, "double") && this.streq(to, "float")) {
+                this.emit_val(t);
+                this.ps(" = fptrunc double ");
+                this.emit_val(v);
+                this.ps(" to float");
+                this.nl();
+            } else if (this.streq(from, "half") &&
+                       (this.streq(to, "float") || this.streq(to, "double"))) {
+                this.emit_val(t);
+                this.ps(" = fpext half ");
+                this.emit_val(v);
+                this.ps(" to ");
+                this.ps(to);
+                this.nl();
+            } else if (this.streq(to, "half") &&
+                       (this.streq(from, "float") || this.streq(from, "double"))) {
+                this.emit_val(t);
+                this.ps(" = fptrunc ");
+                this.ps(from);
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(" to half");
+                this.nl();
+            } else {
+                return v;
+            }
+            return t;
+        }
+        // int -> float
+        if (fb > 0 && this.is_fp_ir(to)) {
+            this.emit_val(t);
+            this.ps(from_unsigned != 0 ? " = uitofp " : " = sitofp ");
+            this.ps(from);
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(" to ");
+            this.ps(to);
+            this.nl();
+            return t;
+        }
+        // float -> int (the oracle always uses fptosi here).
+        if (this.is_fp_ir(from) && tb > 0) {
+            this.emit_val(t);
+            this.ps(" = fptosi ");
+            this.ps(from);
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(" to ");
+            this.ps(to);
+            this.nl();
             return t;
         }
         this.fail(line, col, "cast is out of scope for H6.2a");
@@ -1552,10 +1682,12 @@ export struct Emitter {
             // The oracle allocates the temporary before lowering the operand.
             VRef t = this.new_temp();
             VRef op = this.lower_expr(e.a);
+            long is_f =
+                (e.type.ptr_depth == 0 && this.is_float_base(e.type.base)) ? 1 : 0;
             this.emit_val(t);
-            this.ps(" = sub ");
+            this.ps(is_f != 0 ? " = fsub " : " = sub ");
             this.ps(this.llvm_type(e.type, 0));
-            this.ps(" 0, ");
+            this.ps(is_f != 0 ? " 0.0, " : " 0, ");
             this.emit_val(op);
             this.nl();
             return t;
@@ -1582,6 +1714,54 @@ export struct Emitter {
             this.nl();
             return t;
         }
+        if (this.streq(e.sval, "++") || this.streq(e.sval, "--")) {
+            MExpr opnd;
+            unsafe {
+                opnd = this.mu->exprs[e.a];
+            }
+            VRef p = this.lower_lvalue(e.a);
+            VRef oldV = this.new_temp();
+            this.emit_val(oldV);
+            this.ps(" = load ");
+            this.ps(this.llvm_type(opnd.type, 1));
+            this.ps(", ptr ");
+            this.emit_val(p);
+            this.nl();
+            VRef newV = this.new_temp();
+            this.emit_val(newV);
+            this.ps(" = ");
+            if (opnd.type.ptr_depth > 0) {
+                this.fail(e.line, e.col, "pointer increment is out of scope for H6.2j");
+                return this.imm(0);
+            }
+            long is_f = this.is_float_base(opnd.type.base) ? 1 : 0;
+            if (is_f != 0) {
+                // The oracle always emits `fadd ..., 1.0`, even for `--`.
+                this.ps("fadd ");
+                this.ps(this.llvm_type(opnd.type, 1));
+                this.ps(" ");
+                this.emit_val(oldV);
+                this.ps(", 1.0");
+            } else {
+                this.ps(this.streq(e.sval, "++") ? "add " : "sub ");
+                this.ps(this.llvm_type(opnd.type, 1));
+                this.ps(" ");
+                this.emit_val(oldV);
+                this.ps(", 1");
+            }
+            this.nl();
+            this.ps("store ");
+            this.ps(this.llvm_type(opnd.type, 1));
+            this.ps(" ");
+            this.emit_val(newV);
+            this.ps(", ptr ");
+            this.emit_val(p);
+            this.nl();
+            if (e.flag != 0) {
+                return newV;
+            }
+            return oldV;
+        }
         this.fail(e.line, e.col, "unary operator is out of scope for H6.2a");
         return this.imm(0);
     }
@@ -1600,6 +1780,17 @@ export struct Emitter {
         if (this.streq(op, "<=")) return is_unsigned != 0 ? "ule" : "sle";
         if (this.streq(op, ">=")) return is_unsigned != 0 ? "uge" : "sge";
         return "eq";
+    }
+
+    // H6.2j: the oracle's ordered fcmp predicates.
+    const char* fcmp_name(const char* op) {
+        if (this.streq(op, "==")) return "oeq";
+        if (this.streq(op, "!=")) return "one";
+        if (this.streq(op, "<")) return "olt";
+        if (this.streq(op, ">")) return "ogt";
+        if (this.streq(op, "<=")) return "ole";
+        if (this.streq(op, ">=")) return "oge";
+        return "oeq";
     }
 
     VRef emit_binop(const char* op, const char* ty, VRef lc, VRef rc) {
@@ -1642,6 +1833,10 @@ export struct Emitter {
         VRef rv = this.lower_expr(e.b);
 
         const long is_unsigned = lhs.type.is_unsigned != 0 ? 1 : 0;
+        // H6.2j: the oracle's isFloatType(v.lhs->type) decides the whole
+        // operation family (fcmp/fadd/...); a pointer is never float.
+        const long is_f =
+            (lhs.type.ptr_depth == 0 && this.is_float_base(lhs.type.base)) ? 1 : 0;
 
         if (this.is_cmp_op(e.sval)) {
             VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1),
@@ -1653,8 +1848,13 @@ export struct Emitter {
                                      e.line, e.col);
             VRef t = this.new_temp();
             this.emit_val(t);
-            this.ps(" = icmp ");
-            this.ps(this.cmp_name(e.sval, is_unsigned));
+            if (is_f != 0) {
+                this.ps(" = fcmp ");
+                this.ps(this.fcmp_name(e.sval));
+            } else {
+                this.ps(" = icmp ");
+                this.ps(this.cmp_name(e.sval, is_unsigned));
+            }
             this.ps(" ");
             this.ps(this.llvm_type(lhs.type, 1));
             this.ps(" ");
@@ -1674,20 +1874,25 @@ export struct Emitter {
                                  e.line, e.col);
 
         if (this.streq(e.sval, "+")) {
-            return this.emit_binop("add", this.llvm_type(e.type, 0), lc, rc);
+            return this.emit_binop(is_f != 0 ? "fadd" : "add",
+                                   this.llvm_type(e.type, 0), lc, rc);
         }
         if (this.streq(e.sval, "-")) {
-            return this.emit_binop("sub", this.llvm_type(e.type, 0), lc, rc);
+            return this.emit_binop(is_f != 0 ? "fsub" : "sub",
+                                   this.llvm_type(e.type, 0), lc, rc);
         }
         if (this.streq(e.sval, "*")) {
-            return this.emit_binop("mul", this.llvm_type(e.type, 0), lc, rc);
+            return this.emit_binop(is_f != 0 ? "fmul" : "mul",
+                                   this.llvm_type(e.type, 0), lc, rc);
         }
         if (this.streq(e.sval, "/")) {
-            return this.emit_binop(is_unsigned != 0 ? "udiv" : "sdiv",
+            return this.emit_binop(is_f != 0 ? "fdiv" :
+                                   (is_unsigned != 0 ? "udiv" : "sdiv"),
                                    this.llvm_type(e.type, 0), lc, rc);
         }
         if (this.streq(e.sval, "%")) {
-            return this.emit_binop(is_unsigned != 0 ? "urem" : "srem",
+            return this.emit_binop(is_f != 0 ? "frem" :
+                                   (is_unsigned != 0 ? "urem" : "srem"),
                                    this.llvm_type(e.type, 0), lc, rc);
         }
         if (this.streq(e.sval, "<<")) {
@@ -1792,11 +1997,6 @@ export struct Emitter {
                 }
                 if (a.type.ptr_depth > 0) {
                     this.fail(e.line, e.col, "pointer arguments are out of scope for H6.2b");
-                    this.arg_sp_ = base;
-                    return this.imm(0);
-                }
-                if (this.is_float_base(a.type.base)) {
-                    this.fail(e.line, e.col, "floating-point arguments are out of scope for H6.2b");
                     this.arg_sp_ = base;
                     return this.imm(0);
                 }
@@ -2076,8 +2276,27 @@ export struct Emitter {
             return;
         }
         if (this.is_float_base(at.base)) {
-            this.fail(a.line, a.col,
-                      "floating-point arguments to io::print are out of scope for H6.2c");
+            // H6.2j: a float argument is widened to double for
+            // __ivy_fmt_float (CodeGen::lowerIoArg).
+            VRef v = this.lower_expr(idx);
+            VRef ext = v;
+            if (!this.streq(this.llvm_type(at, 0), "double")) {
+                ext = this.new_temp();
+                this.emit_val(ext);
+                this.ps(" = fpext ");
+                this.ps(this.llvm_type(at, 0));
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(" to double");
+                this.nl();
+            }
+            VRef p = this.new_temp();
+            this.emit_val(p);
+            this.ps(" = call ptr @__ivy_fmt_float(double ");
+            this.emit_val(ext);
+            this.ps(")");
+            this.nl();
+            this.emit_write_str(fd, p);
             return;
         }
         VRef v = this.lower_expr(idx);
@@ -2236,6 +2455,9 @@ export struct Emitter {
         }
         if (e.kind == 0) {
             return this.imm(e.ival);
+        }
+        if (e.kind == 1) {
+            return this.float_lit(e.fval);
         }
         if (e.kind == 2) {
             return this.lower_string(e);

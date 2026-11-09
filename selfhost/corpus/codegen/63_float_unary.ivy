@@ -1,0 +1,9 @@
+int32 main() {
+    float64 x = 1.5;
+    float64 a = -x;
+    x++;
+    ++x;
+    x--;
+    --x;
+    return 0;
+}

@@ -1,0 +1,8 @@
+int32 main() {
+    float32 x = 1.5;
+    float32 y = 2.25;
+    float32 z = x + y;
+    float64 w = z;
+    float32 v = w;
+    return 0;
+}

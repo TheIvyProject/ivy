@@ -1,0 +1,8 @@
+float32 addf(float32 a, float32 b) {
+    return a + b;
+}
+
+int32 main() {
+    float32 x = addf(1.5, 2.25);
+    return 0;
+}

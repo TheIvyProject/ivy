@@ -1,0 +1,9 @@
+int32 main() {
+    float64 x = 1.5;
+    float64 y = 2.25;
+    float64 a = x + y;
+    float64 b = x - y;
+    float64 c = x * y;
+    float64 d = x / y;
+    return 0;
+}

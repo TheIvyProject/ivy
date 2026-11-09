@@ -1,0 +1,14 @@
+int32 main() {
+    float64 x = 1.5;
+    float64 y = 2.25;
+    int32 r = 0;
+    if (x < y) {
+        r = 1;
+    } else {
+        r = 2;
+    }
+    while (x < y) {
+        x = x + 0.5;
+    }
+    return r;
+}

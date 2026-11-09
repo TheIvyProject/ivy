@@ -1,0 +1,8 @@
+int32 main() {
+    int32 i = 3;
+    float64 x = i;
+    int32 j = x;
+    uint32 u = 4;
+    float64 y = u;
+    return j;
+}

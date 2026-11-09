@@ -1,0 +1,14 @@
+struct Vec { float64 x; float64 y; };
+
+Vec make(float64 x, float64 y) {
+    Vec v;
+    v.x = x;
+    v.y = y;
+    return v;
+}
+
+int32 main() {
+    Vec a = make(1.5, 2.25);
+    io::println("{}", a.x);
+    return 0;
+}

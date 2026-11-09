@@ -1,0 +1,9 @@
+int32 main() {
+    float64 x = 1.5;
+    float64 y = 2.25;
+    bool a = x < y;
+    bool b = x >= y;
+    bool c = x == y;
+    bool d = x != y;
+    return 0;
+}

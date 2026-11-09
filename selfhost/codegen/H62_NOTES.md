@@ -1404,3 +1404,118 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push H6.2i
 theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới trong cây
 làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62i\`.
+
+### 33. H6.2j — float scalar (`float`/`double`/`float32_t`/`float64_t`)
+
+#### 33.1 Phạm vi
+
+H6.2j mở rộng emitter sang số thực dấu phẩy động vô hướng, vẫn giữ
+nguyên tắc "text IR emission qua `io::print`" để khớp từng byte với
+`ivy --llvm`:
+
+- literal float -> `std::to_string(double)` (6 chữ số phần lẻ);
+- `+ - * /` -> `fadd`/`fsub`/`fmul`/`fdiv`;
+- so sánh -> `fcmp oeq/one/olt/ogt/ole/oge` (operand ép về kiểu lhs);
+- `-x` -> `fsub <ty> 0.0, x`; `++`/`--` -> `fadd <ty> <old>, 1.0`
+  (oracle dùng `fadd` cho cả `--`);
+- cast `sitofp`/`uitofp`, `fptosi` (kể cả unsigned), `fpext`
+  float->double, `fptrunc` double->float;
+- tham số/return float, mangling MSVC `M` (float/float32_t) và
+  `N` (double/float64_t);
+- `io::print`/`println` float -> `fpext` lên double nếu cần rồi
+  `call ptr @__ivy_fmt_float(double ...)` + `__ivy_write_str`.
+
+#### 33.2 Thiết kế
+
+- `VRef` thêm trường `double fval` (5 field, 40 byte); `arg_vals_` cấp
+  `arg_cap_ * 40`.
+- `float_lit` mang `kind == 5`; `lower_expr` đọc `e.fval` (MIR kind 1).
+- `emit_double_lit(double v)` in `std::to_string`:
+  - tách phần nguyên `ip = (long)v` trước, chỉ nhân phần lẻ với 1e6
+    (`frac = (long)((v - ip) * 1e6 + 0.5)`), carry nếu `frac >= 1e6`;
+  - in `ip`, `.`, rồi 6 chữ số của `frac`;
+  - literal `>= 2^63` bị từ chối rõ ràng (`large floating-point literals
+    are out of scope for H6.2j`) thay vì emit sai — cần big-integer
+    formatting mới xử lý được.
+- `is_float_base` nhận cả alias (`float`/`float32`/`float32_t`/
+  `double`/`float64`/`float64_t`); `is_fp_ir` mirror `isFpType` của oracle.
+- `lower_binary` rẽ nhánh `fadd/fsub/fmul/fdiv` khi lhs là float;
+  `lower_unary` phát `fsub 0.0` và `fadd 1.0`.
+- `emit_cast` xử lý float<->float và float<->int theo đúng thứ tự
+  opcode của oracle.
+- `check_fn_signature` cho phép return/param float; `emit_mangle_type`
+  ánh xạ `M`/`N`.
+- `lower_io_arg` phát `__ivy_fmt_float`; `lower_call` không còn từ chối
+  đối số float; nhánh `io::print` không còn `fail`.
+- Không khai báo biến `const char*` ngoài `unsafe`; dùng trực tiếp
+  `this.llvm_type(...)` trong `this.ps(...)`.
+
+#### 33.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `57_float_local.ivy` | `float64` cục bộ + literal |
+| `58_float_ops.ivy` | `+ - * /` trên float |
+| `59_float_cmp.ivy` | 6 toán tử so sánh float |
+| `60_float_cast.ivy` | int<->float, float32<->float64 |
+| `61_float_print.ivy` | `io::print` float64 |
+| `62_float32.ivy` | biến `float32` + literal |
+| `63_float_unary.ivy` | `-x`, `++`, `--` |
+| `64_float_literals.ivy` | làm tròn 6 chữ số, 0.000001 |
+| `65_float32_sig.ivy` | tham số/return `float32_t` |
+| `66_float_ret.ivy` | hàm trả `float64` |
+| `67_float_mixed_cmp.ivy` | so sánh float32 với float64 |
+| `68_struct_float_param.ivy` | struct chứa float truyền by value |
+| `69_struct_float_ret.ivy` | struct chứa float trả by value |
+| `70_float_cond.ivy` | điều kiện `if`/`while` trên float |
+| `71_float_mangle.ivy` | mangling trộn `N`/`i`/`M` |
+| `72_float_compound.ivy` | `x += 2.0` |
+| `73_float32_print.ivy` | `io::print` float32 (fpext) |
+
+#### 33.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62j\tmp2` (2026-11-09):
+
+```text
+[3/4] running 73 fixtures ...
+...
+PASS 73_float32_print.ivy
+[4/4] summary
+      PASS 73 / 73
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 56 fixture H6.2a-i vẫn byte-identical. Ngoài corpus còn
+11 probe đầu + 11 probe biên (`f12..f28`) chạy tay: tất cả khớp byte,
+riêng `f13_frem` khớp lỗi frontend.
+
+#### 33.5 Giới hạn / defer
+
+1. `%` trên float (`frem`): frontend oracle từ chối
+   `error: '%' expects integer operands`, nên không có cú pháp nguồn
+   hợp lệ; selfhost khớp lỗi.
+2. Literal `>= 2^63` (ví dụ `1e20`): oracle in
+   `100000000000000000000.000000`; selfhost từ chối có chủ đích vì cần
+   big-integer formatting. `1e15`/`1e18` đã PASS.
+3. Các mục ngoài phạm vi của H6.2i vẫn giữ nguyên (raw pointer
+   signature, array param/decay/multi-dim, wide string, variadic,
+   template/virtual, Itanium mangling, initializer list, `new`/`delete`,
+   `io::print` trên biểu thức reference).
+
+#### 33.6 Trạng thái H6.2j
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy` (`VRef.fval`, `float_lit`,
+  `emit_double_lit`, `is_float_base`, `is_fp_ir`, `emit_cast`,
+  `fcmp_name`, `lower_binary`, `lower_unary`, `check_fn_signature`,
+  `emit_mangle_type`, `lower_io_arg`, header);
+- `selfhost/corpus/codegen/57..73_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 33 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..j ... 73/73`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
+H6.2j theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
+trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62j\`.

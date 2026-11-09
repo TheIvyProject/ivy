@@ -1,0 +1,8 @@
+float64 mix(float64 a, int32 b, float32 c) {
+    return a + b;
+}
+
+int32 main() {
+    float64 r = mix(1.5, 2, 3.25);
+    return 0;
+}

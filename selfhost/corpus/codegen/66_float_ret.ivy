@@ -1,0 +1,9 @@
+float64 half(float64 x) {
+    return x / 2.0;
+}
+
+int32 main() {
+    float64 y = half(5.0);
+    io::println("{}", y);
+    return 0;
+}

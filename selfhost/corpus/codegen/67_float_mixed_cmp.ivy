@@ -1,0 +1,7 @@
+int32 main() {
+    float32 x = 1.5;
+    float64 y = 2.25;
+    bool a = x < y;
+    bool b = y > x;
+    return 0;
+}
