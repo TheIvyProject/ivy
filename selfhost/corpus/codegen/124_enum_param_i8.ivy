@@ -1,0 +1,9 @@
+enum Small : int8 { A, B };
+
+Small pick(Small s) {
+    return s;
+}
+
+int32 main() {
+    return pick(B);
+}

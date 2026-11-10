@@ -1,0 +1,7 @@
+enum Color { Red, Green, Blue };
+
+int32 main() {
+    Color c = Blue;
+    io::println("{}", c);
+    return 0;
+}

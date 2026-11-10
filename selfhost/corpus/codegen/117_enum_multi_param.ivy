@@ -1,0 +1,10 @@
+enum Color { Red, Green, Blue };
+enum class Mode { A, B };
+
+Color mix(Color c, Mode m, int32 n) {
+    return c;
+}
+
+int32 main() {
+    return mix(Green, Mode::B, 2);
+}

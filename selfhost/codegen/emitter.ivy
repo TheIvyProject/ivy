@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2l textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2m textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2l):
+// The supported subset is deliberately small (H6.2a..H6.2m):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -56,6 +56,10 @@
 //     chains (`a[i].x`), whole-element copies and float formatting of an
 //     element; plus reference arguments to `io::print` (bug-compatible with
 //     the oracle's `sext ptr` spelling).
+//   * H6.2m: user-defined enums.  An enum value resolves to its underlying
+//     integer type (`Color c` -> `alloca i32`), including enum array
+//     elements; an unscoped enum mangles as its underlying type and a scoped
+//     enum (`enum class`) as the nested-name `W4<name>@@`.
 //
 // Out of scope (H6.3+): allocators, raw pointer parameters/returns,
 // wide strings, variadic functions, templates/virtual dispatch, Itanium
@@ -209,6 +213,10 @@ export struct Emitter {
             p->fields = u.fields;
             p->fld_n = u.fld_n;
             p->fld_cap = u.fld_cap;
+            // H6.2m: the enum definitions.
+            p->enums = u.enums;
+            p->en_n = u.en_n;
+            p->en_cap = u.en_cap;
             this.mu = p;
         }
         this.temp_ = 0;
@@ -420,6 +428,30 @@ export struct Emitter {
             return false;
         }
         return this.find_struct(t.base) >= 0;
+    }
+
+    // H6.2m: the enum definition of a name, or -1 when the name is not an
+    // enum of the unit (mirror of CodeGen::enumTypes_).
+    long find_enum(const char* name) {
+        long i = 0;
+        unsafe {
+            while (i < this.mu->en_n) {
+                if (this.streq(this.mu->enums[i].name, name)) {
+                    return i;
+                }
+                i = i + 1;
+            }
+        }
+        return -1;
+    }
+
+    // An enum value (not a pointer/reference/array): the type resolves to the
+    // underlying integer type.
+    bool is_enum_type(AType t) {
+        if (t.array_size > 0 || t.ptr_depth > 0 || t.is_ref != 0) {
+            return false;
+        }
+        return this.find_enum(t.base) >= 0;
     }
 
     // Builds `index out of bounds (line <line>)` in a heap buffer.  The
@@ -1017,6 +1049,10 @@ export struct Emitter {
             if (this.is_struct_type(ev)) {
                 elem_ok = 1;
             }
+            // H6.2m: an enum element resolves to its underlying integer type.
+            if (this.is_enum_type(ev)) {
+                elem_ok = 1;
+            }
             if (elem_ok == 0) {
                 this.fail(0, 0, "array element type is out of scope for H6.2d");
                 return "i8";
@@ -1042,6 +1078,18 @@ export struct Emitter {
             long sp = this.make_struct_type_name(sv.base);
             unsafe {
                 return reinterpret_cast<const char*>(sp);
+            }
+            return "i8";
+        }
+        // H6.2m: a user-defined enum resolves to its underlying integer type
+        // (CodeGen::llvmType's enum branch).  An unknown underlying name falls
+        // through to the scalar table below.
+        long en = this.find_enum(t.base);
+        if (en >= 0) {
+            AType ut;
+            unsafe {
+                ut = this.mu->enums[en].underlying;
+                return this.llvm_type(ut, drop_ref);
             }
             return "i8";
         }
@@ -1378,6 +1426,27 @@ export struct Emitter {
         if (this.streq(t.base, "float128_t") || this.streq(t.base, "float128")) { this.ps("N"); return; }
         if (this.streq(t.base, "bfloat16_t") || this.streq(t.base, "bfloat16")) { this.ps("M"); return; }
         if (this.streq(t.base, "max_align_t")) { this.ps("PEAV"); return; }
+        // H6.2m: a user-defined enum (CodeGen::msvcMangleType's enum branch).
+        // An unscoped enum collapses to its underlying integer type; a scoped
+        // enum is a nested-name encoding (`W4<name>@@`, no namespace prefix in
+        // the selfhost subset).
+        long en = this.find_enum(t.base);
+        if (en >= 0) {
+            long scoped = 0;
+            AType ut;
+            unsafe {
+                scoped = this.mu->enums[en].is_scoped;
+                ut = this.mu->enums[en].underlying;
+            }
+            if (scoped != 0) {
+                this.ps("W4");
+                this.ps(t.base);
+                this.ps("@@");
+                return;
+            }
+            this.emit_mangle_type(ut, line, col);
+            return;
+        }
         // H6.2f: the oracle's msvcMangleType falls back to "H" (int) for a
         // type it does not know, and a struct by value takes that path.
         if (this.is_struct_type(t)) { this.ps("H"); return; }

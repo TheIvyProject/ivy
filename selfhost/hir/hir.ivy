@@ -102,6 +102,17 @@ export struct HStruct {
     long col;
 };
 
+// H6.2m: an enum definition in HIR.  Only what the codegen needs survives the
+// HIR stage (the enumerator values are folded to integer literals): the name,
+// the `enum class` flag and the underlying integer type.  Duplicate
+// declarations are not recorded (the oracle drops them in
+// HirBuilder::buildEnum).
+export struct HEnum {
+    const char* name;
+    long is_scoped;
+    AType underlying;
+};
+
 // A HIR function.  The declared lifetimes are the native `lifetime<$a, $b>`
 // names first, then the legacy `[[ivy::lt_def(a, b)]]` names; they are
 // stored in the `HUnit.ltnames` pool and `lt_start`/`lt_n` delimit the
@@ -155,4 +166,8 @@ export struct HUnit {
     HField* fields;
     long fld_n;
     long fld_cap;
+    // H6.2m: the enum definitions of the unit (source order).
+    HEnum* enums;
+    long enum_n;
+    long enum_cap;
 };

@@ -1,0 +1,8 @@
+enum class Mode { A, B, C };
+
+int32 main() {
+    Mode a[2];
+    a[0] = Mode::A;
+    a[1] = Mode::C;
+    return a[1];
+}

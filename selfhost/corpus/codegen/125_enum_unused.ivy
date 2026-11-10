@@ -1,0 +1,7 @@
+enum Color { Red, Green, Blue };
+enum Unused { A, B };
+
+int32 main() {
+    Color c = Green;
+    return c;
+}

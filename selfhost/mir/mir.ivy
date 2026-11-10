@@ -146,6 +146,15 @@ export struct MStruct {
     long col;
 };
 
+// H6.2m: an enum definition in MIR.  Mirrors `mir::EnumInfo`: the name, the
+// `enum class` flag and the underlying integer type.  The enumerator values
+// do not survive the HIR stage (they are folded to integer literals).
+export struct MEnum {
+    const char* name;
+    long is_scoped;
+    AType underlying;
+};
+
 // A whole MIR translation unit.  The pools are owned by MirBuilder.
 export struct MUnit {
     MFunction* fns;
@@ -183,4 +192,8 @@ export struct MUnit {
     MField* fields;
     long fld_n;
     long fld_cap;
+    // H6.2m: the enum definitions (source order).
+    MEnum* enums;
+    long en_n;
+    long en_cap;
 };

@@ -338,6 +338,12 @@ export struct HirBuilder {
             this.u.fields = (HField*) __ivy_alloc(this.u.fld_cap * 56);
             this.u.fld_n = 0;
 
+            // H6.2m: the exported enum definitions (name + underlying type).
+            long nenums = this.pa.enum_count();
+            this.u.enum_cap = nenums + 8;
+            this.u.enums = (HEnum*) __ivy_alloc(this.u.enum_cap * 64);
+            this.u.enum_n = 0;
+
             this.cst_bname_ = (long*) __ivy_alloc((ntoks + 16) * 8);
             this.cst_bint_ = (long*) __ivy_alloc((ntoks + 16) * 8);
             this.cst_bi_ = (long*) __ivy_alloc((ntoks + 16) * 8);
@@ -478,6 +484,7 @@ export struct HirBuilder {
             __ivy_free(this.u.args);
             __ivy_free(this.u.structs);
             __ivy_free(this.u.fields);
+            __ivy_free(this.u.enums);
             __ivy_free(this.snm_);
             __ivy_free(this.sty_);
             __ivy_free(this.smv_);
@@ -2404,6 +2411,22 @@ export struct HirBuilder {
                 this.err_redef_enum(ed.line, ed.col, ed.name);
                 ei = ei + 1;
                 continue;
+            }
+            // H6.2m: export the accepted definition so the MIR and the emitter
+            // can resolve the enum to its underlying integer type.  The parser
+            // leaves the underlying type empty when the source omits it; the
+            // oracle defaults it to `int` while parsing, so mirror that here.
+            long hni = this.u.enum_n;
+            if (hni < this.u.enum_cap) {
+                unsafe {
+                    this.u.enums[hni].name = ed.name;
+                    this.u.enums[hni].is_scoped = ed.is_scoped;
+                    this.u.enums[hni].underlying = ed.underlying;
+                    if (this.seq(this.u.enums[hni].underlying.base, "")) {
+                        this.u.enums[hni].underlying.base = "int";
+                    }
+                }
+                this.u.enum_n = hni + 1;
             }
             long start = this.ev_n_;
             long next = 0;

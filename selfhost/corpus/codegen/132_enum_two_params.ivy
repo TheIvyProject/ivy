@@ -1,0 +1,10 @@
+enum A { A0, A1 };
+enum B { B0, B1 };
+
+int32 both(A a, B b) {
+    return a;
+}
+
+int32 main() {
+    return both(A1, B1);
+}

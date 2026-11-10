@@ -1,0 +1,9 @@
+enum Big : uint16 { X = 3, Y };
+
+Big id(Big b) {
+    return b;
+}
+
+int32 main() {
+    return id(Y);
+}

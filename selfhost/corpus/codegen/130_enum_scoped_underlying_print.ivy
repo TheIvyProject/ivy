@@ -1,0 +1,7 @@
+enum class M : int8 { A = 1, B = 2 };
+
+int32 main() {
+    M m = M::B;
+    io::println("{}", m);
+    return 0;
+}

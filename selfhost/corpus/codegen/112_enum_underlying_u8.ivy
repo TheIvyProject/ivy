@@ -1,0 +1,9 @@
+enum Tiny : uint8 { P = 200, Q };
+
+Tiny pick(Tiny t) {
+    return t;
+}
+
+int32 main() {
+    return pick(Q);
+}

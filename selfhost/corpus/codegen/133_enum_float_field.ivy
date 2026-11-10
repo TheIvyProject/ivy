@@ -1,0 +1,11 @@
+enum Color { Red, Green, Blue };
+
+struct S { Color c; float64 f; };
+
+int32 main() {
+    S s;
+    s.c = Blue;
+    s.f = 1.5;
+    io::println("{} {}", s.c, s.f);
+    return 0;
+}

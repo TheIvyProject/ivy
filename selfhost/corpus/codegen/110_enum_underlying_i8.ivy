@@ -1,0 +1,6 @@
+enum Small : int8 { A, B };
+
+int32 main() {
+    Small s = B;
+    return s;
+}

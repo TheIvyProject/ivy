@@ -649,6 +649,12 @@ export struct MirBuilder {
             this.mu.fields = (MField*) __ivy_alloc(nfld * 56);
             this.mu.fld_n = 0;
 
+            // H6.2m: the enum definitions.
+            long nen = u.enum_n + 8;
+            this.mu.en_cap = nen;
+            this.mu.enums = (MEnum*) __ivy_alloc(nen * 64);
+            this.mu.en_n = 0;
+
             this.mu.fn_cap = u.fn_n + 16;
             this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 128);
             this.mu.fn_n = 0;
@@ -747,6 +753,7 @@ export struct MirBuilder {
             __ivy_free(this.mu.arm_blk);
             __ivy_free(this.mu.structs);
             __ivy_free(this.mu.fields);
+            __ivy_free(this.mu.enums);
             __ivy_free(this.sc_name_);
             __ivy_free(this.sc_lt_);
             __ivy_free(this.sc_ltn_);
@@ -3299,6 +3306,25 @@ export struct MirBuilder {
                 this.mu.st_n = mi + 1;
             }
             si = si + 1;
+        }
+        // H6.2m: copy the enum definitions (source order) so the emitter can
+        // resolve an enum to its underlying integer type and mangle it.
+        long eni = 0;
+        while (eni < this.hu.enum_n) {
+            HEnum he;
+            unsafe {
+                he = this.hu.enums[eni];
+            }
+            long me = this.mu.en_n;
+            if (me < this.mu.en_cap) {
+                unsafe {
+                    this.mu.enums[me].name = he.name;
+                    this.mu.enums[me].is_scoped = he.is_scoped;
+                    this.mu.enums[me].underlying = he.underlying;
+                }
+                this.mu.en_n = me + 1;
+            }
+            eni = eni + 1;
         }
         long i = 0;
         long n = 0;

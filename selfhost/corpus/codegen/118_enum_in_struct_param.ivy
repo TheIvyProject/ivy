@@ -1,0 +1,13 @@
+enum Color { Red, Green, Blue };
+
+struct S { Color c; };
+
+int32 get(S s) {
+    return s.c;
+}
+
+int32 main() {
+    S s;
+    s.c = Green;
+    return get(s);
+}

@@ -1,0 +1,15 @@
+enum Color { Red, Green, Blue };
+
+struct S { Color c; int32 n; };
+
+S make() {
+    S s;
+    s.c = Blue;
+    s.n = 2;
+    return s;
+}
+
+int32 main() {
+    S s = make();
+    return s.c;
+}

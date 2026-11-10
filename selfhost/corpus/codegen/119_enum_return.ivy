@@ -1,0 +1,9 @@
+enum Color { Red, Green, Blue };
+
+Color next(Color c) {
+    return Blue;
+}
+
+int32 main() {
+    return next(Red);
+}

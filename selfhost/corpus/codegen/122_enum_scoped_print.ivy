@@ -1,0 +1,7 @@
+enum class Mode { A, B };
+
+int32 main() {
+    Mode m = Mode::B;
+    io::println("{}", m);
+    return 0;
+}

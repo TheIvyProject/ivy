@@ -1,0 +1,9 @@
+enum class Mode { A, B };
+
+Mode pick(Mode m) {
+    return m;
+}
+
+int32 main() {
+    return pick(Mode::A);
+}

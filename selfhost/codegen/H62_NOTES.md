@@ -1716,3 +1716,135 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Commit/push
 H6.2l theo yêu cầu của người dùng. Không có `.obj`, `.ivm`, `.exe` mới
 trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62l\`.
+
+### 36. H6.2m — enum type resolution
+
+#### 36.1 Phạm vi
+
+- Giá trị enum được resolve về **kiểu số nguyên nền** (underlying) đúng
+  như oracle: `Color c = Green;` -> `alloca i32`, `store i32 1`,
+  `load i32`; không còn `i8` + `trunc`/`sext`.
+- Enum không scoped (`enum Color { ... }`) và scoped (`enum class Mode
+  { ... }`, `enum struct`).
+- Underlying tường minh: `enum Small : int8`, `enum Big : uint16`,
+  `enum Tiny : uint8` (parser oracle từ chối hậu tố `_t`; dùng
+  `int8`/`uint16`/`uint8`).
+- Enum trong: biến cục bộ, tham số, giá trị trả về, phần tử mảng,
+  field struct, `io::print`/`println`, `sizeof`, chỉ số mảng, số học
+  (`Green + 1`), giá trị enumerator tường minh/biểu thức.
+- Mangling MSVC:
+  - unscoped enum -> mã của underlying (`H`, `C`, `G`, ...);
+  - scoped enum -> `W4<name>@@` (không có namespace prefix trong
+    selfhost subset).
+- Enum không dùng vẫn được ghi vào bảng nhưng không sinh IR toàn cục
+  (giống oracle).
+
+#### 36.2 Thiết kế
+
+- `selfhost/hir/hir.ivy`: thêm `HEnum { name, is_scoped, underlying }`
+  và `HUnit.enums/enum_n/enum_cap`.
+- `selfhost/hir/hir_builder.ivy`: cấp phát/free pool enum trong
+  `setup`/`release`; `build_enums` export các enum được chấp nhận
+  (bỏ qua enum trùng tên như oracle). Parser selfhost để `underlying`
+  rỗng khi nguồn không ghi kiểu nền; builder đổi thành `int` (oracle
+  mặc định `int` ngay trong parser).
+- `selfhost/mir/mir.ivy`: thêm `MEnum { name, is_scoped, underlying }`
+  và `MUnit.enums/en_n/en_cap`.
+- `selfhost/mir/mir_builder.ivy`: cấp phát/free pool; copy
+  `hu.enums` -> `mu.enums` ở đầu `build()`.
+- `selfhost/codegen/emitter.ivy`:
+  - `find_enum(name)` + `is_enum_type(t)` (mirror `enumTypes_`);
+  - `llvm_type` resolve enum qua underlying (đệ quy, giữ `drop_ref`);
+    nhánh array chấp nhận phần tử enum;
+  - `emit_mangle_type`: unscoped -> đệ quy underlying, scoped ->
+    `W4` + tên + `@@`;
+  - `Emitter::setup` copy thêm `enums/en_n/en_cap` (xem 36.5 mục 1).
+- Không cần đổi `check_fn_signature`: enum là kiểu value, không phải
+  array/pointer.
+
+#### 36.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `106_enum_local.ivy` | `Color c = Green` -> `alloca i32`, `store i32 1` |
+| `107_enum_param_return.ivy` | tham số + return enum, mangling `H` |
+| `108_enum_scoped.ivy` | `enum class Mode`, `Mode::B` |
+| `109_enum_scoped_param.ivy` | tham số/return scoped, mangling `W4Mode@@` |
+| `110_enum_underlying_i8.ivy` | `enum Small : int8` -> `i8` |
+| `111_enum_underlying_u16.ivy` | `enum Big : uint16` -> `i16` |
+| `112_enum_underlying_u8.ivy` | `enum Tiny : uint8` -> `i8`, mangling `E` |
+| `113_enum_array.ivy` | `Color a[2]` -> `[2 x i32]` |
+| `114_enum_struct_field.ivy` | `struct S { Color c; int32 n; }` |
+| `115_enum_print.ivy` | `io::println("{}", c)` -> `__ivy_fmt_int` |
+| `116_enum_explicit_values.ivy` | `A=1, B=2, C=A|B, D=-1` |
+| `117_enum_multi_param.ivy` | `mix(Color, Mode, int32)` |
+| `118_enum_in_struct_param.ivy` | struct chứa enum truyền by value |
+| `119_enum_return.ivy` | hàm trả enum không so sánh |
+| `120_enum_scoped_array.ivy` | mảng `Mode a[2]`, `Mode::C` |
+| `121_enum_struct_print.ivy` | in field enum + int trong struct |
+| `122_enum_scoped_print.ivy` | in giá trị scoped enum |
+| `123_enum_struct_return.ivy` | trả struct chứa enum |
+| `124_enum_param_i8.ivy` | tham số `Small : int8` |
+| `125_enum_unused.ivy` | enum không dùng không sinh IR |
+| `126_enum_arith.ivy` | `Green + 1` |
+| `127_enum_sizeof.ivy` | `sizeof(Color)` = 4 |
+| `128_enum_index.ivy` | `a[Green]` |
+| `129_enum_scoped_underlying.ivy` | `enum class M : uint8` |
+| `130_enum_scoped_underlying_print.ivy` | `enum class M : int8` + in |
+| `131_enum_nested_struct_array.ivy` | `S a[2]; a[1].c` |
+| `132_enum_two_params.ivy` | hai enum khác nhau trong một chữ ký |
+| `133_enum_float_field.ivy` | struct `{ Color; float64 }` + in |
+| `134_enum_expr_values.ivy` | giá trị enumerator `A+B`, `C*2` |
+
+#### 36.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62m\tmp` (2026-11-10):
+
+```text
+[3/4] running 134 fixtures ...
+PASS 106_enum_local.ivy
+...
+PASS 134_enum_expr_values.ivy
+[4/4] summary
+      PASS 134 / 134
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 105 fixture H6.2a-l vẫn byte-identical.
+
+#### 36.5 Giới hạn / defer
+
+1. `Emitter::setup` copy `MUnit` từng field thủ công; lần đầu bỏ sót
+   `enums/en_n/en_cap` nên `find_enum` luôn trả -1 và emitter rơi về
+   `i8`. Đã sửa bằng cách copy thêm ba field (kích thước 320 byte vẫn
+   đủ: `MUnit` hiện 272 byte).
+2. So sánh enum (`c == Green`) bị frontend oracle từ chối
+   (`'==' between incompatible types`), nên không có fixture dương.
+3. C-style cast (`(int32)c`) yêu cầu `unsafe`; chẩn đoán selfhost khác
+   oracle ở trường hợp này (frontend, ngoài phạm vi H6.2m).
+4. Underlying `long` bị frontend từ chối; hậu tố `_t` (`int8_t`, ...)
+   đã bị loại khỏi ngôn ngữ.
+5. Namespace chưa được selfhost parser hỗ trợ, nên scoped mangling
+   không có namespace prefix; Itanium mangling vẫn ngoài phạm vi.
+6. Raw pointer param/return, array param/decay/multi-dim, initializer
+   list, `new`/`delete`, static local: vẫn defer.
+
+#### 36.6 Trạng thái H6.2m
+
+Tập thêm/sửa:
+
+- `selfhost/hir/hir.ivy` (`HEnum`, `HUnit.enums`);
+- `selfhost/hir/hir_builder.ivy` (pool enum + export trong
+  `build_enums`);
+- `selfhost/mir/mir.ivy` (`MEnum`, `MUnit.enums`);
+- `selfhost/mir/mir_builder.ivy` (pool + copy);
+- `selfhost/codegen/emitter.ivy` (`find_enum`, `is_enum_type`,
+  `llvm_type`, `emit_mangle_type`, `setup`, header);
+- `selfhost/corpus/codegen/106..134_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 36 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..m ... 134/134`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62m\`.

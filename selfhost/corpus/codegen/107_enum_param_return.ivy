@@ -1,0 +1,10 @@
+enum Color { Red, Green, Blue };
+
+Color id(Color c) {
+    return c;
+}
+
+int32 main() {
+    Color c = Blue;
+    return id(c);
+}
