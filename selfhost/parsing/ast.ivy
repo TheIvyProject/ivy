@@ -244,6 +244,12 @@ export struct AAlias {
 //   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 nullopt
 //   8 ident  9 this  10 unary  11 binary  12 ternary  13 call  14 index
 //   15 member  16 assign  17 sizeofpack  18 sizeof  19 alignof  20 cast
+//   21 new  22 delete
+//
+// H6.2n: `new T(args)` stores the target type in `type` and its arguments
+// as a run of `astart`/`an` indices in the call-argument pool (the same
+// staging used by calls).  `delete[] expr` stores `isArray` in `flag` and
+// the operand in `a`.
 //
 // `tpl_args`/`tpl_n` hold the explicit template arguments of a template-id
 // call (`f<int32>(x)`); they are empty for an ordinary call.

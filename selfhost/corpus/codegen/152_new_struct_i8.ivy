@@ -1,0 +1,11 @@
+struct Q { int8 a; int32 b; };
+
+int32 main() {
+    unsafe {
+        Q* q = new Q(3);
+        int32 v = q->b;
+        delete q;
+        return v;
+    }
+    return 0;
+}

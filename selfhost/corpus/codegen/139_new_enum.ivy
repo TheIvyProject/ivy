@@ -1,0 +1,11 @@
+enum Color { Red, Green, Blue };
+
+int32 main() {
+    unsafe {
+        Color* p = new Color(2);
+        Color c = *p;
+        delete p;
+        return c;
+    }
+    return 0;
+}

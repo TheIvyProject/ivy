@@ -1,0 +1,7 @@
+int32 main() {
+    unsafe {
+        int32 v = *new int32(9);
+        return v;
+    }
+    return 0;
+}

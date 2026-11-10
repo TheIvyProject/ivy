@@ -1848,3 +1848,137 @@ Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62m\`.
+
+### 37. H6.2n — `new`/`delete` (kèm deref `*p` và address-of `&x`)
+
+#### 37.1 Phạm vi
+
+- `new T`, `new T(args)` với `T` là số nguyên, số thực, enum hoặc struct.
+- `delete p` và `delete[] p`.
+- Chỉ được dùng trong `unsafe { ... }` (kể cả dạng một câu lệnh
+  `unsafe stmt;`), khớp `Parser::inUnsafe_` của oracle.
+- Hai toán tử con trỏ tối thiểu để `new`/`delete` dùng được:
+  - deref `*p` (rvalue: load pointee; lvalue: chính giá trị con trỏ);
+  - address-of `&x` trên biến (`IdentRef`) và trên lvalue khác.
+
+#### 37.2 Thiết kế
+
+- `ast.ivy`: thêm kind 21 = `new` (type trong `e.type`, args trong
+  `astart/an`) và 22 = `delete` (`isArray` trong `flag`, toán hạng
+  trong `a`).
+- `parser.ivy`: field `in_unsafe_`, bật/tắt quanh thân `unsafe`
+  (save/restore như oracle), `parse_new`/`parse_delete` gọi từ
+  `parse_unary` trước chuỗi postfix; lỗi
+  `'new'/'delete' requires an unsafe block in the Ivy subset`.
+- `hir_builder.ivy`: `build_new` (kind 20; kiểu nút là `T*`, args build
+  qua `abuf_` staging như call) và `build_delete` (kind 21, chẩn đoán
+  `'delete' expects a pointer operand` khi toán hạng không phải con trỏ).
+- `mir_builder.ivy`: `ex_new` (kind 15, `lt = Unknown`, reserve run args
+  trước khi build) và `ex_delete` (kind 16).
+- `emitter.ivy`:
+  - `uses_alloc_`/`uses_free_` + `collect_expr` kinds 15/16 (chỉ bật
+    cờ, KHÔNG đệ quy vào args/toán hạng — đúng như oracle, nên string
+    literal/`io::print` nằm trong `new` arg không được pre-collect);
+  - `sizeof_type` mirror `CodeGen::sizeofType` (struct = tổng field làm
+    tròn lên 8; enum = underlying; bỏ qua `ptr_depth` như oracle);
+  - `lower_new`: `%tmp.N = call ptr @__ivy_alloc(i64 sizeof(T))`, sau đó
+    nếu có args thì `store T <arg0>, ptr %tmp.N` (bug-compat: oracle chỉ
+    dùng args[0] và lưu nguyên kiểu `T`, kể cả struct);
+  - `lower_delete`: `call void @__ivy_free(ptr ...)`;
+  - emit `declare ptr @__ivy_alloc(i64)` / `declare void @__ivy_free(ptr)`
+    sau entry point, trước io runtime;
+  - `lower_unary` nhánh `&` (IdentRef -> slot của biến) và `*`
+    (load `llvmType(e.type)`), `lower_lvalue` nhánh Unary `*`
+    (trả giá trị con trỏ);
+  - `lower_string` trả `null` khi literal chưa được pre-collect (oracle:
+    `return "null"`), và `VRef` kind 6 = "empty" cho void call / `delete`
+    dùng như biểu thức (`emit_val` không in gì, khớp chuỗi `""` của
+    oracle).
+
+#### 37.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `135_new_scalar.ivy` | `new int32(5)`, `*p`, `delete p` |
+| `136_new_no_paren.ivy` | `new int32;` + `*p = 7` |
+| `137_new_struct.ivy` | `new P(5)` + `p->x` |
+| `138_new_struct_noparen.ivy` | `new P;` + ghi/đọc field |
+| `139_new_enum.ivy` | `new Color(2)` -> alloc `i64 4` |
+| `140_new_float.ivy` | `new float64(1.5)` + in |
+| `141_new_float32.ivy` | `new float32(2.25)` + in |
+| `142_new_expr_arg.ivy` | `new int32(v + 1)` |
+| `143_new_multiarg.ivy` | `new P(1, 2)` (chỉ args[0] được store) |
+| `144_delete_array.ivy` | `delete[] p` |
+| `145_new_in_expr.ivy` | `*new int32(9)` |
+| `146_new_loop.ivy` | cấp phát/giải phóng trong `while` |
+| `147_deref_struct.ivy` | `(*p).x` |
+| `148_addr_local.ivy` | `int32* p = &x` + `*p = 5` |
+| `149_double_deref.ivy` | `int32** pp = &p`, `**pp` |
+| `150_new_single_stmt.ivy` | `unsafe stmt;` chứa `new` |
+| `151_new_struct_pad.ivy` | struct 3 field -> `i64 16` |
+| `152_new_struct_i8.ivy` | struct `{int8; int32}` -> `i64 8` |
+| `153_new_nested_struct.ivy` | struct lồng nhau -> tổng sizeof |
+
+#### 37.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62n\run` (2026-11-10):
+
+```text
+[3/4] running 153 fixtures ...
+PASS 135_new_scalar.ivy
+...
+PASS 153_new_nested_struct.ivy
+[4/4] summary
+      PASS 153 / 153
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+Exit 0. Toàn bộ 134 fixture H6.2a-m vẫn byte-identical. `interpdiff.ps1`
+vẫn `PASS 23 / 23` (parser/HIR dùng chung không đổi hành vi).
+
+Ngoài corpus, 25 probe trong `...\h62n\probe` khớp oracle từng byte, gồm
+`m06_new`, `p10_new_noparen`, `p11_new_struct`, `p12_new_outside`
+(lỗi unsafe), `n06_delete_nonptr` (chẩn đoán), `n12_addr_member` /
+`n13_addr_nonvar` (lỗi `&` không phải biến), `n17..n19` (sizeof struct
+có padding/lồng nhau), `n20` (string literal trong `new` arg -> `null`,
+không sinh `@.str`) và `n21` (void call trong `new` arg -> `store i32 ,
+ptr`, io runtime không được emit — bug-compat).
+
+#### 37.5 Giới hạn / defer
+
+1. `new T[n]` (mảng cấp phát) bị cả hai frontend từ chối
+   (`expected ';' after declaration`) — không có fixture dương.
+2. `delete` không kiểm tra double-free/leak (chỉ là lowering IR).
+3. `new T(args)` nhiều hơn một arg: oracle chỉ store args[0] và bỏ các
+   arg còn lại (không sinh IR); selfhost giữ đúng hành vi đó.
+4. `&` chỉ hợp lệ trên biến (HIR `oe.kind != 8` -> lỗi
+   `'&' is only supported on variables in the Ivy subset`); `&s.x`
+   cũng bị từ chối ở HIR, khớp oracle.
+5. Struct initializer list, raw pointer param/return, array param/decay/
+   multi-dim, static local: vẫn defer.
+
+#### 37.6 Trạng thái H6.2n
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/ast.ivy` (comment kind 21/22);
+- `selfhost/parsing/parser.ivy` (`in_unsafe_`, `parse_new`,
+  `parse_delete`, dispatch trong `parse_unary`, save/restore trong
+  `parse_statement`);
+- `selfhost/hir/hir.ivy` (comment kind 19–21);
+- `selfhost/hir/hir_builder.ivy` (`build_new`, `build_delete`, dispatch
+  AST 21/22);
+- `selfhost/mir/mir_builder.ivy` (`ex_new`, `ex_delete`, dispatch HIR
+  20/21);
+- `selfhost/codegen/emitter.ivy` (`uses_alloc_`/`uses_free_`,
+  `collect_expr`, `sizeof_type`, `lower_new`, `lower_delete`, nhánh `*`/
+  `&` trong `lower_unary`, nhánh `*` trong `lower_lvalue`, declare
+  allocator, header);
+- `selfhost/corpus/codegen/135..153_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 37 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..n ... 153/153`.
+
+Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62n\`.

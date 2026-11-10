@@ -4622,6 +4622,13 @@ export struct HirBuilder {
         if (a.kind == 20) {
             return this.build_cast(a);
         }
+        // H6.2n: `new` / `delete`.
+        if (a.kind == 21) {
+            return this.build_new(a);
+        }
+        if (a.kind == 22) {
+            return this.build_delete(a);
+        }
         HExpr e = this.new_expr(8, a.line, a.col);
         e.type = this.ty_dummy();
         return this.push_expr(e);
@@ -5130,6 +5137,62 @@ export struct HirBuilder {
         if (ok == 0) {
             this.err_cast_convert(a.line, a.col, "static_cast", from, target);
         }
+        return this.push_expr(e);
+    }
+
+    // H6.2n: `new T(args)` (HirBuilder::buildExpr's New branch).  The target
+    // type is stored in the HIR node; the expression's own type is `T*`.
+    // Arguments are built before the node is pushed, and are staged in the
+    // scratch buffer so a nested call cannot interleave its own args with
+    // this node's run in `u.args`.
+    long build_new(AExpr a) {
+        HExpr e = this.new_expr(20, a.line, a.col);
+        long total = a.an;
+        long slot = this.ab_n_;
+        this.ab_n_ = this.ab_n_ + total;
+        long j = 0;
+        while (j < total) {
+            long ai = -1;
+            unsafe {
+                ai = this.pa.call_args()[a.astart + j];
+            }
+            long he = this.build_expr(ai);
+            unsafe {
+                this.abuf_[slot + j] = he;
+            }
+            j = j + 1;
+        }
+        e.astart = this.u.a_n;
+        long k = 0;
+        while (k < total) {
+            long ix = -1;
+            unsafe {
+                ix = this.abuf_[slot + k];
+            }
+            this.push_arg(ix);
+            k = k + 1;
+        }
+        e.an = total;
+        e.type = a.type;
+        e.type.ptr_depth = e.type.ptr_depth + 1;
+        return this.push_expr(e);
+    }
+
+    // H6.2n: `delete expr` / `delete[] expr` (HirBuilder::buildExpr's Delete
+    // branch).  The operand is an lvalue expression; the node yields void.
+    long build_delete(AExpr a) {
+        long opnd = this.build_expr(a.a);
+        HExpr oe;
+        unsafe {
+            oe = this.u.exprs[opnd];
+        }
+        if (oe.type.ptr_depth == 0) {
+            this.diag(a.line, a.col, "'delete' expects a pointer operand");
+        }
+        HExpr e = this.new_expr(21, a.line, a.col);
+        e.flag = a.flag;
+        e.a = opnd;
+        e.type = this.ty_dummy();
         return this.push_expr(e);
     }
 

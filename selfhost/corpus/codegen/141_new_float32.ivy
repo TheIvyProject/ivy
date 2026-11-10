@@ -1,0 +1,10 @@
+int32 main() {
+    unsafe {
+        float32* p = new float32(2.25);
+        float32 v = *p;
+        delete p;
+        io::println("{}", v);
+        return 0;
+    }
+    return 0;
+}

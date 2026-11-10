@@ -55,6 +55,9 @@ export struct Parser {
     long pos_;
     long failed_;
     long cnumber_;
+    // H6.2n: the oracle's `inUnsafe_`, set while parsing an `unsafe { ... }`
+    // body so `new`/`delete` are accepted there only.
+    long in_unsafe_;
     char* src_;      // text arena (preprocessor output arena)
 
     // function pool
@@ -222,6 +225,7 @@ export struct Parser {
         this.pos_ = 0;
         this.failed_ = 0;
         this.cnumber_ = 0;
+        this.in_unsafe_ = 0;
         this.src_ = arena;
         this.fn_n_ = 0;
         this.fn_cap_ = in_count + 16;
@@ -2382,6 +2386,14 @@ export struct Parser {
             e.col = op.col;
             return this.push_expr(e);
         }
+        // H6.2n: `new`/`delete` are parsed before the postfix chain, exactly
+        // like Parser::parseUnary.
+        if (this.kw("new")) {
+            return this.parse_new();
+        }
+        if (this.kw("delete")) {
+            return this.parse_delete();
+        }
         return this.parse_postfix(this.parse_primary());
     }
 
@@ -2427,6 +2439,93 @@ export struct Parser {
             cur = nxt;
         }
         return astart;
+    }
+
+    // H6.2n: `new T` / `new T(args)` (Parser::parseNew).  The target type is
+    // parsed with parse_type; the arguments are staged exactly like call
+    // arguments and recorded in the shared call-argument pool.
+    long parse_new() {
+        Token start = this.peek(0);
+        if (this.in_unsafe_ == 0) {
+            this.error_at(this.peek(0), "'new' requires an unsafe block in the Ivy subset");
+        }
+        this.next();  // new
+        AType ty = this.parse_type();
+        long astart = -1;
+        long an = 0;
+        if (this.at("(")) {
+            this.next();
+            long head = -1;
+            long tail = -1;
+            while (!this.at(")") && !this.at("eof")) {
+                long arg = this.parse_expr();
+                if (this.argn_n_ < this.argn_cap_) {
+                    long node = this.argn_n_;
+                    unsafe {
+                        this.argn_idx_[node] = arg;
+                        this.argn_next_[node] = -1;
+                    }
+                    if (tail >= 0) {
+                        unsafe {
+                            this.argn_next_[tail] = node;
+                        }
+                    } else {
+                        head = node;
+                    }
+                    tail = node;
+                    this.argn_n_ = node + 1;
+                }
+                if (!this.at(")")) {
+                    this.expect(",", "expected ',' between new arguments");
+                    if (this.at(")")) {
+                        break;
+                    }
+                }
+            }
+            this.expect(")", "expected ')' after new arguments");
+            astart = this.ca_n_;
+            long cur = head;
+            while (cur >= 0) {
+                long idx = -1;
+                long nxt = -1;
+                unsafe {
+                    idx = this.argn_idx_[cur];
+                    nxt = this.argn_next_[cur];
+                }
+                this.push_carg(idx);
+                cur = nxt;
+            }
+            an = this.ca_n_ - astart;
+        }
+        AExpr e = this.fresh(21);
+        e.type = ty;
+        e.astart = astart;
+        e.an = an;
+        e.line = start.line;
+        e.col = start.col;
+        return this.push_expr(e);
+    }
+
+    // H6.2n: `delete expr` / `delete[] expr` (Parser::parseDelete).
+    long parse_delete() {
+        Token start = this.peek(0);
+        if (this.in_unsafe_ == 0) {
+            this.error_at(this.peek(0), "'delete' requires an unsafe block in the Ivy subset");
+        }
+        this.next();  // delete
+        long is_array = 0;
+        if (this.at("[")) {
+            this.next();
+            this.expect("]", "expected ']' after 'delete ['");
+            is_array = 1;
+        }
+        long operand = this.parse_unary();
+        AExpr e = this.fresh(22);
+        e.flag = is_array;
+        e.a = operand;
+        e.line = start.line;
+        e.col = start.col;
+        return this.push_expr(e);
     }
 
     long parse_postfix(long lhs) {
@@ -2764,11 +2863,16 @@ export struct Parser {
         if (this.kw("unsafe")) {
             this.next();
             long body = -1;
+            // H6.2n: `new`/`delete` are allowed only inside an unsafe body
+            // (the oracle's `inUnsafe_`), including a single-statement body.
+            long saved_unsafe = this.in_unsafe_;
+            this.in_unsafe_ = 1;
             if (this.at("{")) {
                 body = this.parse_compound();
             } else {
                 body = this.parse_statement();
             }
+            this.in_unsafe_ = saved_unsafe;
             AStmt s = this.fresh_stmt(13);
             s.a = body;
             s.line = start.line;

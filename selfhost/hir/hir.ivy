@@ -12,7 +12,7 @@ import ast;
 // Expression kinds (internal codes used by the port):
 //   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 this  8 ident
 //   9 unary  10 binary  11 ternary  12 call  13 index  14 member  15 assign
-//   16 sizeof  17 alignof  18 cast
+//   16 sizeof  17 alignof  18 cast  19 init-list  20 new  21 delete
 export struct HExpr {
     long kind;
     long ival;          // integer literal value (1) / bool value (5)

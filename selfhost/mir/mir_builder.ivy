@@ -1708,6 +1708,13 @@ export struct MirBuilder {
         if (kind == 19) {
             return this.ex_initlist(idx);
         }
+        // H6.2n: `new` / `delete`.
+        if (kind == 20) {
+            return this.ex_new(idx);
+        }
+        if (kind == 21) {
+            return this.ex_delete(idx);
+        }
         // The oracle's fallback: the default-constructed variant, which is
         // an IntegerLit with the value 0, and an Unknown lifetime.
         long i = this.add_expr(0);
@@ -2228,6 +2235,78 @@ export struct MirBuilder {
             this.mu.exprs[i].an = an;
             this.mu.exprs[i].line = this.ep[idx].line;
             this.mu.exprs[i].col = this.ep[idx].col;
+        }
+        return i;
+    }
+
+    // H6.2n: `new T(args)` -> mir::Expr::New.  The node's type is `T*`
+    // (the value of the expression); the emitter recovers `T` by dropping
+    // one pointer level.  The arguments are a run in the `args` pool and are
+    // built after the run is reserved (an argument may itself be a call).
+    long ex_new(long idx) {
+        long start = -1;
+        long an = 0;
+        AType t;
+        long ln = 0;
+        long cl = 0;
+        unsafe {
+            start = this.ep[idx].astart;
+            an = this.ep[idx].an;
+            t = this.ep[idx].type;
+            ln = this.ep[idx].line;
+            cl = this.ep[idx].col;
+        }
+        long elstart = this.reserve_args(an);
+        long j = 0;
+        while (j < an) {
+            long ai = -1;
+            unsafe {
+                ai = this.ha[start + j];
+            }
+            long mi = -1;
+            if (ai >= 0) {
+                mi = this.build_expr(ai);
+            }
+            this.set_arg(elstart + j, mi);
+            j = j + 1;
+        }
+        long i = this.add_expr(15);
+        unsafe {
+            this.mu.exprs[i].type = t;
+            this.mu.exprs[i].astart = elstart;
+            this.mu.exprs[i].an = an;
+            this.mu.exprs[i].lt = 4;  // Unknown (a fresh allocation)
+            this.mu.exprs[i].line = ln;
+            this.mu.exprs[i].col = cl;
+        }
+        return i;
+    }
+
+    // H6.2n: `delete expr` / `delete[] expr` -> mir::Expr::Delete.
+    long ex_delete(long idx) {
+        long opnd = -1;
+        long flag = 0;
+        AType t;
+        long ln = 0;
+        long cl = 0;
+        unsafe {
+            opnd = this.ep[idx].a;
+            flag = this.ep[idx].flag;
+            t = this.ep[idx].type;
+            ln = this.ep[idx].line;
+            cl = this.ep[idx].col;
+        }
+        long oi = -1;
+        if (opnd >= 0) {
+            oi = this.build_expr(opnd);
+        }
+        long i = this.add_expr(16);
+        unsafe {
+            this.mu.exprs[i].flag = flag;
+            this.mu.exprs[i].type = t;
+            this.mu.exprs[i].a = oi;
+            this.mu.exprs[i].line = ln;
+            this.mu.exprs[i].col = cl;
         }
         return i;
     }

@@ -1,10 +1,10 @@
-// selfhost/codegen/emitter.ivy - H6.2a..H6.2m textual LLVM IR emitter.
+// selfhost/codegen/emitter.ivy - H6.2a..H6.2n textual LLVM IR emitter.
 //
 // This module is the selfhost counterpart of the textual side of
 // src/codegen/codegen.cpp.  It does NOT use the LLVM C API: it writes the
 // same IR text as the oracle's `ivy --llvm <file>` to stdout, byte for byte.
 //
-// The supported subset is deliberately small (H6.2a..H6.2m):
+// The supported subset is deliberately small (H6.2a..H6.2n):
 //   * the `; LLVM IR emitted by ivy` header;
 //   * function definitions with entry-block alloca slots and `bb<i>` labels;
 //   * parameters materialized in alloca slots (`%argN` -> `%<name>.<slot>`);
@@ -60,12 +60,17 @@
 //     integer type (`Color c` -> `alloca i32`), including enum array
 //     elements; an unscoped enum mangles as its underlying type and a scoped
 //     enum (`enum class`) as the nested-name `W4<name>@@`.
+//   * H6.2n: `new T` / `new T(args)` (a `call ptr @__ivy_alloc(i64 sizeof(T))`
+//     followed by the bug-compatible store of the first argument as a `T`)
+//     and `delete` / `delete[]` (`call void @__ivy_free(ptr ...)`), with the
+//     two allocator `declare`s after the entry point; both forms are
+//     rejected outside an `unsafe` block, like the oracle.
 //
-// Out of scope (H6.3+): allocators, raw pointer parameters/returns,
+// Out of scope (H6.3+): raw pointer parameters/returns,
 // wide strings, variadic functions, templates/virtual dispatch, Itanium
 // mangling, arrays of pointers, array/struct initializer lists,
 // array parameters or return types, array decay outside `a[i]`,
-// multi-dimensional arrays, `new`/`delete`, and the arrow form on an
+// multi-dimensional arrays, `new T[n]`, and the arrow form on an
 // allocator/`(T*)` cast (the selfhost parser rejects `(T*)0` and
 // `(T*)__ivy_alloc(...)`).  A construct outside the subset records a
 // diagnostic and makes the driver exit nonzero instead of emitting wrong IR.
@@ -91,7 +96,10 @@ extern "C" unsigned long long __ivy_strlen(const char* s);
 //   kind 1 - a `%tmp.N` temporary;
 //   kind 2 - an alloca slot `%<name>.<N>` used as an lvalue;
 //   kind 3 - a bool literal (printed as `true`/`false`, like the oracle);
-//   kind 4 - the `nullptr` literal (printed as `null`).
+//   kind 4 - the `nullptr` literal (printed as `null`);
+//   kind 5 - a floating-point literal (see `fval` below);
+//   kind 6 - the empty value of a void call used as an expression (the
+//            oracle's "" result string; emit_val prints nothing).
 export struct VRef {
     long kind;
     long ival;
@@ -160,6 +168,10 @@ export struct Emitter {
     //   * the io segment map is keyed by the raw decoded bytes (the quirk
     //     that makes `io::print("hi")` emit both @.str.0 and @.str.1).
     long uses_io_print_;
+    // H6.2n: the oracle's `usesIvyAlloc_` / `usesIvyFree_`.  They decide
+    // whether the module ends with `declare @__ivy_alloc` / `@__ivy_free`.
+    long uses_alloc_;
+    long uses_free_;
     long dec_len_;
     long str_n_;
     long str_cap_;
@@ -240,6 +252,8 @@ export struct Emitter {
         this.arg_cap_ = 256;
         this.arg_sp_ = 0;
         this.uses_io_print_ = 0;
+        this.uses_alloc_ = 0;
+        this.uses_free_ = 0;
         this.dec_len_ = -1;
         this.str_n_ = 0;
         this.str_cap_ = 4096;
@@ -1124,6 +1138,54 @@ export struct Emitter {
         return "i8";
     }
 
+    // H6.2n: mirror of CodeGen::sizeofType, used by `new T` to size the
+    // allocation.  `sizeof(T)` itself is folded to a literal by the HIR
+    // builder, so this helper exists only for the emitter.  A struct is the
+    // sum of its field sizes rounded up to 8 (Ivy's simple layout); an enum
+    // is the size of its underlying integer type.
+    long sizeof_type(AType t) {
+        if (this.streq(t.base, "bool") || this.streq(t.base, "char")) return 1;
+        if (this.streq(t.base, "short")) return 2;
+        if (this.streq(t.base, "int") || this.streq(t.base, "float")) return 4;
+        if (this.streq(t.base, "int8_t") || this.streq(t.base, "uint8_t")) return 1;
+        if (this.streq(t.base, "int16_t") || this.streq(t.base, "uint16_t")) return 2;
+        if (this.streq(t.base, "int32_t") || this.streq(t.base, "uint32_t") ||
+            this.streq(t.base, "float32_t")) return 4;
+        if (this.streq(t.base, "int64_t") || this.streq(t.base, "uint64_t")) return 8;
+        if (this.streq(t.base, "float16_t") || this.streq(t.base, "bfloat16_t")) return 2;
+        if (this.streq(t.base, "float64_t")) return 8;
+        if (this.streq(t.base, "float128_t") || this.streq(t.base, "int128_t") ||
+            this.streq(t.base, "uint128_t")) return 16;
+        if (this.streq(t.base, "size_t") || this.streq(t.base, "ptrdiff_t") ||
+            this.streq(t.base, "uptr_t")) return 8;
+        long en = this.find_enum(t.base);
+        if (en >= 0) {
+            AType ut;
+            unsafe {
+                ut = this.mu->enums[en].underlying;
+            }
+            return this.sizeof_type(ut);
+        }
+        long si = this.find_struct(t.base);
+        if (si >= 0) {
+            MStruct s;
+            unsafe {
+                s = this.mu->structs[si];
+            }
+            long total = 0;
+            long j = 0;
+            unsafe {
+                while (j < s.nfields) {
+                    total = total + this.sizeof_type(s.fields[j].type);
+                    j = j + 1;
+                }
+            }
+            total = ((total + 7) / 8) * 8;
+            return total;
+        }
+        return 8;
+    }
+
     // Returns the bit width of an integer LLVM type ("i8" -> 8, "ptr" -> 64),
     // or -1 when the type is not an integer (mirror of the oracle's intBits).
     long int_bits(const char* s) {
@@ -1214,6 +1276,18 @@ export struct Emitter {
         return r;
     }
 
+    // H6.2n: the empty value of a void call used as an expression (the
+    // oracle's "" result string).  emit_val prints nothing for it.
+    VRef empty_ref() {
+        VRef r;
+        r.fval = 0.0;
+        r.kind = 6;
+        r.ival = 0;
+        r.idx = 0;
+        r.name = "";
+        return r;
+    }
+
     VRef new_temp() {
         VRef r;
         r.fval = 0.0;
@@ -1294,6 +1368,10 @@ export struct Emitter {
     }
 
     void emit_val(VRef v) {
+        // H6.2n: the empty value prints nothing (the oracle's "").
+        if (v.kind == 6) {
+            return;
+        }
         if (v.kind == 0) {
             io::print("{}", v.ival);
         } else if (v.kind == 1) {
@@ -1789,6 +1867,38 @@ export struct Emitter {
     }
 
     VRef lower_unary(MExpr e) {
+        // H6.2n: address-of (CodeGen::lowerExpr's Unary "&" branch).  An
+        // IdentRef yields the variable's own slot; every other operand uses
+        // its lvalue address.
+        if (this.streq(e.sval, "&")) {
+            MExpr opnd;
+            unsafe {
+                opnd = this.mu->exprs[e.a];
+            }
+            if (opnd.kind == 6) {
+                long slot = this.find_var(opnd.sval);
+                if (slot < 0) {
+                    this.fail(e.line, e.col,
+                              "internal: address-of is not in the variable table");
+                    return this.imm(0);
+                }
+                return this.slot_ref(opnd.sval, slot);
+            }
+            return this.lower_lvalue(e.a);
+        }
+        // H6.2n: pointer dereference as an rvalue: load the pointee type
+        // from the pointer value (CodeGen::lowerExpr's Unary "*" branch).
+        if (this.streq(e.sval, "*")) {
+            VRef p = this.lower_expr(e.a);
+            VRef t = this.new_temp();
+            this.emit_val(t);
+            this.ps(" = load ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.ps(", ptr ");
+            this.emit_val(p);
+            this.nl();
+            return t;
+        }
         if (this.streq(e.sval, "+")) {
             return this.lower_expr(e.a);
         }
@@ -2261,7 +2371,7 @@ export struct Emitter {
             this.ps(")");
             this.nl();
             this.arg_sp_ = base;
-            return this.imm(0);
+            return this.empty_ref();
         }
         VRef t = this.new_temp();
         this.emit_val(t);
@@ -2341,6 +2451,20 @@ export struct Emitter {
         }
         if (e.kind == 2) {
             this.intern_prepass(e.sval, e.line, e.col);
+            return;
+        }
+        // H6.2n: `new`/`delete` only set the allocator flags.  The oracle's
+        // collectExpr does NOT recurse into the New arguments or the Delete
+        // operand, so a string literal / io::print inside them is not
+        // pre-collected: the argument still lowers, but its string global is
+        // interned at lowering time and the io runtime is not emitted
+        // (bug-compatible).
+        if (e.kind == 15) {
+            this.uses_alloc_ = 1;
+            return;
+        }
+        if (e.kind == 16) {
+            this.uses_free_ = 1;
             return;
         }
         if (e.kind == 11) {
@@ -2639,7 +2763,7 @@ export struct Emitter {
             this.ps(")");
             this.nl();
         }
-        return this.imm(0);
+        return this.empty_ref();
     }
 
     VRef lower_string(MExpr e) {
@@ -2656,13 +2780,60 @@ export struct Emitter {
             long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
                                    this.pm_n_, (char*) key, bl + 2);
             if (gi < 0) {
-                this.fail(e.line, e.col,
-                          "internal: string literal was not collected");
-                return this.imm(0);
+                // CodeGen::lowerExpr's StringLit branch returns "null" when
+                // the pre-pass did not collect the literal (it never does
+                // inside a `new` argument, mirroring the oracle).
+                return this.null_ref();
             }
             return this.emit_string_gep(gi);
         }
         return this.imm(0);
+    }
+
+    // H6.2n: `new T(args)` (CodeGen::lowerExpr New branch): allocate
+    // sizeof(T) bytes with @__ivy_alloc, then optionally store the first
+    // argument as a T into the fresh block.  The result is the pointer
+    // temporary.
+    VRef lower_new(MExpr e) {
+        this.uses_alloc_ = 1;
+        AType target = e.type;
+        if (target.ptr_depth > 0) {
+            target.ptr_depth = target.ptr_depth - 1;
+        }
+        long sz = this.sizeof_type(target);
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call ptr @__ivy_alloc(i64 ");
+        io::print("{}", sz);
+        this.ps(")");
+        this.nl();
+        if (e.an > 0) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu->args[e.astart];
+            }
+            VRef v = this.lower_expr(ai);
+            this.ps("store ");
+            this.ps(this.llvm_type(target, 0));
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(", ptr ");
+            this.emit_val(t);
+            this.nl();
+        }
+        return t;
+    }
+
+    // H6.2n: `delete expr` (CodeGen::lowerExpr Delete branch).
+    VRef lower_delete(MExpr e) {
+        this.uses_free_ = 1;
+        VRef p = this.lower_expr(e.a);
+        this.ps("call void @__ivy_free(ptr ");
+        this.emit_val(p);
+        this.ps(")");
+        this.nl();
+        // The oracle's Delete branch returns "".
+        return this.empty_ref();
     }
 
     VRef lower_expr(long idx) {
@@ -2744,6 +2915,13 @@ export struct Emitter {
         if (e.kind == 14) {
             return this.lower_assign(e);
         }
+        // H6.2n: `new` / `delete`.
+        if (e.kind == 15) {
+            return this.lower_new(e);
+        }
+        if (e.kind == 16) {
+            return this.lower_delete(e);
+        }
         if (e.kind == 19) {
             return this.lower_cast(e);
         }
@@ -2792,6 +2970,11 @@ export struct Emitter {
         }
         if (e.kind == 13) {
             return this.lower_member_addr(e);
+        }
+        // H6.2n: `*p` as an lvalue is the pointer value itself
+        // (CodeGen::lowerLValue's Unary "*" branch).
+        if (e.kind == 8 && this.streq(e.sval, "*")) {
+            return this.lower_expr(e.a);
         }
         this.fail(e.line, e.col, "lvalue is out of scope for H6.2e");
         return this.imm(0);
@@ -3314,6 +3497,14 @@ export struct Emitter {
         this.emit_entry_point();
         if (this.failed_ != 0) {
             return 1;
+        }
+        // H6.2n: the Ivy-safe allocator declarations follow the entry point
+        // and precede the io runtime (CodeGen::generate's emitIvyAllocators).
+        if (this.uses_alloc_ != 0) {
+            this.pl("declare ptr @__ivy_alloc(i64)");
+        }
+        if (this.uses_free_ != 0) {
+            this.pl("declare void @__ivy_free(ptr)");
         }
         if (this.uses_io_print_ != 0) {
             this.emit_io_runtime();

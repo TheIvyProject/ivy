@@ -1,0 +1,10 @@
+int32 main() {
+    int32 x = 7;
+    unsafe {
+        int32* p = &x;
+        int32** pp = &p;
+        int32 v = **pp;
+        return v;
+    }
+    return 0;
+}

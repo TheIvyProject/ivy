@@ -1,0 +1,12 @@
+struct P { int32 x; int32 y; int32 z; };
+
+int32 main() {
+    unsafe {
+        P* p = new P;
+        p->z = 9;
+        int32 v = p->z;
+        delete p;
+        return v;
+    }
+    return 0;
+}

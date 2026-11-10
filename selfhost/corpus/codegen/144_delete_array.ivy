@@ -1,0 +1,8 @@
+int32 main() {
+    unsafe {
+        int32* p = new int32(4);
+        delete[] p;
+        return 0;
+    }
+    return 0;
+}

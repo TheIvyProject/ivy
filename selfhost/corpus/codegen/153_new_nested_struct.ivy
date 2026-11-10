@@ -1,0 +1,13 @@
+struct In { int32 v; int32 w; };
+struct Out { In in; int32 n; };
+
+int32 main() {
+    unsafe {
+        Out* o = new Out;
+        o->n = 5;
+        int32 v = o->n;
+        delete o;
+        return v;
+    }
+    return 0;
+}

@@ -1,0 +1,13 @@
+int32 main() {
+    int32 sum = 0;
+    int32 i = 0;
+    unsafe {
+        while (i < 3) {
+            int32* p = new int32(i);
+            sum = sum + *p;
+            delete p;
+            i = i + 1;
+        }
+    }
+    return sum;
+}
