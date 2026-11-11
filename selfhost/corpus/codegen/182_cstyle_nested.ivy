@@ -1,0 +1,18 @@
+// Nested C-style casts, including unsigned targets and truncation through an
+// intermediate wider type.
+int32 main() {
+    int32 x = 5;
+    int32 a = 0;
+    int32 b = 0;
+    uint32 c = 0;
+    int64 d = 0;
+    int8 e = 0;
+    unsafe {
+        a = (int32)(float64)x;
+        b = (int32)((int64)x);
+        c = (uint32)(int32)-1;
+        d = (int64)(int32)x;
+        e = (int8)(int32)x;
+    }
+    return a + b;
+}

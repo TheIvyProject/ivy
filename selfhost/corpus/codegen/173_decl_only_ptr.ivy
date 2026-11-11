@@ -1,0 +1,6 @@
+int32 use(int32* p);
+int32* get();
+
+int32 main() {
+    return 0;
+}

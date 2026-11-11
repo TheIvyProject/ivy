@@ -1,0 +1,23 @@
+// Casts in control flow, return expressions, and call arguments.
+int32 conv(int32 v) {
+    unsafe {
+        return (int32)(float64)v;
+    }
+}
+
+int32 add(int32 a, int32 b) { return a + b; }
+
+int32 main() {
+    int32 s = 0;
+    unsafe {
+        int32 i = 0;
+        while (i < 3) {
+            s = s + (int32)(float64)i;
+            i = i + 1;
+        }
+        if ((bool)s) {
+            s = add((int32)1, (int32)(int64)2);
+        }
+    }
+    return conv(s);
+}

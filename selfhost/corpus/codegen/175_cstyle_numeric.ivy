@@ -1,0 +1,18 @@
+// C-style casts between numeric types: numeric<->numeric is allowed
+// (unlike static_cast, this does not need the operand to be integral).
+#pragma ivy cnumber
+int32 main() {
+    unsafe {
+        int32 i = 42;
+        int64 w = (int64)i;
+        int32 n = (int32)w;
+        uint32 u = (uint32)i;
+        int8 b = (int8)i;
+        float64 d = (float64)i;
+        int32 t = (int32)d;
+        float32 f = (float32)d;
+        int32 ft = (int32)f;
+        bool z = (bool)i;
+    }
+    return 0;
+}

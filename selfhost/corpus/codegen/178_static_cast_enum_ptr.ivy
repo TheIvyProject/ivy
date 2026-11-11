@@ -1,0 +1,19 @@
+// static_cast across enums, void* up/down casts, nullptr -> pointer and
+// pointer <-> integer.
+enum Color { Red = 10, Green = 20, Blue = 30 };
+int32 main() {
+    Color c = Green;
+    int32 v = static_cast<int32>(c);
+    Color d = static_cast<Color>(v);
+    unsafe {
+        int32 x = 5;
+        int32* p = &x;
+        void* vp = static_cast<void*>(p);
+        int32* q = static_cast<int32*>(vp);
+        int32* np = static_cast<int32*>(nullptr);
+        int64 a = static_cast<int64>(p);
+        int32* r = static_cast<int32*>(a);
+        int32 y = *q;
+    }
+    return v;
+}

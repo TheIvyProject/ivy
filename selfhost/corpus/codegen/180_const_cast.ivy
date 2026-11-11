@@ -1,0 +1,12 @@
+// const_cast: add/remove const on pointer and value types whose base type and
+// pointer depth match the source.
+int32 main() {
+    const int32 ci = 3;
+    int32 x = 4;
+    unsafe {
+        int32* m = const_cast<int32*>(&ci);
+        const int32* cp = const_cast<const int32*>(&x);
+        int32 v = const_cast<int32>(x);
+    }
+    return 0;
+}

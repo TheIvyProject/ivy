@@ -130,6 +130,8 @@ export struct HFunction {
     long lt_start;      // first lifetime name index (-1 when absent)
     long lt_n;          // number of declared lifetime names
     const char* return_lifetime;  // the return lifetime name (NULL when none)
+    // H6.2p: the declaration's parameter list ends in `...`.
+    long is_variadic;
 };
 
 // A whole HIR translation unit. Flat pools are owned by HirBuilder.

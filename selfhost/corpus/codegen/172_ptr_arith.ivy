@@ -1,0 +1,11 @@
+int32 main() {
+    unsafe {
+        int32* p = nullptr;
+        int32* a = p + 1;
+        int32* b = p - 1;
+        p++;
+        p--;
+        int32 v = p[2];
+    }
+    return 0;
+}

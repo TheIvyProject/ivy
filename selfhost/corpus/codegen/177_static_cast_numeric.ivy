@@ -1,0 +1,12 @@
+// static_cast between numeric types, including the float<->int directions.
+int32 main() {
+    int32 i = 42;
+    float64 d = static_cast<float64>(i);
+    int32 t = static_cast<int32>(d);
+    float32 f = static_cast<float32>(d);
+    int32 ft = static_cast<int32>(f);
+    uint32 u = static_cast<uint32>(i);
+    int64 w = static_cast<int64>(u);
+    int32 n = static_cast<int32>(w);
+    return t + ft + n;
+}

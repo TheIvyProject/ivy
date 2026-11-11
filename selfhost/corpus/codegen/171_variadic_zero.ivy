@@ -1,0 +1,6 @@
+extern "C" int32 f(...);
+
+int32 main() {
+    f();
+    return 0;
+}

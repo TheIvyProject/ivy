@@ -280,7 +280,7 @@ export struct HirBuilder {
             this.sp_ = p.stmts();
             this.dp_ = p.desigs();
             this.u.fn_cap = ntoks + 64;
-            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 120);
+            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 128);
             this.u.fn_n = 0;
             this.u.ex_cap = ntoks * 8 + 256;
             this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 144);
@@ -2922,6 +2922,7 @@ export struct HirBuilder {
         f.is_constexpr = is_constexpr;
         f.lt_start = lt_start;
         f.lt_n = lt_n;
+        f.is_variadic = 0;
         unsafe {
             f.return_lifetime = (char*)ret_lt;
         }
@@ -3026,6 +3027,11 @@ export struct HirBuilder {
         }
         long idx = this.add_function_at(af.name, ret, af.is_extern_c, af.is_constexpr,
                                         pstart, lt_start, lt_n, ret_lt);
+        if (idx < this.u.fn_n) {
+            unsafe {
+                this.u.fns[idx].is_variadic = af.is_variadic;
+            }
+        }
         this.finish_function(idx);
     }
 
@@ -5317,7 +5323,7 @@ export struct HirBuilder {
         e.a = opnd;
         e.flag = a.flag;
         e.type = target;
-        if (a.flag == 1) {
+        if (a.flag == 1 || a.flag == 3) {
             // reinterpret_cast / C-style cast
             this.require_unsafe(a.line, a.col,
                 a.flag == 1 ? "reinterpret_cast" : "C-style cast");

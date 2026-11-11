@@ -1,0 +1,11 @@
+extern "C" void use(int32* p);
+
+int32 main() {
+    int32 x = 1;
+    unsafe {
+        int32* q = &x;
+        use(q);
+        use(&x);
+    }
+    return 0;
+}

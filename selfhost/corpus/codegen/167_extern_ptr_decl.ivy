@@ -1,0 +1,5 @@
+extern "C" void use(int32* p);
+
+int32 main() {
+    return 0;
+}

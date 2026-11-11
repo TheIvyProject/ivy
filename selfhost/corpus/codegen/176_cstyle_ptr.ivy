@@ -1,0 +1,17 @@
+// C-style casts between pointers and integers: pointer<->pointer of any
+// base type, integer -> pointer, pointer -> integer.
+#pragma ivy cnumber
+int main() {
+    int32 x = 7;
+    unsafe {
+        int32* p = &x;
+        char* c = (char*)p;
+        void* v = (void*)p;
+        int32* q = (int32*)v;
+        int64 a = (int64)p;
+        int32* r = (int32*)a;
+        int32* z = (int32*)0;
+        int32 y = *q;
+    }
+    return 0;
+}

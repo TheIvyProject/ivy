@@ -46,7 +46,7 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 128, AFunction 200, AExpr 168, AStruct 96,
+// sizes (AAttr 40, AParam 128, AFunction 208, AExpr 168, AStruct 96,
 // ATemplateParam 96, AConcept 48, AType 48, ALifetime 8, ALegacyLifetime 40)
 // so `__ivy_alloc` can be used.
 export struct Parser {
@@ -302,7 +302,7 @@ export struct Parser {
         this.cv_ = 0;
         this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 200);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 208);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
         this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 128);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
@@ -327,7 +327,7 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 200);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 208);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
@@ -1212,6 +1212,59 @@ export struct Parser {
                this.lexeme_eq(t.off, t.len, "long") ||
                this.lexeme_eq(t.off, t.len, "float") ||
                this.lexeme_eq(t.off, t.len, "double");
+    }
+
+    // Does the token's lexeme start with `lit`? (std::string_view::rfind == 0)
+    bool lexeme_prefix(long off, long len, const char* lit) {
+        unsafe {
+            long i = 0;
+            while (lit[i] != 0) {
+                if (i >= len) {
+                    return false;
+                }
+                if (this.src_[off + i] != lit[i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    // 8.4: `(type)expr` C-style cast detection. Mirrors
+    // isCStyleTypeKeyword + the built-in type list of parser.cpp. `const` is
+    // deliberately absent: `(const int32)x` parses as a parenthesized
+    // expression (and then fails on the `const` token).
+    long is_cstyle_cast_type() {
+        Token t = this.peek(1);
+        if (this.kind_eq(t, "keyword")) {
+            if (this.is_cstyle_kw(t)) {
+                return 1;
+            }
+            if (this.lexeme_eq(t.off, t.len, "bool") ||
+                this.lexeme_eq(t.off, t.len, "void") ||
+                this.lexeme_eq(t.off, t.len, "bfloat16") ||
+                this.lexeme_eq(t.off, t.len, "bfloat16_t") ||
+                this.lexeme_eq(t.off, t.len, "size") ||
+                this.lexeme_eq(t.off, t.len, "size_t") ||
+                this.lexeme_eq(t.off, t.len, "ptrdiff_t") ||
+                this.lexeme_eq(t.off, t.len, "iptr") ||
+                this.lexeme_eq(t.off, t.len, "uptr") ||
+                this.lexeme_eq(t.off, t.len, "nullptr_t") ||
+                this.lexeme_eq(t.off, t.len, "max_align_t")) {
+                return 1;
+            }
+            if (this.lexeme_prefix(t.off, t.len, "int") ||
+                this.lexeme_prefix(t.off, t.len, "uint") ||
+                this.lexeme_prefix(t.off, t.len, "float")) {
+                return 1;
+            }
+            return 0;
+        }
+        if (this.kind_eq(t, "identifier")) {
+            return this.token_is_type_name(t);
+        }
+        return 0;
     }
 
     long is_type_start() {
@@ -2897,6 +2950,24 @@ export struct Parser {
             return this.push_expr(e);
         }
         if (this.at("(")) {
+            // 8.4: C-style cast `(type)expr` — valid only inside an unsafe
+            // block (checked at HIR build time). Checked before the
+            // paren-expr path so `(int32)x` / `(T*)0` parse as casts. The
+            // operand is a unary expression: casts bind tighter than binary
+            // operators.
+            if (this.is_cstyle_cast_type() != 0) {
+                this.next();
+                AType cty = this.parse_type();
+                this.expect(")", "expected ')' after C-style cast type");
+                long copnd = this.parse_unary();
+                AExpr e = this.fresh(20);
+                e.flag = 3;
+                e.type = cty;
+                e.a = copnd;
+                e.line = t.line;
+                e.col = t.col;
+                return this.push_expr(e);
+            }
             this.next();
             long content = this.parse_conditional();
             this.expect(")", "expected ')' to close parenthesized expression");
@@ -3539,6 +3610,8 @@ export struct Parser {
         f.lt_names = declared;
         f.ret_lts = ret_lts;
         f.legacy_lts = legacy;
+        // H6.2p: the trailing `...` of the parameter list.
+        f.is_variadic = pl.variadic;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -3761,6 +3834,7 @@ export struct Parser {
             m.legacy_lts.items = (ALegacyLifetime*)0;
             m.legacy_lts.n = 0;
         }
+        m.is_variadic = pl.variadic;
         this.push_method(m);
     }
 

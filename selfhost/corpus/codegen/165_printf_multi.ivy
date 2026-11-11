@@ -1,0 +1,9 @@
+#pragma ivy cnumber
+extern "C" int32 printf(const char* fmt, ...);
+
+int32 main() {
+    int32 a = 3;
+    float64 f = 1.5;
+    printf("%d %s %f\n", a, "hi", f);
+    return 0;
+}

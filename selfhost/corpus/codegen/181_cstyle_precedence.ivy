@@ -1,0 +1,23 @@
+// C-style cast precedence: the cast operand is a unary expression, so
+// `(int32)a + b` casts only `a`, while `(int32)(a + b)` casts the sum.
+int32 main() {
+    int32 a = 3;
+    int32 b = 4;
+    int32 v1 = 0;
+    int32 v2 = 0;
+    int32 v3 = 0;
+    int32 v4 = 0;
+    int32 v5 = 0;
+    int64 v6 = 0;
+    int32 v7 = 0;
+    unsafe {
+        v1 = (int32)a + b;
+        v2 = (int32)(a + b);
+        v3 = -(int32)a;
+        v4 = (int32)-a;
+        v5 = (int32)a * b;
+        v6 = (int64)a + b;
+        v7 = (int32)(int64)a;
+    }
+    return v1 + v2 + v3 + v4 + v5 + v7;
+}

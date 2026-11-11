@@ -656,7 +656,7 @@ export struct MirBuilder {
             this.mu.en_n = 0;
 
             this.mu.fn_cap = u.fn_n + 16;
-            this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 128);
+            this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 136);
             this.mu.fn_n = 0;
 
             long nsc = u.st_n * 2 + 64;
@@ -3436,6 +3436,7 @@ export struct MirBuilder {
                 this.mu.fns[fi].lt_n = 0;
                 this.mu.fns[fi].block_start = -1;
                 this.mu.fns[fi].block_n = 0;
+                this.mu.fns[fi].is_variadic = this.hu.fns[i].is_variadic;
             }
             // The parameters.
             long j = 0;

@@ -113,7 +113,7 @@ export struct MLifetime {
 
 // A MIR function.
 //
-// sizeof(MFunction) is 128 bytes: ten 8-byte fields plus the 48-byte AType.
+// sizeof(MFunction) is 136 bytes: eleven 8-byte fields plus the 48-byte AType.
 export struct MFunction {
     const char* name;    // the qualified name ("math::abs", "Counter::get")
     AType ret;           // the return type
@@ -126,6 +126,8 @@ export struct MFunction {
     long block_start;    // the first block index
     long block_n;        // the number of blocks
     long has_body;       // 0 = declaration only
+    // H6.2p: the declaration's parameter list ends in `...`.
+    long is_variadic;
 };
 
 // H6.2e: a struct field in MIR.  The type is already alias/template resolved

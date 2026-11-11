@@ -1141,6 +1141,22 @@ export struct Emitter {
         return "i8";
     }
 
+    // H6.2p: mirror of CodeGen::llvmElemType - the LLVM type of the pointee
+    // of a pointer (a `void*` pointee becomes `i8`).
+    const char* llvm_elem_type(AType t) {
+        AType elem = t;
+        if (elem.ptr_depth > 0) {
+            elem.ptr_depth = elem.ptr_depth - 1;
+        }
+        if (elem.ptr_depth == 0 && this.streq(elem.base, "void")) {
+            elem.base = "char";
+        }
+        unsafe {
+            return this.llvm_type(elem, 0);
+        }
+        return "i8";
+    }
+
     // H6.2n: mirror of CodeGen::sizeofType, used by `new T` to size the
     // allocation.  `sizeof(T)` itself is folded to a literal by the HIR
     // builder, so this helper exists only for the emitter.  A struct is the
@@ -1396,22 +1412,104 @@ export struct Emitter {
 
     // --- function lookup / mangling --------------------------------------
 
-    // The MIR function with `name`, or -1.  The oracle first matches by
-    // signature, but overloads are out of scope and the frontend rejects a
-    // prototype followed by a definition, so the name alone is unambiguous
-    // in this subset.
-    long find_fn(const char* name) {
+    // H6.2p: type equality for overload resolution (mir::Type::operator==
+    // compares base, unsigned, const, pointer depth, array size and the
+    // template arguments; reference-ness is cleared by the caller).
+    bool same_type(AType a, AType b) {
+        if (!this.streq(a.base, b.base)) {
+            return false;
+        }
+        if ((a.is_unsigned != 0) != (b.is_unsigned != 0)) {
+            return false;
+        }
+        if ((a.is_const != 0) != (b.is_const != 0)) {
+            return false;
+        }
+        if (a.ptr_depth != b.ptr_depth) {
+            return false;
+        }
+        if (a.array_size != b.array_size) {
+            return false;
+        }
+        if (a.tpl_n != b.tpl_n) {
+            return false;
+        }
+        long i = 0;
+        unsafe {
+            while (i < a.tpl_n) {
+                if (!this.same_type(a.tpl_args[i], b.tpl_args[i])) {
+                    return false;
+                }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    // H6.2p: the oracle's callee resolution for a call expression
+    // (CodeGen::lowerExpr's Call branch).  The first function whose name and
+    // signature match wins; a name-only match is the fallback (extern "C"
+    // variadic declarations).  `astart`/`an` are the argument slice.
+    long find_call_target(const char* name, long astart, long an) {
+        long first = -1;
         long i = 0;
         unsafe {
             while (i < this.mu->fn_n) {
                 MFunction f = this.mu->fns[i];
                 if (this.streq(f.name, name)) {
-                    return i;
+                    if (first < 0) {
+                        first = i;
+                    }
+                    long np = f.pn;
+                    long ok = 1;
+                    if (np > an) {
+                        ok = 0;
+                    }
+                    if (ok != 0 && f.is_extern_c == 0 && np != an) {
+                        ok = 0;
+                    }
+                    if (ok != 0) {
+                        long cmp_n = np < an ? np : an;
+                        long k = 0;
+                        while (k < cmp_n && ok != 0) {
+                            MParam p = this.mu->params[f.pstart + k];
+                            long ai = this.mu->args[astart + k];
+                            if (ai < 0) {
+                                ok = 0;
+                            } else {
+                                AType pt = p.type;
+                                pt.is_ref = 0;
+                                AType at = this.mu->exprs[ai].type;
+                                at.is_ref = 0;
+                                if (at.array_size > 0 && pt.ptr_depth > 0 &&
+                                    pt.array_size == 0) {
+                                    at.ptr_depth = 1;
+                                    at.array_size = 0;
+                                }
+                                if (!this.same_type(pt, at)) {
+                                    long fb = this.int_bits(at.base);
+                                    long tb = this.int_bits(pt.base);
+                                    if (fb > 0 && tb > 0) {
+                                        // int -> int widening is compatible
+                                    } else if (this.is_float_base(at.base) &&
+                                               this.is_float_base(pt.base)) {
+                                        // float -> float widening
+                                    } else {
+                                        ok = 0;
+                                    }
+                                }
+                            }
+                            k = k + 1;
+                        }
+                    }
+                    if (ok != 0) {
+                        return i;
+                    }
                 }
                 i = i + 1;
             }
         }
-        return -1;
+        return first;
     }
 
     bool is_float_base(const char* b) {
@@ -1437,6 +1535,13 @@ export struct Emitter {
     // (which is not mangled) is diagnosed too instead of silently emitting
     // IR for pointers or arrays.
     bool check_fn_signature(MFunction f, long line, long col) {
+        // H6.2p: a declaration without a body (`extern "C"` prototypes and
+        // `fn f(...);`) may use pointer/array parameter and return types; the
+        // oracle diagnoses only definitions (their HIR unsafe checks already
+        // run before codegen).
+        if (f.has_body == 0) {
+            return true;
+        }
         if (f.ret.array_size > 0) {
             this.fail(line, col, "array return types are out of scope for H6.2b");
             return false;
@@ -1799,23 +1904,43 @@ export struct Emitter {
             base = this.mu->exprs[e.a];
             ix = this.mu->exprs[e.b];
         }
-        long slot = this.array_base_slot(base, e.line, e.col);
-        if (slot < 0) {
-            return this.imm(0);
+        long slot = -1;
+        if (base.type.array_size > 0) {
+            slot = this.array_base_slot(base, e.line, e.col);
+            if (slot < 0) {
+                return this.imm(0);
+            }
         }
         VRef idx = this.lower_expr(e.b);
         unsafe {
             const char* idx_ty = this.llvm_type(ix.type, 0);
             VRef gep = this.new_temp();
-            VRef ba = this.slot_ref(base.sval, slot);
-            this.emit_bounds_check(idx, idx_ty, base.type.array_size,
-                                   e.line, e.col);
+            if (base.type.array_size > 0) {
+                VRef ba = this.slot_ref(base.sval, slot);
+                this.emit_bounds_check(idx, idx_ty, base.type.array_size,
+                                       e.line, e.col);
+                this.emit_val(gep);
+                this.ps(" = getelementptr ");
+                this.ps(this.llvm_type(base.type, 0));
+                this.ps(", ptr ");
+                this.emit_val(ba);
+                this.ps(", i32 0, ");
+                this.ps(idx_ty);
+                this.ps(" ");
+                this.emit_val(idx);
+                this.nl();
+                return gep;
+            }
+            // H6.2p: pointer indexing (CodeGen::lowerExpr Index, pointer
+            // base).  No bounds check; the element type is the result type.
+            const char* elem_ty = this.llvm_type(e.type, 0);
+            VRef bv = this.lower_expr(e.a);
             this.emit_val(gep);
             this.ps(" = getelementptr ");
-            this.ps(this.llvm_type(base.type, 0));
+            this.ps(elem_ty);
             this.ps(", ptr ");
-            this.emit_val(ba);
-            this.ps(", i32 0, ");
+            this.emit_val(bv);
+            this.ps(", ");
             this.ps(idx_ty);
             this.ps(" ");
             this.emit_val(idx);
@@ -1955,12 +2080,31 @@ export struct Emitter {
             this.emit_val(p);
             this.nl();
             VRef newV = this.new_temp();
+            if (opnd.type.ptr_depth > 0) {
+                // H6.2p: a pointer ++/-- steps by one element
+                // (CodeGen::lowerExpr's Unary "++"/"--" branch).
+                this.emit_val(newV);
+                this.ps(" = getelementptr ");
+                this.ps(this.llvm_elem_type(opnd.type));
+                this.ps(", ptr ");
+                this.emit_val(oldV);
+                this.ps(", i64 ");
+                this.ps(this.streq(e.sval, "++") ? "1" : "-1");
+                this.nl();
+                this.ps("store ");
+                this.ps(this.llvm_type(opnd.type, 1));
+                this.ps(" ");
+                this.emit_val(newV);
+                this.ps(", ptr ");
+                this.emit_val(p);
+                this.nl();
+                if (e.flag != 0) {
+                    return newV;
+                }
+                return oldV;
+            }
             this.emit_val(newV);
             this.ps(" = ");
-            if (opnd.type.ptr_depth > 0) {
-                this.fail(e.line, e.col, "pointer increment is out of scope for H6.2j");
-                return this.imm(0);
-            }
             long is_f = this.is_float_base(opnd.type.base) ? 1 : 0;
             if (is_f != 0) {
                 // The oracle always emits `fadd ..., 1.0`, even for `--`.
@@ -2096,10 +2240,10 @@ export struct Emitter {
             lhs = this.mu->exprs[e.a];
             rhs = this.mu->exprs[e.b];
         }
-        if (lhs.type.ptr_depth > 0 || rhs.type.ptr_depth > 0) {
-            this.fail(e.line, e.col, "pointer arithmetic is out of scope for H6.2a");
-            return this.imm(0);
-        }
+        // H6.2p: a pointer operand selects the oracle's pointer lowering
+        // (comparison at `ptr`, or `getelementptr` for `+`/`-`).
+        const long is_ptr =
+            (lhs.type.ptr_depth > 0 || rhs.type.ptr_depth > 0) ? 1 : 0;
 
         VRef lv = this.lower_expr(e.a);
         VRef rv = this.lower_expr(e.b);
@@ -2111,30 +2255,33 @@ export struct Emitter {
             (lhs.type.ptr_depth == 0 && this.is_float_base(lhs.type.base)) ? 1 : 0;
 
         if (this.is_cmp_op(e.sval)) {
-            VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1),
-                                     this.llvm_type(lhs.type, 1), is_unsigned,
-                                     e.line, e.col);
-            VRef rc = this.emit_cast(rv, this.llvm_type(rhs.type, 1),
-                                     this.llvm_type(lhs.type, 1),
-                                     rhs.type.is_unsigned != 0 ? 1 : 0,
-                                     e.line, e.col);
-            VRef t = this.new_temp();
-            this.emit_val(t);
-            if (is_f != 0) {
-                this.ps(" = fcmp ");
-                this.ps(this.fcmp_name(e.sval));
-            } else {
-                this.ps(" = icmp ");
-                this.ps(this.cmp_name(e.sval, is_unsigned));
+            // H6.2p: a pointer comparison is done at `ptr` and always uses
+            // the unsigned predicates (CodeGen::lowerExpr Binary).
+            unsafe {
+                const char* op_ty = is_ptr != 0 ? "ptr" : this.llvm_type(lhs.type, 1);
+                VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1), op_ty,
+                                         is_unsigned, e.line, e.col);
+                VRef rc = this.emit_cast(rv, this.llvm_type(rhs.type, 1), op_ty,
+                                         rhs.type.is_unsigned != 0 ? 1 : 0,
+                                         e.line, e.col);
+                VRef t = this.new_temp();
+                this.emit_val(t);
+                if (is_f != 0) {
+                    this.ps(" = fcmp ");
+                    this.ps(this.fcmp_name(e.sval));
+                } else {
+                    this.ps(" = icmp ");
+                    this.ps(this.cmp_name(e.sval, (is_unsigned != 0 || is_ptr != 0) ? 1 : 0));
+                }
+                this.ps(" ");
+                this.ps(op_ty);
+                this.ps(" ");
+                this.emit_val(lc);
+                this.ps(", ");
+                this.emit_val(rc);
+                this.nl();
+                return t;
             }
-            this.ps(" ");
-            this.ps(this.llvm_type(lhs.type, 1));
-            this.ps(" ");
-            this.emit_val(lc);
-            this.ps(", ");
-            this.emit_val(rc);
-            this.nl();
-            return t;
         }
 
         VRef lc = this.emit_cast(lv, this.llvm_type(lhs.type, 1),
@@ -2144,6 +2291,11 @@ export struct Emitter {
                                  this.llvm_type(e.type, 0),
                                  rhs.type.is_unsigned != 0 ? 1 : 0,
                                  e.line, e.col);
+
+        if (is_ptr != 0 &&
+            (this.streq(e.sval, "+") || this.streq(e.sval, "-"))) {
+            return this.lower_ptr_arith(e, lhs, rhs);
+        }
 
         if (this.streq(e.sval, "+")) {
             return this.emit_binop(is_f != 0 ? "fadd" : "add",
@@ -2185,6 +2337,50 @@ export struct Emitter {
         }
         this.fail(e.line, e.col, "binary operator is out of scope for H6.2a");
         return this.imm(0);
+    }
+
+    // H6.2p: pointer `+`/`-` lowering (CodeGen::lowerExpr's Binary pointer
+    // branch).  The oracle lowers both operands once (their casts are emitted
+    // but unused), then re-lowers the integer operand, optionally negates it,
+    // allocates the GEP temporary and only then re-lowers the pointer operand
+    // - which is what fixes the `%tmp.N` numbering.
+    VRef lower_ptr_arith(MExpr e, MExpr lhs, MExpr rhs) {
+        long pe_idx = lhs.type.ptr_depth > 0 ? e.a : e.b;
+        long ie_idx = lhs.type.ptr_depth > 0 ? e.b : e.a;
+        MExpr pe;
+        MExpr ie;
+        unsafe {
+            pe = this.mu->exprs[pe_idx];
+            ie = this.mu->exprs[ie_idx];
+        }
+        VRef idx = this.lower_expr(ie_idx);
+        if (this.streq(e.sval, "-") && lhs.type.ptr_depth > 0) {
+            // p - n  ->  p + (-n)
+            VRef neg = this.new_temp();
+            this.emit_val(neg);
+            this.ps(" = sub ");
+            this.ps(this.llvm_type(ie.type, 0));
+            this.ps(" 0, ");
+            this.emit_val(idx);
+            this.nl();
+            idx = neg;
+        }
+        VRef t = this.new_temp();
+        unsafe {
+            const char* elem_ty = this.llvm_elem_type(pe.type);
+            VRef base = this.lower_expr(pe_idx);
+            this.emit_val(t);
+            this.ps(" = getelementptr ");
+            this.ps(elem_ty);
+            this.ps(", ptr ");
+            this.emit_val(base);
+            this.ps(", ");
+            this.ps(this.llvm_type(ie.type, 0));
+            this.ps(" ");
+            this.emit_val(idx);
+            this.nl();
+        }
+        return t;
     }
 
     VRef lower_cast(MExpr e) {
@@ -2305,7 +2501,7 @@ export struct Emitter {
         if (this.is_io_print_name(e.sval)) {
             return this.lower_io_print(e);
         }
-        long fi = this.find_fn(e.sval);
+        long fi = this.find_call_target(e.sval, e.astart, e.an);
         if (fi < 0) {
             this.fail(e.line, e.col, "call to a function without a MIR entry is out of scope for H6.2b");
             return this.imm(0);
@@ -2334,16 +2530,6 @@ export struct Emitter {
                     return this.imm(0);
                 }
                 MExpr a = this.mu->exprs[ai];
-                if (a.type.array_size > 0) {
-                    this.fail(e.line, e.col, "array arguments are out of scope for H6.2b");
-                    this.arg_sp_ = base;
-                    return this.imm(0);
-                }
-                if (a.type.ptr_depth > 0) {
-                    this.fail(e.line, e.col, "pointer arguments are out of scope for H6.2b");
-                    this.arg_sp_ = base;
-                    return this.imm(0);
-                }
                 VRef v;
                 const char* ty = "i8";
                 if (j < callee.pn) {
@@ -2352,6 +2538,11 @@ export struct Emitter {
                         // H6.2h: pass by reference - emit the address of the
                         // lvalue and pass it as `ptr` (CodeGen::lowerExpr's
                         // Call branch for a reference parameter).
+                        v = this.lower_lvalue(ai);
+                        ty = "ptr";
+                    } else if (a.type.array_size > 0 && p.type.ptr_depth > 0) {
+                        // H6.2p: array-to-pointer decay for a pointer
+                        // parameter (CodeGen::lowerExpr's Call branch).
                         v = this.lower_lvalue(ai);
                         ty = "ptr";
                     } else {
@@ -3576,6 +3767,12 @@ export struct Emitter {
             }
             this.ps(this.llvm_type(p.type, 0));
             j = j + 1;
+        }
+        if (f.is_variadic != 0) {
+            if (f.pn > 0) {
+                this.ps(", ");
+            }
+            this.ps("...");
         }
         this.ps(")");
         this.nl();

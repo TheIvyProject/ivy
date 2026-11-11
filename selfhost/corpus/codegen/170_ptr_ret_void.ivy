@@ -1,0 +1,5 @@
+extern "C" void* alloc(int64 n);
+
+int32 main() {
+    return 0;
+}

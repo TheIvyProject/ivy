@@ -1,0 +1,11 @@
+// Overload by parameter count: the call site must resolve the 3-argument
+// call to the 3-parameter definition (the mangled name includes all three).
+#pragma ivy cnumber
+int add(int a, int b) { return a + b; }
+int add(int a, int b, int c) { return a + b + c; }
+
+int main() {
+    int r1 = add(1, 2);
+    int r2 = add(1, 2, 3);
+    return r1 + r2;
+}

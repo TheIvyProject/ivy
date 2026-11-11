@@ -1,0 +1,7 @@
+#pragma ivy cnumber
+extern "C" int32 printf(const char* fmt, ...);
+
+int32 main() {
+    printf("n = %d\n", 42);
+    return 0;
+}

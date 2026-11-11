@@ -179,6 +179,9 @@ export struct AFunction {
     ALifetimeList lt_names;
     ALifetimeList ret_lts;
     ALegacyLifetimeList legacy_lts;
+    // H6.2p: the parameter list ends in `...` (a variadic declaration such
+    // as `extern "C" int printf(const char* fmt, ...);`).
+    long is_variadic;
 };
 
 // A struct/class field declaration.

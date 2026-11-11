@@ -1,0 +1,7 @@
+#pragma ivy cnumber
+extern "C" int32 puts(const char* s);
+
+int32 main() {
+    puts("hello");
+    return 0;
+}

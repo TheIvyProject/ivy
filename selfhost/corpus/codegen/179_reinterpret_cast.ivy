@@ -1,0 +1,17 @@
+// reinterpret_cast: pointer<->pointer of any base type, integer -> pointer,
+// pointer -> integer, and numeric <-> numeric.
+#pragma ivy cnumber
+int main() {
+    int32 x = 9;
+    unsafe {
+        int32* p = &x;
+        char* c = reinterpret_cast<char*>(p);
+        int64 a = reinterpret_cast<int64>(p);
+        int32* r = reinterpret_cast<int32*>(a);
+        int32* z = reinterpret_cast<int32*>(0);
+        float64 d = reinterpret_cast<float64>(x);
+        int32 n = reinterpret_cast<int32>(d);
+        int32 y = *r;
+    }
+    return 0;
+}

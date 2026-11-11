@@ -2109,3 +2109,257 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62o\`.
 
+### 39. H6.2p — pointer surface & `extern "C"` variadic
+
+#### 39.1 Phạm vi
+
+Đúng theo những gì oracle chấp nhận (khảo sát `t01`–`t10`, `u01`–`u15`,
+`v01`–`v09`, `w01`–`w04`):
+
+- khai báo `extern "C"` có tham số con trỏ (`void use(int32* p);`) và
+  variadic (`int printf(const char* fmt, ...);`, `int f(...);`);
+- gọi hàm với đối số con trỏ: biến `int32*`, `&x`, string literal, và
+  array decay khi tham số là `T*`;
+- biến con trỏ cục bộ (`int32* p = nullptr;`), gán `p = q`;
+- `declaration-only` (không body, kể cả không `extern "C"`) với tham số
+  con trỏ / trả về con trỏ: `int32 use(int32* p);`, `int32* get();`,
+  `void* alloc(int64 n);`;
+- so sánh con trỏ: `p == q`, `p != q`, `p < q`, `p > q`, `p <= q`,
+  `p >= q`, `nullptr == p` (vế trái `nullptr`);
+- số học con trỏ: `p + n`, `n + p`, `p - n`, `p++`, `p--`, `p[i]`
+  (không bounds check), `*p` (đọc/ghi), `!p`, ternary `p ? p : nullptr`;
+- `p[i]` với element `int8`, struct; `p + n` với `n` kiểu `int64`.
+
+Oracle **từ chối** (giữ nguyên, đã kiểm khớp từng byte): `p += 1`,
+`p * 2`, `p + q`, `p - q`, `p == 0`, `p > nullptr`, `1[p]`,
+`int32 a[3]` làm tham số, array decay ở HIR (`argument 1 ... expects
+'int32_t*', got 'int32_t'`), `nullptr` ngoài `unsafe`.
+
+`v10` (`P* p = &s; return p->y;`) làm oracle **segfault**
+(0xC0000005) nên không emulate.
+
+#### 39.2 Thiết kế
+
+- `ast.ivy`: `AFunction.is_variadic` (cuối struct).
+- `parser.ivy`: stride `AFunction` 200 → 208 (2 pool); `f.is_variadic =
+  pl.variadic` trong `build_function`, `m.is_variadic = pl.variadic`
+  trong `push_method_record`.
+- `hir.ivy` / `hir_builder.ivy`: `HFunction.is_variadic`, stride 120 →
+  128; `add_function_at` khởi tạo 0; `build_free_signature` copy từ
+  `AFunction`.
+- `mir.ivy` / `mir_builder.ivy`: `MFunction.is_variadic`, stride 128 →
+  136; copy từ `HFunction`.
+- `emitter.ivy`:
+  - `check_fn_signature` trả `true` sớm khi `has_body == 0` (chỉ
+    declaration mới được dùng con trỏ/array; definition vẫn bị HIR chặn
+    như oracle);
+  - `emit_declaration` in `, ...` / `...` theo `is_variadic`;
+  - `lower_call` bỏ chặn pointer/array argument, thêm nhánh array decay
+    (giữ nhánh reference);
+  - `find_call_target`: mirror vòng chọn callee của oracle
+    (`CodeGen::lowerExpr` Call): so khớp tên + signature (kể cả numeric
+    widening, float widening, array-to-pointer decay), fallback theo tên
+    cho `extern "C"` variadic; sửa luôn bug chọn nhầm overload theo số
+    tham số ở call site (fixture 174);
+  - `same_type`: so base/unsigned/const/ptr_depth/array_size/tpl_args;
+  - `lower_binary`: nhánh con trỏ (`is_ptr`) — so sánh ở `ptr` với
+    predicate unsigned (`eq/ne/ult/ugt/ule/uge`), `+`/`-` gọi
+    `lower_ptr_arith`;
+  - `lower_ptr_arith`: lower lại toán hạng nguyên, `sub 0, idx` cho
+    `p - n`, cấp temp GEP **trước** khi lower lại pointer operand (đúng
+    thứ tự `%tmp.N` của oracle);
+  - `llvm_elem_type`: giảm `ptr_depth`, `void*` → `i8`;
+  - `lower_index_addr`: nhánh base là con trỏ (không bounds check,
+    element type = `llvm_type(e.type, 0)`);
+  - `lower_unary` `++`/`--` con trỏ → `getelementptr <elem>, ptr oldV,
+    i64 1/-1` rồi store.
+
+#### 39.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `164_printf_basic.ivy` | `extern "C" int32 printf(const char* fmt, ...)` + 1 arg |
+| `165_printf_multi.ivy` | variadic nhiều arg (`int32`, string, `float64`) |
+| `166_puts.ivy` | `extern "C" int32 puts(const char* s)` |
+| `167_extern_ptr_decl.ivy` | `extern "C" void use(int32* p);` không gọi |
+| `168_ptr_arg.ivy` | truyền `&x` và biến `int32*` cho tham số con trỏ |
+| `169_ptr_cmp.ivy` | `== != < > <= >=` giữa hai con trỏ |
+| `170_ptr_ret_void.ivy` | `extern "C" void* alloc(int64 n);` |
+| `171_variadic_zero.ivy` | `extern "C" int32 f(...);` gọi 0 arg |
+| `172_ptr_arith.ivy` | `p + 1`, `p - 1`, `p++`, `p--`, `p[2]` |
+| `173_decl_only_ptr.ivy` | decl-only `int32 use(int32*)` / `int32* get()` |
+| `174_overload_count_call.ivy` | overload theo số tham số: call site chọn đúng bản 3 tham số |
+
+#### 39.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62p\cgdiff3` (2026-11-11):
+
+```text
+[3/4] running 174 fixtures ...
+PASS 164_printf_basic.ivy
+...
+PASS 174_overload_count_call.ivy
+[4/4] summary
+      PASS 174 / 174
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`interpdiff.ps1` vẫn `PASS 23 / 23`; `build_smoke.ps1` vẫn PASS.
+13 example đích (`test_array`, `test_auto`, `test_b4_null_safe`,
+`test_c2_new_delete`, `test_c3_io_print`, `test_default_args`,
+`test_directives`, `test_overload`, `test_sizeof_alignof`,
+`test_stringify_paste`, `test_switch`, `test_types_a1`, `test_warning`)
+khớp oracle từng byte.
+
+Trên 65 example được oracle chấp nhận: **26 MATCH** (trước p: 12).
+Các DIFF còn lại thuộc stage sau: `test_cast` (q), `test_print` (r),
+`test_move_*`/`test_d4_move` (z), `test_methods`/`test_ctor_dtor`/
+`test_raii_break` (s), `test_operator_overloading` (t),
+`test_concepts`/`test_template_struct`/`test_variadic` (u/v),
+`test_structured_binding` (w), `test_range_for` (x),
+`test_inherit*` (y), `test_b5_*`/`test_b6_*`/`test_d1..d7`/
+`test_module_math`/`test_ivy_ext` (aa).
+
+#### 39.5 Giới hạn / defer
+
+1. `v10` oracle segfault — không emulate.
+2. Array parameter (`int32 a[3]`) và array decay ở HIR: oracle từ chối —
+   giữ nguyên.
+3. `p += 1`, `p * 2`, `p ± q`, `p == 0`, `p > nullptr`: oracle từ chối —
+   giữ nguyên.
+4. `test_fn_a3`: selfhost báo lỗi parse (43/46/47) thay vì 4 lỗi pointer
+   của oracle do thiếu `namespace` — defer stage ac.
+5. Method/`this`, ctor/dtor, global variable, `move()`, template…: vẫn
+   defer như các stage sau. (C-style cast đã xong ở H6.2q — xem mục 40.)
+
+#### 39.6 Trạng thái H6.2p
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/ast.ivy` (`AFunction.is_variadic`);
+- `selfhost/parsing/parser.ivy` (stride 208, gán `is_variadic` cho
+  function + method);
+- `selfhost/hir/hir.ivy`, `selfhost/hir/hir_builder.ivy`
+  (`HFunction.is_variadic`, stride 128);
+- `selfhost/mir/mir.ivy`, `selfhost/mir/mir_builder.ivy`
+  (`MFunction.is_variadic`, stride 136);
+- `selfhost/codegen/emitter.ivy` (`check_fn_signature`,
+  `emit_declaration`, `lower_call`, `find_call_target`, `same_type`,
+  `lower_binary`, `lower_ptr_arith`, `llvm_elem_type`,
+  `lower_index_addr`, `lower_unary`);
+- `selfhost/corpus/codegen/164..174_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 39 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..p ... 174/174`.
+
+Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62p\`.
+
+## 40. H6.2q — cast surface (`static_cast` / `reinterpret_cast` / `const_cast` / C-style)
+
+#### 40.1 Phạm vi
+
+`static_cast<T>(x)`, `reinterpret_cast<T>(x)`, `const_cast<T>(x)` đã có từ
+trước; C-style `(type)expr` thì chưa — `(int32)x` bị hiểu là biểu thức
+trong ngoặc nên selfhost báo lỗi parse. Stage q bổ sung nhánh C-style và
+nối flag 3 (CStyle) xuyên HIR/MIR/emitter.
+
+- `selfhost/parsing/parser.ivy`:
+  - thêm `lexeme_prefix()` và `is_cstyle_cast_type()` mirror
+    `isCStyleTypeKeyword` + danh sách built-in của oracle:
+    `unsigned/signed/char/short/int/long/float/double`, `bool`, `void`,
+    tiền tố `int`/`uint`/`float`, `bfloat16(_t)`, `size(_t)`, `ptrdiff_t`,
+    `iptr`, `uptr`, `nullptr_t`, `max_align_t`, hoặc identifier thuộc
+    `token_is_type_name` (struct/enum/alias/template param). `const`
+    **không** nằm trong danh sách — `(const int32)x` vẫn là paren-expr và
+    lỗi `unexpected token in expression` như oracle.
+  - trong `parse_primary`, nhánh `(` kiểm tra cast **trước** paren-expr:
+    `next()`, `parse_type()`, expect `)`, operand `parse_unary()` (cast
+    bám chặt hơn binary), node kind 20 `flag = 3`, loc = token `(`.
+- `selfhost/hir/hir_builder.ivy`: `build_cast` nhận `flag == 1 || flag == 3`,
+  `require_unsafe` với `"reinterpret_cast"`/`"C-style cast"`, dùng chung
+  rules ptr↔ptr / int→ptr / ptr→int / numeric↔numeric, và lỗi luôn in tiền
+  tố `reinterpret_cast: cannot convert from 'X' to 'Y'` (kể cả C-style).
+  Operand được build trước khi kiểm tra cast (giữ thứ tự chẩn đoán oracle).
+- `selfhost/mir/mir_builder.ivy` (`ex_cast`) và `selfhost/codegen/emitter.ivy`
+  (`lower_cast`, `emit_cast`) đã phủ mọi chuyển đổi cần thiết từ trước —
+  không sửa.
+
+#### 40.2 Probe
+
+`cmp.ps1` (oracle vs `cgdrive.exe`) trên `...\h62q\probe` (c01–c32),
+`...\h62q\probe2` (d01–d16), `...\h62q\probe3` (e01–e10): MATCH toàn bộ
+phần cast, gồm:
+
+- numeric: trunc/ext, int↔float, unsigned↔signed, `bool`, nested cast;
+- pointer: `(char*)p`, `(int32*)p`, `(void*)p`, `int64←ptr`, `ptr←int`,
+  `ptr←0`, `ptr↔ptr` khác base, `ptr[i]` operand, double pointer;
+- static_cast: numeric, enum↔int, `nullptr→ptr`, `void*` up/down,
+  ptr↔int, float↔int;
+- reinterpret_cast: ptr↔ptr, int↔ptr, numeric;
+- const_cast: bỏ/thêm const trên pointer và value cùng base;
+- precedence: `(int32)a + b` khác `(int32)(a+b)`, `-(int32)x`,
+  `(int32)-x`, `(int32)x++`, `(int32)(a?b:c)`, `(int32)*p`, `(int32)p.x`;
+- diagnostics: C-style ngoài `unsafe` (`C-style cast requires an unsafe
+  block`), `(int)x` không có `#pragma ivy cnumber`, `(const int32)x`,
+  `(int32*)nullptr`, enum→int/int→enum, float→ptr, ptr→struct, `(void)x`.
+
+Ngoại lệ duy nhất: `d11`/`e08` lấy `&struct` — oracle segfault
+(0xC0000005) nên không emulate (cùng nhóm `v10`).
+
+#### 40.3 Fixture mới (175–184)
+
+| Fixture | Nội dung |
+|---|---|
+| `175_cstyle_numeric.ivy` | C-style numeric: widen/narrow, int↔float, `bool`, `uint32` |
+| `176_cstyle_ptr.ivy` | `(char*)p`, `(void*)p`, `(int32*)v`, ptr→int, int→ptr, `ptr←0` |
+| `177_static_cast_numeric.ivy` | `static_cast` int/uint/float/float32 |
+| `178_static_cast_enum_ptr.ivy` | enum↔int, `void*`, `nullptr→ptr`, ptr↔int |
+| `179_reinterpret_cast.ivy` | ptr↔ptr khác base, int↔ptr, numeric |
+| `180_const_cast.ivy` | bỏ/thêm const trên pointer và value |
+| `181_cstyle_precedence.ivy` | cast chỉ bám unary: `+`, `*`, unary `-`, nested |
+| `182_cstyle_nested.ivy` | cast lồng, `uint32`, `int8` |
+| `183_cstyle_control_flow.ivy` | cast trong `while`/`if`/`return`/call arg |
+| `184_cstyle_unsigned.ivy` | `zext` unsigned và `trunc` `int8`/`uint16`/`uint8` |
+
+#### 40.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62q\cg2` (2026-11-11):
+
+```text
+[3/4] running 184 fixtures ...
+...
+[4/4] summary
+      PASS 184 / 184
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`interpdiff.ps1` vẫn `PASS 23 / 23`; `build_smoke.ps1` vẫn PASS. 13 example
+đích của p khớp oracle từng byte.
+
+Trên 65 example được oracle chấp nhận: **29 MATCH** (trước q: 26). Ba file
+mới khớp byte là `test_cast`, `test_int_convert`, `test_unsafe_a2`; không có
+file nào bị regress. 36 DIFF còn lại thuộc các stage sau: `test_print` (r),
+`test_move_*`/`test_d4_move` (z), `test_methods`/`test_ctor_dtor`/
+`test_raii_break` (s), `test_operator_overloading` (t),
+`test_concepts`/`test_template_struct`/`test_variadic` (u/v),
+`test_structured_binding` (w), `test_range_for` (x), `test_inherit*` (y),
+`test_b5_*`/`test_b6_*`/`test_d1..d7`/`test_designated_init`/
+`test_return_value`/`test_module_math`/`test_ivy_ext` (aa).
+
+#### 40.5 Trạng thái H6.2q
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/parser.ivy` (`lexeme_prefix`, `is_cstyle_cast_type`,
+  nhánh C-style trong `parse_primary`);
+- `selfhost/hir/hir_builder.ivy` (`build_cast` nhận flag 3);
+- `selfhost/corpus/codegen/175..184_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 40 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..q ... 184/184`.
+
+Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62q\`.

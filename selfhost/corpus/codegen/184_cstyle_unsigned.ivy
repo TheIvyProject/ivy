@@ -1,0 +1,14 @@
+// Unsigned widening (zext) and narrowing (trunc) through C-style casts.
+int32 main() {
+    int32 n = -1;
+    unsafe {
+        uint32 u = (uint32)n;
+        int64 w = (int64)u;
+        uint64 e = (uint64)u;
+        int32 a = (int32)u;
+        int8 b = (int8)u;
+        uint16 c = (uint16)u;
+        uint8 d = (uint8)u;
+    }
+    return 0;
+}
