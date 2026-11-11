@@ -118,6 +118,9 @@ export struct Emitter {
     MUnit* mu;
     long temp_;
     long alloca_;
+    // H6.2o: the next pre-assigned hidden `%a.N` slot of an init-list rvalue
+    // (CodeGen::newAllocaSlot + entryAllocas_).
+    long il_next_;
     // H6.2d: the oracle's `inUnsafe_` (copied from the current instruction),
     // its `inlineBlock_` counter for `bb.i<N>` and the `declaredIvyPanic_`
     // flag that decides whether the module ends with `declare @__ivy_panic`.
@@ -2209,6 +2212,16 @@ export struct Emitter {
             lhs = this.mu->exprs[e.a];
         }
         VRef p = this.lower_lvalue(e.a);
+        MExpr rhs;
+        unsafe {
+            rhs = this.mu->exprs[e.b];
+        }
+        if (rhs.kind == 17) {
+            // H6.2o: aggregate init on assignment lowers directly into the
+            // lhs slot (no redundant alloca + load + store of the struct).
+            this.lower_init_list_into(e.b, p);
+            return this.empty_ref();
+        }
         VRef v = this.lower_expr(e.b);
         this.ps("store ");
         this.ps(this.llvm_type(lhs.type, 1));
@@ -2836,6 +2849,75 @@ export struct Emitter {
         return this.empty_ref();
     }
 
+    // H6.2o: CodeGen::lowerInitListInto.  Zero-initialize the whole struct in
+    // `slot`, then store every provided element into its field via GEP.
+    void lower_init_list_into(long ilIdx, VRef slot) {
+        unsafe {
+        MExpr il;
+        unsafe {
+            il = this.mu->exprs[ilIdx];
+        }
+        long si = this.find_struct(il.type.base);
+        if (si < 0) {
+            this.fail(il.line, il.col, "internal: InitList for a non-struct type");
+            return;
+        }
+        const char* ty = "";
+        unsafe {
+            ty = this.llvm_type(il.type, 0);
+        }
+        MStruct sd;
+        unsafe {
+            sd = this.mu->structs[si];
+        }
+        this.ps("store ");
+        this.ps(ty);
+        this.ps(" zeroinitializer, ptr ");
+        this.emit_val(slot);
+        this.nl();
+        long i = 0;
+        while (i < il.an && i < sd.nfields) {
+            long ei = -1;
+            unsafe {
+                ei = this.mu->args[il.astart + i];
+            }
+            if (ei >= 0) {
+                MField fld;
+                MExpr elem;
+                unsafe {
+                    fld = sd.fields[i];
+                    elem = this.mu->exprs[ei];
+                }
+                VRef v = this.lower_expr(ei);
+                const char* fieldTy = "";
+                unsafe {
+                    fieldTy = this.llvm_type(fld.type, 0);
+                }
+                VRef c = this.emit_cast(v, this.llvm_type(elem.type, 1), fieldTy,
+                                        elem.type.is_unsigned != 0 ? 1 : 0,
+                                        il.line, il.col);
+                VRef gep = this.new_temp();
+                this.emit_val(gep);
+                this.ps(" = getelementptr ");
+                this.ps(ty);
+                this.ps(", ptr ");
+                this.emit_val(slot);
+                this.ps(", i32 0, i32 ");
+                io::print("{}", i);
+                this.nl();
+                this.ps("store ");
+                this.ps(fieldTy);
+                this.ps(" ");
+                this.emit_val(c);
+                this.ps(", ptr ");
+                this.emit_val(gep);
+                this.nl();
+            }
+            i = i + 1;
+        }
+        }
+    }
+
     VRef lower_expr(long idx) {
         if (idx < 0) {
             this.fail(0, 0, "internal: missing expression");
@@ -2921,6 +3003,22 @@ export struct Emitter {
         }
         if (e.kind == 16) {
             return this.lower_delete(e);
+        }
+        // H6.2o: an aggregate initializer used as an rvalue lowers into a
+        // hidden alloca (pre-assigned in the entry block), then loads the
+        // struct value out of it (CodeGen::lowerExpr's InitList branch).
+        if (e.kind == 17) {
+            long slot = this.il_next_;
+            this.il_next_ = this.il_next_ + 1;
+            this.lower_init_list_into(idx, this.slot_ref("a", slot));
+            VRef t = this.new_temp();
+            this.emit_val(t);
+            this.ps(" = load ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.ps(", ptr ");
+            this.emit_slot("a", slot);
+            this.nl();
+            return t;
         }
         if (e.kind == 19) {
             return this.lower_cast(e);
@@ -3046,7 +3144,9 @@ export struct Emitter {
                 init = this.mu->exprs[inst.a];
             }
             if (init.kind == 17) {
-                this.fail(inst.line, inst.col, "aggregate initializers are out of scope for H6.2a");
+                // H6.2o: aggregate init - GEP + store each element into the
+                // slot (CodeGen::lowerInst's Alloca InitList branch).
+                this.lower_init_list_into(inst.a, this.slot_ref(inst.var, slot));
                 return;
             }
             VRef v = this.lower_expr(inst.a);
@@ -3219,6 +3319,7 @@ export struct Emitter {
         }
         this.temp_ = 0;
         this.alloca_ = 0;
+        this.il_next_ = 0;
         this.arg_sp_ = 0;
         // H6.2d: `%tmp.N` and `bb.i<K>` both restart for every function.
         this.ib_ = 0;
@@ -3307,6 +3408,50 @@ export struct Emitter {
                     this.add_var(inst.var, slot, inst.type.is_ref != 0 ? 1 : 0);
                 }
                 ii = inst.next;
+            }
+            bi = bi + 1;
+        }
+
+        // H6.2o: an aggregate initializer used as an rvalue (the value of a
+        // store) lowers into a hidden `%a.N` alloca.  The oracle creates the
+        // slot during lowering and splices the alloca into the entry block
+        // (newAllocaSlot + entryAllocas_), after every named slot; the slots
+        // are therefore pre-assigned here, in the order lowering consumes
+        // them, and printed before the first block's label.
+        this.il_next_ = this.alloca_;
+        bi = 0;
+        while (bi < func.block_n) {
+            MBlock b2;
+            unsafe {
+                b2 = this.mu->blocks[func.block_start + bi];
+            }
+            long ii2 = b2.first;
+            while (ii2 >= 0) {
+                MInst ins2;
+                unsafe {
+                    ins2 = this.mu->insts[ii2];
+                }
+                long v = -1;
+                if (ins2.kind == 1) {
+                    v = ins2.b;
+                } else if (ins2.kind == 2 || ins2.kind == 3 || ins2.kind == 4) {
+                    v = ins2.a;
+                }
+                if (v >= 0) {
+                    MExpr ve;
+                    unsafe {
+                        ve = this.mu->exprs[v];
+                    }
+                    if (ve.kind == 17) {
+                        long slot2 = this.alloca_;
+                        this.alloca_ = this.alloca_ + 1;
+                        this.emit_slot("a", slot2);
+                        this.ps(" = alloca ");
+                        this.ps(this.llvm_type(ve.type, 0));
+                        this.nl();
+                    }
+                }
+                ii2 = ins2.next;
             }
             bi = bi + 1;
         }

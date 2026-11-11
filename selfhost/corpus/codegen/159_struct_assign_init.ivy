@@ -1,0 +1,7 @@
+struct P { int32 x; int32 y; };
+
+int32 main() {
+    P p;
+    p = {1, 2};
+    return p.y;
+}

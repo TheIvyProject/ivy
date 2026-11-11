@@ -20,6 +20,7 @@ export struct HirBuilder {
     HUnit u;
     AExpr* ep_;
     AStmt* sp_;
+    long* dp_;           // H6.2o: interned init-list designators
 
     // variable scopes: flat symbol stack + scope start markers
     long* snm_;          // (long) const char* names
@@ -124,6 +125,12 @@ export struct HirBuilder {
     const char* tmp_;
     long* abuf_;
     long ab_n_;
+    // H6.2o: scratch buffers for build_struct_init (one entry per field of
+    // the struct being initialized).  Declared as fields so that the builder
+    // does not need a raw-pointer local.
+    long* ilres_;
+    long* ilini_;
+    long ilcap_;
     long ab_cap_;
     long unsafe_depth_;   // nesting depth of `unsafe` blocks
     long has_return_;     // current function body contains a `return`
@@ -271,6 +278,7 @@ export struct HirBuilder {
             this.pa = p;
             this.ep_ = p.exprs();
             this.sp_ = p.stmts();
+            this.dp_ = p.desigs();
             this.u.fn_cap = ntoks + 64;
             this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 120);
             this.u.fn_n = 0;
@@ -369,6 +377,9 @@ export struct HirBuilder {
             this.ab_cap_ = ntoks * 4 + 64;
             this.abuf_ = (long*) __ivy_alloc((ntoks * 4 + 64) * 8);
             this.ab_n_ = 0;
+            this.ilcap_ = total_fields + 16;
+            this.ilres_ = (long*) __ivy_alloc(this.ilcap_ * 8);
+            this.ilini_ = (long*) __ivy_alloc(this.ilcap_ * 8);
 
             this.dcap_ = ntoks + 64;
             this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
@@ -512,6 +523,8 @@ export struct HirBuilder {
             __ivy_free(this.evstart_);
             __ivy_free(this.evend_);
             __ivy_free(this.abuf_);
+            __ivy_free(this.ilres_);
+            __ivy_free(this.ilini_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
@@ -724,6 +737,22 @@ export struct HirBuilder {
             __ivy_memcpy(this.dbuf_ + this.db_n_, s, (unsigned long long)n);
         }
         this.db_n_ = this.db_n_ + n;
+    }
+
+    // H6.2o: compare an interned init-list designator (kept as a long) with a
+    // field name.
+    bool desig_eq(long desig, const char* name) {
+        unsafe {
+            return this.seq(reinterpret_cast<const char*>(desig), name);
+        }
+    }
+
+    // H6.2o: append an interned init-list designator to the diagnostic
+    // message buffer.
+    void db_put_desig(long desig) {
+        unsafe {
+            this.db_put(reinterpret_cast<const char*>(desig));
+        }
     }
 
     void db_put_char(char c) {
@@ -3319,6 +3348,174 @@ export struct HirBuilder {
         return this.build_init_list(to, line, col, 2, has, valueIdx, -1);
     }
 
+    // H6.2o: HirBuilder::buildStructInit.  Resolve the elements of a braced
+    // aggregate initializer against the fields of `structType` and produce an
+    // `init-list` expression with exactly one entry per field (-1 for a field
+    // without an explicit initializer, which the codegen zero-initializes).
+    //
+    // Designated elements (`.field = value`) select their field by name and
+    // advance the positional cursor to the following field (C++20 rule);
+    // positional elements fill the fields in declaration order.  A field
+    // initialized twice is a diagnostic but the last value still wins, like
+    // the oracle.
+    long build_struct_init(long ilIdx, AType structType, const char* varName,
+                           long line, long col) {
+        AExpr il;
+        unsafe {
+            il = this.ep_[ilIdx];
+        }
+        if (structType.ptr_depth > 0 || this.is_struct_name(structType.base) == 0) {
+            this.db_start_ = this.db_n_;
+            this.db_put("braced initializer list can only initialize a struct variable, not '");
+            this.db_type_name(structType);
+            this.db_put("'");
+            this.diag(line, col, this.db_end());
+            HExpr e0 = this.new_expr(19, line, col);
+            e0.type = this.ty_dummy();
+            return this.push_expr(e0);
+        }
+        long si = this.find_struct(structType.base);
+        AStruct sd = this.get_struct(si);
+        long nf = sd.nfields;
+        long z = 0;
+        while (z < nf) {
+            unsafe {
+                this.ilres_[z] = -1;
+                this.ilini_[z] = 0;
+            }
+            z = z + 1;
+        }
+        long positional = 0;
+        long i = 0;
+        while (i < il.an) {
+            long ai = -1;
+            unsafe {
+                ai = this.pa.call_args()[il.astart + i];
+            }
+            long target = -1;
+            long desig = 0;
+            if (il.dstart >= 0) {
+                unsafe {
+                    desig = this.dp_[il.dstart + i];
+                }
+            }
+            if (desig != 0) {
+                long fi = -1;
+                long k = 0;
+                while (k < nf) {
+                    AField fld;
+                    unsafe {
+                        fld = sd.fields[k];
+                    }
+                    if (this.desig_eq(desig, fld.name)) {
+                        fi = k;
+                        break;
+                    }
+                    k = k + 1;
+                }
+                if (fi < 0) {
+                    this.db_start_ = this.db_n_;
+                    this.db_put("struct '");
+                    this.db_put(structType.base);
+                    this.db_put("' has no field named '");
+                    this.db_put_desig(desig);
+                    this.db_put("'");
+                    this.diag(line, col, this.db_end());
+                    this.build_expr(ai);
+                    i = i + 1;
+                    continue;
+                }
+                target = fi;
+                long was = 0;
+                unsafe {
+                    was = this.ilini_[target];
+                }
+                if (was != 0) {
+                    this.db_start_ = this.db_n_;
+                    this.db_put("field '");
+                    this.db_put_desig(desig);
+                    this.db_put("' of struct '");
+                    this.db_put(structType.base);
+                    this.db_put("' is initialized more than once");
+                    this.diag(line, col, this.db_end());
+                }
+                positional = target + 1;
+            } else {
+                target = positional;
+                if (target >= nf) {
+                    this.db_start_ = this.db_n_;
+                    this.db_put("too many initializers for struct '");
+                    this.db_put(structType.base);
+                    this.db_put("'");
+                    this.diag(line, col, this.db_end());
+                    this.build_expr(ai);
+                    i = i + 1;
+                    continue;
+                }
+                positional = positional + 1;
+            }
+            unsafe {
+                this.ilini_[target] = 1;
+            }
+            AField tf;
+            unsafe {
+                tf = sd.fields[target];
+            }
+            AType fieldType = this.resolve_alias(tf.type);
+            long built = this.build_expr(ai);
+            if (built >= 0) {
+                HExpr be;
+                unsafe {
+                    be = this.u.exprs[built];
+                }
+                if (this.is_assignable(fieldType, be.type) == 0) {
+                    this.db_start_ = this.db_n_;
+                    this.db_put("field '");
+                    this.db_put(tf.name);
+                    this.db_put("' of struct '");
+                    this.db_put(structType.base);
+                    this.db_put("' expects '");
+                    this.db_type_name(fieldType);
+                    this.db_put("', got '");
+                    this.db_type_name(be.type);
+                    this.db_put("'");
+                    this.diag(be.line, be.col, this.db_end());
+                }
+                unsafe {
+                    this.ilres_[target] = built;
+                }
+            }
+            i = i + 1;
+        }
+        HExpr e = this.new_expr(19, line, col);
+        e.type = structType;
+        long slot = this.ab_n_;
+        this.ab_n_ = this.ab_n_ + nf;
+        long j = 0;
+        while (j < nf) {
+            long rv = -1;
+            unsafe {
+                rv = this.ilres_[j];
+            }
+            unsafe {
+                this.abuf_[slot + j] = rv;
+            }
+            j = j + 1;
+        }
+        e.astart = this.u.a_n;
+        long k2 = 0;
+        while (k2 < nf) {
+            long ix = -1;
+            unsafe {
+                ix = this.abuf_[slot + k2];
+            }
+            this.push_arg(ix);
+            k2 = k2 + 1;
+        }
+        e.an = nf;
+        return this.push_expr(e);
+    }
+
     long build_decl(AStmt a) {
         AType t = this.resolve_template_struct_type(this.resolve_alias(a.type),
                                                     a.line, a.col);
@@ -3373,16 +3570,26 @@ export struct HirBuilder {
             return this.push_stmt(s);
         }
         if (a.a >= 0) {
-            init = this.build_expr(a.a);
-            if (init >= 0) {
-                HExpr ie;
-                unsafe {
-                    ie = this.u.exprs[init];
-                }
-                if (this.is_assignable(t, ie.type) == 0) {
-                    this.err_init_types(a.line, a.col, a.sval, t, ie.type);
-                } else {
-                    init = this.wrap_value(t, init, a.line, a.col);
+            AExpr ie0;
+            unsafe {
+                ie0 = this.ep_[a.a];
+            }
+            if (ie0.kind == 23) {
+                // H6.2o: a braced aggregate initializer resolves against the
+                // declared struct type (HirBuilder::buildStructInit).
+                init = this.build_struct_init(a.a, t, a.sval, a.line, a.col);
+            } else {
+                init = this.build_expr(a.a);
+                if (init >= 0) {
+                    HExpr ie;
+                    unsafe {
+                        ie = this.u.exprs[init];
+                    }
+                    if (this.is_assignable(t, ie.type) == 0) {
+                        this.err_init_types(a.line, a.col, a.sval, t, ie.type);
+                    } else {
+                        init = this.wrap_value(t, init, a.line, a.col);
+                    }
                 }
             }
         } else {
@@ -4629,6 +4836,15 @@ export struct HirBuilder {
         if (a.kind == 22) {
             return this.build_delete(a);
         }
+        if (a.kind == 23) {
+            // H6.2o: an init-list that reached buildExpr has no target struct
+            // type - only valid in a declaration initializer.
+            this.diag(a.line, a.col,
+                      "braced initializer list is only valid in a declaration initializer");
+            HExpr il = this.new_expr(8, a.line, a.col);
+            il.type = this.ty_dummy();
+            return this.push_expr(il);
+        }
         HExpr e = this.new_expr(8, a.line, a.col);
         e.type = this.ty_dummy();
         return this.push_expr(e);
@@ -5022,7 +5238,22 @@ export struct HirBuilder {
         this.in_assign_lhs_ = 1;
         long lhs = this.build_expr(a.a);
         this.in_assign_lhs_ = 0;
-        long rhs = this.build_expr(a.b);
+        long rhs = -1;
+        AExpr rhs0;
+        unsafe {
+            rhs0 = this.ep_[a.b];
+        }
+        HExpr lhs0;
+        unsafe {
+            lhs0 = this.u.exprs[lhs];
+        }
+        if (this.seq(a.sval, "=") && rhs0.kind == 23) {
+            // H6.2o: aggregate init on assignment (`p = {1, 2};`) resolves
+            // the elements against the lhs struct type.
+            rhs = this.build_struct_init(a.b, lhs0.type, "", a.line, a.col);
+        } else {
+            rhs = this.build_expr(a.b);
+        }
         HExpr le;
         HExpr re;
         unsafe {

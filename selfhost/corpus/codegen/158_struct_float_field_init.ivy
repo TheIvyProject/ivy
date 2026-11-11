@@ -1,0 +1,7 @@
+struct P { int32 x; float64 f; };
+
+int32 main() {
+    P p = {3, 1.5};
+    io::println("{} {}", p.x, p.f);
+    return 0;
+}

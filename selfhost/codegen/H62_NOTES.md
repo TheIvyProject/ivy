@@ -1982,3 +1982,130 @@ Không sửa `src/**`, không rebuild oracle đúng bang (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62n\`.
+
+### 38. H6.2o — struct initializer list (`P p{...}`, `p = {...}`)
+
+#### 38.1 Phạm vi
+
+Đúng theo những gì oracle chấp nhận (khảo sát `i01`–`i15`):
+
+- declaration init: `P p{1, 2};` và `P p = {1, 2};`;
+- assignment: `p = {1, 2};` (kể cả `p = {}` và `p = {.y = 3}`);
+- designated initializer `.field = value`, trộn positional/designated
+  theo luật C++20 (positional sau designator đi tiếp từ field kế tiếp);
+- partial `{1}` và empty `{}` (các field còn lại zero-init);
+- field kiểu enum / `int8` / `float` / `float32` / struct (chỉ khi
+  element là biểu thức có kiểu tương thích).
+
+Oracle **từ chối** (giữ nguyên, không có fixture dương): nested
+`{{7}, 2}`, array init `int32 a[3] = {...}`, init-list làm đối số
+(`sum({4, 5})`), `return {...}`, array-of-struct init
+(`P a[2] = {{1, 2}, {3, 4}}`). Thông điệp tương ứng:
+`braced initializer list is only valid in a declaration initializer`,
+`braced initializer list can only initialize a struct variable, not 'T'`,
+`field 'in' of struct 'Out' expects 'In', got 'int'`.
+
+#### 38.2 Thiết kế
+
+- `ast.ivy`: kind 23 = init-list; field mới `AExpr.dstart` (index đầu
+  tiên trong pool designator). `astart/an` giữ run element trong
+  call-arg pool như call.
+- `parser.ivy`: pool `dpool_` (`long*`, lưu con trỏ interned dưới dạng
+  long để tránh bug `const char**`) + `push_desig`/`desigs`; nhánh
+  `{ ... }` trong `parse_primary` (element có thể có `.field =`,
+  trailing comma được chấp nhận); staging `argn_idx_`/`argn_next_` như
+  call để call lồng nhau không xen kẽ argument; stride `epool_`
+  168 → 176 byte.
+- `hir_builder.ivy`: `build_struct_init` (mirror `buildStructInit`):
+  - resolve designator theo tên field, positional cursor;
+  - chẩn đoán `has no field named`, `is initialized more than once`,
+    `too many initializers`, `expects 'T', got 'U'` (dùng loc của
+    element như oracle);
+  - list HIR đúng `nfields` phần tử, field không khởi tạo = `-1`;
+  - dispatch trong `build_decl` (init kind 23) và `build_assign`
+    (`op == "="`, rhs kind 23, type lấy từ lhs);
+  - nhánh `a.kind == 23` trong `build_expr` phát chẩn đoán
+    `braced initializer list is only valid in a declaration initializer`
+    + node dummy (giữ thứ tự lỗi của oracle);
+  - scratch `ilres_`/`ilini_` (field của builder) thay cho mảng heap.
+- `mir_builder.ivy`: dùng `ex_initlist` sẵn có (kind 17), reserve run
+  args trước khi build element.
+- `emitter.ivy`:
+  - `lower_init_list_into(ilIdx, slot)`: `store %struct.T
+    zeroinitializer` rồi GEP + cast + store từng field có element;
+  - `lower_expr` kind 17: cấp `%a.N` ẩn, fill, `load` cả struct;
+  - `Inst::Alloca` với init kind 17: lower trực tiếp vào slot của biến
+    (không tạo alloca tạm);
+  - `lower_assign` với rhs kind 17: lower trực tiếp vào lvalue;
+  - pre-scan trong `lower_function`: các init-list rvalue (value của
+    `Store`, `Eval`, `Ret`, `CondBranch`) được cấp slot `%a.N` **trước**
+    khi in `br label %bb0`, đúng vị trí oracle splice
+    `;__IVY_ENTRY_ALLOCAS__`; `il_next_` tiêu thụ theo đúng thứ tự
+    lowering.
+
+#### 38.3 Corpus mới
+
+| fixture | nội dung |
+|---|---|
+| `154_struct_brace_init.ivy` | `P p{1, 2}` |
+| `155_struct_eq_init.ivy` | `P p = {1, 2}` |
+| `156_struct_partial_init.ivy` | `P p = {1}` (3 field) |
+| `157_struct_empty_init.ivy` | `P p = {}` |
+| `158_struct_float_field_init.ivy` | field `float64` |
+| `159_struct_assign_init.ivy` | `p = {1, 2}` (alloca `%a.N` ẩn) |
+| `160_struct_designated_init.ivy` | `{.y = 5}` |
+| `161_struct_enum_field_init.ivy` | field enum |
+| `162_struct_i8_field_init.ivy` | field `int8` (cast `trunc`) |
+| `163_struct_desig_then_pos.ivy` | `{.x = 1, 7}` (cursor C++20) |
+
+#### 38.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62o\run` (2026-11-11):
+
+```text
+[3/4] running 163 fixtures ...
+PASS 154_struct_brace_init.ivy
+...
+PASS 163_struct_desig_then_pos.ivy
+[4/4] summary
+      PASS 163 / 163
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`interpdiff.ps1` vẫn `PASS 23 / 23`; `build_smoke.ps1` vẫn PASS.
+
+Ngoài corpus, 15 probe `i01`–`i15` (khảo sát oracle, gồm cả các ca bị
+từ chối) và 15 probe mở rộng `e01`–`e15` (designated trùng/không tồn
+tại, quá nhiều initializer, assign trong loop/nested block, hai local,
+`float32`, `int8`, …) đều khớp oracle từng byte (stdout, stderr, exit).
+
+#### 38.5 Giới hạn / defer
+
+1. Nested brace init, array init, init-list làm argument/return,
+   array-of-struct init: oracle từ chối — giữ nguyên.
+2. Default member initializer trong struct: không nằm trong phạm vi
+   H6.2o (oracle có `defaultInits`, selfhost chưa port).
+3. Struct method/`this`, global variable: vẫn defer như H6.2n.
+
+#### 38.6 Trạng thái H6.2o
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/ast.ivy` (kind 23 + `dstart`);
+- `selfhost/parsing/parser.ivy` (`dpool_`/`push_desig`/`desigs`,
+  nhánh `{...}` trong `parse_primary`, stride 176);
+- `selfhost/hir/hir_builder.ivy` (`dp_`, `desig_eq`,
+  `db_put_desig`, `build_struct_init`, dispatch decl/assign/expr,
+  `ilres_`/`ilini_`);
+- `selfhost/codegen/emitter.ivy` (`il_next_`, `lower_init_list_into`,
+  kind 17 trong `lower_expr`, Alloca init, `lower_assign`, pre-scan
+  alloca ẩn);
+- `selfhost/corpus/codegen/154..163_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 38 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..o ... 163/163`.
+
+Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62o\`.
+

@@ -114,6 +114,13 @@ export struct Parser {
     long cp_n_;
     long cp_cap_;
 
+    // H6.2o: init-list designator pool.  Each entry is the interned field
+    // name of a designated initializer, or 0 for a positional element.
+    // Stored as long (the interned pointer) like the other name pools.
+    long* dpool_;
+    long dp_n_;
+    long dp_cap_;
+
     // user-defined type names (struct/enum/class/using alias), stored as
     // interned pointers in a long* pool (avoids the Ivy const char** bug)
     long* tnames_;
@@ -253,6 +260,8 @@ export struct Parser {
         this.argn_cap_ = in_count * 4 + 64;
         this.cp_n_ = 0;
         this.cp_cap_ = in_count + 16;
+        this.dp_n_ = 0;
+        this.dp_cap_ = in_count + 16;
         this.tn_n_ = 0;
         this.tn_cap_ = in_count + 16;
         this.tp_n_ = 0;
@@ -304,12 +313,13 @@ export struct Parser {
         this.fbuf_ = (char*) __ivy_alloc(this.fb_cap_);
         this.fb_n_ = 0;
         this.fval_ = 0.0;
-        this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 168);
+        this.epool_ = (AExpr*) __ivy_alloc(this.ep_cap_ * 176);
         this.spool_ = (AStmt*) __ivy_alloc(this.sp_cap_ * 136);
         this.cargs_ = (long*) __ivy_alloc(this.ca_cap_ * 8);
         this.argn_idx_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
         this.argn_next_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
         this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 32);
+        this.dpool_ = (long*) __ivy_alloc(this.dp_cap_ * 8);
         this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
@@ -349,6 +359,7 @@ export struct Parser {
         __ivy_free(this.argn_idx_);
         __ivy_free(this.argn_next_);
             __ivy_free(this.casepool_);
+            __ivy_free(this.dpool_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
@@ -2096,6 +2107,7 @@ export struct Parser {
         e.fval = 0.0;
         unsafe { e.tpl_args = (AType*)0; }
         e.tpl_n = 0;
+        e.dstart = -1;
         return e;
     }
 
@@ -2179,6 +2191,17 @@ export struct Parser {
         }
     }
 
+    // H6.2o: append an init-list designator (0 for a positional element).
+    // The name is the interned pointer kept as a long (see `dpool_`).
+    void push_desig(long nm) {
+        if (this.dp_n_ < this.dp_cap_) {
+            unsafe {
+                this.dpool_[this.dp_n_] = nm;
+            }
+            this.dp_n_ = this.dp_n_ + 1;
+        }
+    }
+
     void set_next(long i, long v) {
         unsafe {
             this.spool_[i].next = v;
@@ -2200,6 +2223,13 @@ export struct Parser {
     long* call_args() {
         unsafe {
             return this.cargs_;
+        }
+    }
+
+    // H6.2o: the interned init-list designators (`Parser::push_desig`).
+    long* desigs() {
+        unsafe {
+            return this.dpool_;
         }
     }
 
@@ -2700,6 +2730,84 @@ export struct Parser {
         if (this.kw("nullopt")) {
             this.next();
             AExpr e = this.fresh(7);
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
+        }
+        // H6.2o: braced aggregate initializer `{ expr, .field = expr, ... }`
+        // (Parser::parsePrimary's LBrace branch).  The elements are staged in
+        // the same linked list as call arguments so that a nested call cannot
+        // interleave its own arguments with this run.
+        if (this.at("{")) {
+            this.next();
+            AExpr e = this.fresh(23);
+            long dstart = this.dp_n_;
+            long head = -1;
+            long tail = -1;
+            while (!this.at("}") && !this.at("eof")) {
+                long ok = 1;
+                long desig = 0;
+                if (this.at(".")) {
+                    this.next();
+                    if (!this.at("identifier")) {
+                        this.error_at(this.peek(0),
+                                      "expected field name after '.' in designated initializer");
+                        ok = 0;
+                    } else {
+                        unsafe {
+                            desig = (long) this.intern_tok(this.next());
+                        }
+                        if (!this.at("=")) {
+                            this.error_at(this.peek(0),
+                                          "expected '=' after field name in designated initializer");
+                            ok = 0;
+                        } else {
+                            this.next();
+                        }
+                    }
+                }
+                if (ok != 0) {
+                    long elem = this.parse_expr();
+                    this.push_desig(desig);
+                    if (this.argn_n_ < this.argn_cap_) {
+                        long node = this.argn_n_;
+                        unsafe {
+                            this.argn_idx_[node] = elem;
+                            this.argn_next_[node] = -1;
+                        }
+                        if (tail >= 0) {
+                            unsafe {
+                                this.argn_next_[tail] = node;
+                            }
+                        } else {
+                            head = node;
+                        }
+                        tail = node;
+                        this.argn_n_ = node + 1;
+                    }
+                }
+                if (this.at(",")) {
+                    this.next();
+                } else {
+                    break;
+                }
+            }
+            this.expect("}", "expected '}' to close braced initializer");
+            long astart = this.ca_n_;
+            long cur = head;
+            while (cur >= 0) {
+                long idx = -1;
+                long nxt = -1;
+                unsafe {
+                    idx = this.argn_idx_[cur];
+                    nxt = this.argn_next_[cur];
+                }
+                this.push_carg(idx);
+                cur = nxt;
+            }
+            e.astart = astart;
+            e.an = this.ca_n_ - astart;
+            e.dstart = dstart;
             e.line = t.line;
             e.col = t.col;
             return this.push_expr(e);

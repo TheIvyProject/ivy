@@ -244,12 +244,20 @@ export struct AAlias {
 //   1 int  2 float  3 string  4 char  5 bool  6 nullptr  7 nullopt
 //   8 ident  9 this  10 unary  11 binary  12 ternary  13 call  14 index
 //   15 member  16 assign  17 sizeofpack  18 sizeof  19 alignof  20 cast
-//   21 new  22 delete
+//   21 new  22 delete  23 init-list
 //
 // H6.2n: `new T(args)` stores the target type in `type` and its arguments
 // as a run of `astart`/`an` indices in the call-argument pool (the same
 // staging used by calls).  `delete[] expr` stores `isArray` in `flag` and
 // the operand in `a`.
+//
+// H6.2o: a braced aggregate initializer `{ expr, .field = expr, ... }`
+// stores its elements as a run of `astart`/`an` indices in the
+// call-argument pool and the matching field designators (the interned field
+// name, or 0 for a positional element) as a run of `dstart`/`an` entries in
+// the parser's designator pool (`Parser::desigs()`).  The parser never
+// records a missing element: the `<zero-init>` placeholders of the oracle's
+// HIR list are synthesized by the HIR builder.
 //
 // `tpl_args`/`tpl_n` hold the explicit template arguments of a template-id
 // call (`f<int32>(x)`); they are empty for an ordinary call.
@@ -262,7 +270,7 @@ export struct AExpr {
     long b;             // rhs / then / index
     long c;             // else
     long astart;        // first call-arg / index expr index (-1 none)
-    long an;            // call-arg count
+    long an;            // call-arg count / init-list element count
     AType type;         // sizeof/alignof/cast/new target type
     long is_scope;      // member(15): `::` scope resolution (vs `.`/`->`)
     long line;
@@ -270,6 +278,7 @@ export struct AExpr {
     double fval;        // exact value of a float literal (kind 2)
     AType* tpl_args;    // explicit template arguments of a template-id call
     long tpl_n;
+    long dstart;        // init-list(23): first designator index (-1 none)
 };
 
 // A statement node in the statement pool.

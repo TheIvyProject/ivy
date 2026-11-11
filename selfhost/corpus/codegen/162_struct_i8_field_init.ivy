@@ -1,0 +1,6 @@
+struct P { int8 a; int32 b; };
+
+int32 main() {
+    P p = {5, 9};
+    return p.a;
+}
