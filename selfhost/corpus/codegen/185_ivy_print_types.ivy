@@ -1,0 +1,17 @@
+// ivy::print/println dispatch on the first argument type (int/float/str/char/
+// bool), plus the no-argument and multi-argument forms.
+#pragma ivy cnumber
+int32 main() {
+    bool b = true;
+    int32 x = 5;
+    ivy::println(b);
+    ivy::print(true);
+    ivy::println(3.14);
+    ivy::println('A');
+    ivy::println("s");
+    ivy::println(x);
+    ivy::println();
+    ivy::print();
+    ivy::println(1, 2, 3);
+    return 0;
+}

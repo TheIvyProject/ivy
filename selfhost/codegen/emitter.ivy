@@ -171,6 +171,13 @@ export struct Emitter {
     //   * the io segment map is keyed by the raw decoded bytes (the quirk
     //     that makes `io::print("hi")` emit both @.str.0 and @.str.1).
     long uses_io_print_;
+    // H6.2r: the oracle's `usesIvyPrint_` / `usesIoReadLine_` / `usesIoFile_`.
+    // `usesIvyPrint_` gates the eight `ivy_print_*` declares in emitGlobals;
+    // the D6 flags gate the `@__ivy_read_line` / `@__ivy_read_file` /
+    // `@__ivy_write_file` declares after the io::print runtime.
+    long uses_ivy_print_;
+    long uses_io_read_line_;
+    long uses_io_file_;
     // H6.2n: the oracle's `usesIvyAlloc_` / `usesIvyFree_`.  They decide
     // whether the module ends with `declare @__ivy_alloc` / `@__ivy_free`.
     long uses_alloc_;
@@ -190,6 +197,24 @@ export struct Emitter {
     void* sm_idx_;
     long sm_n_;
     long sm_cap_;
+    // H6.2r: per-function output capture.  CodeGen::lowerFunction lowers into
+    // an ostringstream and splices entry-block allocas created during lowering
+    // (io::read_file's outLen slot) before the first branch.  The emitter
+    // buffers the prologue (`cap_phase_ == 1`) and the body
+    // (`cap_phase_ == 2`) separately, and `cap_phase_ == 3` collects the
+    // spliced entry alloca lines.  `cap_ == 0` writes straight to stdout.
+    long cap_;
+    long cap_phase_;
+    void* cap_a_;
+    long cap_an_;
+    long cap_acap_;
+    void* cap_b_;
+    long cap_bn_;
+    long cap_bcap_;
+    void* cap_x_;
+    long cap_xn_;
+    long cap_xcap_;
+    void* num_buf_;
 
     // --- setup / teardown -------------------------------------------------
 
@@ -255,6 +280,9 @@ export struct Emitter {
         this.arg_cap_ = 256;
         this.arg_sp_ = 0;
         this.uses_io_print_ = 0;
+        this.uses_ivy_print_ = 0;
+        this.uses_io_read_line_ = 0;
+        this.uses_io_file_ = 0;
         this.uses_alloc_ = 0;
         this.uses_free_ = 0;
         this.dec_len_ = -1;
@@ -264,6 +292,14 @@ export struct Emitter {
         this.pm_cap_ = 4096;
         this.sm_n_ = 0;
         this.sm_cap_ = 4096;
+        this.cap_ = 0;
+        this.cap_phase_ = 0;
+        this.cap_an_ = 0;
+        this.cap_bn_ = 0;
+        this.cap_xn_ = 0;
+        this.cap_acap_ = 8192;
+        this.cap_bcap_ = 8192;
+        this.cap_xcap_ = 4096;
         unsafe {
             this.vnames_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vnums_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
@@ -278,6 +314,10 @@ export struct Emitter {
             this.sm_keys_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
             this.sm_klens_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
             this.sm_idx_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
+            this.cap_a_ = __ivy_alloc((unsigned long long) this.cap_acap_);
+            this.cap_b_ = __ivy_alloc((unsigned long long) this.cap_bcap_);
+            this.cap_x_ = __ivy_alloc((unsigned long long) this.cap_xcap_);
+            this.num_buf_ = __ivy_alloc(64);
         }
     }
 
@@ -296,6 +336,10 @@ export struct Emitter {
             __ivy_free(this.sm_keys_);
             __ivy_free(this.sm_klens_);
             __ivy_free(this.sm_idx_);
+            __ivy_free(this.cap_a_);
+            __ivy_free(this.cap_b_);
+            __ivy_free(this.cap_x_);
+            __ivy_free(this.num_buf_);
             __ivy_free((void*) this.mu);
         }
     }
@@ -355,6 +399,18 @@ export struct Emitter {
                 p = p - 1;
             }
             return end;
+        }
+        return o;
+    }
+
+    // H6.2r: signed decimal spelling, matching io::print("{}", long).
+    long put_long(char* buf, long o, long v) {
+        unsafe {
+            if (v < 0) {
+                buf[o] = '-';
+                return this.put_uint(buf, o + 1, -v);
+            }
+            return this.put_uint(buf, o, v);
         }
         return o;
     }
@@ -823,7 +879,7 @@ export struct Emitter {
         VRef t = this.new_temp();
         this.emit_val(t);
         this.ps(" = getelementptr i8, ptr @.str.");
-        io::print("{}", gi);
+        this.out_long(gi);
         this.ps(", i64 0");
         this.nl();
         return t;
@@ -862,7 +918,7 @@ export struct Emitter {
             this.emit_val(idx64);
         }
         this.ps(", ");
-        io::print("{}", n);
+        this.out_long(n);
         this.nl();
 
         long panic_b = this.ib_;
@@ -872,12 +928,14 @@ export struct Emitter {
         this.ps("br i1 ");
         this.emit_val(oob);
         this.ps(", label %bb.i");
-        io::print("{}", panic_b);
+        this.out_long(panic_b);
         this.ps(", label %bb.i");
-        io::print("{}", ok_b);
+        this.out_long(ok_b);
         this.nl();
 
-        io::print("bb.i{}:", panic_b);
+        this.out_str("bb.i");
+        this.out_long(panic_b);
+        this.out_str(":");
         this.nl();
         this.cur_blk_inline_ = 1;
         this.cur_blk_idx_ = panic_b;
@@ -892,19 +950,21 @@ export struct Emitter {
             VRef msg = this.new_temp();
             this.emit_val(msg);
             this.ps(" = getelementptr i8, ptr @.str.");
-            io::print("{}", gi);
+            this.out_long(gi);
             this.ps(", i64 0");
             this.nl();
             this.ps("call void @__ivy_panic(ptr ");
             this.emit_val(msg);
             this.ps(", i32 ");
-            io::print("{}", line);
+            this.out_long(line);
             this.ps(")");
             this.nl();
         }
         this.pl("unreachable");
 
-        io::print("bb.i{}:", ok_b);
+        this.out_str("bb.i");
+        this.out_long(ok_b);
+        this.out_str(":");
         this.nl();
         this.cur_blk_inline_ = 1;
         this.cur_blk_idx_ = ok_b;
@@ -934,7 +994,7 @@ export struct Emitter {
                 i = i + 1;
             }
             out[o] = 0;
-            io::print("{}", out);
+            this.out_str(out);
             __ivy_free(out);
         }
     }
@@ -1227,17 +1287,126 @@ export struct Emitter {
 
     // --- output primitives ------------------------------------------------
 
+    // H6.2r: append `n` bytes to the active capture buffer.  Phase 1 is the
+    // prologue, phase 2 the body, phase 3 the spliced entry allocas.
+    void cap_append(const char* s, long n) {
+        if (this.cap_ == 0 || n <= 0) {
+            return;
+        }
+        unsafe {
+            char* dst = (char*) this.cap_a_;
+            long len = 0;
+            long cap = 0;
+            if (this.cap_phase_ == 1) {
+                dst = (char*) this.cap_a_;
+                len = this.cap_an_;
+                cap = this.cap_acap_;
+            } else if (this.cap_phase_ == 3) {
+                dst = (char*) this.cap_x_;
+                len = this.cap_xn_;
+                cap = this.cap_xcap_;
+            } else {
+                dst = (char*) this.cap_b_;
+                len = this.cap_bn_;
+                cap = this.cap_bcap_;
+            }
+            if (len + n + 1 > cap) {
+                long ncap = cap * 2 + n + 16;
+                char* nb = (char*) __ivy_alloc((unsigned long long) ncap);
+                long i = 0;
+                while (i < len) {
+                    nb[i] = dst[i];
+                    i = i + 1;
+                }
+                __ivy_free(dst);
+                dst = nb;
+                cap = ncap;
+            }
+            long j = 0;
+            while (j < n) {
+                dst[len + j] = s[j];
+                j = j + 1;
+            }
+            len = len + n;
+            if (this.cap_phase_ == 1) {
+                this.cap_a_ = dst;
+                this.cap_an_ = len;
+                this.cap_acap_ = cap;
+            } else if (this.cap_phase_ == 3) {
+                this.cap_x_ = dst;
+                this.cap_xn_ = len;
+                this.cap_xcap_ = cap;
+            } else {
+                this.cap_b_ = dst;
+                this.cap_bn_ = len;
+                this.cap_bcap_ = cap;
+            }
+        }
+    }
+
+    void out_str(const char* s) {
+        if (this.cap_ != 0) {
+            unsafe {
+                this.cap_append(s, (long) __ivy_strlen(s));
+            }
+        } else {
+            io::print("{}", s);
+        }
+    }
+
+    void out_long(long v) {
+        if (this.cap_ != 0) {
+            unsafe {
+                char* b = (char*) this.num_buf_;
+                long n = this.put_long(b, 0, v);
+                this.cap_append(b, n);
+            }
+        } else {
+            io::print("{}", v);
+        }
+    }
+
+    void out_char(char c) {
+        if (this.cap_ != 0) {
+            unsafe {
+                char* b = (char*) this.num_buf_;
+                b[0] = c;
+                b[1] = 0;
+                this.cap_append(b, 1);
+            }
+        } else {
+            io::print("{}", c);
+        }
+    }
+
+    // Emit the buffered function: prologue, the entry-block allocas created
+    // during lowering, then the body (which starts with the entry branch).
+    void flush_capture() {
+        this.cap_ = 0;
+        unsafe {
+            char* a = (char*) this.cap_a_;
+            a[this.cap_an_] = 0;
+            io::print("{}", a);
+            char* x = (char*) this.cap_x_;
+            x[this.cap_xn_] = 0;
+            io::print("{}", x);
+            char* b = (char*) this.cap_b_;
+            b[this.cap_bn_] = 0;
+            io::print("{}", b);
+        }
+    }
+
     void ps(const char* s) {
-        io::print("{}", s);
+        this.out_str(s);
     }
 
     void pl(const char* s) {
-        io::print("{}", s);
-        io::print("\n");
+        this.out_str(s);
+        this.out_str("\n");
     }
 
     void nl() {
-        io::print("\n");
+        this.out_str("\n");
     }
 
     void emit_slot(const char* name, long slot) {
@@ -1245,31 +1414,37 @@ export struct Emitter {
         unsafe {
             first = (long) name[0];
         }
-        io::print("%");
+        this.out_str("%");
         if (first == 0) {
-            io::print("arg");
+            this.out_str("arg");
         } else {
-            io::print("{}", name);
+            this.out_str(name);
         }
-        io::print(".{}", slot);
+        this.out_str(".");
+        this.out_long(slot);
     }
 
     void emit_bb(long global) {
-        io::print("%bb{}", global - this.cur_block_start_);
+        this.out_str("%bb");
+        this.out_long(global - this.cur_block_start_);
     }
 
     // H6.2k: the block reference of the oracle's `curBlock_` state.  A
     // function block prints `%bb<local>`; an inline block `%bb.i<N>`.
     void emit_blk_ref(long is_inline, long idx) {
         if (is_inline != 0) {
-            io::print("%bb.i{}", idx);
+            this.out_str("%bb.i");
+            this.out_long(idx);
         } else {
-            io::print("%bb{}", idx);
+            this.out_str("%bb");
+            this.out_long(idx);
         }
     }
 
     void emit_inline_label(long idx) {
-        io::print("bb.i{}:", idx);
+        this.out_str("bb.i");
+        this.out_long(idx);
+        this.out_str(":");
         this.nl();
     }
 
@@ -1375,12 +1550,12 @@ export struct Emitter {
             ip = ip + 1;
             frac = frac - 1000000;
         }
-        io::print("{}", ip);
+        this.out_long(ip);
         this.ps(".");
         long div = 100000;
         while (div > 0) {
             long d = frac / div;
-            io::print("{}", d);
+            this.out_long(d);
             frac = frac - d * div;
             div = div / 10;
         }
@@ -1392,9 +1567,10 @@ export struct Emitter {
             return;
         }
         if (v.kind == 0) {
-            io::print("{}", v.ival);
+            this.out_long(v.ival);
         } else if (v.kind == 1) {
-            io::print("%tmp.{}", v.idx);
+            this.out_str("%tmp.");
+            this.out_long(v.idx);
         } else if (v.kind == 3) {
             if (v.ival != 0) {
                 this.ps("true");
@@ -1989,7 +2165,7 @@ export struct Emitter {
         this.ps(", ptr ");
         this.emit_val(addr);
         this.ps(", i32 0, i32 ");
-        io::print("{}", fi);
+        this.out_long(fi);
         this.nl();
         return t;
     }
@@ -2501,6 +2677,25 @@ export struct Emitter {
         if (this.is_io_print_name(e.sval)) {
             return this.lower_io_print(e);
         }
+        // H6.2r: `ivy::print`/`ivy::println` dispatch on the first argument's
+        // type; the explicit `ivy::print_*`/`ivy::println_*` names and the D6
+        // io builtins take the generic extern "C" builtin path.
+        if (this.is_ivy_print_name(e.sval)) {
+            if (this.streq(e.sval, "ivy::print") ||
+                this.streq(e.sval, "ivy::println")) {
+                return this.lower_ivy_print(e);
+            }
+            return this.lower_builtin_explicit(e);
+        }
+        if (this.streq(e.sval, "io::read_line")) {
+            return this.lower_io_read_line(e);
+        }
+        if (this.streq(e.sval, "io::write_file")) {
+            return this.lower_io_write_file(e);
+        }
+        if (this.streq(e.sval, "io::read_file")) {
+            return this.lower_io_read_file(e);
+        }
         long fi = this.find_call_target(e.sval, e.astart, e.an);
         if (fi < 0) {
             this.fail(e.line, e.col, "call to a function without a MIR entry is out of scope for H6.2b");
@@ -2632,6 +2827,260 @@ export struct Emitter {
         }
     }
 
+    // --- H6.2r: ivy::print* / D6 io builtins -------------------------------
+
+    // Mirror of CodeGen's `isFloatType` for the ivy::print suffix choice.  It
+    // is narrower than `is_float_base` (only `float`/`double` and the `_t`
+    // spellings) and excludes pointers.
+    bool is_ivy_float_type(AType t) {
+        if (t.ptr_depth > 0) {
+            return false;
+        }
+        return this.streq(t.base, "float") || this.streq(t.base, "double") ||
+               this.streq(t.base, "float32_t") ||
+               this.streq(t.base, "float64_t") ||
+               this.streq(t.base, "float16_t") ||
+               this.streq(t.base, "float128_t") ||
+               this.streq(t.base, "bfloat16_t");
+    }
+
+    // Emit a builtin symbol with `::` replaced by `_` (CodeGen::lowerExpr's
+    // `isBuiltinCall` branch), e.g. `ivy::print_int` -> `ivy__print_int`.
+    void emit_builtin_symbol(const char* name) {
+        unsafe {
+            char* buf = (char*) __ivy_alloc(256);
+            long i = 0;
+            long n = 0;
+            while (name[i] != 0 && n < 255) {
+                if (name[i] == ':') {
+                    buf[n] = '_';
+                } else {
+                    buf[n] = name[i];
+                }
+                n = n + 1;
+                i = i + 1;
+            }
+            buf[n] = 0;
+            this.ps(buf);
+            __ivy_free(buf);
+        }
+    }
+
+    // Mirror of the ivy::print / ivy::println branch of CodeGen::lowerExpr.
+    // Only the first argument is printed; with no argument the oracle computes
+    // an empty suffix and emits nothing at all.
+    VRef lower_ivy_print(MExpr e) {
+        long is_ln = this.streq(e.sval, "ivy::println") ? 1 : 0;
+        if (e.an <= 0) {
+            return this.empty_ref();
+        }
+        long ai = -1;
+        unsafe {
+            ai = this.mu->args[e.astart];
+        }
+        if (ai < 0) {
+            return this.empty_ref();
+        }
+        MExpr a;
+        unsafe {
+            a = this.mu->exprs[ai];
+        }
+        AType at = a.type;
+        VRef v = this.lower_expr(ai);
+        unsafe {
+            const char* ty = this.llvm_type(at, 1);
+            const char* suffix = "int";
+            if (at.ptr_depth > 0) {
+                suffix = "str";
+            } else if (this.streq(at.base, "char") ||
+                       this.streq(at.base, "int8_t") ||
+                       this.streq(at.base, "uint8_t")) {
+                suffix = "char";
+            } else if (this.is_ivy_float_type(at)) {
+                suffix = "float";
+            }
+            this.ps("call void @");
+            if (is_ln != 0) {
+                this.ps("ivy_println_");
+            } else {
+                this.ps("ivy_print_");
+            }
+            this.ps(suffix);
+            this.ps("(");
+            this.ps(ty);
+            this.ps(" ");
+            this.emit_val(v);
+            this.ps(")");
+            this.nl();
+        }
+        return this.empty_ref();
+    }
+
+    // The generic extern "C" builtin path: no MIR callee, arguments are passed
+    // with their own value type (no parameter cast), and the result type comes
+    // from the HIR (`builtin_ret`).
+    VRef lower_builtin_explicit(MExpr e) {
+        long an = e.an;
+        long base = this.arg_sp_;
+        if (base + an > this.arg_cap_) {
+            this.fail(e.line, e.col, "too many call arguments for H6.2r");
+            return this.imm(0);
+        }
+        this.arg_sp_ = base + an;
+        long j = 0;
+        while (j < an) {
+            unsafe {
+                long ai = this.mu->args[e.astart + j];
+                if (ai < 0) {
+                    this.fail(e.line, e.col, "internal: missing call argument");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                MExpr a = this.mu->exprs[ai];
+                VRef v = this.lower_expr(ai);
+                const char* ty = this.llvm_type(a.type, 1);
+                VRef* av = (VRef*) this.arg_vals_;
+                av[base + j] = v;
+                long* at = (long*) this.arg_tys_;
+                at[base + j] = (long) ty;
+            }
+            j = j + 1;
+        }
+        if (this.streq(this.llvm_type(e.type, 0), "void")) {
+            this.ps("call void @");
+            this.emit_builtin_symbol(e.sval);
+            this.ps("(");
+            this.emit_call_args(base, an);
+            this.ps(")");
+            this.nl();
+            this.arg_sp_ = base;
+            return this.empty_ref();
+        }
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call ");
+        this.ps(this.llvm_type(e.type, 0));
+        this.ps(" @");
+        this.emit_builtin_symbol(e.sval);
+        this.ps("(");
+        this.emit_call_args(base, an);
+        this.ps(")");
+        this.nl();
+        this.arg_sp_ = base;
+        return t;
+    }
+
+    VRef lower_io_read_line(MExpr e) {
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call ptr @__ivy_read_line()");
+        this.nl();
+        return t;
+    }
+
+    // Mirror of the io::write_file branch: up to three arguments are lowered in
+    // order (missing ones use the oracle's `null`/`null`/`0` literals), then
+    // the result temporary is allocated and the call is emitted.
+    VRef lower_io_write_file(MExpr e) {
+        VRef pv;
+        VRef dv;
+        VRef lv;
+        long hp = 0;
+        long hd = 0;
+        long hl = 0;
+        if (e.an >= 1) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu->args[e.astart];
+            }
+            if (ai >= 0) {
+                pv = this.lower_expr(ai);
+                hp = 1;
+            }
+        }
+        if (e.an >= 2) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu->args[e.astart + 1];
+            }
+            if (ai >= 0) {
+                dv = this.lower_expr(ai);
+                hd = 1;
+            }
+        }
+        if (e.an >= 3) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu->args[e.astart + 2];
+            }
+            if (ai >= 0) {
+                lv = this.lower_expr(ai);
+                hl = 1;
+            }
+        }
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call i32 @__ivy_write_file(ptr ");
+        if (hp != 0) {
+            this.emit_val(pv);
+        } else {
+            this.ps("null");
+        }
+        this.ps(", ptr ");
+        if (hd != 0) {
+            this.emit_val(dv);
+        } else {
+            this.ps("null");
+        }
+        this.ps(", i64 ");
+        if (hl != 0) {
+            this.emit_val(lv);
+        } else {
+            this.ps("0");
+        }
+        this.ps(")");
+        this.nl();
+        return t;
+    }
+
+    // Mirror of the io::read_file branch.  The path argument is lowered first;
+    // then the outLen slot's `%tmp.N = alloca i64` is spliced into the entry
+    // block (CodeGen::newTemp + emitEntryAlloca), and the call itself is
+    // emitted at the current position.
+    VRef lower_io_read_file(MExpr e) {
+        VRef pv;
+        long hp = 0;
+        if (e.an >= 1) {
+            long ai = -1;
+            unsafe {
+                ai = this.mu->args[e.astart];
+            }
+            if (ai >= 0) {
+                pv = this.lower_expr(ai);
+                hp = 1;
+            }
+        }
+        VRef len_slot = this.new_temp();
+        this.cap_phase_ = 3;
+        this.emit_val(len_slot);
+        this.ps(" = alloca i64");
+        this.nl();
+        this.cap_phase_ = 2;
+        VRef t = this.new_temp();
+        this.emit_val(t);
+        this.ps(" = call ptr @__ivy_read_file(ptr ");
+        if (hp != 0) {
+            this.emit_val(pv);
+        } else {
+            this.ps("null");
+        }
+        this.ps(", ptr ");
+        this.emit_val(len_slot);
+        this.ps(")");
+        this.nl();
+        return t;
+    }
+
     // --- H6.2c: pre-pass collection ---------------------------------------
 
     bool is_io_print_name(const char* name) {
@@ -2639,6 +3088,21 @@ export struct Emitter {
                this.streq(name, "io::println") ||
                this.streq(name, "io::eprint") ||
                this.streq(name, "io::eprintln");
+    }
+
+    // H6.2r: the ten `ivy::print*` builtins (CodeGen::isCodegenBuiltin).  Only
+    // these names set `usesIvyPrint_`, exactly like the oracle's prefix test.
+    bool is_ivy_print_name(const char* name) {
+        return this.streq(name, "ivy::print") ||
+               this.streq(name, "ivy::println") ||
+               this.streq(name, "ivy::print_int") ||
+               this.streq(name, "ivy::print_float") ||
+               this.streq(name, "ivy::print_str") ||
+               this.streq(name, "ivy::print_char") ||
+               this.streq(name, "ivy::println_int") ||
+               this.streq(name, "ivy::println_float") ||
+               this.streq(name, "ivy::println_str") ||
+               this.streq(name, "ivy::println_char");
     }
 
     // Mirror of CodeGen::collectExpr.  The node itself is visited first (a
@@ -2674,6 +3138,17 @@ export struct Emitter {
         if (e.kind == 11) {
             if (this.is_io_print_name(e.sval)) {
                 this.uses_io_print_ = 1;
+            }
+            // H6.2r: the oracle's usesIvyPrint_ / usesIoReadLine_ / usesIoFile_.
+            if (this.is_ivy_print_name(e.sval)) {
+                this.uses_ivy_print_ = 1;
+            }
+            if (this.streq(e.sval, "io::read_line")) {
+                this.uses_io_read_line_ = 1;
+            }
+            if (this.streq(e.sval, "io::read_file") ||
+                this.streq(e.sval, "io::write_file")) {
+                this.uses_io_file_ = 1;
             }
             long j = 0;
             while (j < e.an) {
@@ -2758,6 +3233,38 @@ export struct Emitter {
 
     // --- H6.2c: io::print builtins ----------------------------------------
 
+    // H6.2r: mirror of CodeGen::emitGlobals for the ivy stdlib declares.  All
+    // eight typed print symbols are declared as soon as any `ivy::` builtin is
+    // used (the oracle only tracks the flag, not the individual suffix).
+    void emit_globals() {
+        if (this.uses_ivy_print_ != 0) {
+            this.pl("declare void @ivy_print_int(i32)");
+            this.pl("declare void @ivy_print_float(double)");
+            this.pl("declare void @ivy_print_str(ptr)");
+            this.pl("declare void @ivy_print_char(i8)");
+            this.pl("declare void @ivy_println_int(i32)");
+            this.pl("declare void @ivy_println_float(double)");
+            this.pl("declare void @ivy_println_str(ptr)");
+            this.pl("declare void @ivy_println_char(i8)");
+        }
+    }
+
+    // H6.2r: mirror of CodeGen::emitIoD6Runtime.  `io::read_file` and
+    // `io::write_file` share `usesIoFile_`, so both symbols are declared
+    // whenever either one is used.
+    void emit_io_d6_runtime() {
+        if (this.uses_io_read_line_ == 0 && this.uses_io_file_ == 0) {
+            return;
+        }
+        if (this.uses_io_read_line_ != 0) {
+            this.pl("declare ptr @__ivy_read_line()");
+        }
+        if (this.uses_io_file_ != 0) {
+            this.pl("declare ptr @__ivy_read_file(ptr, ptr)");
+            this.pl("declare i32 @__ivy_write_file(ptr, ptr, i64)");
+        }
+    }
+
     void emit_io_runtime() {
         this.pl("declare void @__ivy_write_str(i32, ptr)");
         this.pl("declare void @__ivy_write_char(i32, i8)");
@@ -2769,7 +3276,7 @@ export struct Emitter {
 
     void emit_write_str(long fd, VRef v) {
         this.ps("call void @__ivy_write_str(i32 ");
-        io::print("{}", fd);
+        this.out_long(fd);
         this.ps(", ptr ");
         this.emit_val(v);
         this.ps(")");
@@ -2778,7 +3285,7 @@ export struct Emitter {
 
     void emit_write_char(long fd, VRef v) {
         this.ps("call void @__ivy_write_char(i32 ");
-        io::print("{}", fd);
+        this.out_long(fd);
         this.ps(", i8 ");
         this.emit_val(v);
         this.ps(")");
@@ -2963,7 +3470,7 @@ export struct Emitter {
 
         if (is_ln != 0) {
             this.ps("call void @__ivy_write_newline(i32 ");
-            io::print("{}", fd);
+            this.out_long(fd);
             this.ps(")");
             this.nl();
         }
@@ -3008,7 +3515,7 @@ export struct Emitter {
         VRef t = this.new_temp();
         this.emit_val(t);
         this.ps(" = call ptr @__ivy_alloc(i64 ");
-        io::print("{}", sz);
+        this.out_long(sz);
         this.ps(")");
         this.nl();
         if (e.an > 0) {
@@ -3094,7 +3601,7 @@ export struct Emitter {
                 this.ps(", ptr ");
                 this.emit_val(slot);
                 this.ps(", i32 0, i32 ");
-                io::print("{}", i);
+                this.out_long(i);
                 this.nl();
                 this.ps("store ");
                 this.ps(fieldTy);
@@ -3458,7 +3965,7 @@ export struct Emitter {
                 this.ps("    ");
                 this.ps(this.llvm_type(ce.type, 0));
                 this.ps(" ");
-                io::print("{}", av);
+                this.out_long(av);
                 this.ps(", label ");
                 this.emit_bb(ab);
                 this.nl();
@@ -3475,7 +3982,9 @@ export struct Emitter {
         long global = this.cur_block_start_ + local_idx;
         this.cur_blk_inline_ = 0;
         this.cur_blk_idx_ = local_idx;
-        io::print("bb{}:", local_idx);
+        this.out_str("bb");
+        this.out_long(local_idx);
+        this.out_str(":");
         this.nl();
         MBlock b;
         unsafe {
@@ -3527,6 +4036,14 @@ export struct Emitter {
             return;
         }
 
+        // H6.2r: capture the function so entry-block allocas created during
+        // lowering can be spliced before the body (the oracle's fnOut buffer).
+        this.cap_ = 1;
+        this.cap_phase_ = 1;
+        this.cap_an_ = 0;
+        this.cap_bn_ = 0;
+        this.cap_xn_ = 0;
+
         this.ps("define ");
         this.ps(this.llvm_type(func.ret, 0));
         this.ps(" @");
@@ -3542,7 +4059,8 @@ export struct Emitter {
                 this.ps(", ");
             }
             this.ps(this.llvm_type(p.type, 0));
-            io::print(" %arg{}", i);
+            this.out_str(" %arg");
+            this.out_long(i);
             i = i + 1;
         }
         this.ps(") {");
@@ -3563,7 +4081,8 @@ export struct Emitter {
             this.nl();
             this.ps("store ");
             this.ps(this.llvm_type(p.type, 0));
-            io::print(" %arg{}", i);
+            this.out_str(" %arg");
+            this.out_long(i);
             this.ps(", ptr ");
             this.emit_slot(p.name, slot);
             this.nl();
@@ -3648,10 +4167,13 @@ export struct Emitter {
         }
 
         if (func.block_n > 0) {
+            this.cap_phase_ = 2;
             this.pl("br label %bb0");
         } else if (this.cur_is_void_ != 0) {
+            this.cap_phase_ = 2;
             this.pl("ret void");
         } else {
+            this.cap_phase_ = 2;
             this.pl("unreachable");
         }
 
@@ -3662,6 +4184,7 @@ export struct Emitter {
         }
         this.pl("}");
         this.nl();
+        this.flush_capture();
     }
 
     // --- C entry point ----------------------------------------------------
@@ -3792,6 +4315,9 @@ export struct Emitter {
         if (this.failed_ != 0) {
             return 1;
         }
+        // H6.2r: CodeGen::generate() calls emitGlobals() after the struct
+        // definitions and before the extern "C" declaration loop.
+        this.emit_globals();
         // CodeGen::generate() emits extern "C" declarations first, then the
         // declarations of bodyless non-extern functions, then the definitions.
         long fi = 0;
@@ -3851,6 +4377,8 @@ export struct Emitter {
         if (this.uses_io_print_ != 0) {
             this.emit_io_runtime();
         }
+        // H6.2r: D6 read_line/file declares follow the io::print runtime.
+        this.emit_io_d6_runtime();
         this.emit_string_constants();
         if (this.failed_ != 0) {
             return 1;

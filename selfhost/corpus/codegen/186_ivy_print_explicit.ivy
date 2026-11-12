@@ -1,0 +1,16 @@
+// Explicit ivy::print_*/println_* builtins: the symbol keeps the double
+// underscore produced by replacing '::' with '_'.
+#pragma ivy cnumber
+int32 main() {
+    ivy::print_int(42);
+    ivy::print_float(3.5);
+    ivy::print_str("hi");
+    ivy::print_char('A');
+    ivy::println_int(7);
+    ivy::println_float(2.5);
+    ivy::println_str("bye");
+    ivy::println_char('Z');
+    ivy::println();
+    ivy::print();
+    return 0;
+}

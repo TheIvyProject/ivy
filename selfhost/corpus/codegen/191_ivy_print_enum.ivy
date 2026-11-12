@@ -1,0 +1,11 @@
+// An enum argument to ivy::println uses the int suffix and the underlying
+// integer type.
+enum Color { Red, Green, Blue };
+enum Small : uint8 { A, B };
+int32 main() {
+    Color c = Blue;
+    Small s = B;
+    ivy::println(c);
+    ivy::print(s);
+    return 0;
+}

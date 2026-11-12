@@ -1,0 +1,9 @@
+// The eight ivy_print_* declares are emitted alongside extern "C"
+// declarations when any ivy:: builtin is used.
+#pragma ivy cnumber
+extern "C" int puts(const char* s);
+int32 main() {
+    puts("x");
+    ivy::print_int(1);
+    return 0;
+}

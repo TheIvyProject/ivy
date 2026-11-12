@@ -2363,3 +2363,126 @@ Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62q\`.
+
+## 41. H6.2r — `ivy::print*` và io file builtins
+
+#### 41.1 Phạm vi
+
+Stage r phủ bốn nhóm builtin còn lại của `isCodegenBuiltin`:
+
+1. **`ivy::print` / `ivy::println`** — dispatch theo type của **arg đầu**:
+   - `pointerDepth > 0` → `str`; `char`/`int8_t`/`uint8_t` → `char`;
+     họ float (`float`, `double`, `float32_t`, `float64_t`, `float16_t`,
+     `float128_t`, `bfloat16_t`, `pointerDepth == 0`) → `float`; còn lại
+     (kể cả `bool` và enum) → `int`.
+   - symbol: `@ivy_print_<suffix>` hoặc `@ivy_println_<suffix>`; type của
+     tham số là `valueLlvmType` (reference decay), giống oracle.
+   - không có arg → oracle trả chuỗi rỗng: **không** emit call và **không**
+     cấp `%tmp`; các arg thứ 2 trở đi cũng không được lower (chỉ arg[0]).
+2. **8 tên explicit** `ivy::print_int|float|str|char`,
+   `ivy::println_int|float|str|char` — đi nhánh builtin generic:
+   `::` → `_` nên symbol là `ivy__print_int` (hai dấu gạch dưới,
+   bug-compat), không mangling, arg giữ type value, return type lấy từ HIR
+   (`builtin_ret`: void cho print*, `int32` cho `io::write_file`, `char*`
+   cho `io::read_line`/`io::read_file`).
+3. **`io::read_line`** — `%tmp.N = call ptr @__ivy_read_line()`.
+4. **`io::write_file`** — lower lần lượt arg 0/1/2 (thiếu thì dùng literal
+   `null`/`null`/`0` như oracle), rồi cấp temp kết quả và emit
+   `call i32 @__ivy_write_file(ptr, ptr, i64)`.
+5. **`io::read_file`** — lower path trước, cấp `%tmp.N` cho outLen và
+   splice `%tmp.N = alloca i64` vào entry block (sau các slot param/local,
+   trước `br label %bb0`), sau đó
+   `%tmp.M = call ptr @__ivy_read_file(ptr path, ptr slot)`.
+
+Declares:
+
+- `usesIvyPrint_` được set khi callee bắt đầu bằng `ivy::` **và** là
+  builtin; khi đó emit đủ 8 dòng `declare void @ivy_print_int(i32)` …
+  `@ivy_println_char(i8)` — đặt sau `emit_struct_defs()` và **trước** vòng
+  `extern "C"` declaration (mirror `CodeGen::emitGlobals`).
+- `usesIoReadLine_` → `declare ptr @__ivy_read_line()`;
+  `usesIoFile_` (dùng `io::read_file` **hoặc** `io::write_file`) → emit cả
+  `declare ptr @__ivy_read_file(ptr, ptr)` và
+  `declare i32 @__ivy_write_file(ptr, ptr, i64)`. Hai khối này phát sau
+  `emit_io_runtime()`, trước `emit_string_constants()` (mirror
+  `emitIoD6Runtime`).
+
+Splice entry alloca: oracle lower function vào `ostringstream` rồi mới in,
+nên alloca phát sinh giữa chừng vẫn nằm đúng entry. Emitter buffer
+**prologue** (A), **body** (B) và **alloca phát sinh** (X) cho mọi function
+rồi flush theo thứ tự A, X, B. Cơ chế bật cho tất cả function
+(byte-neutral; đã chứng minh bằng 184 fixture trước r và 191 sau r), và mọi
+helper emit chuyển từ `io::print` trực tiếp sang `out_str`/`out_long`/
+`out_char` (qua `ps`/`pl`/`nl`) để capture hoạt động.
+
+#### 41.2 Probe
+
+`cmp.ps1` (oracle vs `cgdrive.exe`) trên `...\h62r\probe2`:
+
+```text
+MATCH r01_readfile   (io::read_file, splice alloca)
+MATCH r02_explicit   (5 tên explicit + no-arg)
+MATCH r03_types      (bool/int/float/char/str + literal)
+MATCH r04_io         (read_line + write_file + printf)
+MATCH r05_noargs     (print/println không arg, nhiều arg)
+MATCH r06_order      (extern "C" puts + ivy::print_int)
+MATCH r07_wfmissing  (write_file 1 và 0 arg)
+```
+
+7/7 MATCH, cả trước lẫn sau refactor capture. Bộ fixture 185–191 dưới
+`...\h62r\probe3` cũng 7/7 MATCH trước khi copy vào corpus.
+
+#### 41.3 Fixture mới (185–191)
+
+| Fixture | Nội dung |
+|---|---|
+| `185_ivy_print_types.ivy` | `print`/`println` cho bool/int/float/char/str, literal, no-arg, nhiều arg |
+| `186_ivy_print_explicit.ivy` | đủ 8 tên `ivy::print_*`/`ivy::println_*` (symbol `ivy__*`) |
+| `187_io_read_line.ivy` | `io::read_line` → `@__ivy_read_line` |
+| `188_io_write_file.ivy` | `io::write_file` 3/2/1/0 arg (literal `null`/`0`) |
+| `189_io_read_file.ivy` | hai `io::read_file`, numbering temp + splice entry |
+| `190_ivy_print_decl_order.ivy` | 8 declares `ivy_print_*` cạnh `extern "C" puts` |
+| `191_ivy_print_enum.ivy` | enum (mặc định và `uint8`) vào `ivy::print*` → suffix `int` |
+
+#### 41.4 Kết quả
+
+`cgdiff.ps1 -TempRoot ...\opencode\h62r\cg3` (2026-11-12):
+
+```text
+[3/4] running 191 fixtures ...
+...
+[4/4] summary
+      PASS 191 / 191
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`interpdiff.ps1` vẫn `PASS 23 / 23`; `build_smoke.ps1` vẫn PASS.
+
+Trên 65 example được oracle chấp nhận: **32 MATCH** (trước r: 29). Ba file
+mới khớp byte là `test_print`, `test_designated_init`, `test_d6_io`; không
+có file nào bị regress. 33 DIFF còn lại thuộc các stage sau:
+`test_b5_*`/`test_b6_*`/`test_concepts`/`test_ctor_dtor`/`test_d1..d7`/
+`test_methods`/`test_raii_break`/`test_operator_overloading`/
+`test_template_struct`/`test_variadic`/`test_structured_binding`/
+`test_range_for`/`test_inherit*`/`test_move_*`/`test_return_value`/
+`test_module_math`/`test_ivy_ext`.
+
+#### 41.5 Trạng thái H6.2r
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy`: fields `uses_ivy_print_`/
+  `uses_io_read_line_`/`uses_io_file_`; `is_ivy_print_name`,
+  `is_ivy_float_type`, `emit_builtin_symbol`, `emit_globals`,
+  `emit_io_d6_runtime`; `lower_ivy_print`, `lower_builtin_explicit`,
+  `lower_io_read_line`, `lower_io_write_file`, `lower_io_read_file`;
+  capture (`cap_*`, `put_long`, `cap_append`, `out_str`/`out_long`/
+  `out_char`, `flush_capture`) và `lower_function`/`emit` cập nhật theo;
+- `selfhost/corpus/codegen/185..191_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 41 này);
+- `PLAN.md` dòng H6.2 -> `◐ H6.2a..r ... 191/191`.
+
+Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62r\`.

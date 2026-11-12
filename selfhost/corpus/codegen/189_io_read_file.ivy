@@ -1,0 +1,10 @@
+// io::read_file: the outLen slot alloca is spliced into the entry block and
+// the temporary numbering continues across two calls.
+#pragma ivy cnumber
+int32 main() {
+    unsafe {
+        char* a = io::read_file("a.txt");
+        char* b = io::read_file("b.txt");
+    }
+    return 0;
+}

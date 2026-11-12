@@ -1,0 +1,11 @@
+// io::write_file with three, two, one and zero arguments.
+#pragma ivy cnumber
+int32 main() {
+    unsafe {
+        int32 a = io::write_file("a.txt", "x", 1);
+        int32 b = io::write_file("b.txt", "y");
+        int32 c = io::write_file("c.txt");
+        int32 d = io::write_file();
+    }
+    return 0;
+}

@@ -1,0 +1,8 @@
+// io::read_line lowers to the extern "C" __ivy_read_line call.
+#pragma ivy cnumber
+int32 main() {
+    unsafe {
+        char* l = io::read_line();
+    }
+    return 0;
+}
