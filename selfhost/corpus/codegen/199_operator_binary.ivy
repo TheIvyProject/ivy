@@ -1,0 +1,45 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Vec2 {
+    int32 x;
+    int32 y;
+
+    // Binary operator+: Vec2 + Vec2 -> Vec2
+    Vec2 operator+(Vec2 other) {
+        Vec2 r;
+        r.x = this.x + other.x;
+        r.y = this.y + other.y;
+        return r;
+    }
+
+    // Binary operator==: Vec2 == Vec2 -> bool
+    bool operator==(Vec2 other) {
+        return this.x == other.x && this.y == other.y;
+    }
+};
+
+int32 main() {
+    Vec2 a;
+    a.x = 1;
+    a.y = 2;
+    Vec2 b;
+    b.x = 3;
+    b.y = 4;
+
+    Vec2 c = a + b;
+    printf("c = (%d, %d)\n", c.x, c.y);
+
+    // Chained binary operators nest the rewritten calls.
+    Vec2 d = a + b + c;
+    printf("d = (%d, %d)\n", d.x, d.y);
+
+    bool eq = (a == b);
+    printf("a == b? %d\n", eq);
+    bool eq2 = (a == a);
+    printf("a == a? %d\n", eq2);
+    return 0;
+}

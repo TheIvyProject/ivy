@@ -1,0 +1,22 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Adder {
+    int32 base;
+
+    // Call operator() with two user arguments (the multi-argument path).
+    int32 operator()(int32 a, int32 b) {
+        return this.base + a + b;
+    }
+};
+
+int32 main() {
+    Adder f;
+    f.base = 100;
+    int32 r = f(10, 20);
+    printf("f(10, 20) = %d\n", r);
+    return 0;
+}

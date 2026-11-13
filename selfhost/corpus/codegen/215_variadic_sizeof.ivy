@@ -1,0 +1,15 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename... Args>
+int count_args(Args... args) {
+    return sizeof...(args);
+}
+
+int32 main() {
+    printf("%d %d %d\n", count_args(), count_args(1), count_args(1, 2, 3));
+    return 0;
+}

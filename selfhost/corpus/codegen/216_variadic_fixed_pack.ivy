@@ -1,0 +1,15 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename T, typename... Rest>
+int count_after(T first, Rest... rest) {
+    return sizeof...(rest);
+}
+
+int32 main() {
+    printf("%d %d %d\n", count_after(1), count_after(1, 2), count_after(1, 2, 3));
+    return 0;
+}

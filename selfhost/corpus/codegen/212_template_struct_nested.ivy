@@ -1,0 +1,26 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename T>
+struct Box {
+    T value;
+
+    T get() { return this.value; }
+};
+
+template <typename T>
+struct Wrap {
+    T inner;
+
+    T outer() { return this.inner; }
+};
+
+int32 main() {
+    Wrap<Box<int32> > w;
+    w.inner.value = 9;
+    printf("w.inner.value=%d w.outer().value=%d\n", w.inner.value, w.outer().value);
+    return 0;
+}

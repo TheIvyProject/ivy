@@ -1,0 +1,22 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Scale {
+    int32 k;
+
+    // Call operator() with one user argument.
+    int32 operator()(int32 v) {
+        return this.k * v;
+    }
+};
+
+int32 main() {
+    Scale s;
+    s.k = 7;
+    int32 r = s(6);
+    printf("s(6) = %d\n", r);
+    return 0;
+}

@@ -1,0 +1,28 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Vec2 {
+    int32 x;
+    int32 y;
+
+    // Unary operator-: -Vec2 -> Vec2 (negation)
+    Vec2 operator-() {
+        Vec2 r;
+        r.x = -this.x;
+        r.y = -this.y;
+        return r;
+    }
+};
+
+int32 main() {
+    Vec2 a;
+    a.x = 5;
+    a.y = 7;
+
+    Vec2 n = -a;
+    printf("-a = (%d, %d)\n", n.x, n.y);
+    return 0;
+}

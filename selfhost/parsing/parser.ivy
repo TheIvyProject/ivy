@@ -121,6 +121,13 @@ export struct Parser {
     long dp_n_;
     long dp_cap_;
 
+    // H6.2s: constructor member initializer pool.  Two parallel `long` pools:
+    // the interned field name and the initializer expression index.
+    long* miname_;
+    long* miarg_;
+    long mi_n_;
+    long mi_cap_;
+
     // user-defined type names (struct/enum/class/using alias), stored as
     // interned pointers in a long* pool (avoids the Ivy const char** bug)
     long* tnames_;
@@ -302,7 +309,7 @@ export struct Parser {
         this.cv_ = 0;
         this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 208);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 224);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
         this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 128);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
@@ -320,6 +327,10 @@ export struct Parser {
         this.argn_next_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
         this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 32);
         this.dpool_ = (long*) __ivy_alloc(this.dp_cap_ * 8);
+        this.mi_cap_ = in_count + 16;
+        this.miname_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
+        this.miarg_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
+        this.mi_n_ = 0;
         this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
@@ -327,7 +338,7 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 208);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 224);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
@@ -360,6 +371,8 @@ export struct Parser {
         __ivy_free(this.argn_next_);
             __ivy_free(this.casepool_);
             __ivy_free(this.dpool_);
+            __ivy_free(this.miname_);
+            __ivy_free(this.miarg_);
             __ivy_free(this.dline_);
             __ivy_free(this.dcol_);
             __ivy_free((void*)this.dmsg_);
@@ -1782,6 +1795,28 @@ export struct Parser {
         }
     }
 
+    // H6.2s: the `k`-th constructor member initializer of `f` (the name of the
+    // field and the expression index of its initializer).
+    const char* ctor_init_name(AFunction f, long k) {
+        long i = f.minit_start + k;
+        unsafe {
+            if (k >= 0 && k < f.minit_n && i < this.mi_n_) {
+                return reinterpret_cast<const char*>(this.miname_[i]);
+            }
+        }
+        return "";
+    }
+
+    long ctor_init_arg(AFunction f, long k) {
+        long i = f.minit_start + k;
+        unsafe {
+            if (k >= 0 && k < f.minit_n && i < this.mi_n_) {
+                return this.miarg_[i];
+            }
+        }
+        return -1;
+    }
+
     long expr_count() {
         return this.ep_n_;
     }
@@ -2383,6 +2418,32 @@ export struct Parser {
         return -1;
     }
 
+    // H6.2v: the operator of a fold expression, or "" when the current
+    // token is not one (Parser::foldOperator in parser.cpp).
+    const char* fold_operator() {
+        Token t = this.peek(0);
+        if (this.kind_eq(t, "+")) { return "+"; }
+        if (this.kind_eq(t, "-")) { return "-"; }
+        if (this.kind_eq(t, "*")) { return "*"; }
+        if (this.kind_eq(t, "/")) { return "/"; }
+        if (this.kind_eq(t, "%")) { return "%"; }
+        if (this.kind_eq(t, "^")) { return "^"; }
+        if (this.kind_eq(t, "&")) { return "&"; }
+        if (this.kind_eq(t, "|")) { return "|"; }
+        if (this.kind_eq(t, "<<")) { return "<<"; }
+        if (this.kind_eq(t, ">>")) { return ">>"; }
+        if (this.kind_eq(t, "&&")) { return "&&"; }
+        if (this.kind_eq(t, "||")) { return "||"; }
+        if (this.kind_eq(t, "==")) { return "=="; }
+        if (this.kind_eq(t, "!=")) { return "!="; }
+        if (this.kind_eq(t, "<")) { return "<"; }
+        if (this.kind_eq(t, ">")) { return ">"; }
+        if (this.kind_eq(t, "<=")) { return "<="; }
+        if (this.kind_eq(t, ">=")) { return ">="; }
+        if (this.kind_eq(t, ",")) { return ","; }
+        return "";
+    }
+
     bool is_assign_kind() {
         Token t = this.peek(0);
         return this.kind_eq(t, "=") || this.kind_eq(t, "+=") ||
@@ -2865,6 +2926,29 @@ export struct Parser {
             e.col = t.col;
             return this.push_expr(e);
         }
+        if (this.kw("sizeof") && this.kind_eq(this.peek(1), "...")) {
+            // H6.2v: `sizeof...(pack)` - the number of elements of a
+            // parameter pack, folded to an integer at HIR build time.
+            this.next();  // `sizeof`
+            this.next();  // `...`
+            this.expect("(", "expected '(' after 'sizeof...'");
+            if (!this.at("identifier")) {
+                this.error_at(this.peek(0),
+                              "expected parameter pack name after 'sizeof...('");
+                this.synchronize();
+                AExpr e0 = this.fresh(1);
+                e0.ival = 0;
+                e0.line = t.line;
+                e0.col = t.col;
+                return this.push_expr(e0);
+            }
+            AExpr e = this.fresh(24);
+            e.sval = this.intern_tok(this.next());
+            this.expect(")", "expected ')' after sizeof... pack name");
+            e.line = t.line;
+            e.col = t.col;
+            return this.push_expr(e);
+        }
         if (this.kw("sizeof")) {
             this.next();
             this.expect("(", "expected '(' after 'sizeof'");
@@ -2969,6 +3053,72 @@ export struct Parser {
                 return this.push_expr(e);
             }
             this.next();
+            // H6.2v: fold expressions.
+            //   ( ... op expr )        - unary left fold
+            //   ( expr op ... )        - unary right fold
+            //   ( expr op ... op expr )- binary fold
+            // The `...` marks the pack; `op` is a binary operator.
+            if (this.at("...")) {
+                this.next();  // `...`
+                AExpr fe = this.fresh(25);
+                fe.sval = this.fold_operator();
+                if (this.cstr_len(fe.sval) == 0) {
+                    this.error_at(this.peek(0),
+                                  "expected binary operator after '...' in fold expression");
+                } else {
+                    this.next();
+                }
+                long frhs = this.parse_unary();
+                this.expect(")", "expected ')' to close fold expression");
+                fe.a = -1;
+                fe.b = frhs;
+                fe.flag = 1;
+                fe.line = t.line;
+                fe.col = t.col;
+                return this.push_expr(fe);
+            }
+            // Parse the first operand with `parse_unary` (not the full
+            // conditional expression) so a following binary operator is
+            // recognised as part of the fold syntax.  The position and the
+            // diagnostic count are saved so a non-fold can be reparsed with
+            // the correct precedence (the speculative parse may have emitted
+            // diagnostics, which the oracle discards).
+            long fsave = this.pos_;
+            long fdiag = this.dn_;
+            long ffailed = this.failed_;
+            long finner = this.parse_unary();
+            AExpr fe2 = this.fresh(25);
+            fe2.sval = this.fold_operator();
+            if (this.cstr_len(fe2.sval) > 0) {
+                this.next();  // first operator
+                if (this.at("...")) {
+                    this.next();  // `...`
+                    long frhs2 = -1;
+                    if (this.cstr_len(this.fold_operator()) > 0) {
+                        this.next();  // second operator
+                        frhs2 = this.parse_unary();
+                    }
+                    this.expect(")", "expected ')' to close fold expression");
+                    fe2.a = finner;
+                    fe2.b = frhs2;
+                    fe2.flag = 0;
+                    fe2.line = t.line;
+                    fe2.col = t.col;
+                    return this.push_expr(fe2);
+                }
+                // Not a fold: reparse the whole parenthesized content as a
+                // full conditional expression.
+                this.pos_ = fsave;
+                this.dn_ = fdiag;
+                this.failed_ = ffailed;
+                long full = this.parse_conditional();
+                this.expect(")", "expected ')' to close parenthesized expression");
+                return full;
+            }
+            // No fold operator ahead: reparse uniformly for precedence.
+            this.pos_ = fsave;
+            this.dn_ = fdiag;
+            this.failed_ = ffailed;
             long content = this.parse_conditional();
             this.expect(")", "expected ')' to close parenthesized expression");
             return content;
@@ -3612,6 +3762,9 @@ export struct Parser {
         f.legacy_lts = legacy;
         // H6.2p: the trailing `...` of the parameter list.
         f.is_variadic = pl.variadic;
+        // H6.2s: free functions have no constructor member initializer list.
+        f.minit_start = 0;
+        f.minit_n = 0;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -3775,10 +3928,18 @@ export struct Parser {
                 this.synchronize();
                 return;
             }
-            this.next();
+            Token nm = this.next();
             this.expect("(", "expected '(' after member name in initializer list");
-            this.parse_expr();
+            long arg = this.parse_expr();
             this.expect(")", "expected ')' to close member initializer");
+            // H6.2s: record the initializer (field name + expression).
+            if (this.mi_n_ < this.mi_cap_) {
+                unsafe {
+                    this.miname_[this.mi_n_] = (long) this.intern_tok(nm);
+                    this.miarg_[this.mi_n_] = arg;
+                }
+                this.mi_n_ = this.mi_n_ + 1;
+            }
             if (this.at(",")) {
                 this.next();
             } else {
@@ -3835,6 +3996,8 @@ export struct Parser {
             m.legacy_lts.n = 0;
         }
         m.is_variadic = pl.variadic;
+        m.minit_start = 0;
+        m.minit_n = 0;
         this.push_method(m);
     }
 
@@ -3861,8 +4024,11 @@ export struct Parser {
                 this.next();
                 AParamList pl = this.parse_params();
                 this.expect(")", "expected ')' to close constructor parameter list");
+                long mi_start = this.mi_n_;
+                long mi_cnt = 0;
                 if (this.at(":")) {
                     this.parse_ctor_inits();
+                    mi_cnt = this.mi_n_ - mi_start;
                 }
                 AType ret = this.empty_type();
                 ret.base = "void";
@@ -3874,6 +4040,10 @@ export struct Parser {
                 }
                 const char* qn = this.intern_join3(bare, "::", bare);
                 this.push_method_record(qn, ret, pl, body, is_virtual, mstart.line, mstart.col);
+                unsafe {
+                    this.mpool_[this.m_n_ - 1].minit_start = mi_start;
+                    this.mpool_[this.m_n_ - 1].minit_n = mi_cnt;
+                }
                 continue;
             }
             // Destructor: `~Name() { body }`.

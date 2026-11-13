@@ -1,0 +1,14 @@
+#pragma ivy cnumber
+
+struct Pair {
+    int32 a;
+    int32 b;
+    Pair() : a(0), b(0) {}
+    Pair(int32 x, int32 y) : a(x), b(y) {}
+};
+
+int32 main() {
+    Pair p;
+    Pair q(3, 4);
+    return p.a + q.b;
+}

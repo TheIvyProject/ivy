@@ -1,0 +1,21 @@
+#pragma ivy cnumber
+
+struct Box {
+    int32 v;
+    Box(int32 x) : v(x) {}
+    ~Box() {
+        this.v = 0;
+    }
+};
+
+// NRVO: returning a local by value transfers ownership, so its dtor is not
+// emitted on the return path.
+Box make() {
+    Box b(9);
+    return b;
+}
+
+int32 main() {
+    make();
+    return 0;
+}

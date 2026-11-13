@@ -1,0 +1,15 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename... Args>
+long long lsum(Args... args) {
+    return (args + ...);
+}
+
+int32 main() {
+    printf("%lld\n", lsum(1, 2, 3));
+    return 0;
+}

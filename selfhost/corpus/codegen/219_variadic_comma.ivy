@@ -1,0 +1,19 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+void print_int(int x) {
+    printf("%d\n", x);
+}
+
+template <typename... Args>
+void print_all(Args... args) {
+    (print_int(args), ...);
+}
+
+int32 main() {
+    print_all(11, 22, 33);
+    return 0;
+}

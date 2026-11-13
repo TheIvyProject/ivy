@@ -1,0 +1,26 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename... Args>
+int sum(Args... args) {
+    return (args + ...);
+}
+
+template <typename... Args>
+bool all_true(Args... args) {
+    return (args && ...);
+}
+
+template <typename... Args>
+bool any_true(Args... args) {
+    return (args || ...);
+}
+
+int32 main() {
+    printf("%d\n", sum());
+    printf("%d %d\n", all_true() ? 1 : 0, any_true() ? 1 : 0);
+    return 0;
+}

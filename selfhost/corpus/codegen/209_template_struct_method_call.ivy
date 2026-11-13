@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename T>
+struct Box {
+    T value;
+
+    T get() { return this.value; }
+
+    T twice() { return this.get() + this.get(); }
+};
+
+int32 main() {
+    Box<int32> a;
+    a.value = 21;
+    Box<int32> b;
+    b.value = a.twice();
+    printf("a=%d b=%d twice=%d\n", a.get(), b.get(), b.twice());
+    return 0;
+}

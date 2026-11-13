@@ -1,0 +1,30 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Logger {
+    int32 id;
+    Logger(int32 v) : id(v) {}
+    ~Logger() {
+        printf("dtor %d\n", this.id);
+    }
+};
+
+// RAII with break: the loop-body local's dtor runs before the jump.
+int32 test() {
+    int32 sum = 0;
+    for (int32 i = 0; i < 6; ++i) {
+        Logger loop(i);
+        sum = sum + i;
+        if (i == 2) {
+            break;
+        }
+    }
+    return sum;
+}
+
+int32 main() {
+    return test();
+}

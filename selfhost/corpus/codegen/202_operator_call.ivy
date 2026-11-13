@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Vec3 {
+    int32 x;
+    int32 y;
+    int32 z;
+
+    // Call operator() with no user arguments.
+    int32 operator()() {
+        return this.x * this.x + this.y * this.y + this.z * this.z;
+    }
+};
+
+int32 main() {
+    Vec3 a;
+    a.x = 1;
+    a.y = 2;
+    a.z = 3;
+
+    int32 mag = a();
+    printf("|a|^2 = %d\n", mag);
+    return 0;
+}

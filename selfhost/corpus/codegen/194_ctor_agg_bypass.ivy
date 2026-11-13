@@ -1,0 +1,13 @@
+#pragma ivy cnumber
+
+// An aggregate initializer bypasses the user-declared constructor.
+struct Pair {
+    int32 a;
+    int32 b;
+    Pair() : a(1), b(2) {}
+};
+
+int32 main() {
+    Pair p = {7, 8};
+    return p.a + p.b;
+}

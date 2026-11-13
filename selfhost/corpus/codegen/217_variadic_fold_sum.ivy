@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename... Args>
+int sum(Args... args) {
+    return (args + ...);
+}
+
+template <typename... Args>
+int sum_left(Args... args) {
+    return (... + args);
+}
+
+template <typename... Args>
+int sum_from(int init, Args... args) {
+    return (init + ... + args);
+}
+
+int32 main() {
+    printf("%d\n", sum(1, 2, 3, 4));
+    printf("%d\n", sum_left(1, 2, 3, 4));
+    printf("%d\n", sum_from(10, 1, 2, 3));
+    return 0;
+}

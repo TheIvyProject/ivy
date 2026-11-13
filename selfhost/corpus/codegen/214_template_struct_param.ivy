@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename T>
+struct Box {
+    T value;
+
+    T get() { return this.value; }
+
+    void copy(Box<T> o) { this.value = o.value; }
+};
+
+int32 main() {
+    Box<int32> a;
+    a.value = 13;
+    Box<int32> b;
+    b.copy(a);
+    printf("b=%d\n", b.get());
+    return 0;
+}

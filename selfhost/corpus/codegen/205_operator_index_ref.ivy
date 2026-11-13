@@ -1,0 +1,29 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Arr {
+    int32 v0;
+    int32 v1;
+
+    // Index operator[] returning a reference: the result is an lvalue, so
+    // `a[0] = x` writes through the call's raw pointer result.
+    int32& operator[](int32 i) {
+        if (i == 0) { return this.v0; }
+        return this.v1;
+    }
+};
+
+int32 main() {
+    Arr a;
+    a.v0 = 1;
+    a.v1 = 2;
+
+    a[0] = 42;
+    a[1] = 43;
+    printf("%d %d\n", a[0], a[1]);
+    printf("%d %d\n", a.v0, a.v1);
+    return 0;
+}

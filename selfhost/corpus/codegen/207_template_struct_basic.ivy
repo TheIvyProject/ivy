@@ -1,0 +1,21 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename T>
+struct Box {
+    T value;
+
+    T get() { return this.value; }
+
+    void set(T v) { this.value = v; }
+};
+
+int32 main() {
+    Box<int32> a;
+    a.set(7);
+    printf("a.value=%d a.get()=%d\n", a.value, a.get());
+    return 0;
+}

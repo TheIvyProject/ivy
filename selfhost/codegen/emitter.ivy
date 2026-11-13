@@ -215,6 +215,9 @@ export struct Emitter {
     long cap_xn_;
     long cap_xcap_;
     void* num_buf_;
+    // H6.2s: scratch buffer for one `::`-separated name component when the
+    // MSVC mangling of a method / constructor / destructor is emitted.
+    void* mangle_buf_;
 
     // --- setup / teardown -------------------------------------------------
 
@@ -318,6 +321,7 @@ export struct Emitter {
             this.cap_b_ = __ivy_alloc((unsigned long long) this.cap_bcap_);
             this.cap_x_ = __ivy_alloc((unsigned long long) this.cap_xcap_);
             this.num_buf_ = __ivy_alloc(64);
+            this.mangle_buf_ = __ivy_alloc(1024);
         }
     }
 
@@ -340,6 +344,7 @@ export struct Emitter {
             __ivy_free(this.cap_b_);
             __ivy_free(this.cap_x_);
             __ivy_free(this.num_buf_);
+            __ivy_free(this.mangle_buf_);
             __ivy_free((void*) this.mu);
         }
     }
@@ -457,7 +462,17 @@ export struct Emitter {
             }
             long i = 0;
             while (i < n) {
-                buf[o] = name[i];
+                // Mirror CodeGen::escapeLlvmIdent: a template specialization
+                // name like `Box<int32_t>` is not a valid LLVM identifier, so
+                // the disallowed characters become `_`
+                // (`%struct.Box_int32_t_`).
+                char c = name[i];
+                if (c == '<' || c == '>' || c == ',' || c == ' ' ||
+                    c == ':' || c == '&' || c == '*' || c == '(' ||
+                    c == ')') {
+                    c = '_';
+                }
+                buf[o] = c;
                 o = o + 1;
                 i = i + 1;
             }
@@ -1815,26 +1830,112 @@ export struct Emitter {
         this.fail(line, col, "type mangling is out of scope for H6.2b");
     }
 
-    // Mirror of CodeGen::msvcMangleFunction for a global, non-extern "C"
-    // function: ?<name>@@Y<ret><params>@Z (no class/namespace scope).  The
-    // symbol is always quoted because '?' and '@' are not bare LLVM
-    // identifier characters (CodeGen::llvmGlobalName).
-    void emit_mangled_name(const char* name, long fi, long line, long col) {
+    // --- H6.2s: qualified-name helpers for method mangling -----------------
+
+    // The number of `::`-separated components of a function name.
+    long name_part_count(const char* name) {
+        long n = 1;
         long i = 0;
-        bool scoped = false;
         unsafe {
             while (name[i] != 0) {
                 if (name[i] == ':' && name[i + 1] == ':') {
-                    scoped = true;
+                    n = n + 1;
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+            }
+        }
+        return n;
+    }
+
+    // The byte offset where component `idx` starts.
+    long name_part_off(const char* name, long idx) {
+        long cur = 0;
+        long off = 0;
+        long i = 0;
+        unsafe {
+            while (name[i] != 0) {
+                if (name[i] == ':' && name[i + 1] == ':') {
+                    if (cur == idx) {
+                        return off;
+                    }
+                    cur = cur + 1;
+                    i = i + 2;
+                    off = i;
+                } else {
+                    i = i + 1;
+                }
+            }
+        }
+        return off;
+    }
+
+    long name_part_len(const char* name, long idx) {
+        long off = this.name_part_off(name, idx);
+        long i = off;
+        unsafe {
+            while (name[i] != 0) {
+                if (name[i] == ':' && name[i + 1] == ':') {
                     break;
                 }
                 i = i + 1;
             }
         }
-        if (scoped) {
-            this.fail(line, col, "namespace-qualified function names are out of scope for H6.2b");
-            return;
+        return i - off;
+    }
+
+    bool name_part_eq(const char* name, long a, long b) {
+        long la = this.name_part_len(name, a);
+        if (la != this.name_part_len(name, b)) {
+            return false;
         }
+        long oa = this.name_part_off(name, a);
+        long ob = this.name_part_off(name, b);
+        long k = 0;
+        unsafe {
+            while (k < la) {
+                if (name[oa + k] != name[ob + k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+        }
+        return true;
+    }
+
+    // Print component `idx` of a qualified name.
+    void emit_name_part(const char* name, long idx) {
+        long off = this.name_part_off(name, idx);
+        long len = this.name_part_len(name, idx);
+        unsafe {
+            char* b = (char*) this.mangle_buf_;
+            long k = 0;
+            while (k < len) {
+                // Mirror CodeGen::escapeLlvmIdent: the characters that are
+                // not allowed in an LLVM identifier become `_` (this is how
+                // `operator()` mangles to `operator__`).
+                char c = name[off + k];
+                if (c == '<' || c == '>' || c == ',' || c == ' ' ||
+                    c == ':' || c == '&' || c == '*' || c == '(' ||
+                    c == ')') {
+                    c = '_';
+                }
+                b[k] = c;
+                k = k + 1;
+            }
+            b[len] = 0;
+            this.ps(b);
+        }
+    }
+
+    // Mirror of CodeGen::msvcMangleFunction.  A `::`-qualified name is split
+    // into components: the last one is the simple name and the preceding ones
+    // are the scopes (innermost first).  Constructors and destructors use the
+    // special `??0<Struct>@@AEX...` / `??1<Struct>@@AEX...` form; they are
+    // recognised from the name the parser produces (`Struct::Struct` and
+    // `Struct::~Struct`), which matches the oracle's isCtor/isDtor flags.
+    void emit_mangled_name(const char* name, long fi, long line, long col) {
         MFunction f;
         unsafe {
             f = this.mu->fns[fi];
@@ -1842,13 +1943,48 @@ export struct Emitter {
         if (!this.check_fn_signature(f, line, col)) {
             return;
         }
+        long np = this.name_part_count(name);
+        long is_dtor = 0;
+        long is_ctor = 0;
+        long loff = this.name_part_off(name, np - 1);
+        unsafe {
+            if (name[loff] == '~') {
+                is_dtor = 1;
+            }
+        }
+        if (is_dtor == 0 && np >= 2) {
+            if (this.name_part_eq(name, np - 1, np - 2)) {
+                is_ctor = 1;
+            }
+        }
         this.ps("\"?");
-        this.ps(name);
-        this.ps("@@Y");
-        if (this.streq(f.ret.base, "void")) {
+        if (is_ctor != 0 || is_dtor != 0) {
+            this.ps(is_ctor != 0 ? "0" : "1");
+            this.emit_name_part(name, np - 2);
+            this.ps("@");
+            long k = np - 3;
+            while (k >= 0) {
+                this.emit_name_part(name, k);
+                this.ps("@");
+                k = k - 1;
+            }
+            this.ps("@AE");
             this.ps("X");
         } else {
-            this.emit_mangle_type(f.ret, line, col);
+            this.emit_name_part(name, np - 1);
+            this.ps("@");
+            long k = np - 2;
+            while (k >= 0) {
+                this.emit_name_part(name, k);
+                this.ps("@");
+                k = k - 1;
+            }
+            this.ps("@Y");
+            if (this.streq(f.ret.base, "void")) {
+                this.ps("X");
+            } else {
+                this.emit_mangle_type(f.ret, line, col);
+            }
         }
         if (f.pn == 0) {
             this.ps("X");
@@ -2406,8 +2542,11 @@ export struct Emitter {
             return p;
         }
         if (this.streq(e.sval, ",")) {
-            this.fail(e.line, e.col, "the comma operator is out of scope for H6.2a");
-            return this.imm(0);
+            // H6.2v: the comma operator evaluates the left side for its
+            // side effects and yields the right side (CodeGen's Binary
+            // branch for `,`).
+            this.lower_expr(e.a);
+            return this.lower_expr(e.b);
         }
 
         MExpr lhs;
@@ -3650,6 +3789,25 @@ export struct Emitter {
         if (e.kind == 6) {
             return this.lower_ident(e);
         }
+        // H6.2s: `this` (M::This) is the implicit first parameter of a method.
+        // CodeGen::lowerExpr loads the struct address out of the `%this.N`
+        // slot (the parameter is passed by reference).
+        if (e.kind == 7) {
+            long slot = this.find_var("this");
+            if (slot < 0) {
+                this.fail(e.line, e.col, "internal: `this` is not in the variable table");
+                return this.null_ref();
+            }
+            if (this.is_ref_var("this") != 0 || e.type.is_ref != 0) {
+                VRef t = this.new_temp();
+                this.emit_val(t);
+                this.ps(" = load ptr, ptr ");
+                this.emit_slot("this", slot);
+                this.nl();
+                return t;
+            }
+            return this.slot_ref("this", slot);
+        }
         if (e.kind == 8) {
             return this.lower_unary(e);
         }
@@ -3740,9 +3898,12 @@ export struct Emitter {
                 this.fail(e.line, e.col, "internal: lvalue is not in the variable table");
                 return this.imm(0);
             }
-            if (this.is_ref_var(e.sval) != 0 || e.type.is_ref != 0) {
+            if (this.is_ref_var(e.sval) != 0) {
                 // H6.2h: a reference variable's slot holds the address of the
                 // referenced object (CodeGen::lowerLValue's IdentRef case).
+                // H6.2s: the expression type is NOT consulted — a value
+                // variable passed as `this` also carries `isReference=true`
+                // on its type (the oracle's `varIsRef_` distinction).
                 VRef t = this.new_temp();
                 this.emit_val(t);
                 this.ps(" = load ptr, ptr ");
@@ -3752,14 +3913,55 @@ export struct Emitter {
             }
             return this.slot_ref(e.sval, slot);
         }
+        // H6.2s: `this` as an lvalue is the address of the object.
+        if (e.kind == 7) {
+            long slot = this.find_var("this");
+            if (slot < 0) {
+                this.fail(e.line, e.col, "internal: `this` is not in the variable table");
+                return this.imm(0);
+            }
+            if (this.is_ref_var("this") != 0) {
+                VRef t = this.new_temp();
+                this.emit_val(t);
+                this.ps(" = load ptr, ptr ");
+                this.emit_slot("this", slot);
+                this.nl();
+                return t;
+            }
+            return this.slot_ref("this", slot);
+        }
         if (e.kind == 11) {
             if (e.type.is_ref != 0) {
                 // H6.2i: a reference-returning call is an lvalue whose address
                 // is the call's raw pointer result.
                 return this.lower_call_ptr(e);
             }
-            this.fail(e.line, e.col, "a by-value call is not an lvalue in H6.2i");
-            return this.imm(0);
+            // H6.2t: a by-value struct call used as an lvalue is materialized
+            // into an entry-block temporary (CodeGen::lowerLValue's Call
+            // branch), so `a + b + c` has an address for the `this` argument
+            // of the outer operator call.
+            if (this.streq(this.llvm_type(e.type, 0), "void")) {
+                return this.lower_expr(idx);
+            }
+            if (this.find_struct(e.type.base) < 0) {
+                return this.lower_expr(idx);
+            }
+            VRef val = this.lower_expr(idx);
+            VRef slot = this.new_temp();
+            this.cap_phase_ = 3;
+            this.emit_val(slot);
+            this.ps(" = alloca ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.nl();
+            this.cap_phase_ = 2;
+            this.ps("store ");
+            this.ps(this.llvm_type(e.type, 0));
+            this.ps(" ");
+            this.emit_val(val);
+            this.ps(", ptr ");
+            this.emit_val(slot);
+            this.nl();
+            return slot;
         }
         if (e.kind == 12) {
             return this.lower_index_addr(e);
@@ -4242,8 +4444,10 @@ export struct Emitter {
         unsafe {
             while (i < this.mu->st_n) {
                 MStruct s = this.mu->structs[i];
-                this.ps("%struct.");
-                this.ps(s.name);
+                long tn = this.make_struct_type_name(s.name);
+                unsafe {
+                    this.ps(reinterpret_cast<const char*>(tn));
+                }
                 this.ps(" = type { ");
                 long j = 0;
                 while (j < s.nfields) {

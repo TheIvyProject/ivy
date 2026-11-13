@@ -31,6 +31,28 @@ export struct HirBuilder {
     long sc_n_;
     long sc_cap_;
 
+    // H6.2s: destructor (RAII) tracking.  `dsnm_` is a flat stack of the
+    // local names that own a struct with a user-declared destructor, and
+    // `dscope_` records the stack height at every scope entry (mirror of the
+    // oracle's `dtorStacks_`).  `dbase_` is the scope depth of the current
+    // function body (the oracle's `dtorBaseline_`).
+    long* dsnm_;
+    long ds_n_;
+    long ds_cap_;
+    long* dscope_;
+    long dsc_n_;
+    long dsc_cap_;
+    long dbase_;
+    // Names returned by value from the current function (NRVO: their dtor
+    // must not run).  Mirror of the oracle's `returnedLocals_`.
+    long* rsnm_;
+    long rs_n_;
+    long rs_cap_;
+    // The chain built by the last `emit_dtor_calls` call.
+    long dtor_first_;
+    long dtor_last_;
+    long dtor_count_;
+
     // Move-state tracking (A4 in hir_builder.cpp): the move state of every
     // symbol, parallel to `snm_` / `sty_`.  0 = Initialized, 1 = MovedOut.
     // The state belongs to the *binding*, not to the name: a shadowing
@@ -105,6 +127,14 @@ export struct HirBuilder {
     const char* op_owner_;
     const char* op_name_;
 
+    // H6.2s: statements synthesized at the head of a constructor body (the
+    // `this.field = arg` assignments of the member initializer list).  They
+    // are consumed by the next compound statement built (the function body).
+    long pre_first_;
+    long pre_last_;
+    long pre_n_;
+    long pre_on_;
+
     // diagnostics
     long* dline_;
     long* dcol_;
@@ -176,6 +206,9 @@ export struct HirBuilder {
     char* sb_;
     long sb_n_;
     long sb_cap_;
+    // H6.2s: the name synthesized by the last `synth_ret_name` call, kept as
+    // a `long` so the helper does not have to return a raw pointer.
+    long retnm_;
 
     // The pool of substituted template-argument lists.  It is a list of
     // fixed-size chunks: a chunk is never reallocated (a substituted type
@@ -205,6 +238,22 @@ export struct HirBuilder {
     long packdata_cap_;
     long packframe_;
     long pack_first_;
+
+    // H6.2v: while the pattern of a fold expression is built once per pack
+    // element, an identifier that names the pack (`args`) is substituted by
+    // the concrete element parameter (`__args0`, ...).  The oracle clones
+    // the AST pattern and rewrites the identifier before building it; the
+    // port rebuilds the pattern with this substitution active.
+    const char* fold_pack_name_;
+    const char* fold_elem_name_;
+    AType fold_elem_type_;
+    // The saved substitution state of the enclosing folds (a small stack;
+    // the pack/element names are kept in the `base` field of an AType
+    // because a raw `const char**` cannot be allocated in the subset).
+    AType* fold_pstack_;
+    AType* fold_estack_;
+    AType* fold_tstack_;
+    long fold_depth_;
 
     // --- class/struct template instantiation (H4.4) ---
     //
@@ -306,6 +355,25 @@ export struct HirBuilder {
             this.sc_cap_ = ntoks + 64;
             this.scope_ = (long*) __ivy_alloc(this.sc_cap_ * 8);
             this.sc_n_ = 0;
+
+            // H6.2s: dtor tracking (see the field declarations).
+            this.ds_cap_ = ntoks * 2 + 64;
+            this.dsnm_ = (long*) __ivy_alloc(this.ds_cap_ * 8);
+            this.ds_n_ = 0;
+            this.dsc_cap_ = ntoks + 64;
+            this.dscope_ = (long*) __ivy_alloc(this.dsc_cap_ * 8);
+            this.dsc_n_ = 0;
+            this.dbase_ = 0;
+            this.rs_cap_ = ntoks + 64;
+            this.rsnm_ = (long*) __ivy_alloc(this.rs_cap_ * 8);
+            this.rs_n_ = 0;
+            this.dtor_first_ = -1;
+            this.dtor_last_ = -1;
+            this.dtor_count_ = 0;
+            this.pre_first_ = -1;
+            this.pre_last_ = -1;
+            this.pre_n_ = 0;
+            this.pre_on_ = 0;
 
             this.ec_cap_ = ntoks * 2 + 64;
             this.ecnm_ = (long*) __ivy_alloc(this.ec_cap_ * 8);
@@ -448,6 +516,13 @@ export struct HirBuilder {
             this.packdata_n_ = 0;
             this.packframe_ = -1;
             this.pack_first_ = 0;
+            this.fold_pack_name_ = "";
+            this.fold_elem_name_ = "";
+            this.fold_elem_type_ = this.ty_empty();
+            this.fold_pstack_ = (AType*) __ivy_alloc(64 * 48);
+            this.fold_estack_ = (AType*) __ivy_alloc(64 * 48);
+            this.fold_tstack_ = (AType*) __ivy_alloc(64 * 48);
+            this.fold_depth_ = 0;
 
             this.stpl_cap_ = ntoks + 16;
             this.stpl_ast_ = (long*) __ivy_alloc(this.stpl_cap_ * 8);
@@ -500,6 +575,9 @@ export struct HirBuilder {
             __ivy_free(this.sty_);
             __ivy_free(this.smv_);
             __ivy_free(this.scope_);
+            __ivy_free(this.dsnm_);
+            __ivy_free(this.dscope_);
+            __ivy_free(this.rsnm_);
             __ivy_free(this.ecnm_);
             __ivy_free(this.ecval_);
             __ivy_free(this.ssize_);
@@ -1990,6 +2068,13 @@ export struct HirBuilder {
             this.scope_[this.sc_n_] = this.s_n_;
         }
         this.sc_n_ = this.sc_n_ + 1;
+        // H6.2s: record the dtor stack height of the new scope.
+        if (this.dsc_n_ < this.dsc_cap_) {
+            unsafe {
+                this.dscope_[this.dsc_n_] = this.ds_n_;
+            }
+            this.dsc_n_ = this.dsc_n_ + 1;
+        }
     }
 
     void leave_scope() {
@@ -1999,6 +2084,14 @@ export struct HirBuilder {
         this.sc_n_ = this.sc_n_ - 1;
         unsafe {
             this.s_n_ = this.scope_[this.sc_n_];
+        }
+        // H6.2s: the scope's dtor calls have already been emitted; drop the
+        // entries so an enclosing scope never sees them.
+        if (this.dsc_n_ > 0) {
+            this.dsc_n_ = this.dsc_n_ - 1;
+            unsafe {
+                this.ds_n_ = this.dscope_[this.dsc_n_];
+            }
         }
     }
 
@@ -2035,6 +2128,461 @@ export struct HirBuilder {
         unsafe {
             this.smv_[i] = moved;
         }
+    }
+
+    // --- H6.2s: constructors, destructors and RAII ------------------------
+
+    // True when `name` is exactly `<sname>::<sname>` (the qualified name the
+    // parser gives a constructor).
+    bool name_is_struct_ctor(const char* name, const char* sname) {
+        long n = this.slen(sname);
+        unsafe {
+            long k = 0;
+            while (k < n) {
+                if (name[k] != sname[k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+            if (name[n] != ':' || name[n + 1] != ':') {
+                return false;
+            }
+            long p = n + 2;
+            k = 0;
+            while (k < n) {
+                if (name[p + k] != sname[k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+            if (name[p + n] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // True when `name` is exactly `<sname>::~<sname>`.
+    bool name_is_struct_dtor(const char* name, const char* sname) {
+        long n = this.slen(sname);
+        unsafe {
+            long k = 0;
+            while (k < n) {
+                if (name[k] != sname[k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+            if (name[n] != ':' || name[n + 1] != ':') {
+                return false;
+            }
+            long p = n + 2;
+            if (name[p] != '~') {
+                return false;
+            }
+            p = p + 1;
+            k = 0;
+            while (k < n) {
+                if (name[p + k] != sname[k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+            if (name[p + n] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool struct_has_ctor(const char* sname) {
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.name_is_struct_ctor(f.name, sname) != 0) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    long find_dtor(const char* sname) {
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.name_is_struct_dtor(f.name, sname) != 0) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // resolveCtorOverload in hir_builder.cpp for the arg types already
+    // pushed into `u.args[astart..astart+argcount)`.  The implicit `this`
+    // parameter (params[0]) is skipped.  A candidate whose user parameter
+    // count matches the argument count and whose types are assignable wins;
+    // the most exact match is preferred.  -1 when nothing matches.
+    long find_ctor(const char* sname, long astart, long argcount, long line, long col) {
+        long best = -1;
+        long best_score = -1;
+        long ambiguous = 0;
+        long i = 0;
+        while (i < this.u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = this.u.fns[i];
+            }
+            if (this.name_is_struct_ctor(f.name, sname) != 0) {
+                long expected = f.pn - 1;
+                if (expected == argcount) {
+                    long ok = 1;
+                    long score = 100;
+                    long k = 0;
+                    while (k < argcount && ok != 0) {
+                        HParam p;
+                        unsafe {
+                            p = this.u.params[f.pstart + 1 + k];
+                        }
+                        long ai = -1;
+                        unsafe {
+                            ai = this.u.args[astart + k];
+                        }
+                        if (ai < 0) {
+                            ok = 0;
+                        } else {
+                            HExpr ae;
+                            unsafe {
+                                ae = this.u.exprs[ai];
+                            }
+                            AType pt = p.type;
+                            pt.is_ref = 0;
+                            AType at = ae.type;
+                            at.is_ref = 0;
+                            if (this.is_assignable(pt, at) == 0) {
+                                ok = 0;
+                            } else if (this.same_type(pt, at) == 0) {
+                                score = score + 1;
+                            }
+                        }
+                        k = k + 1;
+                    }
+                    if (ok != 0) {
+                        if (score > best_score) {
+                            best_score = score;
+                            best = i;
+                            ambiguous = 0;
+                        } else if (score == best_score) {
+                            ambiguous = 1;
+                        }
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        if (ambiguous != 0) {
+            return -1;
+        }
+        return best;
+    }
+
+    bool is_returned_local(const char* name) {
+        long i = 0;
+        while (i < this.rs_n_) {
+            long p = 0;
+            unsafe {
+                p = this.rsnm_[i];
+            }
+            long hit = 0;
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(p), name) != 0) {
+                    hit = 1;
+                }
+            }
+            if (hit != 0) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    void mark_returned_local(const char* name) {
+        if (this.is_returned_local(name) != 0) {
+            return;
+        }
+        if (this.rs_n_ < this.rs_cap_) {
+            unsafe {
+                this.rsnm_[this.rs_n_] = (long)name;
+            }
+            this.rs_n_ = this.rs_n_ + 1;
+        }
+    }
+
+    // recordDtorVar: remember a local that needs a destructor call.
+    void record_dtor_var(const char* name, AType t) {
+        if (t.ptr_depth > 0) {
+            return;
+        }
+        if (this.find_dtor(t.base) < 0) {
+            return;
+        }
+        if (this.dsc_n_ <= 0) {
+            return;
+        }
+        if (this.ds_n_ < this.ds_cap_) {
+            unsafe {
+                this.dsnm_[this.ds_n_] = (long)name;
+            }
+            this.ds_n_ = this.ds_n_ + 1;
+        }
+    }
+
+    // Build `dtor(&var)` as an expression statement.  The `this` argument is
+    // an IdentRef whose type carries the reference (the oracle's ctor/dtor
+    // injection); the emitter lowers it as the variable's address.
+    long build_dtor_stmt(const char* name, long line, long col) {
+        long si = this.find_sym(name);
+        if (si < 0) {
+            return -1;
+        }
+        AType vt = this.sym_type(si);
+        long di = this.find_dtor(vt.base);
+        if (di < 0) {
+            return -1;
+        }
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[di];
+        }
+        HExpr call = this.new_expr(12, line, col);
+        call.sval = hf.name;
+        call.type = hf.ret;
+        long run = this.u.a_n;
+        HExpr self = this.new_expr(8, line, col);
+        self.sval = name;
+        self.type = vt;
+        self.type.is_ref = 1;
+        long selfi = this.push_expr(self);
+        this.push_arg(selfi);
+        call.astart = run;
+        call.an = 1;
+        long ci = this.push_expr(call);
+        HStmt st = this.new_stmt(11, line, col);
+        st.a = ci;
+        return this.push_stmt(st);
+    }
+
+    // emitDtorCalls: append dtor calls for the scopes from the innermost one
+    // down to `upto` (inclusive), reverse declaration order within a scope.
+    // The chain is left in `dtor_first_` / `dtor_last_` / `dtor_count_`.
+    long emit_dtor_calls(long upto, long line, long col) {
+        long first = -1;
+        long last = -1;
+        long count = 0;
+        long i = this.dsc_n_ - 1;
+        while (i >= upto && i >= 0) {
+            long lo = 0;
+            unsafe {
+                lo = this.dscope_[i];
+            }
+            long hi = this.ds_n_;
+            if (i + 1 < this.dsc_n_) {
+                unsafe {
+                    hi = this.dscope_[i + 1];
+                }
+            }
+            long k = hi - 1;
+            while (k >= lo) {
+                long nmp = 0;
+                unsafe {
+                    nmp = this.dsnm_[k];
+                }
+                unsafe {
+                    const char* nm = reinterpret_cast<const char*>(nmp);
+                    if (this.is_returned_local(nm) == 0) {
+                        long st = this.build_dtor_stmt(nm, line, col);
+                        if (st >= 0) {
+                            if (first < 0) {
+                                first = st;
+                            } else if (last >= 0) {
+                                this.u.stmts[last].next = st;
+                            }
+                            last = st;
+                            count = count + 1;
+                        }
+                    }
+                }
+                k = k - 1;
+            }
+            i = i - 1;
+        }
+        this.dtor_first_ = first;
+        this.dtor_last_ = last;
+        this.dtor_count_ = count;
+        return first;
+    }
+
+    // A unique synthesized name for the return-value temporary (`__ret`).
+    // The name is copied into a stable allocation (the scratch buffer is
+    // reused) and kept in `retnm_`.
+    void synth_ret_name() {
+        this.sb_reset();
+        this.sb_put("__ret");
+        if (this.find_sym(this.sb_) < 0) {
+            this.retnm_ = this.sb_save_long();
+            return;
+        }
+        long n = 0;
+        while (n < 1000) {
+            this.sb_reset();
+            this.sb_put("__ret");
+            this.sb_put_num(n);
+            if (this.find_sym(this.sb_) < 0) {
+                this.retnm_ = this.sb_save_long();
+                return;
+            }
+            n = n + 1;
+        }
+        unsafe {
+            this.retnm_ = (long) "__ret";
+        }
+    }
+
+    // `sb_save` with the pointer kept as a `long` (the name pools store
+    // pointers that way).
+    long sb_save_long() {
+        unsafe {
+            return (long) this.sb_save();
+        }
+        return 0;
+    }
+
+    // Build `ctor(&var, args...)` as an expression and return its index.
+    long build_ctor_call(long ci, const char* var, AType vt, long astart,
+                         long argcount, long line, long col) {
+        HFunction hf;
+        unsafe {
+            hf = this.u.fns[ci];
+        }
+        HExpr call = this.new_expr(12, line, col);
+        call.sval = hf.name;
+        call.type = hf.ret;
+        long run = this.u.a_n;
+        HExpr self = this.new_expr(8, line, col);
+        self.sval = var;
+        self.type = vt;
+        self.type.is_ref = 1;
+        long selfi = this.push_expr(self);
+        this.push_arg(selfi);
+        long k = 0;
+        while (k < argcount) {
+            long ai = -1;
+            unsafe {
+                ai = this.u.args[astart + k];
+            }
+            this.push_arg(ai);
+            k = k + 1;
+        }
+        call.astart = run;
+        call.an = argcount + 1;
+        return this.push_expr(call);
+    }
+
+    // H6.2s: synthesize `this.<fname> = <arg>` for a constructor member
+    // initializer (`: fname(arg)`) and return its expression-statement index
+    // (mirror of the synthesized body in buildStruct).
+    long build_ctor_member_assign(const char* sname, const char* fname,
+                                  long argIdx, long line, long col) {
+        long si = this.find_struct(sname);
+        if (si < 0) {
+            return -1;
+        }
+        AStruct sd = this.get_struct(si);
+        if (this.lookup_field(sd, fname) == 0) {
+            return -1;
+        }
+        AField f = this.found_field_;
+        // `this`
+        HExpr te = this.new_expr(7, line, col);
+        long thissi = this.find_sym("this");
+        if (thissi >= 0) {
+            te.type = this.sym_type(thissi);
+        } else {
+            AType tt = this.ty_empty();
+            tt.base = sname;
+            tt.is_ref = 1;
+            te.type = tt;
+        }
+        long thi = this.push_expr(te);
+        // `this.field`
+        HExpr me = this.new_expr(14, line, col);
+        me.sval = fname;
+        me.flag = 0;
+        me.a = thi;
+        me.type = this.resolve_alias(f.type);
+        long mi = this.push_expr(me);
+        // `= arg`
+        long rhs = -1;
+        if (argIdx >= 0) {
+            rhs = this.build_expr(argIdx);
+        }
+        HExpr ae = this.new_expr(15, line, col);
+        ae.sval = "=";
+        ae.a = mi;
+        ae.b = rhs;
+        ae.type = me.type;
+        long ai = this.push_expr(ae);
+        HStmt st = this.new_stmt(11, line, col);
+        st.a = ai;
+        return this.push_stmt(st);
+    }
+
+    // H6.2s: RAII on a jump that leaves the current scope (`break`,
+    // `continue`, `nextcase`).  The oracle only destroys the locals of the
+    // INNERMOST scope: `dtorStacks_.back()` — an enclosing scope's locals are
+    // still alive, and a jump written inside a nested block does not destroy
+    // the loop body's locals (bug-compatible with the reference IR).
+    // `kind` is the terminator statement kind (8 break, 9 continue, 10
+    // nextcase); `sval` is its label (nextcase only).
+    long wrap_scope_dtors(long kind, const char* sval, long line, long col) {
+        long has = 0;
+        if (this.dsc_n_ > 0) {
+            long lo = 0;
+            unsafe {
+                lo = this.dscope_[this.dsc_n_ - 1];
+            }
+            if (this.ds_n_ > lo) {
+                has = 1;
+            }
+        }
+        if (has == 0) {
+            HStmt plain = this.new_stmt(kind, line, col);
+            plain.sval = sval;
+            return this.push_stmt(plain);
+        }
+        long d = this.emit_dtor_calls(this.dsc_n_ - 1, line, col);
+        long count = this.dtor_count_;
+        unsafe {
+            this.ds_n_ = this.dscope_[this.dsc_n_ - 1];
+        }
+        HStmt t = this.new_stmt(kind, line, col);
+        t.sval = sval;
+        long ti = this.push_stmt(t);
+        unsafe {
+            this.u.stmts[this.dtor_last_].next = ti;
+        }
+        HStmt w = this.new_stmt(1, line, col);
+        w.sstart = d;
+        w.sn = count + 1;
+        return this.push_stmt(w);
     }
 
     // A4 in hir_builder.cpp: mark the variable `name` as moved-out
@@ -3192,6 +3740,11 @@ export struct HirBuilder {
         long saved_fn = this.cur_fn_;
         AType saved_ret = this.cur_ret_;
         long saved_hasret = this.has_return_;
+        // H6.2s: the caller's dtor state (a template body can be built while
+        // another body is active).
+        long saved_dsn = this.ds_n_;
+        long saved_dsc = this.dsc_n_;
+        long saved_dbase = this.dbase_;
         this.cur_fn_ = fnidx;
         this.has_return_ = 0;
         HFunction hf;
@@ -3200,6 +3753,9 @@ export struct HirBuilder {
         }
         this.cur_ret_ = hf.ret;
         this.enter_scope();
+        // The oracle's dtorBaseline_: a return only destroys locals declared
+        // inside this function body (not the caller's live locals).
+        this.dbase_ = this.dsc_n_;
         long i = 0;
         while (i < hf.pn) {
             HParam p;
@@ -3210,6 +3766,49 @@ export struct HirBuilder {
                 this.declare(p.name, p.type, p.line, p.col);
             }
             i = i + 1;
+        }
+        // H6.2s: a constructor's member initializer list becomes a run of
+        // `this.field = arg` assignments at the head of the body (the
+        // oracle's synthesized body in buildStruct).
+        this.pre_first_ = -1;
+        this.pre_last_ = -1;
+        this.pre_n_ = 0;
+        this.pre_on_ = 0;
+        if (af.minit_n > 0) {
+            unsafe {
+                const char* sname = "";
+                long thissi = this.find_sym("this");
+                if (thissi >= 0) {
+                    AType st = this.sym_type(thissi);
+                    sname = st.base;
+                }
+                long pf = -1;
+                long pl = -1;
+                long pn = 0;
+                long k = 0;
+                while (k < af.minit_n) {
+                    const char* fname = this.pa.ctor_init_name(af, k);
+                    long arg = this.pa.ctor_init_arg(af, k);
+                    long st = this.build_ctor_member_assign(sname, fname, arg,
+                                                            af.line, af.col);
+                    if (st >= 0) {
+                        if (pf < 0) {
+                            pf = st;
+                        } else if (pl >= 0) {
+                            this.u.stmts[pl].next = st;
+                        }
+                        pl = st;
+                        pn = pn + 1;
+                    }
+                    k = k + 1;
+                }
+                if (pn > 0) {
+                    this.pre_first_ = pf;
+                    this.pre_last_ = pl;
+                    this.pre_n_ = pn;
+                    this.pre_on_ = 1;
+                }
+            }
         }
         long root = this.build_stmt(af.body);
         this.leave_scope();
@@ -3223,6 +3822,9 @@ export struct HirBuilder {
         }
         this.s_n_ = saved_s;
         this.sc_n_ = saved_sc;
+        this.ds_n_ = saved_dsn;
+        this.dsc_n_ = saved_dsc;
+        this.dbase_ = saved_dbase;
         this.cur_fn_ = saved_fn;
         this.cur_ret_ = saved_ret;
         this.has_return_ = saved_hasret;
@@ -3234,6 +3836,14 @@ export struct HirBuilder {
         long first = -1;
         long last = -1;
         long count = 0;
+        // H6.2s: a constructor body starts with the synthesized member
+        // initializer assignments (see build_body).
+        if (this.pre_on_ != 0) {
+            this.pre_on_ = 0;
+            first = this.pre_first_;
+            last = this.pre_last_;
+            count = this.pre_n_;
+        }
         long cur = a.sstart;
         while (cur >= 0) {
             AStmt child = this.get_stmt(cur);
@@ -3249,6 +3859,22 @@ export struct HirBuilder {
             last = h;
             count = count + 1;
             cur = nxt;
+        }
+        // H6.2s: RAII - destroy this scope's locals in reverse declaration
+        // order before the scope is popped (buildCompound in hir_builder.cpp).
+        if (this.dsc_n_ > 0) {
+            long d = this.emit_dtor_calls(this.dsc_n_ - 1, a.line, a.col);
+            if (d >= 0) {
+                if (first < 0) {
+                    first = d;
+                } else if (last >= 0) {
+                    unsafe {
+                        this.u.stmts[last].next = d;
+                    }
+                }
+                last = this.dtor_last_;
+                count = count + this.dtor_count_;
+            }
         }
         this.leave_scope();
         HStmt s = this.new_stmt(1, a.line, a.col);
@@ -3608,6 +4234,67 @@ export struct HirBuilder {
             }
         }
         this.declare(a.sval, t, a.line, a.col);
+
+        // H6.2s: constructor injection (buildDeclaration in hir_builder.cpp).
+        // A struct with a user-declared constructor is initialized by a
+        // synthesized `T::T(&x, args...)` call right after the declaration.
+        // An aggregate initializer (`T x = {a, b}`) bypasses the constructors.
+        if (t.ptr_depth == 0 && t.is_ref == 0 && this.is_struct_name(t.base) != 0 &&
+            this.struct_has_ctor(t.base) != 0) {
+            long astart = this.u.a_n;
+            long an = 0;
+            long is_agg = 0;
+            long is_direct = 0;
+            if (init >= 0) {
+                HExpr ie;
+                unsafe {
+                    ie = this.u.exprs[init];
+                }
+                if (ie.kind == 17) {
+                    is_agg = 1;
+                } else if (ie.kind == 12 &&
+                           this.name_is_struct_ctor(ie.sval, t.base) != 0) {
+                    is_direct = 1;
+                    astart = ie.astart;
+                    an = ie.an;
+                } else {
+                    // `T x = other` - the value is passed as the single ctor
+                    // argument (copy construction).
+                    this.push_arg(init);
+                    an = 1;
+                }
+            }
+            if (is_agg == 0) {
+                long ci = this.find_ctor(t.base, astart, an, a.line, a.col);
+                if (ci >= 0) {
+                    if (is_direct != 0) {
+                        // The ctor call owns the initialization now.
+                        init = -1;
+                    }
+                    long call = this.build_ctor_call(ci, a.sval, t, astart, an,
+                                                     a.line, a.col);
+                    HStmt cstmt = this.new_stmt(11, a.line, a.col);
+                    cstmt.a = call;
+                    long csi = this.push_stmt(cstmt);
+                    HStmt d = this.new_stmt(2, a.line, a.col);
+                    d.type = t;
+                    d.sval = a.sval;
+                    d.a = init;
+                    long di = this.push_stmt(d);
+                    unsafe {
+                        this.u.stmts[di].next = csi;
+                    }
+                    HStmt w = this.new_stmt(1, a.line, a.col);
+                    w.sstart = di;
+                    w.sn = 2;
+                    long wi = this.push_stmt(w);
+                    this.record_dtor_var(a.sval, t);
+                    return wi;
+                }
+            }
+        }
+
+        this.record_dtor_var(a.sval, t);
         HStmt s = this.new_stmt(2, a.line, a.col);
         s.type = t;
         s.sval = a.sval;
@@ -3656,9 +4343,95 @@ export struct HirBuilder {
                 this.err_must_return_value(a.line, a.col, this.current_fn_name(), rt);
             }
         }
-        HStmt s = this.new_stmt(7, a.line, a.col);
-        s.a = val;
-        return this.push_stmt(s);
+        // D1: NRVO / copy elision.  A local returned by value of the same
+        // type as the function's return type has its ownership transferred to
+        // the caller, so its destructor must not run.
+        if (val >= 0) {
+            HExpr ve;
+            unsafe {
+                ve = this.u.exprs[val];
+            }
+            if (rt.is_ref == 0 && rt.ptr_depth == 0 && !this.seq(rt.base, "void") &&
+                ve.kind == 8 && ve.type.is_ref == 0 &&
+                this.seq(ve.type.base, rt.base) != 0) {
+                this.mark_returned_local(ve.sval);
+            }
+        }
+
+        // H6.2s: RAII on return - destroy every live local of this function
+        // (innermost scope first) before leaving it.
+        long dtor_first = -1;
+        long dtor_last = -1;
+        long dtor_count = 0;
+        if (this.dsc_n_ > 0) {
+            dtor_first = this.emit_dtor_calls(this.dbase_, a.line, a.col);
+            dtor_last = this.dtor_last_;
+            dtor_count = this.dtor_count_;
+        }
+        if (dtor_first < 0) {
+            HStmt s = this.new_stmt(7, a.line, a.col);
+            s.a = val;
+            return this.push_stmt(s);
+        }
+
+        // Evaluate a non-trivial return value into a temporary BEFORE the
+        // destructors run (C++ evaluates the expression, then destroys).
+        long temp_decl = -1;
+        long temp_count = 0;
+        if (val >= 0) {
+            HExpr ve;
+            unsafe {
+                ve = this.u.exprs[val];
+            }
+            long by_value = (rt.is_ref == 0 && rt.ptr_depth == 0 &&
+                             !this.seq(rt.base, "void")) ? 1 : 0;
+            long plain_local = (ve.kind == 8 && ve.type.is_ref == 0 &&
+                                this.seq(ve.type.base, rt.base) != 0) ? 1 : 0;
+            if (by_value != 0 && plain_local == 0) {
+                this.synth_ret_name();
+                unsafe {
+                    const char* tn = reinterpret_cast<const char*>(this.retnm_);
+                    this.declare(tn, ve.type, a.line, a.col);
+                    this.record_dtor_var(tn, ve.type);
+                    this.mark_returned_local(tn);
+                    HStmt d = this.new_stmt(2, a.line, a.col);
+                    d.type = ve.type;
+                    d.sval = tn;
+                    d.a = val;
+                    temp_decl = this.push_stmt(d);
+                    temp_count = 1;
+                    HExpr id = this.new_expr(8, a.line, a.col);
+                    id.sval = tn;
+                    id.type = ve.type;
+                    val = this.push_expr(id);
+                }
+            }
+        }
+
+        HStmt rs = this.new_stmt(7, a.line, a.col);
+        rs.a = val;
+        long ri = this.push_stmt(rs);
+        if (dtor_last >= 0) {
+            unsafe {
+                this.u.stmts[dtor_last].next = ri;
+            }
+        }
+        if (temp_decl >= 0) {
+            unsafe {
+                this.u.stmts[temp_decl].next = dtor_first;
+            }
+        }
+        // The dtors have run; do not emit them again when the enclosing
+        // compound statement finishes.
+        if (this.dsc_n_ > 0) {
+            unsafe {
+                this.ds_n_ = this.dscope_[this.dsc_n_ - 1];
+            }
+        }
+        HStmt w = this.new_stmt(1, a.line, a.col);
+        w.sstart = (temp_decl >= 0) ? temp_decl : dtor_first;
+        w.sn = temp_count + dtor_count + 1;
+        return this.push_stmt(w);
     }
 
     // True when the statement ends a case clause: `break`, `return`,
@@ -3891,17 +4664,14 @@ export struct HirBuilder {
             return this.build_return(a);
         }
         if (a.kind == 9) {
-            HStmt s = this.new_stmt(8, a.line, a.col);
-            return this.push_stmt(s);
+            // H6.2s: run the innermost scope's dtors before the jump.
+            return this.wrap_scope_dtors(8, "", a.line, a.col);
         }
         if (a.kind == 10) {
-            HStmt s = this.new_stmt(9, a.line, a.col);
-            return this.push_stmt(s);
+            return this.wrap_scope_dtors(9, "", a.line, a.col);
         }
         if (a.kind == 11) {
-            HStmt s = this.new_stmt(10, a.line, a.col);
-            s.sval = a.sval;
-            return this.push_stmt(s);
+            return this.wrap_scope_dtors(10, a.sval, a.line, a.col);
         }
         if (a.kind == 12) {
             long val = this.build_expr(a.a);
@@ -3931,6 +4701,16 @@ export struct HirBuilder {
     // --- expressions -----------------------------------------------------
 
     long build_ident(AExpr a) {
+        // H6.2v: a fold expression is expanded by rebuilding its pattern
+        // once per pack element; the pack identifier (`args`) becomes the
+        // concrete element parameter (`__args0`, ...).
+        if (this.slen(this.fold_pack_name_) > 0 &&
+            this.seq(a.sval, this.fold_pack_name_)) {
+            HExpr fe = this.new_expr(8, a.line, a.col);
+            fe.sval = this.fold_elem_name_;
+            fe.type = this.fold_elem_type_;
+            return this.push_expr(fe);
+        }
         long si = this.find_sym(a.sval);
         // A4: the use-after-move check.  It fires for every identifier that
         // resolves to a variable whose move state is `MovedOut`; the
@@ -4517,6 +5297,109 @@ export struct HirBuilder {
             }
         }
 
+        // H6.2t: `obj(args)` where `obj` is a struct-typed expression with an
+        // `operator()` method (hir_builder.cpp:2926-3039).  The probe runs
+        // after the `move` builtin and before the template-id and ordinary
+        // resolution paths; it is skipped when the bare name is a known
+        // function/template or a struct with constructors (a ctor call).
+        if (ca.kind == 8) {
+            long is_func = 0;
+            if (this.count_fns(ca.sval) != 0 ||
+                this.find_template(ca.sval) >= 0) {
+                is_func = 1;
+            }
+            long is_ctor = 0;
+            if (is_func == 0) {
+                if (this.is_struct_name(ca.sval) != 0 &&
+                    this.struct_has_ctor(ca.sval) != 0) {
+                    is_ctor = 1;
+                }
+                if (is_ctor == 0 && this.find_struct_template(ca.sval) >= 0) {
+                    is_ctor = 1;
+                }
+            }
+            // The oracle builds the callee expression here; the port only
+            // builds it when the name resolves (otherwise the ordinary path
+            // below reports the undeclared identifier, exactly once).
+            long callee_expr = -1;
+            if (is_func == 0 && is_ctor == 0) {
+                if (this.find_sym(ca.sval) >= 0 ||
+                    this.find_global_enum(ca.sval) >= 0) {
+                    callee_expr = this.build_expr(a.a);
+                }
+            }
+            if (callee_expr >= 0) {
+                HExpr ce;
+                unsafe {
+                    ce = this.u.exprs[callee_expr];
+                }
+                if (this.find_struct(ce.type.base) >= 0) {
+                    if (e.an <= 1) {
+                        long rhs = -1;
+                        if (e.an == 1) {
+                            unsafe {
+                                rhs = this.u.args[e.astart];
+                            }
+                        }
+                        long callIdx = this.try_operator_overload(
+                            callee_expr, "()", rhs, a.line, a.col);
+                        if (callIdx >= 0) {
+                            return callIdx;
+                        }
+                    } else {
+                        // A multi-argument operator(): build the call
+                        // directly (the oracle's variant at :3001-3028).
+                        AType bt = ce.type;
+                        bt.is_ref = 0;
+                        long si = this.find_struct(bt.base);
+                        if (si >= 0) {
+                            AStruct sd = this.get_struct(si);
+                            if (this.find_operator_owner(sd, "()")) {
+                                long start2 = this.u.a_n;
+                                this.push_arg(callee_expr);
+                                long j2 = 0;
+                                while (j2 < e.an) {
+                                    long ai2 = -1;
+                                    unsafe {
+                                        ai2 = this.u.args[e.astart + j2];
+                                    }
+                                    this.push_arg(ai2);
+                                    j2 = j2 + 1;
+                                }
+                                long fi2 = this.resolve_overload(
+                                    this.op_name_, start2, e.an + 1, a.line, a.col);
+                                if (fi2 >= 0) {
+                                    HFunction hf2;
+                                    unsafe {
+                                        hf2 = this.u.fns[fi2];
+                                    }
+                                    HExpr c2 = this.new_expr(12, a.line, a.col);
+                                    c2.sval = hf2.name;
+                                    c2.type = hf2.ret;
+                                    c2.astart = start2;
+                                    c2.an = e.an + 1;
+                                    long idx2 = this.push_expr(c2);
+                                    long cnt2 = this.check_call(fi2, start2, e.an + 1,
+                                                                a.line, a.col);
+                                    if (cnt2 != e.an + 1) {
+                                        unsafe {
+                                            this.u.exprs[idx2].an = cnt2;
+                                        }
+                                    }
+                                    return idx2;
+                                }
+                            }
+                        }
+                    }
+                    // No matching operator(): the oracle reports and keeps
+                    // the (unresolved) call with the dummy type.
+                    this.err_no_operator(a.line, a.col, ce.type, "()");
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
+            }
+        }
+
         if (ca.kind == 8) {
             // A template-id call: `func<T>(args)`.
             if (a.tpl_n > 0) {
@@ -4667,6 +5550,28 @@ export struct HirBuilder {
                 if (folded >= 0) {
                     return folded;
                 }
+                return this.push_expr(e);
+            }
+            // H6.2s: `Type(args)` where Type is a struct with user-declared
+            // constructors resolves to the constructor (buildCall in
+            // hir_builder.cpp:3097-3117).  A function of the same name wins
+            // (checked above); the callee becomes the qualified ctor name.
+            if (this.is_struct_name(ca.sval) != 0 &&
+                this.struct_has_ctor(ca.sval) != 0) {
+                long ci = this.find_ctor(ca.sval, e.astart, e.an, a.line, a.col);
+                if (ci >= 0) {
+                    HFunction hf;
+                    unsafe {
+                        hf = this.u.fns[ci];
+                    }
+                    e.sval = hf.name;
+                    AType st = this.ty_empty();
+                    st.base = ca.sval;
+                    e.type = st;
+                    return this.push_expr(e);
+                }
+                e.sval = ca.sval;
+                e.type = this.ty_dummy();
                 return this.push_expr(e);
             }
             if (this.find_sym(ca.sval) < 0 && this.find_global_enum(ca.sval) < 0 &&
@@ -4850,6 +5755,22 @@ export struct HirBuilder {
             HExpr il = this.new_expr(8, a.line, a.col);
             il.type = this.ty_dummy();
             return this.push_expr(il);
+        }
+        // H6.2v: `sizeof...(pack)` folds to an integer literal (the number
+        // of elements; an unknown pack has zero elements).
+        if (a.kind == 24) {
+            long cnt = this.pack_find(a.sval);
+            if (cnt < 0) {
+                cnt = 0;
+            }
+            HExpr sp = this.new_expr(1, a.line, a.col);
+            sp.ival = cnt;
+            sp.type = this.ty_int64();
+            return this.push_expr(sp);
+        }
+        // H6.2v: a fold expression expands into a Binary chain.
+        if (a.kind == 25) {
+            return this.build_fold(a);
         }
         HExpr e = this.new_expr(8, a.line, a.col);
         e.type = this.ty_dummy();
@@ -5165,6 +6086,175 @@ export struct HirBuilder {
         }
         e.type = this.ty_dummy();
         return this.push_expr(e);
+    }
+
+    // H6.2v: the index of the bare identifier that names the pack referenced
+    // by a fold pattern, or -1 when the pattern references no pack.  Mirrors
+    // `findPackExpansion` in hir_builder.cpp: a bare identifier names the
+    // pack, a call is searched through its arguments only, and a pack
+    // expansion is searched through its pattern only when that pattern is a
+    // bare identifier.
+    long expr_pack_idx(long idx) {
+        if (idx < 0) {
+            return -1;
+        }
+        AExpr e;
+        unsafe {
+            e = this.get_expr(idx);
+        }
+        if (e.kind == 17) {
+            AExpr p;
+            unsafe {
+                p = this.get_expr(e.a);
+            }
+            if (p.kind == 8 && this.pack_find(p.sval) >= 0) {
+                return e.a;
+            }
+            return -1;
+        }
+        if (e.kind == 8) {
+            if (this.pack_find(e.sval) >= 0) {
+                return idx;
+            }
+            return -1;
+        }
+        if (e.kind == 13) {
+            long k = 0;
+            while (k < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.pa.call_args()[e.astart + k];
+                }
+                long r = this.expr_pack_idx(ai);
+                if (r >= 0) {
+                    return r;
+                }
+                k = k + 1;
+            }
+        }
+        return -1;
+    }
+
+    // H6.2v: expand a fold expression into the same Binary chain as the
+    // oracle (hir_builder.cpp:3858-4060).  The pattern is rebuilt once per
+    // pack element with the pack identifier substituted; the fixed operand
+    // of a binary fold is built once.  An empty pack yields the identity
+    // element (`true`/`false` for `&&`/`||`, otherwise integer 0), even
+    // when a binary fold carries an initializer (bug-compat).
+    long build_fold(AExpr a) {
+        long pat = -1;
+        long init = -1;
+        if (a.a < 0 && a.b >= 0) {
+            pat = a.b;
+        } else if (a.b < 0 && a.a >= 0) {
+            pat = a.a;
+        } else if (a.a >= 0 && a.b >= 0) {
+            if (this.expr_pack_idx(a.a) >= 0) {
+                pat = a.a;
+                init = a.b;
+            } else if (this.expr_pack_idx(a.b) >= 0) {
+                pat = a.b;
+                init = a.a;
+            }
+        }
+        if (pat < 0) {
+            this.diag(a.line, a.col,
+                      "fold expression references unknown parameter pack");
+            HExpr bad = this.new_expr(1, a.line, a.col);
+            bad.type = this.ty_dummy();
+            return this.push_expr(bad);
+        }
+        long pi = this.expr_pack_idx(pat);
+        if (pi < 0) {
+            this.diag(a.line, a.col,
+                      "fold expression references unknown parameter pack");
+            HExpr badp = this.new_expr(1, a.line, a.col);
+            badp.type = this.ty_dummy();
+            return this.push_expr(badp);
+        }
+        AExpr pn;
+        unsafe {
+            pn = this.get_expr(pi);
+        }
+        long cnt = this.pack_find(pn.sval);
+        long first = this.pack_first_;
+        if (cnt < 0) {
+            this.diag(a.line, a.col,
+                      "fold expression references unknown parameter pack");
+            HExpr bad2 = this.new_expr(1, a.line, a.col);
+            bad2.type = this.ty_dummy();
+            return this.push_expr(bad2);
+        }
+        long initIdx = -1;
+        if (init >= 0) {
+            initIdx = this.build_expr(init);
+        }
+        if (cnt == 0) {
+            if (this.seq(a.sval, "&&")) {
+                HExpr bt = this.new_expr(5, a.line, a.col);
+                bt.ival = 1;
+                bt.type = this.ty_bool();
+                return this.push_expr(bt);
+            }
+            if (this.seq(a.sval, "||")) {
+                HExpr bf = this.new_expr(5, a.line, a.col);
+                bf.ival = 0;
+                bf.type = this.ty_bool();
+                return this.push_expr(bf);
+            }
+            HExpr z = this.new_expr(1, a.line, a.col);
+            z.ival = 0;
+            z.type = this.ty_int64();
+            return this.push_expr(z);
+        }
+        HFunction cf;
+        unsafe {
+            cf = this.u.fns[this.cur_fn_];
+        }
+        HParam hp0;
+        unsafe {
+            hp0 = this.u.params[cf.pstart + first];
+        }
+        AType chainTy = hp0.type;
+        long result = initIdx;
+        // Save the substitution state on a stack: a nested instantiation
+        // triggered by building a pattern may itself expand a fold.
+        long fd = this.fold_depth_;
+        unsafe {
+            this.fold_pstack_[fd].base = this.fold_pack_name_;
+            this.fold_estack_[fd].base = this.fold_elem_name_;
+            this.fold_tstack_[fd] = this.fold_elem_type_;
+        }
+        this.fold_depth_ = fd + 1;
+        this.fold_pack_name_ = pn.sval;
+        long k = 0;
+        while (k < cnt) {
+            HParam hp;
+            unsafe {
+                hp = this.u.params[cf.pstart + first + k];
+            }
+            this.fold_elem_name_ = hp.name;
+            this.fold_elem_type_ = hp.type;
+            long elem = this.build_expr(pat);
+            if (result < 0) {
+                result = elem;
+            } else {
+                HExpr b = this.new_expr(10, a.line, a.col);
+                b.sval = a.sval;
+                b.a = result;
+                b.b = elem;
+                b.type = chainTy;
+                result = this.push_expr(b);
+            }
+            k = k + 1;
+        }
+        this.fold_depth_ = fd;
+        unsafe {
+            this.fold_pack_name_ = this.fold_pstack_[fd].base;
+            this.fold_elem_name_ = this.fold_estack_[fd].base;
+            this.fold_elem_type_ = this.fold_tstack_[fd];
+        }
+        return result;
     }
 
     // Ternary operator (buildExpr / Expr::Ternary in hir_builder.cpp).
@@ -7313,6 +8403,40 @@ export struct HirBuilder {
         rec.fields = flds;
         long gidx = this.add_spec(mangled, rec);
         this.layout_spec(gidx, tpl);
+        // H6.2u: export the specialization (name + substituted field types)
+        // into the unit's struct table, exactly like `build_struct` does for
+        // a declared struct.  The oracle calls `buildStruct(cloned)`, which
+        // appends to `hir_->structs`, so the MIR and the emitter see
+        // `%struct.<Spec>` and can resolve member accesses.
+        long hsi = this.u.struct_n;
+        if (hsi < this.u.struct_cap) {
+            unsafe {
+                this.u.structs[hsi].name = rec.name;
+                this.u.structs[hsi].fields = this.u.fields + this.u.fld_n;
+                this.u.structs[hsi].nfields = 0;
+                this.u.structs[hsi].line = rec.line;
+                this.u.structs[hsi].col = rec.col;
+            }
+            long fj = 0;
+            while (fj < rec.nfields) {
+                AField sf;
+                unsafe {
+                    sf = rec.fields[fj];
+                }
+                long fi = this.u.fld_n;
+                if (fi < this.u.fld_cap) {
+                    unsafe {
+                        this.u.fields[fi].name = sf.name;
+                        this.u.fields[fi].type = sf.type;
+                        this.u.structs[hsi].nfields =
+                            this.u.structs[hsi].nfields + 1;
+                    }
+                    this.u.fld_n = fi + 1;
+                }
+                fj = fj + 1;
+            }
+            this.u.struct_n = hsi + 1;
+        }
         // The methods of the specialization.
         long nm = tpl.nmethods;
         long fnbase = this.spcfns_n_;

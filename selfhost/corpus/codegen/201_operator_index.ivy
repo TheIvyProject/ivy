@@ -1,0 +1,30 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Vec3 {
+    int32 x;
+    int32 y;
+    int32 z;
+
+    // Index operator[]: int32 -> int32 (component access)
+    int32 operator[](int32 i) {
+        if (i == 0) { return this.x; }
+        if (i == 1) { return this.y; }
+        return this.z;
+    }
+};
+
+int32 main() {
+    Vec3 a;
+    a.x = 10;
+    a.y = 20;
+    a.z = 30;
+
+    printf("a[0]=%d a[1]=%d a[2]=%d\n", a[0], a[1], a[2]);
+    int32 s = a[0] + a[2];
+    printf("s=%d\n", s);
+    return 0;
+}

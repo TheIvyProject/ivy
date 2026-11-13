@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Logger {
+    int32 id;
+    Logger(int32 v) : id(v) {
+        printf("ctor %d\n", this.id);
+    }
+    ~Logger() {
+        printf("dtor %d\n", this.id);
+    }
+};
+
+int32 main() {
+    Logger a(1);
+    {
+        Logger b(2);
+    }
+    return 0;
+}

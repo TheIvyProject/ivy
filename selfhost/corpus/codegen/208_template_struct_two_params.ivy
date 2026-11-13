@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename A, typename B>
+struct Pair {
+    A first;
+    B second;
+
+    A sum() { return this.first + this.second; }
+
+    B swap() { return this.second; }
+};
+
+int32 main() {
+    Pair<int32, int32> p;
+    p.first = 11;
+    p.second = 31;
+    printf("p.sum()=%d p.swap()=%d\n", p.sum(), p.swap());
+    return 0;
+}

@@ -2486,3 +2486,484 @@ Không sửa `src/**`, không rebuild oracle dựng bằng (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62r\`.
+
+## 42. H6.2s — method, `this`, constructor/destructor và RAII
+
+#### 42.1 Phạm vi
+
+Stage s phủ bốn nhóm còn thiếu của `examples/test_methods`,
+`examples/test_ctor_dtor` và `examples/test_raii_break`:
+
+1. **Method mangling** (`emitter.ivy`) — `emit_mangled_name` tách tên theo
+   `::` (helpers `name_part_count`/`name_part_off`/`name_part_len`/
+   `name_part_eq`, buffer `mangle_buf_`):
+   - method thường `?<name>@<scope>@@Y<ret><params>@Z`
+     (vd `?sum@Point@@YHAAV@Z`);
+   - ctor `?0<Struct>@@AEX<params>@Z` (vd `?0Logger@@AEXAAVH@Z`);
+   - dtor `?1<Struct>@@AEXAAV@Z`.
+2. **`this`** — MIR expr kind 7: `lower_expr` load giá trị qua con trỏ,
+   `lower_lvalue` trả địa chỉ (`load ptr` từ slot `this`). Emitter cũng bỏ
+   điều kiện `e.type.is_ref` khỏi nhánh IdentRef của `lower_lvalue`: chỉ
+   `is_ref_var(name)` quyết định (mirror `varIsRef_` của oracle) — nhờ vậy
+   `thisArg` (biến value nhưng `isRef = true`) trả về địa chỉ slot thay vì
+   load.
+3. **Constructor injection** (`hir_builder.ivy`) — `build_decl` chèn
+   `T::T(&x, args...)` sau khai báo khi `T` có ctor do người dùng khai báo:
+   - `T x(args)` / `T x = T(args)` → dùng chính args của call, decl mất
+     initializer;
+   - `T x;` → ctor mặc định, 0 arg;
+   - `T x = other` → 1 arg (copy-construction);
+   - `T x = {..}` (InitList) → **bypass** ctor (aggregate), vẫn record dtor.
+   Ctor/dtor được nhận diện từ tên qualified do parser sinh
+   (`Struct::Struct` / `Struct::~Struct`) qua `name_is_struct_ctor` /
+   `name_is_struct_dtor`, không thêm flag AST/HIR/MIR (giữ stride 3 struct).
+   `find_ctor` mirror `resolveCtorOverload`: bỏ param[0] (`this`), so
+   `is_assignable`, chọn exact-match, ambiguous → -1.
+4. **Member initializer list** (`parser.ivy` + `hir_builder.ivy`) — parser
+   giờ ghi lại `: field(expr), ...` vào hai pool song song
+   `miname_`/`miarg_`; `AFunction` thêm `minit_start`/`minit_n` (208 → 224
+   byte, cập nhật cả `fpool_` và `mpool_`). HIR synth `this.field = arg` ở
+   đầu body (prefix stmt `pre_first_`/`pre_last_`/`pre_n_`, tiêu thụ bởi
+   compound kế tiếp) — đúng thứ tự oracle (assignment trước body gốc).
+5. **RAII / destructor** — stack phẳng `dsnm_`/`dscope_` (mirror
+   `dtorStacks_`), `dbase_` (mirror `dtorBaseline_`), `rsnm_` (mirror
+   `returnedLocals_`):
+   - `build_compound` emit dtor của scope hiện tại (thứ tự ngược khai báo)
+     trước `leave_scope`;
+   - `build_return` emit dtor từ scope trong cùng tới `dbase_`; NRVO đánh
+     dấu local được trả về để bỏ dtor; return không phải plain-local được
+     đánh giá vào temp `__ret[N]` **trước** các dtor, rồi `load`/`return`;
+   - `break`/`continue`/`nextcase` (`wrap_scope_dtors`) chỉ chạy dtor của
+     **scope trong cùng** (`dtorStacks_.back()`), rồi truncate stack —
+     bug-compat: `break` trong `if` lồng không chạy dtor của loop body
+     (đúng IR oracle của `test_raii_break`).
+6. **Ctor call dạng biểu thức** — `build_call` nhánh ident: nếu tên là
+   struct có ctor (và không phải function/template) thì resolve ctor, callee
+   thành `Struct::Struct`, type là struct (mirror `buildCall` 3097-3117).
+   Trước đây nhánh này báo "undeclared identifier 'Logger'".
+
+#### 42.2 Probe
+
+`cmp.ps1` (oracle vs `cgdrive.exe`) trên `...\h62s\probe`:
+
+```text
+MATCH test_ctor_dtor  (6552 B)
+MATCH test_methods    (4092 B)
+MATCH test_raii_break (4922 B)
+```
+
+`hirdrive.exe` (selfhost) vs `ivy --hir` trên cùng 3 example: thân HIR khớp
+byte (chỉ khác dòng header `=== <path> ===` do hirdrive in).
+
+#### 42.3 Fixture mới (192–198)
+
+| Fixture | Nội dung |
+|---|---|
+| `192_ctor_dtor.ivy` | ctor member-init list + dtor, hai scope lồng (thứ tự dtor) |
+| `193_ctor_overload.ivy` | ctor mặc định + tham số, hai field init list |
+| `194_ctor_agg_bypass.ivy` | `Pair p = {7, 8}` bypass ctor, vẫn chạy dtor |
+| `195_raii_break.ivy` | `break` trong `if` lồng → dtor scope trong cùng |
+| `196_raii_continue.ivy` | `continue` + dtor loop body |
+| `197_dtor_return_temp.ivy` | return biểu thức (`g.n + 1`) → temp `__ret` trước dtor |
+| `198_dtor_nrvo.ivy` | `return b` local → NRVO, không emit dtor trên đường return |
+
+#### 42.4 Kết quả
+
+`cgdiff.ps1` (2026-11-12):
+
+```text
+[3/4] running 198 fixtures ...
+[4/4] summary
+      PASS 198 / 198
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng, `...\h62verify`):
+`INDEP PASS 198/198`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **35 MATCH** (trước s: 32). Ba file
+mới khớp byte là `test_methods`, `test_ctor_dtor`, `test_raii_break`;
+không file nào regress. 30 DIFF còn lại thuộc stage sau:
+`test_b5_*`/`test_b6_*`/`test_d1..d7`/`test_d4_*`/`test_move_*` (z),
+`test_operator_overloading` (t), `test_concepts`/`test_template_struct`/
+`test_variadic` (u/v), `test_structured_binding` (w), `test_range_for` (x),
+`test_inherit*` (y), `test_return_value`/`test_module_math`/`test_ivy_ext`
+(aa).
+
+#### 42.5 Trạng thái H6.2s
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/ast.ivy`: `AFunction.minit_start`/`minit_n`;
+- `selfhost/parsing/parser.ivy`: pool `miname_`/`miarg_`/`mi_n_`/`mi_cap_`
+  (+alloc/free), `parse_ctor_inits` ghi lại entry, ctor record lưu slice,
+  `ctor_init_name`/`ctor_init_arg`, `fpool_`/`mpool_` 224 byte;
+- `selfhost/hir/hir_builder.ivy`: fields `dsnm_`/`dscope_`/`dbase_`/
+  `rsnm_`/`dtor_*`/`pre_*`; `name_is_struct_ctor`/`name_is_struct_dtor`/
+  `struct_has_ctor`/`find_dtor`/`find_ctor`/`is_returned_local`/
+  `mark_returned_local`/`record_dtor_var`/`build_dtor_stmt`/
+  `emit_dtor_calls`/`synth_ret_name`/`build_ctor_call`/
+  `build_ctor_member_assign`/`wrap_scope_dtors`; cập nhật `build_body`,
+  `build_compound`, `build_decl`, `build_return`, `build_call`, `build_stmt`
+  kind 9/10/11;
+- `selfhost/codegen/emitter.ivy`: `emit_mangled_name` + helpers `::`,
+  ctor/dtor prefix, `this` (kind 7), `lower_lvalue` chỉ dùng `is_ref_var`;
+- `selfhost/corpus/codegen/192..198_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 42 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..s ... 198/198`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62s\` (và `h62verify`,
+`h62r` cho verify độc lập).
+
+## 43. H6.2t — operator overloading
+
+#### 43.1 Phạm vi
+
+Mục tiêu là `examples/test_operator_overloading.ivy` (struct `Vec3` với
+`operator+`, `operator==`, unary `operator-`, `operator[]`, `operator()`).
+Port đã có sẵn phần lớn đường HIR từ các stage trước:
+
+- `try_operator_overload` + `find_operator_owner` (kế thừa qua base);
+- nhánh Unary, Binary, Index gọi `try_operator_overload` với `+`/`==`/`-`/
+  `[]`… khi operand là struct value (`ptr_depth == 0`);
+- `err_no_operator` in đúng `struct 'X' has no matching operator 'op'`.
+
+Ba phần còn thiếu của stage t:
+
+1. **`operator()` trong `build_call`** (`hir_builder.ivy`) — mirror
+   `hir_builder.cpp:2926-3039`. Probe chạy sau builtin `move()` và trước
+   template-id/ctor/overload thường, chỉ khi callee là `IdentRef` và tên
+   không phải function/template/struct-có-ctor. Callee được build để lấy
+   type; nếu `base` là struct thì:
+   - 0/1 arg → `try_operator_overload(callee, "()", rhs)`;
+   - >1 arg → dựng Call trực tiếp từ `find_operator_owner` +
+     `resolve_overload` trên danh sách `[this, args...]`;
+   - không match → `err_no_operator(..., "()")` và giữ call dummy.
+   Port chỉ build callee khi tên resolve được (`find_sym` hoặc
+   `find_global_enum`), để nhánh sau vẫn in `undeclared identifier` đúng
+   một lần như oracle.
+2. **Escape tên operator trong mangling** (`emitter.ivy`) —
+   `emit_name_part` mirror `CodeGen::escapeLlvmIdent`: `<`, `>`, `,`,
+   space, `:`, `&`, `*`, `(`, `)` → `_`. Nhờ vậy `Vec3::operator()`
+   mangle thành `?operator__@Vec3@@YHAAV@Z` (đúng byte oracle), còn
+   `operator+`/`operator[]` giữ nguyên ký hiệu.
+3. **Materialize call trả struct by value khi dùng làm lvalue**
+   (`emitter.ivy`, `lower_lvalue` kind 11) — mirror
+   `CodeGen::lowerLValue` nhánh Call: nếu call trả struct by value thì
+   `lower_expr` lấy value, cấp `%tmp.N = alloca %struct.T` trong entry
+   block (phase 3 của capture), `store` value vào slot rồi trả slot làm
+   địa chỉ. Nhờ vậy `a + b + c`, `make() + b`, `(a + b)[1]` có `this`
+   hợp lệ cho operator ngoài.
+
+#### 43.2 Probe
+
+- `examples/test_operator_overloading.ivy`: oracle `--hir` và `--llvm`
+  dump; body HIR của port khớp byte-for-byte sau khi thêm probe.
+- `operator[]` trả `T&` rồi gán `a[0] = 42`: oracle nhận, port khớp
+  (đi qua `lower_call_ptr` trong `lower_lvalue`).
+- `make() + b`, `(a + b)[1]`: oracle nhận, port khớp (materialization).
+- `a += b`: **cả hai** báo `compound assignment '+=' expects numeric
+  operands` (không hỗ trợ operator compound).
+- `(a + b)()`: **cả hai** báo `callee must be a function name` ở parser.
+
+#### 43.3 Fixture mới (199-206)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `199_operator_binary.ivy` | `operator+` trả struct, `operator==` trả bool, chuỗi `a + b + c` |
+| `200_operator_unary.ivy` | unary `operator-` |
+| `201_operator_index.ivy` | `operator[](int32)` trả `int32` |
+| `202_operator_call.ivy` | `operator()` 0 tham số |
+| `203_operator_call_arg.ivy` | `operator()` 1 tham số |
+| `204_operator_call_multi.ivy` | `operator()` 2 tham số (nhánh multi-arg) |
+| `205_operator_index_ref.ivy` | `operator[]` trả `int32&`, gán `a[0] = 42` |
+| `206_operator_call_result.ivy` | call trả struct làm receiver (`make() + b`, `(b + c)[1]`) |
+
+#### 43.4 Kết quả
+
+`cgdiff.ps1` (2026-11-12):
+
+```text
+[3/4] running 206 fixtures ...
+[4/4] summary
+      PASS 206 / 206
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng):
+`INDEP PASS 206/206`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **38 MATCH** (trước t: 35). Ba
+file mới khớp byte là `test_operator_overloading`, `test_concepts` và
+`test_ivy_ext`; không file nào regress. 27 DIFF còn lại thuộc stage sau:
+`test_b5_*`/`test_b6_*`/`test_d1..d7`/`test_d4_*`/`test_move_*` (z),
+`test_template_struct`/`test_variadic` (u/v), `test_structured_binding`
+(w), `test_range_for` (x), `test_inherit*` (y),
+`test_return_value`/`test_module_math` (aa).
+
+#### 43.5 Trạng thái H6.2t
+
+Tập thêm/sửa:
+
+- `selfhost/hir/hir_builder.ivy`: probe `operator()` trong `build_call`
+  (0/1 arg qua `try_operator_overload`, multi-arg dựng Call trực tiếp);
+- `selfhost/codegen/emitter.ivy`: `emit_name_part` escape ký tự LLVM
+  không hợp lệ; `lower_lvalue` kind 11 materialize call trả struct
+  by value vào entry-block `%tmp.N`;
+- `selfhost/corpus/codegen/199..206_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 43 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..t ... 206/206`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62t\` (và `h62verify`,
+`h62r` cho verify độc lập).
+
+## 44. H6.2u — template struct
+
+#### 44.1 Phạm vi
+
+Mục tiêu là `examples/test_template_struct.ivy`: `template <typename T>
+struct Box` với field `T value` và hai method `T get()` / `void set(T v)`,
+dùng `Box<int32>` trong `main` (khai báo, gọi method, đọc field, cộng kết
+quả). So với stage t, phần HIR của port **đã khớp byte** oracle (cả `main`
+lẫn `Box<int32_t>::get`/`set`) trước khi sửa: parser đã parse template
+struct, `instantiate_struct_template` đã thay kiểu field/param/return và
+build method body, `resolve_template_struct_type` đã thay template-id bằng
+tên specialization. Gap nằm ở MIR/emitter.
+
+#### 44.2 Nguyên nhân
+
+Oracle `instantiateStructTemplate` (`src/hir/hir_builder.cpp:5516`) gọi
+`buildStruct(cloned)`, và `buildStruct` append specialization vào
+`hir_->structs` (dòng 653) — cùng đường với struct khai báo thường. MIR
+builder copy `hir_.structs` theo thứ tự, nên emitter thấy
+`%struct.Box<int32_t>` và resolve được member.
+
+Port chỉ ghi `spc_name_`/`spc_rec_` qua `add_spec` mà **không** export vào
+`u.structs`; vì vậy `mu->structs` không có specialization, `find_struct`
+trả -1 và emitter rơi vào nhánh "member access on a non-struct", đồng thời
+`llvm_type` coi local là `i8` (thiếu `%struct.*`, thiếu zeroinit).
+
+#### 44.3 Sửa
+
+1. **Export specialization vào `u.structs`** (`hir_builder.ivy`,
+   `instantiate_struct_template`, ngay sau `add_spec`/`layout_spec`) —
+   mirror block export của `build_struct`: tên `rec.name` (= tên mangled
+   `Box<int32_t>`), field đã substitute (`cf.type`), giữ đúng thứ tự oracle
+   (field type được resolve trước, nên specialization lồng nhau vào bảng
+   trước specialization ngoài; method body build sau đó). Cache
+   `find_spec` vẫn chặn export trùng.
+2. **Escape tên struct type** (`emitter.ivy`) — mirror
+   `CodeGen::escapeLlvmIdent` ở hai chỗ:
+   - `make_struct_type_name` escape `<`, `>`, `,`, space, `:`, `&`, `*`,
+     `(`, `)` → `_` (`Box<int32_t>` → `%struct.Box_int32_t_`);
+   - `emit_struct_defs` in định nghĩa qua `make_struct_type_name` thay vì
+     `"%struct." + s.name` (trước đó chỉ phần thân dùng tên đã escape nên
+     định nghĩa vẫn in tên thô).
+
+#### 44.4 Probe
+
+- `examples/test_template_struct.ivy`: `--hir` port khớp oracle (trước và
+  sau sửa); `--llvm` khớp byte sau sửa (`%struct.Box_int32_t_ = type { i32
+  }`, zeroinit `store %struct.Box_int32_t_ zeroinitializer`, GEP field 0,
+  method `?set@Box_int32_t_@@YXAAVH@Z` / `?get@Box_int32_t_@@YHAAV@Z`).
+- `Wrap<Box<int32> >` (template struct lồng nhau, cần space trước `>`):
+  oracle nhận và port khớp, kể cả `w.outer().value` (method trả struct
+  dùng làm receiver của member access).
+- `Box<int32> a = { 5 };` (aggregate init specialization): khớp.
+- `Box<int64>` với literal `5000000000` + `%lld`: khớp.
+- `b = a` (gán toàn struct specialization): khớp.
+- `void copy(Box<T> o)` (tham số là template-id của chính template): khớp.
+- `Box<int32_t>`/`int64_t` trong source bị cả hai từ chối
+  (`_t-suffixed type ... is removed`) — dùng `int32`/`int64`.
+
+#### 44.5 Fixture mới (207-214)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `207_template_struct_basic.ivy` | `Box<int32>` get/set + field access |
+| `208_template_struct_two_params.ivy` | `Pair<int32, int32>` (2 type param), method trả `A`/`B` |
+| `209_template_struct_method_call.ivy` | method gọi method khác (`twice()` gọi `get()`), 2 biến |
+| `210_template_struct_int64.ivy` | `Box<int64>` + literal lớn + `%lld` |
+| `211_template_struct_agg.ivy` | aggregate init `Box<int32> a = { 5 };` |
+| `212_template_struct_nested.ivy` | `Wrap<Box<int32> >`, method trả struct lồng, `w.outer().value` |
+| `213_template_struct_assign.ivy` | gán toàn struct `b = a` |
+| `214_template_struct_param.ivy` | tham số `Box<T>` trong method (`copy(Box<T> o)`) |
+
+#### 44.6 Kết quả
+
+`cgdiff.ps1` (2026-11-13):
+
+```text
+[3/4] running 214 fixtures ...
+[4/4] summary
+      PASS 214 / 214
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng):
+`INDEP PASS 214/214`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **39 MATCH** (trước u: 38).
+File mới khớp byte là `test_template_struct`; không file nào regress.
+26 DIFF còn lại thuộc stage sau: `test_b5_*`/`test_b6_*`/`test_d1..d7`/
+`test_d4_*`/`test_move_*` (z), `test_variadic` (v),
+`test_structured_binding` (w), `test_range_for` (x), `test_inherit*` (y),
+`test_return_value`/`test_module_math` (aa).
+
+#### 44.7 Trạng thái H6.2u
+
+Tập thêm/sửa:
+
+- `selfhost/hir/hir_builder.ivy`: export specialization vào `u.structs`
+  trong `instantiate_struct_template`;
+- `selfhost/codegen/emitter.ivy`: escape tên struct type trong
+  `make_struct_type_name` và dùng nó ở `emit_struct_defs`;
+- `selfhost/corpus/codegen/207..214_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 44 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..u ... 214/214`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62u\` (và `h62s`, `h62n`,
+`h62r`, `h62verify` cho verify độc lập).
+
+## 45. H6.2v — variadic template
+
+#### 45.1 Phạm vi
+
+Mục tiêu là `examples/test_variadic.ivy`: `template <typename... Args>`
+với pack param `Args... args`, `sizeof...(args)`, và bốn dạng fold:
+unary right `(args + ...)`, unary left `(... + args)`, binary
+`(init + ... + args)`, logic `(args && ...)` / `(args || ...)`, cùng
+comma fold `(print_int(args), ...)`.
+
+Trước stage v, parser đã parse template param variadic
+(`ATemplateParam.is_variadic`), pack expansion `expr...` (AST kind 17)
+và `instantiate_template` đã sinh các param `__args0..`, splice pack
+expansion trong danh sách argument của call. Còn thiếu `sizeof...`,
+fold expression, cách build HIR của chúng và comma operator ở emitter.
+
+#### 45.2 Nguyên nhân
+
+Oracle parse `sizeof...` thành `Expr::SizeofPack` và fold thành
+`Expr::FoldExpr` (`src/parsing/parser.cpp:2920-2932`, `3117-3157`).
+HIR builder fold `SizeofPack` thành `IntegerLit` (`int64_t`,
+`hir_builder.cpp:3731-3742`) và expand `FoldExpr` thành một chuỗi
+`Binary` left-to-right bằng cách clone pattern AST rồi thay ident của
+pack bằng tên param phần tử (`hir_builder.cpp:3858-4060`). Port chưa có
+ba kind AST tương ứng nên `sizeof...` bị parse như `sizeof(...)`, còn
+`(args + ...)` bị parse như biểu thức thường (lỗi cú pháp).
+
+#### 45.3 Sửa
+
+1. **`parser.ivy`** — thêm hai kind AST:
+   - kind 24 = `sizeof...(pack)`: `sval` là tên pack, nhận diện bằng
+     `kw("sizeof") && kind_eq(peek(1), "...")` **trước** nhánh
+     `sizeof(type)`;
+   - kind 25 = fold expression: `sval` là toán tử, `a`/`b` là hai toán
+     hạng (-1 khi vắng), `flag` = 1 cho unary-left. `fold_operator()`
+     mirror `Parser::foldOperator` (đủ `+ - * / % ^ & | << >> && || ==
+     != < > <= >= ,`). Nhánh speculative (parse_unary rồi mới biết có
+     phải fold) lưu/khôi phục cả `pos_` **và** `dn_` — oracle lưu
+     `diagnostics_.size()` để bỏ chẩn đoán của lần parse thử.
+2. **`ast.ivy`** — cập nhật comment kind 17 (pack expansion), 24, 25.
+3. **`hir_builder.ivy`**:
+   - kind 24 → `IntegerLit` kiểu `int64_t`, đếm qua `pack_find` (0 khi
+     pack không xác định);
+   - kind 25 → `build_fold`: `expr_pack_idx` mirror
+     `findPackExpansion` (chỉ trả index khi ident thật sự là pack đã
+     biết; call chỉ tìm trong arguments; pack expansion chỉ tìm trong
+     pattern nếu pattern là bare ident); pattern được build lại một lần
+     cho mỗi phần tử với substitution `fold_pack_name_` /
+     `fold_elem_name_` / `fold_elem_type_` (thay vì clone AST);
+     `pack_first_` được chụp ngay sau `pack_find` (trước khi build
+     init); chain `Binary` left-to-right với type = type phần tử pack
+     đầu tiên (bug-compat oracle); empty pack → `true`/`false` cho
+     `&&`/`||`, còn lại `int64` 0 — kể cả binary fold có init
+     (bug-compat);
+   - trạng thái substitution lưu/khôi phục qua stack `AType`
+     (`fold_pstack_`/`fold_estack_`/`fold_tstack_`) vì subset không cho
+     khai báo `const char*` local ngoài `unsafe` và không hỗ trợ cast
+     `long` → pointer; tên pack/phần tử nằm ở field `base` của `AType`.
+4. **`emitter.ivy`** — nhánh comma operator: lower lhs (vì side effect)
+   rồi trả rhs, mirror `CodeGen` `Binary` nhánh `,`
+   (`src/codegen/codegen.cpp:1298-1302`).
+
+#### 45.4 Probe
+
+- `--hir` oracle của `test_variadic`: pack param đổi tên `__args0..`,
+  `sizeof...` → IntLit, fold → chuỗi `Binary`; `sum<>` → `int 0`;
+  `print_all` → `binary ',' : int` với các call `print_int`.
+- `--llvm` của `test_variadic` khớp byte (11,013 bytes), kể cả mangling
+  `count_args<>`, `count_args<int,int,int>`, `count_after<int,int>`,
+  `sum_from<int,int,int>`.
+- Bug-compat đã xác nhận với oracle: `g(args...)` trực tiếp trong call
+  → `undeclared identifier 'args'` (exit 1) nhưng vẫn splice; empty
+  binary fold có init vẫn trả identity.
+
+#### 45.5 Fixture mới (215-222)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `215_variadic_sizeof.ivy` | `sizeof...(args)` với pack 0/1/3 phần tử |
+| `216_variadic_fixed_pack.ivy` | `typename T` + `typename... Rest`, `sizeof...(rest)` |
+| `217_variadic_fold_sum.ivy` | `(args + ...)`, `(... + args)`, `(init + ... + args)` |
+| `218_variadic_fold_logic.ivy` | `(args && ...)` / `(args \|\| ...)` |
+| `219_variadic_comma.ivy` | comma fold `(print_int(args), ...)` |
+| `220_variadic_mixed.ivy` | fold `+` trả `long long` (`%lld`) |
+| `221_variadic_empty.ivy` | pack rỗng: `sum()`, `all_true()`, `any_true()` |
+| `222_variadic_binary_init.ivy` | binary fold có init, gồm cả pack rỗng |
+
+#### 45.6 Kết quả
+
+`cgdiff.ps1` (2026-11-13):
+
+```text
+[3/4] running 222 fixtures ...
+[4/4] summary
+      PASS 222 / 222
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng):
+`INDEP PASS 222/222`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **40 MATCH** (trước v: 39).
+File mới khớp byte là `test_variadic`; không file nào regress.
+25 DIFF còn lại thuộc stage sau: `test_b5_*`/`test_b6_*`/`test_d1..d7`/
+`test_d4_*`/`test_move_*` (z), `test_structured_binding` (w),
+`test_range_for` (x), `test_inherit*` (y),
+`test_return_value`/`test_module_math` (aa).
+
+#### 45.7 Trạng thái H6.2v
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/parser.ivy`: kind 24 (`sizeof...`), kind 25 (fold),
+  `fold_operator()`, lưu/khôi phục `dn_` ở nhánh speculative;
+- `selfhost/parsing/ast.ivy`: comment kind 17/24/25;
+- `selfhost/hir/hir_builder.ivy`: kind 24/25 trong `build_expr`,
+  `build_fold`, `expr_pack_idx`, substitution `fold_*` trong
+  `build_ident`, stack lưu trạng thái;
+- `selfhost/codegen/emitter.ivy`: nhánh comma operator;
+- `selfhost/corpus/codegen/215..222_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 45 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..v ... 222/222`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62v\` (và `h62s`, `h62n`,
+`h62r`, `h62verify` cho verify độc lập).
+

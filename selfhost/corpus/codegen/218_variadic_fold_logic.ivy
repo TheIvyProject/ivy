@@ -1,0 +1,21 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+template <typename... Args>
+bool all_true(Args... args) {
+    return (args && ...);
+}
+
+template <typename... Args>
+bool any_true(Args... args) {
+    return (args || ...);
+}
+
+int32 main() {
+    printf("%d %d\n", all_true(true, true) ? 1 : 0, all_true(true, false) ? 1 : 0);
+    printf("%d %d\n", any_true(false, true) ? 1 : 0, any_true(false, false) ? 1 : 0);
+    return 0;
+}
