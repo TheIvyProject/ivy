@@ -21,6 +21,9 @@ export struct HirBuilder {
     AExpr* ep_;
     AStmt* sp_;
     long* dp_;           // H6.2o: interned init-list designators
+    long* sbnm_;         // H6.2w: interned structured binding names
+    long sbctr_;         // H6.2w: `__sb_N` temporary counter
+    long rfc_;           // H6.2x: `__rfiN` range-for index counter
 
     // variable scopes: flat symbol stack + scope start markers
     long* snm_;          // (long) const char* names
@@ -328,6 +331,9 @@ export struct HirBuilder {
             this.ep_ = p.exprs();
             this.sp_ = p.stmts();
             this.dp_ = p.desigs();
+            this.sbnm_ = p.sbnms();
+            this.sbctr_ = 0;
+            this.rfc_ = 0;
             this.u.fn_cap = ntoks + 64;
             this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 128);
             this.u.fn_n = 0;
@@ -3883,6 +3889,280 @@ export struct HirBuilder {
         return this.push_stmt(s);
     }
 
+    // H6.2w: structured binding (`auto [a, b] = expr;`).  Mirror of
+    // buildStmt(A::StructuredBinding) in hir_builder.cpp: the initializer is
+    // built to learn its type, then the binding is desugared into a compound
+    // of N+1 declarations:
+    //   { auto __sb_N = expr; auto a = __sb_N.f0; auto b = __sb_N.f1; }
+    // The synthesized names are declared in the current scope (no new scope
+    // is entered) and, like the oracle, no destructor is recorded for them.
+    long build_structbind(AStmt a) {
+        long init = this.build_expr(a.a);
+        if (init < 0) {
+            HStmt z0 = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(z0);
+        }
+        HExpr ie;
+        unsafe {
+            ie = this.u.exprs[init];
+        }
+        AType it = ie.type;
+        // Strip the reference: the binding copies the value.
+        it.is_ref = 0;
+        long si = this.find_struct(it.base);
+        if (si < 0) {
+            this.db_start_ = this.db_n_;
+            this.db_put("structured binding requires a struct type, got '");
+            this.db_put(it.base);
+            this.db_put("'");
+            this.diag(a.line, a.col, this.db_end());
+            HStmt z1 = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(z1);
+        }
+        AStruct sd = this.get_struct(si);
+        if (a.sn != sd.nfields) {
+            this.db_start_ = this.db_n_;
+            this.db_put("structured binding expects ");
+            this.db_put_num(sd.nfields);
+            this.db_put(" names, got ");
+            this.db_put_num(a.sn);
+            this.diag(a.line, a.col, this.db_end());
+            HStmt z2 = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(z2);
+        }
+        // 1) The temporary: `auto __sb_N = expr;`.
+        this.sb_reset();
+        this.sb_put("__sb_");
+        this.sb_put_num(this.sbctr_);
+        this.sbctr_ = this.sbctr_ + 1;
+        long tmpl = this.sb_save_long();
+        HStmt td = this.new_stmt(2, a.line, a.col);
+        td.type = it;
+        td.a = init;
+        unsafe {
+            const char* tname = reinterpret_cast<const char*>(tmpl);
+            td.sval = tname;
+            this.declare(tname, it, a.line, a.col);
+        }
+        long first = this.push_stmt(td);
+        long last = first;
+        // 2) One declaration per field: `auto a = __sb_N.field;`.
+        long i = 0;
+        while (i < a.sn) {
+            long nmp = 0;
+            unsafe {
+                nmp = this.sbnm_[a.sstart + i];
+            }
+            AField fd;
+            unsafe {
+                fd = sd.fields[i];
+            }
+            AType ft = this.resolve_alias(fd.type);
+            // The base reference `__sb_N`.
+            HExpr be = this.new_expr(8, a.line, a.col);
+            be.type = it;
+            unsafe {
+                be.sval = reinterpret_cast<const char*>(tmpl);
+            }
+            long bei = this.push_expr(be);
+            // The member access `__sb_N.field`.
+            HExpr me = this.new_expr(14, a.line, a.col);
+            me.sval = fd.name;
+            me.flag = 0;
+            me.a = bei;
+            me.type = ft;
+            long mei = this.push_expr(me);
+            HStmt fdcl = this.new_stmt(2, a.line, a.col);
+            fdcl.type = ft;
+            fdcl.a = mei;
+            unsafe {
+                const char* nm = reinterpret_cast<const char*>(nmp);
+                fdcl.sval = nm;
+                this.declare(nm, ft, a.line, a.col);
+            }
+            long fdi = this.push_stmt(fdcl);
+            unsafe {
+                this.u.stmts[last].next = fdi;
+            }
+            last = fdi;
+            i = i + 1;
+        }
+        HStmt comp = this.new_stmt(1, a.line, a.col);
+        comp.sstart = first;
+        comp.sn = a.sn + 1;
+        return this.push_stmt(comp);
+    }
+
+    // H6.2x: range-based for (`for (T x : range) { body }`).  Mirror of
+    // buildRangeFor in hir_builder.cpp: the range expression is built once to
+    // discover its type, then the loop is desugared into an index-based
+    // C-style for loop and handed to buildStmt so that scoping, RAII and
+    // overload resolution apply uniformly:
+    //   for (size_t __rfiN = 0; __rfiN < N; ++__rfiN) {
+    //       T x = range[__rfiN];   // (or T& x = range[__rfiN])
+    //       body
+    //   }
+    // A non-array range (e.g. vector<T>) must be a struct with `len()` and
+    // `operator[]`; its bound is then `range.len()`.  The synthesized AST
+    // nodes are pushed into the parser pools, so the range expression is
+    // rebuilt (not cloned) where the oracle clones it: buildExpr never
+    // mutates the AST, so both produce the same HIR and temporaries.
+    long build_range_for(AStmt a) {
+        // The oracle builds the range expression once and discards the
+        // result; the build still contributes temporaries to the HIR.
+        long rng = this.build_expr(a.a);
+        if (rng < 0) {
+            HStmt z0 = this.new_stmt(13, a.line, a.col);
+            return this.push_stmt(z0);
+        }
+        HExpr re;
+        unsafe {
+            re = this.u.exprs[rng];
+        }
+        AType rt = re.type;
+        long is_array = 0;
+        if (rt.array_size > 0) { is_array = 1; }
+        if (is_array == 0) {
+            long si = this.find_struct(rt.base);
+            if (si < 0) {
+                this.diag(a.line, a.col, "range-based for requires a fixed-size array (T[N]) or a struct with len() and operator[] methods");
+                HStmt z1 = this.new_stmt(13, a.line, a.col);
+                return this.push_stmt(z1);
+            }
+            AStruct sd = this.get_struct(si);
+            long has_len = 0;
+            long has_index = 0;
+            if (this.find_method_owner(sd, "len")) { has_len = 1; }
+            if (this.find_method_owner(sd, "operator[]")) { has_index = 1; }
+            if (has_len == 0 || has_index == 0) {
+                this.diag(a.line, a.col, "range-based for requires len() and operator[] methods on the range type");
+                HStmt z2 = this.new_stmt(13, a.line, a.col);
+                return this.push_stmt(z2);
+            }
+        }
+        // `__rfiN` — the index name must outlive the desugared loop.
+        long id = this.rfc_;
+        this.rfc_ = this.rfc_ + 1;
+        this.sb_reset();
+        this.sb_put("__rfi");
+        this.sb_put_num(id);
+        long idxp = this.sb_save_long();
+
+        // init: size_t __rfiN = 0;
+        AType szt = this.ty_empty();
+        szt.base = "size_t";
+        AExpr zero = this.pa.fresh(1);
+        zero.ival = 0;
+        zero.line = a.line;
+        zero.col = a.col;
+        long zero_i = this.pa.push_expr(zero);
+        AStmt init = this.pa.fresh_stmt(2);
+        init.type = szt;
+        init.a = zero_i;
+        init.line = a.line;
+        init.col = a.col;
+        unsafe {
+            init.sval = reinterpret_cast<const char*>(idxp);
+        }
+        long init_i = this.pa.push_stmt(init);
+
+        // cond: __rfiN < N   (or __rfiN < range.len())
+        AExpr cid = this.pa.fresh(8);
+        cid.line = a.line;
+        cid.col = a.col;
+        unsafe {
+            cid.sval = reinterpret_cast<const char*>(idxp);
+        }
+        long cid_i = this.pa.push_expr(cid);
+        AExpr cond = this.pa.fresh(11);
+        cond.sval = "<";
+        cond.a = cid_i;
+        cond.line = a.line;
+        cond.col = a.col;
+        if (is_array != 0) {
+            AExpr bound = this.pa.fresh(1);
+            bound.ival = rt.array_size;
+            bound.line = a.line;
+            bound.col = a.col;
+            cond.b = this.pa.push_expr(bound);
+        } else {
+            // range.len()
+            AExpr mem = this.pa.fresh(15);
+            mem.sval = "len";
+            mem.flag = 0;
+            mem.a = a.a;
+            mem.is_scope = 0;
+            mem.line = a.line;
+            mem.col = a.col;
+            long mem_i = this.pa.push_expr(mem);
+            AExpr call = this.pa.fresh(13);
+            call.a = mem_i;
+            call.astart = -1;
+            call.an = 0;
+            call.line = a.line;
+            call.col = a.col;
+            cond.b = this.pa.push_expr(call);
+        }
+        long cond_i = this.pa.push_expr(cond);
+
+        // incr: ++__rfiN
+        AExpr iid = this.pa.fresh(8);
+        iid.line = a.line;
+        iid.col = a.col;
+        unsafe {
+            iid.sval = reinterpret_cast<const char*>(idxp);
+        }
+        long iid_i = this.pa.push_expr(iid);
+        AExpr incr = this.pa.fresh(10);
+        incr.sval = "++";
+        incr.flag = 1;
+        incr.a = iid_i;
+        incr.line = a.line;
+        incr.col = a.col;
+        long incr_i = this.pa.push_expr(incr);
+
+        // body: { T x = range[__rfiN]; <user body> }
+        AExpr xid = this.pa.fresh(8);
+        xid.line = a.line;
+        xid.col = a.col;
+        unsafe {
+            xid.sval = reinterpret_cast<const char*>(idxp);
+        }
+        long xid_i = this.pa.push_expr(xid);
+        AExpr ix = this.pa.fresh(14);
+        ix.a = a.a;
+        ix.b = xid_i;
+        ix.line = a.line;
+        ix.col = a.col;
+        long ix_i = this.pa.push_expr(ix);
+        AStmt vd = this.pa.fresh_stmt(2);
+        vd.type = a.type;
+        vd.type.is_ref = a.flag;
+        vd.sval = a.sval;
+        vd.a = ix_i;
+        vd.line = a.line;
+        vd.col = a.col;
+        long vd_i = this.pa.push_stmt(vd);
+        this.pa.set_next(vd_i, a.b);
+        AStmt comp = this.pa.fresh_stmt(1);
+        comp.sstart = vd_i;
+        comp.sn = 2;
+        comp.line = a.line;
+        comp.col = a.col;
+        long comp_i = this.pa.push_stmt(comp);
+
+        // Assemble the For stmt and delegate to the normal builder.
+        AStmt fr = this.pa.fresh_stmt(6);
+        fr.a = init_i;
+        fr.b = cond_i;
+        fr.c = incr_i;
+        fr.sstart = comp_i;
+        fr.line = a.line;
+        fr.col = a.col;
+        long fr_i = this.pa.push_stmt(fr);
+        return this.build_stmt(fr_i);
+    }
+
     // B5 / B6 in buildDeclaration and buildExpr(Assign): materialise an
     // expected<T, E> / optional<T> target from a plain value.  Returns the
     // expression index of the value to store (unchanged when no wrapping
@@ -4657,8 +4937,7 @@ export struct HirBuilder {
             return this.push_stmt(s);
         }
         if (a.kind == 7) {
-            HStmt s = this.new_stmt(13, a.line, a.col);
-            return this.push_stmt(s);
+            return this.build_range_for(a);
         }
         if (a.kind == 8) {
             return this.build_return(a);
@@ -4693,6 +4972,9 @@ export struct HirBuilder {
         }
         if (a.kind == 15) {
             return this.build_switch(a);
+        }
+        if (a.kind == 16) {
+            return this.build_structbind(a);
         }
         HStmt s = this.new_stmt(13, a.line, a.col);
         return this.push_stmt(s);

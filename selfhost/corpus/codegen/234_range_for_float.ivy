@@ -1,0 +1,12 @@
+int32 main() {
+    float64 a[3];
+    a[0] = 1.5;
+    a[1] = 2.5;
+    a[2] = 3.0;
+
+    float64 s = 0.0;
+    for (float64 x : a) {
+        s = s + x;
+    }
+    return s > 6.9 ? 1 : 0;
+}

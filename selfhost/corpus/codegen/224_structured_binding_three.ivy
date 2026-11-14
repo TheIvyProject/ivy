@@ -1,0 +1,22 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct RGB {
+    int32 r;
+    int32 g;
+    int32 b;
+};
+
+int32 main() {
+    RGB color = {255, 128, 0};
+    auto [r, g, b] = color;
+    printf("r = %d, g = %d, b = %d\n", r, g, b);
+
+    RGB other = {1, 2, 3};
+    auto [r2, g2, b2] = other;
+    printf("r2 = %d, g2 = %d, b2 = %d\n", r2, g2, b2);
+    return 0;
+}

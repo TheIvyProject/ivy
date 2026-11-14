@@ -2967,3 +2967,242 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62v\` (và `h62s`, `h62n`,
 `h62r`, `h62verify` cho verify độc lập).
 
+## 46. H6.2w - structured binding (`auto [a, b] = expr`)
+
+#### 46.1 Phạm vi
+
+- Parser: `auto [a, b, c] = expr;` → stmt kind 16 (`structbind`).
+- HIR: desugar thành block `{ T __sb_N = expr; F0 a = __sb_N.f0; ... }`.
+- Chẩn đoán: `structured binding requires a struct type, got 'X'` và
+  `structured binding expects N names, got M`.
+- Không đổi codegen: HIR desugar chỉ dùng decl/member/ident sẵn có.
+
+#### 46.2 Parser (`selfhost/parsing/parser.ivy`)
+
+- Nhánh mới trong `parse_decl` sau `parse_type`, khi
+  `type.base == "auto"` và token kế là `[` (mirror
+  `Parser::parseDeclaration`, `src/parsing/parser.cpp:2570-2592`):
+  đọc các identifier cách nhau `,`, `expect("]")`, `expect("=")`,
+  `parse_expr()`, rồi `expect(";")` khi `expect_semi != 0`.
+- Tên được intern và ghi vào pool mới `sbnm_`
+  (`push_sbname`/`sbnms`); stmt kind 16 giữ `a` = init và
+  `sstart`/`sn` = run tên.
+- Lỗi `expected identifier in structured binding` →
+  `synchronize()` + stmt null (kind 14), giống oracle.
+
+#### 46.3 HIR (`selfhost/hir/hir_builder.ivy`)
+
+- `build_stmt` kind 16 → `build_structbind`, mirror
+  `buildStmt(A::StructuredBinding)` (`src/hir/hir_builder.cpp:1859-1933`):
+  1. build init, lấy type, `is_ref = 0`;
+  2. `find_struct(initType.base)`; lỗi nếu không phải struct;
+  3. so `a.sn` với `nfields`; lỗi nếu lệch;
+  4. synth compound (kind 1) gồm N+1 decl: `__sb_N` (type init) rồi
+     từng field (type `resolve_alias(field.type)`, init Member `.field`
+     trên IdentRef `__sb_N`);
+  5. `declare()` từng tên vào scope hiện tại — không `enter_scope`,
+     không `record_dtor_var` (oracle cũng không đăng ký dtor).
+- Counter `__sb_N` là field `sbctr_`, reset trong `setup`, tăng theo
+  thứ tự build trên toàn chương trình (giống static trong oracle).
+- Tên tạm lưu bằng `sb_save_long()`. Lưu ý: **không đặt tên biến local
+  là `tmp`** — oracle sinh alloca `%tmp.N` trùng counter với temp
+  instruction và LLVM báo `multiple definition of local value`.
+- `astdrive.ivy`: dump `structured-binding [a, b]` + init (kind 16),
+  thêm field `sbnm` (nạp từ `pa.sbnms()`).
+
+#### 46.4 Probe
+
+- `--hir` oracle của `test_structured_binding`: block gồm
+  `decl Point __sb_0 = ident p`, `decl int32_t x = member . x
+  (ident __sb_0)`, ...; binding thứ hai dùng `__sb_1`.
+- `--llvm` khớp byte: `test_structured_binding` 2,424 bytes.
+
+#### 46.5 Fixture mới (223-227)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `223_structured_binding_two.ivy` | Point 2 field từ biến local |
+| `224_structured_binding_three.ivy` | RGB 3 field, hai binding (`__sb_0`, `__sb_1`) |
+| `225_structured_binding_call.ivy` | `auto [a, b] = make(3, 4);` (struct return) |
+| `226_structured_binding_mixed.ivy` | field `int32`/`float64`/`bool` |
+| `227_structured_binding_nested.ivy` | field là struct lồng (`Inner in`), dùng `in.a` |
+
+#### 46.6 Kết quả
+
+`cgdiff.ps1` (2026-11-14):
+
+```text
+[3/4] running 227 fixtures ...
+[4/4] summary
+      PASS 227 / 227
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng):
+`INDEP PASS 227/227`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **41 MATCH** (trước w: 40).
+File mới khớp byte là `test_structured_binding`; không file nào regress.
+24 DIFF còn lại thuộc stage sau: `test_b5_*`/`test_b6_*`/`test_d1..d7`/
+`test_d4_*`/`test_move_*` (z), `test_range_for` (x), `test_inherit*` (y),
+`test_return_value`/`test_module_math` (aa).
+
+#### 46.7 Trạng thái H6.2w
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/parser.ivy`: pool `sbnm_`, `push_sbname`/`sbnms`,
+  nhánh `auto [` trong `parse_decl`;
+- `selfhost/parsing/ast.ivy`: comment kind 16;
+- `selfhost/parsing/astdrive.ivy`: dump kind 16 + field `sbnm`;
+- `selfhost/hir/hir_builder.ivy`: `sbnm_`/`sbctr_`, `build_structbind`,
+  dispatch kind 16 trong `build_stmt`;
+- `selfhost/corpus/codegen/223..227_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 46 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..w ... 227/227`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62w\` (và `h62s`, `h62n`,
+`h62r`, `h62verify` cho verify độc lập).
+
+## 47. H6.2x - range-based for (`for (T x : range)`)
+
+#### 47.1 Phạm vi
+
+- `for (T x : range) { body }` và `for (T& x : range) { body }`
+  (parser đã sinh stmt kind 7 từ H6.2a; trước x, HIR trả stmt null).
+- HIR desugar thành vòng lặp index rồi **tái dùng `build_stmt`** cho
+  stmt `For` tổng hợp, nên mọi kiểm tra type/overload/RAII áp dụng
+  thống nhất (mirror `HirBuilder::buildRangeFor`,
+  `src/hir/hir_builder.cpp:1505-1679`).
+- Hai dạng range:
+  - mảng fixed-size `T[N]` (bound = `array_size`, compile-time);
+  - struct có `len()` + `operator[]` (bound = `range.len()`,
+    element = `range[__rfiN]`).
+- Chẩn đoán (khớp byte oracle):
+  - `range-based for requires a fixed-size array (T[N]) or a struct with len() and operator[] methods`
+  - `range-based for requires len() and operator[] methods on the range type`
+
+#### 47.2 Desugar (mirror oracle)
+
+```text
+for (T x : range) { body }
+=>
+for (size_t __rfiN = 0; __rfiN < N; ++__rfiN) {
+    T x = range[__rfiN];   // T& khi by-reference
+    body
+}
+```
+
+- Range expr được build **một lần đầu rồi bỏ** để lấy type; bản build
+  này vẫn tiêu thụ temp của HIR (bug-compat với oracle).
+- Oracle `cloneExpr` range cho cond (non-array) và body; port dùng lại
+  cùng AST index vì `build_expr` không mutate AST → cùng HIR/temp.
+- Thứ tự build init → cond → incr → body do `build_stmt(For)` đảm bảo.
+
+#### 47.3 HIR (`selfhost/hir/hir_builder.ivy`)
+
+- `build_stmt` kind 7 → `build_range_for(a)`.
+- Thêm counter `rfc_` (reset trong `setup`) cho tên `__rfiN` toàn
+  chương trình, kể cả vòng lặp lồng nhau.
+- Tên lưu qua `sb_reset`/`sb_put`/`sb_put_num`/`sb_save_long` (pointer
+  ổn định trong pool của builder).
+- AST tổng hợp được push vào pool của parser
+  (`pa.fresh`/`pa.push_expr`/`pa.fresh_stmt`/`pa.push_stmt`/`pa.set_next`):
+  - init: decl kind 2, type `size_t`, init int literal `0`;
+  - cond: binary `<` (kind 11) giữa ident `__rfiN` và int `N`, hoặc
+    call (kind 13) `len` (member kind 15) khi non-array;
+  - incr: unary `++` prefix (kind 10, `flag = 1`);
+  - body: compound (kind 1) gồm decl `T x = range[__rfiN]`
+    (index kind 14; `vd.type.is_ref = a.flag`) nối `next` tới body
+    người dùng (`a.b`), `sn = 2`;
+  - stmt `For` (kind 6): `a = init`, `b = cond`, `c = incr`,
+    `sstart = body`.
+- Non-array: `find_struct(rangeType.base)`; nếu không phải struct →
+  lỗi 1; thiếu `len` hoặc `operator[]` (qua `find_method_owner`, có
+  inheritance) → lỗi 2; sau đó trả stmt null (kind 13).
+- `size_t` không phải alias `using` nên `resolve_alias` giữ nguyên,
+  khớp dump oracle (`decl size_t __rfiN`).
+
+#### 47.4 Emitter (`selfhost/codegen/emitter.ivy`)
+
+- `lower_ident` bỏ điều kiện tên `is_ref_var(e.sval) != 0`; chỉ dùng
+  `e.type.is_ref` — mirror `CodeGen::lowerExpr` IdentRef
+  (`src/codegen/codegen.cpp:1172-1196`). `lower_lvalue` vẫn dùng
+  `is_ref_var` (mirror `varIsRef_`).
+- Lý do: slot alloca được hoist theo tên (last-wins, bug-compat), còn
+  việc *đọc* giá trị do type của biểu thức quyết định. Khi một tên được
+  khai báo lại bằng reference ở scope sau (range-for by-value rồi
+  by-ref cùng tên `x`, hoặc hai block cùng tên), oracle đọc theo type
+  của từng biểu thức; điều kiện tên làm port sinh thêm `load ptr`.
+- Sửa này độc lập với range-for: probe hai block cùng tên
+  (`int32 x` rồi `int32& x`) trước đây DIFF, nay MATCH; 227 fixture cũ
+  không regress.
+
+#### 47.5 Probe
+
+- `--hir` oracle của `examples/test_range_for.ivy`: 7 vòng
+  `__rfi0..__rfi6` (kể cả lồng nhau), `decl size_t __rfiN = int 0`,
+  `binary '<' : bool`, `prefix '++' : size_t`, body
+  `block { decl int32_t x = index ...; block { ... } }`.
+- HIR của port (qua `selfhost/hir/hirdrive.ivy`) khớp **byte** với
+  oracle cho `test_range_for` + 7 fixture mới (sau khi bỏ dòng header
+  `=== path ===` do hirdrive in).
+- `--llvm` khớp byte: `test_range_for` 13,279 bytes.
+- Negative test ngoài corpus (4 file): range không phải mảng/struct,
+  struct thiếu cả hai method, chỉ có `len`, chỉ có `operator[]` — stderr
+  khớp byte oracle, exit code 1.
+
+#### 47.6 Fixture mới (228-234)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `228_range_for_value.ivy` | mảng `int32[4]`, by-value, `printf` |
+| `229_range_for_ref.ivy` | by-ref `x = x * 10` rồi `const int32&` |
+| `230_range_for_break_continue.ivy` | `break`/`continue` trong range-for |
+| `231_range_for_nested.ivy` | hai vòng lồng nhau (`__rfi0`, `__rfi1`) |
+| `232_range_for_struct_range.ivy` | struct có `len()` + `operator[]`, value + ref cùng tên `x` |
+| `233_range_for_struct_elem.ivy` | mảng struct: by-value, `P&`, `const P&` |
+| `234_range_for_float.ivy` | mảng `float64[3]`, cộng dồn |
+
+#### 47.7 Kết quả
+
+`cgdiff.ps1` (2026-11-14):
+
+```text
+[3/4] running 234 fixtures ...
+[4/4] summary
+      PASS 234 / 234
+PASS: stdout bytes, stderr bytes, and exit status match for every fixture
+```
+
+`indep_verify.ps1` (build lại từ đầu trong scratch riêng):
+`INDEP PASS 234/234`. `interpdiff.ps1`: `PASS 23 / 23`.
+`build_smoke.ps1`: PASS (`h61 smoke ok`).
+
+Trên 65 example được oracle chấp nhận: **42 MATCH** (trước x: 41).
+File mới khớp byte là `test_range_for`; không file nào regress.
+23 DIFF còn lại thuộc stage sau: `test_b5_*`/`test_b6_*`/`test_d1..d7`/
+`test_d4_*`/`test_move_*` (z), `test_inherit*` (y),
+`test_return_value`/`test_module_math` (aa).
+
+#### 47.8 Trạng thái H6.2x
+
+Tập thêm/sửa:
+
+- `selfhost/hir/hir_builder.ivy`: field `rfc_`, reset trong `setup`,
+  `build_range_for`, dispatch kind 7 trong `build_stmt`;
+- `selfhost/codegen/emitter.ivy`: `lower_ident` chỉ dựa `e.type.is_ref`;
+- `selfhost/corpus/codegen/228..234_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 47 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..x ... 234/234`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62x\` (và `h62s`, `h62n`,
+`h62r`, `h62verify` cho verify độc lập).
+

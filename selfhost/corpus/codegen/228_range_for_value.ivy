@@ -1,0 +1,21 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int32 main() {
+    int32 arr[4];
+    arr[0] = 3;
+    arr[1] = 4;
+    arr[2] = 5;
+    arr[3] = 6;
+
+    int32 sum = 0;
+    for (int32 x : arr) {
+        sum = sum + x;
+    }
+
+    printf("sum = %d\n", sum);
+    return sum;
+}

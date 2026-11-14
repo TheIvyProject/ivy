@@ -1,0 +1,26 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int32 main() {
+    int32 arr[3];
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+
+    // By-reference: modify the array in place.
+    for (int32& x : arr) {
+        x = x * 10;
+    }
+
+    // Const reference: read-only access.
+    int32 s = 0;
+    for (const int32& x : arr) {
+        s = s + x;
+    }
+
+    printf("%d %d %d\n", arr[0], arr[1], arr[2]);
+    return s;
+}

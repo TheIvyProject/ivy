@@ -1,0 +1,18 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Mixed {
+    int32 i;
+    float64 f;
+    bool b;
+};
+
+int32 main() {
+    Mixed m = {7, 2.5, true};
+    auto [i, f, b] = m;
+    printf("%d %.2f %d\n", i, f, b);
+    return i;
+}

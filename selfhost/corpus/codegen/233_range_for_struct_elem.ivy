@@ -1,0 +1,31 @@
+struct P {
+    int32 x;
+    int32 y;
+};
+
+int32 main() {
+    P ps[3];
+    ps[0].x = 1;
+    ps[0].y = 2;
+    ps[1].x = 3;
+    ps[1].y = 4;
+    ps[2].x = 5;
+    ps[2].y = 6;
+
+    // Array of structs, by value.
+    int32 s = 0;
+    for (P p : ps) {
+        s = s + p.x + p.y;
+    }
+
+    // Array of structs, by reference.
+    for (P& p : ps) {
+        p.x = p.x + 10;
+    }
+
+    // Const reference.
+    for (const P& p : ps) {
+        s = s + p.x;
+    }
+    return s;
+}

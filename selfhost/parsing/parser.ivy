@@ -121,6 +121,13 @@ export struct Parser {
     long dp_n_;
     long dp_cap_;
 
+    // H6.2w: structured binding name pool.  Each entry is the interned name
+    // of an `auto [a, b] = expr;` binding, stored as long (the interned
+    // pointer).  The statement records the run with `sstart`/`sn`.
+    long* sbnm_;
+    long sbnm_n_;
+    long sbnm_cap_;
+
     // H6.2s: constructor member initializer pool.  Two parallel `long` pools:
     // the interned field name and the initializer expression index.
     long* miname_;
@@ -269,6 +276,8 @@ export struct Parser {
         this.cp_cap_ = in_count + 16;
         this.dp_n_ = 0;
         this.dp_cap_ = in_count + 16;
+        this.sbnm_n_ = 0;
+        this.sbnm_cap_ = in_count + 16;
         this.tn_n_ = 0;
         this.tn_cap_ = in_count + 16;
         this.tp_n_ = 0;
@@ -327,6 +336,7 @@ export struct Parser {
         this.argn_next_ = (long*) __ivy_alloc(this.argn_cap_ * 8);
         this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 32);
         this.dpool_ = (long*) __ivy_alloc(this.dp_cap_ * 8);
+        this.sbnm_ = (long*) __ivy_alloc(this.sbnm_cap_ * 8);
         this.mi_cap_ = in_count + 16;
         this.miname_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
         this.miarg_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
@@ -371,6 +381,7 @@ export struct Parser {
         __ivy_free(this.argn_next_);
             __ivy_free(this.casepool_);
             __ivy_free(this.dpool_);
+            __ivy_free(this.sbnm_);
             __ivy_free(this.miname_);
             __ivy_free(this.miarg_);
             __ivy_free(this.dline_);
@@ -2290,6 +2301,16 @@ export struct Parser {
         }
     }
 
+    // H6.2w: append a structured binding name (an interned pointer as long).
+    void push_sbname(long nm) {
+        if (this.sbnm_n_ < this.sbnm_cap_) {
+            unsafe {
+                this.sbnm_[this.sbnm_n_] = nm;
+            }
+            this.sbnm_n_ = this.sbnm_n_ + 1;
+        }
+    }
+
     void set_next(long i, long v) {
         unsafe {
             this.spool_[i].next = v;
@@ -2318,6 +2339,13 @@ export struct Parser {
     long* desigs() {
         unsafe {
             return this.dpool_;
+        }
+    }
+
+    // H6.2w: the interned structured binding names (`Parser::push_sbname`).
+    long* sbnms() {
+        unsafe {
+            return this.sbnm_;
         }
     }
 
@@ -3607,6 +3635,55 @@ export struct Parser {
             sn.line = start.line;
             sn.col = start.col;
             return this.push_stmt(sn);
+        }
+        // H6.2w: structured bindings - `auto [a, b, c] = expr;`.
+        // The names are interned into the structured binding pool and the
+        // statement records the run with `sstart`/`sn`; the initializer is
+        // in `a`.  The HIR builder desugars the binding into per-field
+        // declarations.
+        if (this.cstr_eq(type.base, "auto") && this.at("[")) {
+            this.next();
+            long nstart = this.sbnm_n_;
+            long ncount = 0;
+            if (!this.at("]")) {
+                long go = 1;
+                while (go != 0) {
+                    if (!this.at("identifier")) {
+                        this.error_at(this.peek(0),
+                                      "expected identifier in structured binding");
+                        this.synchronize();
+                        AStmt sn = this.fresh_stmt(14);
+                        sn.line = start.line;
+                        sn.col = start.col;
+                        return this.push_stmt(sn);
+                    }
+                    Token nt = this.next();
+                    long nmp = 0;
+                    unsafe {
+                        nmp = (long) this.intern_tok(nt);
+                    }
+                    this.push_sbname(nmp);
+                    ncount = ncount + 1;
+                    if (this.at(",")) {
+                        this.next();
+                    } else {
+                        go = 0;
+                    }
+                }
+            }
+            this.expect("]", "expected ']' after structured binding names");
+            this.expect("=", "structured binding requires '= expr'");
+            long init = this.parse_expr();
+            if (expect_semi != 0) {
+                this.expect(";", "expected ';' after structured binding");
+            }
+            AStmt s = this.fresh_stmt(16);
+            s.a = init;
+            s.sstart = nstart;
+            s.sn = ncount;
+            s.line = start.line;
+            s.col = start.col;
+            return this.push_stmt(s);
         }
         long first = this.parse_declarator(type, start.line, start.col);
         if (!this.at(",")) {

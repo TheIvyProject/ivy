@@ -2152,10 +2152,14 @@ export struct Emitter {
             this.fail(e.line, e.col, "internal: identifier is not in the variable table");
             return this.imm(0);
         }
-        if (this.is_ref_var(e.sval) != 0 || e.type.is_ref != 0) {
+        if (e.type.is_ref != 0) {
             // H6.2h: reference variable (reference parameter).  The slot holds
             // the address of the referenced object; load it, then load the
             // value through it (CodeGen::lowerExpr's IdentRef reference case).
+            // H6.2x: the *expression* type decides, not the name-based
+            // `varIsRef_` table: a name redeclared as a reference in a later
+            // scope still reads as a value where the earlier value
+            // declaration is in scope (mirror of lowerExpr).
             VRef addr = this.new_temp();
             this.emit_val(addr);
             this.ps(" = load ptr, ptr ");

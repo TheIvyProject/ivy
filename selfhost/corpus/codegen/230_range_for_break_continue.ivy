@@ -1,0 +1,17 @@
+int32 main() {
+    int32 a[5];
+    a[0] = 1;
+    a[1] = 2;
+    a[2] = 3;
+    a[3] = 4;
+    a[4] = 5;
+
+    // continue skips 3, break stops at 5: sum = 1 + 2 + 4 = 7.
+    int32 s = 0;
+    for (int32 x : a) {
+        if (x == 3) continue;
+        if (x > 4) break;
+        s = s + x;
+    }
+    return s;
+}

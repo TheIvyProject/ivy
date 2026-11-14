@@ -301,6 +301,10 @@ export struct AExpr {
 //   1 compound  2 decl  3 if  4 while  5 dowhile  6 for  7 rangefor
 //   8 return  9 break  10 continue  11 nextcase  12 exprstmt  13 unsafe
 //   14 null  15 switch  16 structbind
+//
+// H6.2w: a structured binding (`auto [a, b] = expr;`) stores its initializer
+// in `a` and its names as a run of `sn` interned name pointers starting at
+// `sstart` in the parser's structured binding name pool (`Parser::sbnms()`).
 export struct AStmt {
     long kind;
     const char* sval;   // decl name / nextcase target

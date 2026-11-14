@@ -27,6 +27,7 @@ struct Dumper {
     AStmt* sp;
     long* ca;
     ACase* cp;
+    long* sbnm;
 
     long slen(const char* s) {
         long i = 0;
@@ -385,6 +386,24 @@ struct Dumper {
             }
             return;
         }
+        if (s.kind == 16) {
+            io::print("structured-binding [");
+            long k = 0;
+            while (k < s.sn) {
+                if (k > 0) {
+                    io::print(", ");
+                }
+                unsafe {
+                    io::print("{}", (char*) this.sbnm[s.sstart + k]);
+                }
+                k = k + 1;
+            }
+            io::println("]");
+            if (s.a >= 0) {
+                this.dump_expr(s.a, depth + 1);
+            }
+            return;
+        }
     }
 
     void emit(AFunction f) {
@@ -520,6 +539,7 @@ void run() {
                             d.sp = pa.stmts();
                             d.ca = pa.call_args();
                             d.cp = pa.cases();
+                            d.sbnm = pa.sbnms();
                             long n = pa.fn_count();
                             long i = 0;
                             while (i < n) {

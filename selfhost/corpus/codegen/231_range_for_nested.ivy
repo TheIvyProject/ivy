@@ -1,0 +1,15 @@
+int32 main() {
+    int32 a[3];
+    a[0] = 0;
+    a[1] = 1;
+    a[2] = 2;
+
+    // Nested range-for: 9 iterations, sum(i * 3 + j) = 27.
+    int32 total = 0;
+    for (int32 i : a) {
+        for (int32 j : a) {
+            total = total + i * 3 + j;
+        }
+    }
+    return total;
+}

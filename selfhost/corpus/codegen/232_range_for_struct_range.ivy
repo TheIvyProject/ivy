@@ -1,0 +1,37 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+// A non-array range: a struct with len() and operator[].
+struct Buf {
+    int32 v0;
+    int32 v1;
+
+    uint64 len() {
+        return 2;
+    }
+
+    int32& operator[](uint64 i) {
+        if (i == 0) { return this.v0; }
+        return this.v1;
+    }
+};
+
+int32 main() {
+    Buf b;
+    b.v0 = 7;
+    b.v1 = 9;
+
+    int32 s = 0;
+    for (int32 x : b) {
+        s = s + x;
+    }
+    for (int32& x : b) {
+        x = x + 1;
+    }
+
+    printf("%d %d\n", b.v0, b.v1);
+    return s + b.v0 + b.v1;
+}

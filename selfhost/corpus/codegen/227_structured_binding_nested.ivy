@@ -1,0 +1,25 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Inner {
+    int32 a;
+    int32 b;
+};
+
+struct Outer {
+    Inner in;
+    int32 tail;
+};
+
+int32 main() {
+    Outer o;
+    o.in.a = 1;
+    o.in.b = 2;
+    o.tail = 3;
+    auto [in, tail] = o;
+    printf("in.a = %d, in.b = %d, tail = %d\n", in.a, in.b, tail);
+    return tail;
+}

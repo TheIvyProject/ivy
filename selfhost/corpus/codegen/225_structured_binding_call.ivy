@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Point {
+    int32 x;
+    int32 y;
+};
+
+Point make(int32 a, int32 b) {
+    Point p;
+    p.x = a;
+    p.y = b;
+    return p;
+}
+
+int32 main() {
+    auto [a, b] = make(3, 4);
+    printf("a = %d, b = %d\n", a, b);
+    return a + b;
+}
