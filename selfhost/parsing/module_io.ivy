@@ -1,0 +1,1855 @@
+// selfhost/parsing/module_io.ivy - H7.3 `.ivm` module interface read/write.
+//
+// Mirror of src/parsing/module_io.cpp:
+//
+//   * `serializeType` / `deserializeType` - the compact type encoding
+//     `base[:unsigned][:const][:ref][:ptr<depth>][:arr<size>][:tpl{...}]`.
+//   * `escape` / `unescape` - `\n`, `\r` and space (`\s`) escaping.
+//   * `writeModuleInterface` - the `IVYMOD\x01` header, `module <name>`, then
+//     the exported functions / structs / enums and *all* using aliases and
+//     concepts (the oracle does not check `isExported` for those two).
+//   * `readModuleInterface` - parse the file back.  The reader qualifies a
+//     function name with `<module>::` unless it is `extern "C"` or already
+//     qualified, and a method name with `<struct>::` when it is not already
+//     qualified.  Enumerator values are dropped (`e.value = nullptr` in the
+//     oracle), so a read-then-write round trip emits `=-1`.
+//
+// The selfhost AST has no `isExported`, `isOperator` or `isConsteval` on
+// `AFunction` for the first two, so the parser keeps the export flags in
+// parallel pools (H7.3) and this module derives the method flags from the
+// qualified name (`Struct::Struct`, `Struct::~Struct`, `Struct::operatorX`).
+// Two known gaps against the oracle, both outside the H7.3 harness:
+//   * a free `operator` function cannot be parsed by the selfhost parser;
+//   * a template base class is stored as its bare name (`Base`, not
+//     `Base:tpl{int32}`) because `AStruct` keeps base names only.
+//
+// `ModuleUnit` is the in-memory form used by both directions: the writer
+// fills it from a parsed `Parser` (`from_parser`), the reader fills it from a
+// `.ivm` file (`read_module`).  `write` and `dump` serialize it, which keeps
+// the byte format in one place.
+
+#pragma ivy cnumber
+export module module_io;
+
+import ast;
+import parser;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void* __ivy_file_open_write(const char* path);
+extern "C" unsigned long long __ivy_file_write(void* f, const void* buf,
+                                               unsigned long long n);
+extern "C" void  __ivy_file_close(void* f);
+
+// --- in-memory module interface --------------------------------------------
+
+export struct ModParam {
+    AType type;
+    const char* name;
+};
+
+export struct ModFunc {
+    const char* name;
+    AType ret;
+    ModParam* params;
+    long nparams;
+    long is_extern_c;
+    long is_constexpr;
+    long is_consteval;
+    long is_operator;
+    const char* op_symbol;
+};
+
+export struct ModMethod {
+    const char* name;
+    AType ret;
+    ModParam* params;
+    long nparams;
+    long is_ctor;
+    long is_dtor;
+    long is_operator;
+    const char* op_symbol;
+};
+
+export struct ModStruct {
+    const char* name;
+    AField* fields;
+    long nfields;
+    AType* bases;
+    long nbases;
+    long is_class;
+    ATemplateParam* tpl;
+    long ntpl;
+    ModMethod* methods;
+    long nmethods;
+};
+
+export struct ModEnum {
+    const char* name;
+    long is_scoped;
+    AType underlying;
+    AEnumerator* ens;
+    long nens;
+};
+
+export struct ModUsing {
+    const char* name;
+    AType target;
+};
+
+export struct ModConcept {
+    const char* name;
+    const char* param_name;
+    long req_start;
+    long nreqs;
+};
+
+// --- growable byte buffer ---------------------------------------------------
+
+export struct IvmBuf {
+    char* data_;
+    long len_;
+    long cap_;
+
+    void setup(long cap) {
+        unsafe {
+            if (cap < 64) { cap = 64; }
+            this.data_ = (char*) __ivy_alloc((unsigned long long) cap);
+            this.len_ = 0;
+            this.cap_ = cap;
+            this.data_[0] = 0;
+        }
+    }
+
+    void release() {
+        unsafe {
+            if (this.data_ != (char*) 0) {
+                __ivy_free(this.data_);
+            }
+            this.data_ = (char*) 0;
+            this.len_ = 0;
+            this.cap_ = 0;
+        }
+    }
+
+    void reset() {
+        this.len_ = 0;
+        unsafe { this.data_[0] = 0; }
+    }
+
+    void ensure(long extra) {
+        unsafe {
+            long need = this.len_ + extra + 1;
+            if (need <= this.cap_) { return; }
+            long ncap = this.cap_ * 2;
+            while (ncap < need) { ncap = ncap * 2; }
+            char* grown = (char*) __ivy_alloc((unsigned long long) ncap);
+            __ivy_memcpy(grown, this.data_, (unsigned long long) (this.len_ + 1));
+            __ivy_free(this.data_);
+            this.data_ = grown;
+            this.cap_ = ncap;
+        }
+    }
+
+    void add(const char* s) {
+        unsafe {
+            char* p = (char*) s;
+            if (p == (char*) 0) { return; }
+            long n = (long) __ivy_strlen(s);
+            this.ensure(n);
+            __ivy_memcpy(this.data_ + this.len_, s, (unsigned long long) n);
+            this.len_ = this.len_ + n;
+            this.data_[this.len_] = 0;
+        }
+    }
+
+    void ch(char c) {
+        unsafe {
+            this.ensure(1);
+            this.data_[this.len_] = c;
+            this.len_ = this.len_ + 1;
+            this.data_[this.len_] = 0;
+        }
+    }
+
+    // Decimal form of `v` (the oracle's `operator<<(ostream&, long long)`).
+    void num(long v) {
+        unsafe {
+        uint64 mag = 0;
+        unsafe {
+            if (v < 0) {
+                mag = (uint64) 0 - (uint64) v;
+            } else {
+                mag = (uint64) v;
+            }
+        }
+        char digits[32];
+        long pos = 0;
+        if (mag == 0) {
+            digits[0] = 48;
+            pos = 1;
+        } else {
+            while (mag > 0) {
+                digits[pos] = (char) (48 + (long) (mag % 10));
+                pos = pos + 1;
+                mag = mag / 10;
+            }
+        }
+        if (v < 0) { this.ch(45); }
+        long i = pos - 1;
+        while (i >= 0) {
+            this.ch(digits[i]);
+            i = i - 1;
+        }
+        }
+    }
+
+    // `escape`: newline, CR and space become `\n`, `\r`, `\s`.
+    void esc(const char* s) {
+        unsafe {
+            char* p = (char*) s;
+            if (p == (char*) 0) { return; }
+            long i = 0;
+            while (s[i] != 0) {
+                char c = s[i];
+                if (c == 10) {
+                    this.ch(92);
+                    this.ch(110);
+                } else if (c == 13) {
+                    this.ch(92);
+                    this.ch(114);
+                } else if (c == 32) {
+                    this.ch(92);
+                    this.ch(115);
+                } else {
+                    this.ch(c);
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // `serializeType`.
+    void type(AType t) {
+        long bp = 0;
+        unsafe { bp = reinterpret_cast<long>(t.base); }
+        if (bp != 0) { this.add(t.base); }
+        if (t.is_unsigned) { this.add(":unsigned"); }
+        if (t.is_const) { this.add(":const"); }
+        if (t.is_ref) { this.add(":ref"); }
+        if (t.ptr_depth > 0) {
+            this.add(":ptr");
+            this.num(t.ptr_depth);
+        }
+        if (t.array_size > 0) {
+            this.add(":arr");
+            this.num(t.array_size);
+        }
+        long k = 0;
+        unsafe {
+            while (k < t.tpl_n) {
+                this.add(":tpl{");
+                this.type(t.tpl_args[k]);
+                this.ch(125);
+                k = k + 1;
+            }
+        }
+    }
+
+    void param(ModParam p) {
+        this.ch(32);
+        this.type(p.type);
+        this.ch(58);
+        this.esc(p.name);
+    }
+
+    void func(ModFunc f) {
+        unsafe {
+        this.add("func ");
+        this.add(f.name);
+        this.ch(32);
+        this.type(f.ret);
+        this.ch(32);
+        this.num(f.nparams);
+        long k = 0;
+        while (k < f.nparams) {
+            this.param(f.params[k]);
+            k = k + 1;
+        }
+        this.ch(32);
+        this.num(f.is_extern_c);
+        this.ch(32);
+        this.num(f.is_constexpr);
+        this.ch(32);
+        this.num(f.is_consteval);
+        this.ch(32);
+        this.num(f.is_operator);
+        if (f.is_operator != 0) {
+            this.ch(32);
+            this.esc(f.op_symbol);
+        }
+        }
+    }
+
+    void method(ModMethod m) {
+        unsafe {
+        this.ch(32);
+        this.esc(m.name);
+        this.ch(32);
+        this.type(m.ret);
+        this.ch(32);
+        this.num(m.nparams);
+        long k = 0;
+        while (k < m.nparams) {
+            this.param(m.params[k]);
+            k = k + 1;
+        }
+        this.ch(32);
+        this.num(m.is_ctor);
+        this.ch(32);
+        this.num(m.is_dtor);
+        this.ch(32);
+        this.num(m.is_operator);
+        if (m.is_operator != 0) {
+            this.ch(32);
+            this.esc(m.op_symbol);
+        }
+        }
+    }
+
+    void struct_decl(ModStruct s) {
+        unsafe {
+        this.add("struct ");
+        this.add(s.name);
+        this.ch(32);
+        this.num(s.nfields);
+        long k = 0;
+        while (k < s.nfields) {
+            AField f = s.fields[k];
+            this.ch(32);
+            this.type(f.type);
+            this.ch(58);
+            this.esc(f.name);
+            k = k + 1;
+        }
+        this.ch(32);
+        this.num(s.nbases);
+        k = 0;
+        while (k < s.nbases) {
+            this.ch(32);
+            this.type(s.bases[k]);
+            k = k + 1;
+        }
+        this.ch(32);
+        this.num(s.is_class);
+        this.ch(32);
+        this.num(s.ntpl);
+        k = 0;
+        while (k < s.ntpl) {
+            ATemplateParam tp = s.tpl[k];
+            this.ch(32);
+            this.esc(tp.name);
+            this.ch(32);
+            this.num(tp.is_typename);
+            this.ch(32);
+            this.num(tp.is_variadic);
+            k = k + 1;
+        }
+        this.ch(32);
+        this.num(s.nmethods);
+        k = 0;
+        while (k < s.nmethods) {
+            this.method(s.methods[k]);
+            k = k + 1;
+        }
+        }
+    }
+
+    void enum_decl(ModEnum e) {
+        unsafe {
+        this.add("enum ");
+        this.add(e.name);
+        this.ch(32);
+        this.num(e.is_scoped);
+        this.ch(32);
+        this.type(e.underlying);
+        this.ch(32);
+        this.num(e.nens);
+        long k = 0;
+        while (k < e.nens) {
+            this.ch(32);
+            this.esc(e.ens[k].name);
+            this.ch(61);
+            this.num(e.ens[k].value);
+            k = k + 1;
+        }
+        }
+    }
+
+    void using_decl(ModUsing u) {
+        this.add("using ");
+        this.add(u.name);
+        this.ch(32);
+        this.type(u.target);
+    }
+};
+
+// A single `.ivm` line being tokenized in place (the line's `\n` was replaced
+// by a NUL, so the last token is already NUL-terminated).
+export struct ModLine {
+    char* s;
+    long n;
+    long pos;
+
+    char* tok() {
+        unsafe {
+        unsafe {
+            while (this.pos < this.n) {
+                char c = this.s[this.pos];
+                if (c == 32 || c == 9 || c == 13) {
+                    this.pos = this.pos + 1;
+                } else {
+                    break;
+                }
+            }
+            if (this.pos >= this.n) { return (char*) 0; }
+            long start = this.pos;
+            while (this.pos < this.n) {
+                char c = this.s[this.pos];
+                if (c == 32 || c == 9 || c == 13) { break; }
+                this.pos = this.pos + 1;
+            }
+            char* r = this.s + start;
+            if (this.pos < this.n) {
+                this.s[this.pos] = 0;
+                this.pos = this.pos + 1;
+            }
+            return r;
+        }
+        return (char*) 0;
+        }
+    }
+};
+
+// --- module interface unit -------------------------------------------------
+
+export struct ModuleUnit {
+    long ok;
+    const char* module_name;
+
+    ModFunc* funcs;
+    long nfuncs;
+    long capfuncs;
+    ModStruct* structs;
+    long nstructs;
+    long capstructs;
+    ModEnum* enums;
+    long nenums;
+    long capenums;
+    ModUsing* usings;
+    long nusings;
+    long capusings;
+    ModConcept* concepts;
+    long nconcepts;
+    long capconcepts;
+
+    ModParam* params;
+    long nparams;
+    long capparams;
+    AField* fields;
+    long nfields;
+    long capfields;
+    AType* bases;
+    long nbases;
+    long capbases;
+    ATemplateParam* tpls;
+    long ntpls;
+    long captpls;
+    ModMethod* methods;
+    long nmethods;
+    long capmethods;
+    AEnumerator* ens;
+    long nens;
+    long capens;
+    long* reqpool;
+    long nreqs;
+    long capreqs;
+
+    // `deserializeType` scratch: a stack for the arguments of one type and a
+    // pool of immutable argument blocks.
+    AType* types;
+    long ntypes;
+    long captypes;
+    AType* tstack;
+    long ntstack;
+    long captstack;
+
+    char* buf;          // the file contents when reading
+    long len;
+    ModLine cur;        // the `.ivm` line currently being read
+    // `method_flags` out-parameters (an Ivy struct argument is by value, so
+    // the derived ctor/dtor/operator flags cannot be returned through the
+    // record itself).
+    long method_flag;   // 0 none, 1 ctor, 2 dtor, 3 operator
+    const char* method_op;
+    char* arena;        // unescaped/qualified strings owned by the reader
+    long arena_n;
+    long arena_cap;
+
+    // --- small helpers -----------------------------------------------------
+
+    long cstr_len(const char* s) {
+        long i = 0;
+        unsafe {
+            char* p = (char*) s;
+            if (p == (char*) 0) { return 0; }
+            while (s[i] != 0) { i = i + 1; }
+        }
+        return i;
+    }
+
+    bool cstr_eq(const char* a, const char* b) {
+        unsafe {
+            char* pa = (char*) a;
+            char* pb = (char*) b;
+            if (pa == (char*) 0 || pb == (char*) 0) { return false; }
+            long i = 0;
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) { return false; }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    bool starts_at(const char* s, long pos, long n, const char* p) {
+        unsafe {
+            long i = 0;
+            while (p[i] != 0) {
+                if (pos + i >= n) { return false; }
+                if (s[pos + i] != p[i]) { return false; }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    bool prefix_eq(const char* s, const char* p, long n) {
+        unsafe {
+            long i = 0;
+            while (i < n) {
+                if (s[i] != p[i]) { return false; }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    bool suffix_eq(const char* s, const char* p, long n) {
+        unsafe {
+            long i = 0;
+            while (i < n) {
+                if (s[i] != p[i]) { return false; }
+                i = i + 1;
+            }
+        }
+        return true;
+    }
+
+    bool has_dcolon(const char* s) {
+        unsafe {
+            long i = 0;
+            while (s[i] != 0) {
+                if (s[i] == 58 && s[i + 1] == 58) { return true; }
+                i = i + 1;
+            }
+        }
+        return false;
+    }
+
+    long find_ch(const char* s, long from, long n, long ch) {
+        unsafe {
+            long i = from;
+            while (i < n) {
+                if (s[i] == (char) ch) { return i; }
+                i = i + 1;
+            }
+        }
+        return -1;
+    }
+
+    long to_long(const char* s) {
+        long v = 0;
+        unsafe {
+            char* p = (char*) s;
+            if (p == (char*) 0) { return 0; }
+            long i = 0;
+            while (s[i] >= 48 && s[i] <= 57) {
+                v = v * 10 + (long) (s[i] - 48);
+                i = i + 1;
+            }
+        }
+        return v;
+    }
+
+    // `unescape` in place.  A `char*` parameter cannot be returned without a
+    // `lifetime<$a>` annotation, so the caller keeps its own pointer (the
+    // buffer is modified in place).
+    void unesc(char* s) {
+        unsafe {
+            char* p = (char*) s;
+            if (p == (char*) 0) { return; }
+            long n = this.cstr_len(s);
+            long i = 0;
+            long o = 0;
+            while (i < n) {
+                char c = s[i];
+                if (c == 92 && i + 1 < n) {
+                    char d = s[i + 1];
+                    if (d == 110) {
+                        s[o] = 10;
+                        i = i + 2;
+                        o = o + 1;
+                    } else if (d == 114) {
+                        s[o] = 13;
+                        i = i + 2;
+                        o = o + 1;
+                    } else if (d == 115) {
+                        s[o] = 32;
+                        i = i + 2;
+                        o = o + 1;
+                    } else {
+                        s[o] = c;
+                        i = i + 1;
+                        o = o + 1;
+                    }
+                } else {
+                    s[o] = c;
+                    i = i + 1;
+                    o = o + 1;
+                }
+            }
+            s[o] = 0;
+        }
+    }
+
+    // A heap copy, used when the reader arena is full (a fallback that cannot
+    // be reached with the harness inputs; it leaks, which is acceptable for a
+    // diagnostic-only path).
+    const char* heap_dup(const char* s) {
+        unsafe {
+            long n = this.cstr_len(s);
+            char* p = (char*) __ivy_alloc((unsigned long long) (n + 1));
+            __ivy_memcpy(p, s, (unsigned long long) (n + 1));
+            return p;
+        }
+        return "";
+    }
+
+    const char* arena_dup(const char* s, long n) {
+        unsafe {
+            if (this.arena_n + n + 1 > this.arena_cap) { return this.heap_dup(s); }
+            char* p = this.arena + this.arena_n;
+            long i = 0;
+            while (i < n) {
+                p[i] = s[i];
+                i = i + 1;
+            }
+            p[n] = 0;
+            this.arena_n = this.arena_n + n + 1;
+            return p;
+        }
+        return "";
+    }
+
+    const char* arena_qual(const char* a, const char* b) {
+        unsafe {
+            long la = this.cstr_len(a);
+            long lb = this.cstr_len(b);
+            if (this.arena_n + la + 2 + lb + 1 > this.arena_cap) { return this.heap_dup(b); }
+            char* p = this.arena + this.arena_n;
+            long o = 0;
+            long i = 0;
+            while (i < la) { p[o] = a[i]; o = o + 1; i = i + 1; }
+            p[o] = 58; o = o + 1;
+            p[o] = 58; o = o + 1;
+            i = 0;
+            while (i < lb) { p[o] = b[i]; o = o + 1; i = i + 1; }
+            p[o] = 0;
+            this.arena_n = this.arena_n + o + 1;
+            return p;
+        }
+        return "";
+    }
+
+    const char* req_text(long i) {
+        unsafe {
+            if (i >= 0 && i < this.nreqs) {
+                return reinterpret_cast<const char*>(this.reqpool[i]);
+            }
+        }
+        return "";
+    }
+
+    // --- pool allocation ---------------------------------------------------
+
+    // Record sizes are written out as literals because the oracle's
+    // `sizeof` folds a *struct field* to 8 bytes (`sizeof(ModParam)` is 16,
+    // not 56), so it cannot size these pools.  The numbers are the ABI
+    // layout of the records above:
+    //   ModParam 56, ModFunc 112, ModMethod 104, ModStruct 80, ModEnum 80,
+    //   ModUsing 56, ModConcept 32, AField 72, AType 48,
+    //   ATemplateParam 96, AEnumerator 32.
+    void alloc_pools(long cf, long cs, long ce, long cu, long cc,
+                     long cp, long cfl, long cb, long ct, long cm, long cen,
+                     long cr, long cts) {
+        unsafe {
+        this.capfuncs = cf;
+        this.capstructs = cs;
+        this.capenums = ce;
+        this.capusings = cu;
+        this.capconcepts = cc;
+        this.capparams = cp;
+        this.capfields = cfl;
+        this.capbases = cb;
+        this.captpls = ct;
+        this.capmethods = cm;
+        this.capens = cen;
+        this.capreqs = cr;
+        this.captypes = cts;
+        this.captstack = cts;
+        unsafe {
+            if (cf > 0) {
+                this.funcs = (ModFunc*) __ivy_alloc((unsigned long long) (cf * 112));
+            } else {
+                this.funcs = (ModFunc*) 0;
+            }
+            if (cs > 0) {
+                this.structs = (ModStruct*) __ivy_alloc((unsigned long long) (cs * 80));
+            } else {
+                this.structs = (ModStruct*) 0;
+            }
+            if (ce > 0) {
+                this.enums = (ModEnum*) __ivy_alloc((unsigned long long) (ce * 80));
+            } else {
+                this.enums = (ModEnum*) 0;
+            }
+            if (cu > 0) {
+                this.usings = (ModUsing*) __ivy_alloc((unsigned long long) (cu * 56));
+            } else {
+                this.usings = (ModUsing*) 0;
+            }
+            if (cc > 0) {
+                this.concepts = (ModConcept*) __ivy_alloc((unsigned long long) (cc * 32));
+            } else {
+                this.concepts = (ModConcept*) 0;
+            }
+            if (cp > 0) {
+                this.params = (ModParam*) __ivy_alloc((unsigned long long) (cp * 56));
+            } else {
+                this.params = (ModParam*) 0;
+            }
+            if (cfl > 0) {
+                this.fields = (AField*) __ivy_alloc((unsigned long long) (cfl * 72));
+            } else {
+                this.fields = (AField*) 0;
+            }
+            if (cb > 0) {
+                this.bases = (AType*) __ivy_alloc((unsigned long long) (cb * 48));
+            } else {
+                this.bases = (AType*) 0;
+            }
+            if (ct > 0) {
+                this.tpls = (ATemplateParam*) __ivy_alloc((unsigned long long) (ct * 96));
+            } else {
+                this.tpls = (ATemplateParam*) 0;
+            }
+            if (cm > 0) {
+                this.methods = (ModMethod*) __ivy_alloc((unsigned long long) (cm * 104));
+            } else {
+                this.methods = (ModMethod*) 0;
+            }
+            if (cen > 0) {
+                this.ens = (AEnumerator*) __ivy_alloc((unsigned long long) (cen * 32));
+            } else {
+                this.ens = (AEnumerator*) 0;
+            }
+            if (cr > 0) {
+                this.reqpool = (long*) __ivy_alloc((unsigned long long) (cr * 8));
+            } else {
+                this.reqpool = (long*) 0;
+            }
+            if (cts > 0) {
+                this.types = (AType*) __ivy_alloc((unsigned long long) (cts * 48));
+                this.tstack = (AType*) __ivy_alloc((unsigned long long) (cts * 48));
+            } else {
+                this.types = (AType*) 0;
+                this.tstack = (AType*) 0;
+            }
+        }
+        this.nfuncs = 0;
+        this.nstructs = 0;
+        this.nenums = 0;
+        this.nusings = 0;
+        this.nconcepts = 0;
+        this.nparams = 0;
+        this.nfields = 0;
+        this.nbases = 0;
+        this.ntpls = 0;
+        this.nmethods = 0;
+        this.nens = 0;
+        this.nreqs = 0;
+        this.ntypes = 0;
+        this.ntstack = 0;
+        this.arena = (char*) 0;
+        this.arena_n = 0;
+        this.arena_cap = 0;
+        this.buf = (char*) 0;
+        this.len = 0;
+        this.method_flag = 0;
+        this.method_op = "";
+        }
+    }
+
+    void release() {
+        unsafe {
+            if (this.funcs != (ModFunc*) 0) { __ivy_free(this.funcs); }
+            if (this.structs != (ModStruct*) 0) { __ivy_free(this.structs); }
+            if (this.enums != (ModEnum*) 0) { __ivy_free(this.enums); }
+            if (this.usings != (ModUsing*) 0) { __ivy_free(this.usings); }
+            if (this.concepts != (ModConcept*) 0) { __ivy_free(this.concepts); }
+            if (this.params != (ModParam*) 0) { __ivy_free(this.params); }
+            if (this.fields != (AField*) 0) { __ivy_free(this.fields); }
+            if (this.bases != (AType*) 0) { __ivy_free(this.bases); }
+            if (this.tpls != (ATemplateParam*) 0) { __ivy_free(this.tpls); }
+            if (this.methods != (ModMethod*) 0) { __ivy_free(this.methods); }
+            if (this.ens != (AEnumerator*) 0) { __ivy_free(this.ens); }
+            if (this.reqpool != (long*) 0) { __ivy_free(this.reqpool); }
+            if (this.types != (AType*) 0) { __ivy_free(this.types); }
+            if (this.tstack != (AType*) 0) { __ivy_free(this.tstack); }
+            if (this.buf != (char*) 0) { __ivy_free(this.buf); }
+            if (this.arena != (char*) 0) { __ivy_free(this.arena); }
+            this.funcs = (ModFunc*) 0;
+        this.structs = (ModStruct*) 0;
+        this.enums = (ModEnum*) 0;
+        this.usings = (ModUsing*) 0;
+        this.concepts = (ModConcept*) 0;
+        this.params = (ModParam*) 0;
+        this.fields = (AField*) 0;
+        this.bases = (AType*) 0;
+        this.tpls = (ATemplateParam*) 0;
+        this.methods = (ModMethod*) 0;
+        this.ens = (AEnumerator*) 0;
+        this.reqpool = (long*) 0;
+        this.types = (AType*) 0;
+        this.tstack = (AType*) 0;
+        this.buf = (char*) 0;
+        this.arena = (char*) 0;
+        }
+    }
+
+    void push_func(ModFunc f) {
+        if (this.nfuncs < this.capfuncs) {
+            unsafe { this.funcs[this.nfuncs] = f; }
+            this.nfuncs = this.nfuncs + 1;
+        }
+    }
+
+    void push_struct(ModStruct s) {
+        if (this.nstructs < this.capstructs) {
+            unsafe { this.structs[this.nstructs] = s; }
+            this.nstructs = this.nstructs + 1;
+        }
+    }
+
+    void push_enum(ModEnum e) {
+        if (this.nenums < this.capenums) {
+            unsafe { this.enums[this.nenums] = e; }
+            this.nenums = this.nenums + 1;
+        }
+    }
+
+    void push_using(ModUsing u) {
+        if (this.nusings < this.capusings) {
+            unsafe { this.usings[this.nusings] = u; }
+            this.nusings = this.nusings + 1;
+        }
+    }
+
+    void push_concept(ModConcept c) {
+        if (this.nconcepts < this.capconcepts) {
+            unsafe { this.concepts[this.nconcepts] = c; }
+            this.nconcepts = this.nconcepts + 1;
+        }
+    }
+
+    void push_param(ModParam p) {
+        if (this.nparams < this.capparams) {
+            unsafe { this.params[this.nparams] = p; }
+            this.nparams = this.nparams + 1;
+        }
+    }
+
+    void push_field(AField f) {
+        if (this.nfields < this.capfields) {
+            unsafe { this.fields[this.nfields] = f; }
+            this.nfields = this.nfields + 1;
+        }
+    }
+
+    void push_base(AType b) {
+        if (this.nbases < this.capbases) {
+            unsafe { this.bases[this.nbases] = b; }
+            this.nbases = this.nbases + 1;
+        }
+    }
+
+    void push_tpl(ATemplateParam t) {
+        if (this.ntpls < this.captpls) {
+            unsafe { this.tpls[this.ntpls] = t; }
+            this.ntpls = this.ntpls + 1;
+        }
+    }
+
+    void push_method(ModMethod m) {
+        if (this.nmethods < this.capmethods) {
+            unsafe { this.methods[this.nmethods] = m; }
+            this.nmethods = this.nmethods + 1;
+        }
+    }
+
+    void push_en(AEnumerator e) {
+        if (this.nens < this.capens) {
+            unsafe { this.ens[this.nens] = e; }
+            this.nens = this.nens + 1;
+        }
+    }
+
+    // --- writer: build from the parsed translation unit --------------------
+
+    void from_parser(Parser pa) {
+        unsafe {
+        this.ok = 1;
+        this.module_name = pa.module_name();
+        long nf = pa.fn_count();
+        long ns = pa.struct_count();
+        long ne = pa.enum_count();
+        long na = pa.alias_count();
+        long nc = pa.concept_count();
+
+        long cf = 0;
+        long i = 0;
+        while (i < nf) {
+            if (pa.fn_exported(i) != 0) { cf = cf + 1; }
+            i = i + 1;
+        }
+        long cs = 0;
+        i = 0;
+        while (i < ns) {
+            if (pa.struct_exported(i) != 0) { cs = cs + 1; }
+            i = i + 1;
+        }
+        long ce = 0;
+        i = 0;
+        while (i < ne) {
+            if (pa.enum_exported(i) != 0) { ce = ce + 1; }
+            i = i + 1;
+        }
+
+        long cp = 0;
+        long cfl = 0;
+        long cb = 0;
+        long ct = 0;
+        long cm = 0;
+        long cen = 0;
+        long cr = 0;
+        i = 0;
+        while (i < nf) {
+            if (pa.fn_exported(i) != 0) {
+                AFunction f = pa.get_fn(i);
+                cp = cp + f.nparams;
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < ns) {
+            if (pa.struct_exported(i) != 0) {
+                AStruct s = pa.get_struct(i);
+                cfl = cfl + s.nfields;
+                cb = cb + s.nbases;
+                ct = ct + s.tpl_n;
+                cm = cm + s.nmethods;
+                long j = 0;
+                unsafe {
+                    while (j < s.nmethods) {
+                        cp = cp + s.methods[j].nparams;
+                        j = j + 1;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < ne) {
+            if (pa.enum_exported(i) != 0) {
+                AEnum e = pa.get_enum(i);
+                cen = cen + e.nenumerators;
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < nc) {
+            AConcept c = pa.get_concept(i);
+            cr = cr + c.nreqs;
+            i = i + 1;
+        }
+
+        this.alloc_pools(cf, cs, ce, na, nc, cp, cfl, cb, ct, cm, cen, cr, 0);
+
+        // Exported functions.
+        i = 0;
+        while (i < nf) {
+            if (pa.fn_exported(i) != 0) {
+                AFunction f = pa.get_fn(i);
+                ModFunc mf;
+                mf.name = f.name;
+                mf.ret = f.ret;
+                long pstart = this.nparams;
+                long j = 0;
+                unsafe {
+                    while (j < f.nparams) {
+                        ModParam p;
+                        p.type = f.params[j].type;
+                        p.name = f.params[j].name;
+                        this.push_param(p);
+                        j = j + 1;
+                    }
+                }
+                unsafe { mf.params = this.params + pstart; }
+                mf.nparams = this.nparams - pstart;
+                mf.is_extern_c = f.is_extern_c;
+                mf.is_constexpr = f.is_constexpr;
+                mf.is_consteval = f.is_consteval;
+                // A free operator cannot be represented by the selfhost AST.
+                mf.is_operator = 0;
+                mf.op_symbol = "";
+                this.push_func(mf);
+            }
+            i = i + 1;
+        }
+
+        // Exported structs.
+        i = 0;
+        while (i < ns) {
+            if (pa.struct_exported(i) != 0) {
+                AStruct s = pa.get_struct(i);
+                ModStruct ms;
+                ms.name = s.name;
+                long fstart = this.nfields;
+                long j = 0;
+                unsafe {
+                    while (j < s.nfields) {
+                        this.push_field(s.fields[j]);
+                        j = j + 1;
+                    }
+                }
+                unsafe { ms.fields = this.fields + fstart; }
+                ms.nfields = this.nfields - fstart;
+
+                long bstart = this.nbases;
+                j = 0;
+                while (j < s.nbases) {
+                    AType bt = this.empty_type();
+                    bt.base = pa.base_at(s.bstart + j);
+                    this.push_base(bt);
+                    j = j + 1;
+                }
+                unsafe { ms.bases = this.bases + bstart; }
+                ms.nbases = this.nbases - bstart;
+
+                ms.is_class = s.is_class;
+
+                long tstart = this.ntpls;
+                j = 0;
+                unsafe {
+                    while (j < s.tpl_n) {
+                        this.push_tpl(s.tpl_params[j]);
+                        j = j + 1;
+                    }
+                }
+                unsafe { ms.tpl = this.tpls + tstart; }
+                ms.ntpl = this.ntpls - tstart;
+
+                long mstart = this.nmethods;
+                j = 0;
+                unsafe {
+                    while (j < s.nmethods) {
+                        AFunction am = s.methods[j];
+                        ModMethod mm;
+                        mm.name = am.name;
+                        mm.ret = am.ret;
+                        long pstart = this.nparams;
+                        long k = 0;
+                        while (k < am.nparams) {
+                            ModParam p;
+                            p.type = am.params[k].type;
+                            p.name = am.params[k].name;
+                            this.push_param(p);
+                            k = k + 1;
+                        }
+                        mm.params = this.params + pstart;
+                        mm.nparams = this.nparams - pstart;
+                        this.method_flags(am.name, s.name);
+                        mm.is_ctor = 0;
+                        mm.is_dtor = 0;
+                        mm.is_operator = 0;
+                        mm.op_symbol = "";
+                        if (this.method_flag == 1) {
+                            mm.is_ctor = 1;
+                        } else if (this.method_flag == 2) {
+                            mm.is_dtor = 1;
+                        } else if (this.method_flag == 3) {
+                            mm.is_operator = 1;
+                            mm.op_symbol = this.method_op;
+                        }
+                        this.push_method(mm);
+                        j = j + 1;
+                    }
+                }
+                unsafe { ms.methods = this.methods + mstart; }
+                ms.nmethods = this.nmethods - mstart;
+                this.push_struct(ms);
+            }
+            i = i + 1;
+        }
+
+        // Exported enums.
+        AExpr* ex = pa.exprs();
+        i = 0;
+        while (i < ne) {
+            if (pa.enum_exported(i) != 0) {
+                AEnum e = pa.get_enum(i);
+                ModEnum me;
+                me.name = e.name;
+                me.is_scoped = e.is_scoped;
+                me.underlying = e.underlying;
+                long estart = this.nens;
+                long j = 0;
+                unsafe {
+                    while (j < e.nenumerators) {
+                        AEnumerator en = e.enumerators[j];
+                        AEnumerator copy;
+                        copy.name = en.name;
+                        copy.line = 0;
+                        copy.col = 0;
+                        copy.value = -1;
+                        if (en.value >= 0) {
+                            AExpr ev = ex[en.value];
+                            if (ev.kind == 1) {
+                                copy.value = ev.ival;
+                            }
+                        }
+                        this.push_en(copy);
+                        j = j + 1;
+                    }
+                }
+                unsafe { me.ens = this.ens + estart; }
+                me.nens = this.nens - estart;
+                this.push_enum(me);
+            }
+            i = i + 1;
+        }
+
+        // Every type alias.
+        i = 0;
+        while (i < na) {
+            AAlias a = pa.get_alias(i);
+            ModUsing mu;
+            mu.name = a.name;
+            mu.target = a.target;
+            this.push_using(mu);
+            i = i + 1;
+        }
+
+        // Every concept.
+        i = 0;
+        while (i < nc) {
+            AConcept c = pa.get_concept(i);
+            ModConcept mc;
+            mc.name = c.name;
+            mc.param_name = c.param_name;
+            long rstart = this.nreqs;
+            long j = 0;
+            while (j < c.nreqs) {
+                const char* txt = pa.requirement_text(c.req_start + j);
+                unsafe {
+                    this.reqpool[this.nreqs] = reinterpret_cast<long>(txt);
+                }
+                this.nreqs = this.nreqs + 1;
+                j = j + 1;
+            }
+            mc.req_start = rstart;
+            mc.nreqs = this.nreqs - rstart;
+            this.push_concept(mc);
+            i = i + 1;
+        }
+        }
+    }
+
+    AType empty_type() {
+        AType t;
+        t.base = "";
+        unsafe { t.tpl_args = (AType*) 0; }
+        t.tpl_n = 0;
+        t.is_unsigned = 0;
+        t.is_const = 0;
+        t.is_ref = 0;
+        t.ptr_depth = 0;
+        t.array_size = 0;
+        return t;
+    }
+
+    // Derive `isCtor` / `isDtor` / `isOperator` from the qualified method name.
+    // The result goes through `method_flag` / `method_op` because an Ivy
+    // struct parameter is passed by value (a `ModMethod` argument would be a
+    // copy that the caller never sees).
+    void method_flags(const char* name, const char* sname) {
+        this.method_flag = 0;
+        this.method_op = "";
+        long sl = this.cstr_len(sname);
+        long nl = this.cstr_len(name);
+        unsafe {
+            if (nl == sl * 2 + 3 &&
+                this.prefix_eq(name, sname, sl) &&
+                name[sl] == 58 && name[sl + 1] == 58 && name[sl + 2] == 126 &&
+                this.suffix_eq(name + sl + 3, sname, sl)) {
+                this.method_flag = 2;
+                return;
+            }
+            if (nl == sl * 2 + 2 &&
+                this.prefix_eq(name, sname, sl) &&
+                name[sl] == 58 && name[sl + 1] == 58 &&
+                this.suffix_eq(name + sl + 2, sname, sl)) {
+                this.method_flag = 1;
+                return;
+            }
+            // `Struct::operator<symbol>`.
+            if (nl > sl + 10 &&
+                this.prefix_eq(name, sname, sl) &&
+                name[sl] == 58 && name[sl + 1] == 58 &&
+                this.prefix_eq(name + sl + 2, "operator", 8)) {
+                this.method_flag = 3;
+                this.method_op = name + sl + 10;
+            }
+        }
+    }
+
+    // --- reader ------------------------------------------------------------
+
+    void init(long n) {
+        this.ok = 0;
+        this.module_name = "";
+        long capp = n / 4 + 64;
+        long capd = n / 8 + 64;
+        this.alloc_pools(capd, capd, capd, capd, capd,
+                         capp, capp, capp, capp, capp, capp, capp, capp);
+        this.len = n;
+        this.arena_cap = n * 2 + 4096;
+        unsafe {
+            this.arena = (char*) __ivy_alloc((unsigned long long) this.arena_cap);
+        }
+    }
+
+    bool magic_ok(const char* s, long n) {
+        if (n != 7) { return false; }
+        unsafe {
+            if (s[0] != 73 || s[1] != 86 || s[2] != 89 || s[3] != 77 ||
+                s[4] != 79 || s[5] != 68 || s[6] != 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // `deserializeType`.  The input string is mutable: the base and every
+    // `:`-delimited part are NUL-terminated in place, and a `tpl{...}`
+    // argument is parsed recursively with its closing `}` overwritten by a
+    // NUL (the argument's strings must stay terminated).
+    AType deser_type(char* s) {
+        unsafe {
+        long start = this.ntstack;
+        AType t = this.empty_type();
+        long n = this.cstr_len(s);
+        long colon = this.find_ch(s, 0, n, 58);
+        if (colon < 0) {
+            t.base = s;
+            return t;
+        }
+        unsafe { s[colon] = 0; }
+        t.base = s;
+        long pos = colon + 1;
+        while (pos < n) {
+            if (this.starts_at(s, pos, n, "tpl{")) {
+                long depth = 1;
+                long end = pos + 4;
+                while (end < n && depth > 0) {
+                    unsafe {
+                        if (s[end] == 123) {
+                            depth = depth + 1;
+                        } else if (s[end] == 125) {
+                            depth = depth - 1;
+                        }
+                    }
+                    if (depth > 0) { end = end + 1; }
+                }
+                unsafe { s[end] = 0; }
+                AType a = this.deser_type(s + pos + 4);
+                unsafe { this.tstack[this.ntstack] = a; }
+                this.ntstack = this.ntstack + 1;
+                if (end + 1 < n && s[end + 1] == 58) {
+                    pos = end + 2;
+                } else {
+                    break;
+                }
+                continue;
+            }
+            long c2 = this.find_ch(s, pos, n, 58);
+            char* part = s + pos;
+            if (c2 >= 0) {
+                unsafe { s[c2] = 0; }
+                pos = c2 + 1;
+            } else {
+                pos = n;
+            }
+            if (this.cstr_eq(part, "unsigned")) {
+                t.is_unsigned = 1;
+            } else if (this.cstr_eq(part, "const")) {
+                t.is_const = 1;
+            } else if (this.cstr_eq(part, "ref")) {
+                t.is_ref = 1;
+            } else if (this.starts_at(part, 0, this.cstr_len(part), "ptr")) {
+                t.ptr_depth = this.to_long(part + 3);
+            } else if (this.starts_at(part, 0, this.cstr_len(part), "arr")) {
+                t.array_size = this.to_long(part + 3);
+            }
+        }
+        long cnt = this.ntstack - start;
+        if (cnt > 0) {
+            unsafe {
+                AType* blk = this.types + this.ntypes;
+                long k = 0;
+                while (k < cnt) {
+                    blk[k] = this.tstack[start + k];
+                    k = k + 1;
+                }
+                this.ntypes = this.ntypes + cnt;
+                t.tpl_args = blk;
+            }
+            t.tpl_n = cnt;
+            this.ntstack = start;
+        }
+        return t;
+        }
+    }
+
+    void read_param() {
+        unsafe {
+        char* ps = this.cur.tok();
+        if (ps == (char*) 0) { return; }
+        this.unesc(ps);
+        long n = this.cstr_len(ps);
+        long colon = -1;
+        long i = 0;
+        unsafe {
+            while (i < n) {
+                if (ps[i] == 58) { colon = i; }
+                i = i + 1;
+            }
+        }
+        ModParam p;
+        if (colon >= 0) {
+            unsafe { ps[colon] = 0; }
+            p.type = this.deser_type(ps);
+            p.name = ps + colon + 1;
+        } else {
+            p.type = this.deser_type(ps);
+            p.name = "";
+        }
+        this.push_param(p);
+        }
+    }
+
+    void read_func() {
+        unsafe {
+        char* name = this.cur.tok();
+        char* rets = this.cur.tok();
+        char* pc = this.cur.tok();
+        if (name == (char*) 0 || rets == (char*) 0 || pc == (char*) 0) { return; }
+        this.unesc(name);
+        this.unesc(rets);
+        ModFunc f;
+        f.name = name;
+        f.ret = this.deser_type(rets);
+        long pcount = this.to_long(pc);
+        long pstart = this.nparams;
+        long k = 0;
+        while (k < pcount) {
+            this.read_param();
+            k = k + 1;
+        }
+        unsafe { f.params = this.params + pstart; }
+        f.nparams = this.nparams - pstart;
+        char* ec = this.cur.tok();
+        char* ce = this.cur.tok();
+        char* cv = this.cur.tok();
+        char* op = this.cur.tok();
+        f.is_extern_c = this.to_long(ec);
+        f.is_constexpr = this.to_long(ce);
+        f.is_consteval = this.to_long(cv);
+        f.is_operator = this.to_long(op);
+        if (f.is_operator != 0) {
+            char* sym = this.cur.tok();
+            this.unesc(sym);
+        f.op_symbol = sym;
+        } else {
+            f.op_symbol = "";
+        }
+        if (f.is_extern_c == 0 && !this.has_dcolon(f.name) &&
+            this.module_name[0] != 0) {
+            f.name = this.arena_qual(this.module_name, f.name);
+        }
+        this.push_func(f);
+        }
+    }
+
+    void read_method(const char* sname) {
+        unsafe {
+        char* name = this.cur.tok();
+        char* rets = this.cur.tok();
+        char* pc = this.cur.tok();
+        if (name == (char*) 0 || rets == (char*) 0 || pc == (char*) 0) { return; }
+        this.unesc(name);
+        this.unesc(rets);
+        ModMethod m;
+        m.name = name;
+        m.ret = this.deser_type(rets);
+        long pcount = this.to_long(pc);
+        long pstart = this.nparams;
+        long k = 0;
+        while (k < pcount) {
+            this.read_param();
+            k = k + 1;
+        }
+        unsafe { m.params = this.params + pstart; }
+        m.nparams = this.nparams - pstart;
+        char* ctor = this.cur.tok();
+        char* dtor = this.cur.tok();
+        char* op = this.cur.tok();
+        m.is_ctor = this.to_long(ctor);
+        m.is_dtor = this.to_long(dtor);
+        m.is_operator = this.to_long(op);
+        if (m.is_operator != 0) {
+            char* sym = this.cur.tok();
+            this.unesc(sym);
+        m.op_symbol = sym;
+        } else {
+            m.op_symbol = "";
+        }
+        if (!this.has_dcolon(m.name)) {
+            m.name = this.arena_qual(sname, m.name);
+        }
+        this.push_method(m);
+        }
+    }
+
+    void read_struct() {
+        unsafe {
+        char* name = this.cur.tok();
+        char* fc = this.cur.tok();
+        if (name == (char*) 0 || fc == (char*) 0) { return; }
+        ModStruct s;
+        this.unesc(name);
+        s.name = name;
+        long fieldCount = this.to_long(fc);
+        long fstart = this.nfields;
+        long k = 0;
+        while (k < fieldCount) {
+            char* fs = this.cur.tok();
+            if (fs == (char*) 0) { break; }
+            this.unesc(fs);
+            long n = this.cstr_len(fs);
+            long colon = -1;
+            long i = 0;
+            unsafe {
+                while (i < n) {
+                    if (fs[i] == 58) { colon = i; }
+                    i = i + 1;
+                }
+            }
+            AField fld;
+            if (colon >= 0) {
+                unsafe { fs[colon] = 0; }
+                fld.type = this.deser_type(fs);
+                fld.name = fs + colon + 1;
+            } else {
+                fld.type = this.deser_type(fs);
+                fld.name = "";
+            }
+            fld.line = 0;
+            fld.col = 0;
+            this.push_field(fld);
+            k = k + 1;
+        }
+        unsafe { s.fields = this.fields + fstart; }
+        s.nfields = this.nfields - fstart;
+
+        char* bc = this.cur.tok();
+        long baseCount = this.to_long(bc);
+        long bstart = this.nbases;
+        k = 0;
+        while (k < baseCount) {
+            char* bs = this.cur.tok();
+            if (bs == (char*) 0) { break; }
+            this.unesc(bs);
+            this.push_base(this.deser_type(bs));
+            k = k + 1;
+        }
+        unsafe { s.bases = this.bases + bstart; }
+        s.nbases = this.nbases - bstart;
+
+        char* ic = this.cur.tok();
+        s.is_class = this.to_long(ic);
+
+        char* tc = this.cur.tok();
+        long tplCount = this.to_long(tc);
+        long tstart = this.ntpls;
+        k = 0;
+        while (k < tplCount) {
+            char* tn = this.cur.tok();
+            char* ti = this.cur.tok();
+            char* tv = this.cur.tok();
+            if (tn == (char*) 0) { break; }
+            ATemplateParam tp;
+            this.unesc(tn);
+            tp.name = tn;
+            tp.type = this.empty_type();
+            tp.constraint = "";
+            tp.is_typename = this.to_long(ti);
+            tp.is_variadic = this.to_long(tv);
+            tp.line = 0;
+            tp.col = 0;
+            this.push_tpl(tp);
+            k = k + 1;
+        }
+        unsafe { s.tpl = this.tpls + tstart; }
+        s.ntpl = this.ntpls - tstart;
+
+        char* mc = this.cur.tok();
+        long methodCount = this.to_long(mc);
+        long mstart = this.nmethods;
+        k = 0;
+        while (k < methodCount) {
+            this.read_method(s.name);
+            k = k + 1;
+        }
+        unsafe { s.methods = this.methods + mstart; }
+        s.nmethods = this.nmethods - mstart;
+        this.push_struct(s);
+        }
+    }
+
+    void read_enum() {
+        unsafe {
+        char* name = this.cur.tok();
+        char* sc = this.cur.tok();
+        char* un = this.cur.tok();
+        char* cnt = this.cur.tok();
+        if (name == (char*) 0 || sc == (char*) 0) { return; }
+        ModEnum e;
+        this.unesc(name);
+        e.name = name;
+        e.is_scoped = this.to_long(sc);
+        e.underlying = this.empty_type();
+        if (un != (char*) 0) {
+            this.unesc(un);
+            e.underlying = this.deser_type(un);
+        }
+        long count = this.to_long(cnt);
+        long estart = this.nens;
+        long k = 0;
+        while (k < count) {
+            char* es = this.cur.tok();
+            if (es == (char*) 0) { break; }
+            this.unesc(es);
+            long n = this.cstr_len(es);
+            long eq = this.find_ch(es, 0, n, 61);
+            if (eq >= 0) {
+                unsafe { es[eq] = 0; }
+            }
+            AEnumerator en;
+            en.name = es;
+            en.value = -1;   // the oracle drops the value on read
+            en.line = 0;
+            en.col = 0;
+            this.push_en(en);
+            k = k + 1;
+        }
+        unsafe { e.ens = this.ens + estart; }
+        e.nens = this.nens - estart;
+        this.push_enum(e);
+        }
+    }
+
+    void read_using() {
+        unsafe {
+        char* name = this.cur.tok();
+        char* target = this.cur.tok();
+        if (name == (char*) 0 || target == (char*) 0) { return; }
+        this.unesc(name);
+        this.unesc(target);
+        ModUsing u;
+        u.name = name;
+        u.target = this.deser_type(target);
+        this.push_using(u);
+        }
+    }
+
+    void read_concept() {
+        unsafe {
+        char* name = this.cur.tok();
+        char* pn = this.cur.tok();
+        char* cnt = this.cur.tok();
+        if (name == (char*) 0 || pn == (char*) 0) { return; }
+        ModConcept c;
+        c.name = name;
+        c.param_name = pn;
+        long count = this.to_long(cnt);
+        long rstart = this.nreqs;
+        long k = 0;
+        while (k < count) {
+            char* r = this.cur.tok();
+            if (r == (char*) 0) { break; }
+            this.unesc(r);
+            unsafe { this.reqpool[this.nreqs] = reinterpret_cast<long>(r); }
+            this.nreqs = this.nreqs + 1;
+            k = k + 1;
+        }
+        c.req_start = rstart;
+        c.nreqs = this.nreqs - rstart;
+        this.push_concept(c);
+        }
+    }
+
+    void read_line(char* s, long n) {
+        unsafe {
+        ModLine ln;
+        ln.s = s;
+        ln.n = n;
+        ln.pos = 0;
+        this.cur = ln;
+        char* kind = this.cur.tok();
+        if (kind == (char*) 0) { return; }
+        if (this.cstr_eq(kind, "func")) {
+            this.read_func();
+        } else if (this.cstr_eq(kind, "struct")) {
+            this.read_struct();
+        } else if (this.cstr_eq(kind, "enum")) {
+            this.read_enum();
+        } else if (this.cstr_eq(kind, "using")) {
+            this.read_using();
+        } else if (this.cstr_eq(kind, "concept")) {
+            this.read_concept();
+        }
+        }
+    }
+
+    void read_module(const char* path) {
+        unsafe {
+        this.ok = 0;
+        char* content = io::read_file(path);
+        if (content == (char*) 0) {
+            io::eprint("ivy: error: cannot read module interface '");
+            io::eprint(path);
+            io::eprintln("'");
+            return;
+        }
+        long n = (long) __ivy_strlen(content);
+        this.init(n);
+        this.buf = content;
+        this.len = n;
+
+        long pos = 0;
+        long lineno = 0;
+        // The oracle reads the module-name line with `std::getline` and
+        // returns false when the magic line is the whole file, so a truncated
+        // interface (no second line) is a silent failure, not an empty module.
+        long have_module = 0;
+        if (n == 0) {
+            io::eprint("ivy: error: invalid module interface file '");
+            io::eprint(path);
+            io::eprintln("' (bad magic)");
+            return;
+        }
+        while (pos < n) {
+            long end = pos;
+            while (end < n && content[end] != 10) { end = end + 1; }
+            unsafe { content[end] = 0; }
+            long last = 0;
+            if (end >= n) { last = 1; }
+            if (lineno == 0) {
+                if (!this.magic_ok(content + pos, end - pos)) {
+                    io::eprint("ivy: error: invalid module interface file '");
+                    io::eprint(path);
+                    io::eprintln("' (bad magic)");
+                    return;
+                }
+            } else if (lineno == 1) {
+                have_module = 1;
+                if (this.starts_at(content + pos, 0, end - pos, "module ")) {
+                    this.module_name = content + pos + 7;
+                }
+            } else if (end > pos) {
+                this.read_line(content + pos, end - pos);
+            }
+            lineno = lineno + 1;
+            if (last != 0) { break; }
+            pos = end + 1;
+        }
+        if (have_module == 0) { return; }
+        this.ok = 1;
+        }
+    }
+
+    // --- serialization -----------------------------------------------------
+
+    void dump() {
+        unsafe {
+        IvmBuf b;
+        b.setup(256);
+        io::println("module {}", this.module_name);
+        long i = 0;
+        while (i < this.nfuncs) {
+            b.reset();
+            b.func(this.funcs[i]);
+            io::println("{}", b.data_);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nstructs) {
+            b.reset();
+            b.struct_decl(this.structs[i]);
+            io::println("{}", b.data_);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nenums) {
+            b.reset();
+            b.enum_decl(this.enums[i]);
+            io::println("{}", b.data_);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nusings) {
+            b.reset();
+            b.using_decl(this.usings[i]);
+            io::println("{}", b.data_);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nconcepts) {
+            ModConcept c = this.concepts[i];
+            b.reset();
+            b.add("concept ");
+            b.add(c.name);
+            b.ch(32);
+            b.add(c.param_name);
+            b.ch(32);
+            b.num(c.nreqs);
+            long k = 0;
+            while (k < c.nreqs) {
+                b.ch(32);
+                b.esc(this.req_text(c.req_start + k));
+                k = k + 1;
+            }
+            io::println("{}", b.data_);
+            i = i + 1;
+        }
+        b.release();
+        }
+    }
+
+    bool write(const char* path) {
+        unsafe {
+        IvmBuf b;
+        b.setup(1024);
+        b.add("IVYMOD");
+        b.ch(1);
+        b.ch(10);
+        b.add("module ");
+        b.add(this.module_name);
+        b.ch(10);
+
+        long i = 0;
+        while (i < this.nfuncs) {
+            b.func(this.funcs[i]);
+            b.ch(10);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nstructs) {
+            b.struct_decl(this.structs[i]);
+            b.ch(10);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nenums) {
+            b.enum_decl(this.enums[i]);
+            b.ch(10);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nusings) {
+            b.using_decl(this.usings[i]);
+            b.ch(10);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < this.nconcepts) {
+            ModConcept c = this.concepts[i];
+            b.add("concept ");
+            b.add(c.name);
+            b.ch(32);
+            b.add(c.param_name);
+            b.ch(32);
+            b.num(c.nreqs);
+            long k = 0;
+            while (k < c.nreqs) {
+                b.ch(32);
+                b.esc(this.req_text(c.req_start + k));
+                k = k + 1;
+            }
+            b.ch(10);
+            i = i + 1;
+        }
+
+        unsafe {
+            void* f = __ivy_file_open_write(path);
+            if (f == (void*) 0) {
+                io::eprint("ivy: error: cannot write module interface to '");
+                io::eprint(path);
+                io::eprintln("'");
+                b.release();
+                return false;
+            }
+            __ivy_file_write(f, b.data_, (unsigned long long) b.len_);
+            __ivy_file_close(f);
+        }
+        b.release();
+        return true;
+        }
+    }
+};

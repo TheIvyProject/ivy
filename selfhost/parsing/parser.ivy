@@ -27,6 +27,7 @@ import ast;
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" void  __ivy_memset(void* dst, int c, unsigned long long n);
 // The C library's decimal-to-double conversion: the oracle parses float
 // literals with std::stod, which is correctly rounded, so the port needs
 // the same value for compile-time constant folding.
@@ -46,7 +47,7 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 128, AFunction 208, AExpr 168, AStruct 96,
+// sizes (AAttr 40, AParam 128, AFunction 248, AExpr 168, AStruct 96,
 // ATemplateParam 96, AConcept 48, AType 48, ALifetime 8, ALegacyLifetime 40)
 // so `__ivy_alloc` can be used.
 export struct Parser {
@@ -229,6 +230,14 @@ export struct Parser {
     const char* module_name_;
     long is_module_export_;
 
+    // H7.3: exported-declaration flags, parallel to the function / struct /
+    // enum pools.  `parse_export` sets them (mirrors `isExported` in the
+    // oracle AST) and the `.ivm` writer reads them.  Using aliases and
+    // concepts have no flag: the oracle writes every one of them.
+    long* fexp_;
+    long* sexp_;
+    long* eexp_;
+
     // diagnostics
     long* dline_;
     long* dcol_;
@@ -319,7 +328,7 @@ export struct Parser {
         this.cv_ = 0;
         this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 240);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 248);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
         this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 128);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
@@ -349,7 +358,7 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 240);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 248);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
@@ -361,6 +370,13 @@ export struct Parser {
         this.argstack_ = (AType*) __ivy_alloc(this.argst_cap_ * 48);
         this.argblk_ = (long*) __ivy_alloc(this.argblk_cap_ * 8);
         this.bpool_ = (long*) __ivy_alloc(this.b_cap_ * 8);
+        // H7.3: exported-declaration flags start cleared.
+        this.fexp_ = (long*) __ivy_alloc(this.fn_cap_ * 8);
+        this.sexp_ = (long*) __ivy_alloc(this.st_cap_ * 8);
+        this.eexp_ = (long*) __ivy_alloc(this.en_cap_ * 8);
+        __ivy_memset(this.fexp_, 0, (unsigned long long)(this.fn_cap_ * 8));
+        __ivy_memset(this.sexp_, 0, (unsigned long long)(this.st_cap_ * 8));
+        __ivy_memset(this.eexp_, 0, (unsigned long long)(this.en_cap_ * 8));
         }
     }
 
@@ -411,6 +427,9 @@ export struct Parser {
             }
             __ivy_free(this.argblk_);
             __ivy_free((void*)this.bpool_);
+            __ivy_free(this.fexp_);
+            __ivy_free(this.sexp_);
+            __ivy_free(this.eexp_);
         }
     }
 
@@ -1807,6 +1826,25 @@ export struct Parser {
         }
     }
 
+    // H7.3: the `export` marker of the `i`-th function / struct / enum
+    // (mirrors `isExported` in the oracle AST).
+    long fn_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.fn_n_) {
+                return this.fexp_[i];
+            }
+        }
+        return 0;
+    }
+
+    void mark_fn_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.fn_n_) {
+                this.fexp_[i] = 1;
+            }
+        }
+    }
+
     // H6.2s: the `k`-th constructor member initializer of `f` (the name of the
     // field and the expression index of its initializer).
     const char* ctor_init_name(AFunction f, long k) {
@@ -1864,6 +1902,40 @@ export struct Parser {
                 return this.enpool_[i];
             }
             return this.enpool_[0];
+        }
+    }
+
+    long struct_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.st_n_) {
+                return this.sexp_[i];
+            }
+        }
+        return 0;
+    }
+
+    void mark_struct_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.st_n_) {
+                this.sexp_[i] = 1;
+            }
+        }
+    }
+
+    long enum_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.en_n_) {
+                return this.eexp_[i];
+            }
+        }
+        return 0;
+    }
+
+    void mark_enum_exported(long i) {
+        unsafe {
+            if (i >= 0 && i < this.en_n_) {
+                this.eexp_[i] = 1;
+            }
         }
     }
 
@@ -3813,7 +3885,8 @@ export struct Parser {
     }
 
     void build_function(AFunction f, long a_start, long a_end, AType ret, const char* name,
-                        AParamList pl, long is_extern_c, long is_constexpr, long line, long col,
+                        AParamList pl, long is_extern_c, long is_constexpr, long is_consteval,
+                        long line, long col,
                         ATemplateParamList tpl, ALifetimeList declared, ALifetimeList ret_lts,
                         ALegacyLifetimeList legacy) {
         unsafe {
@@ -3831,6 +3904,7 @@ export struct Parser {
         f.line = line;
         f.col = col;
         f.is_constexpr = is_constexpr;
+        f.is_consteval = is_consteval;
         f.is_virtual = 0;
         f.tpl_params = tpl.items;
         f.tpl_n = tpl.n;
@@ -3892,7 +3966,7 @@ export struct Parser {
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce, cv,
                                 dline, dcol, tpl, declared, ret_lts, legacy);
         }
     }
@@ -3945,7 +4019,7 @@ export struct Parser {
             // A5: the legacy lifetime annotations of the function.
             ALegacyLifetimeList legacy = this.collect_legacy_lts(all);
             AFunction f;
-            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce,
+            this.build_function(f, a_start, a_end, ret, name, pl, is_extern_c, ce, cv,
                                 dline, dcol, tpl, declared, ret_lts, legacy);
         }
     }
@@ -4068,6 +4142,7 @@ export struct Parser {
         m.line = line;
         m.col = col;
         m.is_constexpr = 0;
+        m.is_consteval = 0;
         m.is_virtual = is_virtual;
         unsafe { m.tpl_params = (ATemplateParam*)0; }
         m.tpl_n = 0;
@@ -4303,7 +4378,10 @@ export struct Parser {
         }
         Token nametok = this.peek(0);
         const char* name = this.intern_tok(this.next());
+        // The oracle defaults the underlying type to `int` (parser.cpp
+        // parseEnum); the `.ivm` writer serializes it as-is.
         AType ut = this.empty_type();
+        ut.base = "int";
         if (this.at(":")) {
             this.next();
             ut = this.parse_type();
@@ -4721,18 +4799,32 @@ export struct Parser {
         }
         if (this.kw("struct") || this.kw("class")) {
             this.parse_struct(this.no_tpl());
+            // The oracle marks `tu.structs.back()` (parser.cpp:1861-1865).
+            this.mark_struct_exported(this.struct_count() - 1);
             return;
         }
         if (this.kw("enum")) {
             this.parse_enum();
+            this.mark_enum_exported(this.enum_count() - 1);
             return;
         }
         if (this.kw("using")) {
             this.parse_using();
+            // UsingDecl has no isExported: the writer emits every alias.
             return;
         }
         if (this.kw("template")) {
             this.parse_template(dline, dcol);
+            // The oracle marks the last template struct when its parameter
+            // list is non-empty, else the last template function
+            // (parser.cpp:1877-1896).
+            if (this.struct_count() > 0 &&
+                this.get_struct(this.struct_count() - 1).tpl_n != 0) {
+                this.mark_struct_exported(this.struct_count() - 1);
+            } else if (this.fn_count() > 0 &&
+                       this.get_fn(this.fn_count() - 1).tpl_n != 0) {
+                this.mark_fn_exported(this.fn_count() - 1);
+            }
             return;
         }
         if (this.kw("constexpr") || this.kw("consteval")) {
@@ -4745,12 +4837,14 @@ export struct Parser {
                 AAttrList a2 = this.parse_attrs();
                 this.parse_function(a2, 0, this.ce_, this.cv_, this.no_tpl(), this.no_lt(), dline, dcol);
             }
+            this.mark_fn_exported(this.fn_count() - 1);
             return;
         }
         if (this.kw("fn")) {
             this.next();
             AAttrList a = this.parse_attrs();
             this.parse_fn_trailing(a, 0, 0, 0, this.no_tpl(), this.no_lt(), dline, dcol);
+            this.mark_fn_exported(this.fn_count() - 1);
             return;
         }
         if (this.is_type_start() == 0) {
@@ -4760,6 +4854,7 @@ export struct Parser {
         }
         AAttrList a = this.parse_attrs();
         this.parse_function(a, 0, 0, 0, this.no_tpl(), this.no_lt(), dline, dcol);
+        this.mark_fn_exported(this.fn_count() - 1);
     }
 
     void parse_import_header(const char* no_hdr_msg, const char* gt_msg) {

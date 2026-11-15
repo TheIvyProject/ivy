@@ -1,0 +1,175 @@
+// selfhost/parsing/ivmdrive.ivy - H7.3 `.ivm` read/write driver.
+//
+// Test driver for `module_io.ivy` (the port of `module_io.cpp`):
+//
+//   ivmdrive --write <src.ivy> <out.ivm>
+//       lex + preprocess + parse the source, then write the module interface
+//       exactly like `ivy -c -o <out>` writes `<out>.ivm`.
+//
+//   ivmdrive --dump <in.ivm>
+//       read a module interface and print the serialized form of the parsed
+//       unit (one line per declaration, same field order as the file).  Used
+//       to check that the reader interpreted every field correctly.
+//
+// The parser diagnostics are printed on stderr in the oracle format.  Lexer
+// diagnostics are still printed by the lexer itself (H7.4 gap), so the
+// harness only feeds lexically valid fixtures.
+//
+// The helpers live in a struct because a free function with raw pointer
+// parameters needs an `unsafe` block at its declaration site, which only the
+// methods of a struct can do in the Ivy subset.
+
+#pragma ivy cnumber
+import module_io;
+import ast;
+import parser;
+import token;
+import lexer;
+import preprocessor;
+import io;
+
+extern "C" int*   __p___argc();
+extern "C" char*** __p___argv();
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+export struct IvmDrive {
+    bool streq(const char* a, const char* b) {
+        unsafe {
+            long i = 0;
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) { return false; }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    int32 write_src(char* path, char* out_path) {
+        unsafe {
+            char* content = io::read_file(path);
+            if (content == (char*) 0) {
+                io::eprint("ivy: error: cannot open file '");
+                io::eprint(path);
+                io::eprintln("'");
+                return 2;
+            }
+            uint64 len = __ivy_strlen(content);
+
+            Lexer lx;
+            lx.setup(content, len, path);
+            lx.lex_all((long) len + 16);
+            if (lx.had_error()) {
+                lx.release();
+                return 1;
+            }
+
+            long in_n = lx.token_count();
+            long out_cap = in_n * 8 + 256;
+            Preprocessor pp;
+            pp.setup(lx.tokens(), in_n, content, (long) len, path,
+                     (long) __ivy_strlen(path), out_cap, 1024);
+            pp.run();
+
+            long failed = 0;
+            char* fname = path;
+            if (pp.has_line_file() != 0) {
+                fname = pp.line_file();
+            }
+            long dc = pp.diag_count();
+            long di = 0;
+            while (di < dc) {
+                long w = pp.diag_warn(di);
+                if (w == 0) { failed = 1; }
+                io::eprint(fname);
+                io::eprint(":{}", pp.diag_line(di));
+                io::eprint(":{}", pp.diag_col(di));
+                if (w != 0) {
+                    io::eprint(": warning: ");
+                } else {
+                    io::eprint(": error: ");
+                }
+                io::eprintln("{}", pp.diag_msg(di));
+                di = di + 1;
+            }
+            if (failed != 0) {
+                pp.release();
+                lx.release();
+                return 1;
+            }
+
+            Parser pa;
+            pa.setup(pp.output(), pp.output_count(), pp.arena(), (long) len);
+            pa.set_cnumber(pp.cnumber_enabled());
+            pa.parse();
+            if (pa.failed() != 0) {
+                long nd = pa.diag_count();
+                long k = 0;
+                while (k < nd) {
+                    io::eprint(fname);
+                    io::eprint(":{}", pa.diag_line(k));
+                    io::eprint(":{}", pa.diag_col(k));
+                    io::eprint(": error: ");
+                    io::eprintln("{}", pa.diag_msg(k));
+                    k = k + 1;
+                }
+                pa.release();
+                pp.release();
+                lx.release();
+                return 1;
+            }
+            if (pa.is_module_export() == 0) {
+                io::eprintln("ivmdrive: source is not a module interface unit");
+                pa.release();
+                pp.release();
+                lx.release();
+                return 1;
+            }
+
+            ModuleUnit u;
+            u.from_parser(pa);
+            bool ok = u.write(out_path);
+            u.release();
+            pa.release();
+            pp.release();
+            lx.release();
+            if (!ok) { return 1; }
+            return 0;
+        }
+        return 1;
+    }
+
+    int32 dump_file(char* path) {
+        ModuleUnit u;
+        u.read_module(path);
+        if (u.ok == 0) {
+            u.release();
+            return 1;
+        }
+        u.dump();
+        u.release();
+        return 0;
+    }
+};
+
+int32 main() {
+    unsafe {
+        int* argc_p = __p___argc();
+        char** argv = *__p___argv();
+        long argc = (long) *argc_p;
+        IvmDrive d;
+        if (argc >= 3 && d.streq(argv[1], "--write")) {
+            if (argc < 4) {
+                io::eprintln("usage: ivmdrive --write <src.ivy> <out.ivm>");
+                return 2;
+            }
+            return d.write_src(argv[2], argv[3]);
+        }
+        if (argc >= 3 && d.streq(argv[1], "--dump")) {
+            return d.dump_file(argv[2]);
+        }
+        io::eprintln("usage: ivmdrive --write <src.ivy> <out.ivm> | --dump <in.ivm>");
+        return 2;
+    }
+    return 2;
+}

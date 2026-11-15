@@ -173,6 +173,10 @@ export struct AFunction {
     long line;
     long col;
     long is_constexpr;   // `constexpr` / `consteval` function
+    // H7.3: `consteval` is a distinct flag in the oracle AST
+    // (`Function::isConsteval`), and the `.ivm` writer serializes it
+    // separately from `isConstexpr` (a `consteval` function sets both).
+    long is_consteval;
     long is_virtual;     // `virtual` or pure-virtual method
     ATemplateParam* tpl_params;
     long tpl_n;
