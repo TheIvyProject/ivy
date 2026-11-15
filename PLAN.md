@@ -797,7 +797,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | C++ ref | selfhost | corpus | trạng thái |
 |-----|-----------|---------|----------|--------|-----------|
-| H7.1 | Arg parsing | `app/main.cpp` | `app/main.ivy` | CLI smoke | ☐ |
+| H7.1 | Arg parsing | `app/main.cpp` | `app/main.ivy`, `app/cli.ivy` | CLI smoke | ✅ `CliArgs` (mirror vòng lặp `main()` 1464-1611: flags, usage 1384 B, chẩn đoán, `.ivy` validate, `-o *.o/.obj` ⇒ `-c`, `-o *.ll` ⇒ `--llvm`, `linkMode`) + argv qua UCRT `__p___argc`/`__p___argv`; `build_cli_smoke.ps1` PASS 67/67 (40 oracle byte-identical + 26 dump + 1 stub, 2026-11-15); dispatch để H7.2+ |
 | H7.2 | `import` resolve + search path | `app/main.cpp` | `app/main.ivy` | module suite | ☐ |
 | H7.3 | `.ivm` read/write | `module_io.cpp` | `parsing/module_io.ivy` | module I/O | ☐ |
 | H7.4 | Diagnostics | `diagnostic.h` | `common/diagnostic.ivy` | err suite | ☐ |

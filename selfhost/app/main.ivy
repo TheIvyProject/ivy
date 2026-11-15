@@ -1,0 +1,54 @@
+// selfhost/app/main.ivy - H7.1 entry point for the self-host driver.
+//
+// The oracle's `main(int argc, char** argv)` (src/app/main.cpp:1454) parses
+// arguments and then calls `run(...)`. Ivy's entry point is synthesized by the
+// oracle emitter (`CodeGen::emitEntryPoint`, src/codegen/codegen.cpp:671-697)
+// as `define i32 @main() { ... call i32 @ivy_main() ... }`, so an Ivy program
+// never sees `argc`/`argv`. This driver reads them from the UCRT globals
+// instead:
+//
+//     int*    __p___argc(void)   -> __argc
+//     char*** __p___argv(void)   -> __argv
+//
+// (both exported by ucrt; declared in <stdlib.h>). Verified on this checkout:
+// argc/argv, including arguments containing spaces, arrive unchanged.
+//
+// H7.1 scope: parse the command line with `cli::CliArgs` (mirror of the oracle
+// loop) and reproduce its help/usage/diagnostic bytes and exit codes. The
+// oracle then dispatches to the frontend/codegen; that is H7.2+, so a
+// *successful* parse currently stops with an explicit "dispatch not ported"
+// diagnostic and exit 3. Set IVY_CLI_DUMP=1 to print the parsed options
+// instead (used by build_cli_smoke.ps1).
+
+#pragma ivy cnumber
+import cli;
+import io;
+
+extern "C" int*   __p___argc();
+extern "C" char*** __p___argv();
+extern "C" char*  getenv(const char* name);
+
+int32 main() {
+    unsafe {
+        int* argc_p = __p___argc();
+        char** argv = *__p___argv();
+        long argc = (long) *argc_p;
+
+        CliArgs args;
+        args.init();
+        int32 rc = args.parse(argc, argv);
+        if (rc >= 0) {
+            return rc;  // help (0) or a CLI diagnostic (2) already printed
+        }
+
+        char* dump = getenv("IVY_CLI_DUMP");
+        if (dump != (char*)0 && dump[0] != 0) {
+            args.dump();
+            return 0;
+        }
+
+        io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.1: argument parsing only)");
+        return 3;
+    }
+    return 3;
+}

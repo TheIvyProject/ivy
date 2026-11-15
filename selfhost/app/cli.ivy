@@ -1,0 +1,454 @@
+// selfhost/app/cli.ivy - H7.1 command-line parsing for the self-host driver.
+//
+// Mirror of the argument loop at the top of `main()` in src/app/main.cpp
+// (lines 1464-1611): flag parsing, the help/usage text, the CLI diagnostics,
+// and the derived modes computed after the loop (`-o *.o|*.obj` implies `-c`,
+// `-o *.ll` implies `--llvm`, and the default `linkMode`).
+//
+// What is ported here is *only* the parsing layer. The oracle then calls
+// `run(...)`; that dispatch (frontend pipeline, import resolution, module I/O,
+// codegen) lands in H7.2+. Until then `main.ivy` reports that dispatch is not
+// ported and exits 3, so a successful parse is observable but does not pretend
+// to compile anything.
+//
+// Two oracle details are deliberately mirrored even though they look odd:
+//
+//   * the auto-added `lib/` include path (`main.cpp:1547-1565`) is NOT part of
+//     H7.1 - it needs the include-search-path work of H7.2 - so `include=`
+//     dump lines only list explicit `-I` arguments;
+//   * `std::filesystem::path::empty()` is emulated with a "null or empty
+//     string" test, which is why `-o ""` behaves exactly like no `-o` at all
+//     (it does not imply `-c` and does not disable `linkMode`).
+//
+// Byte-exactness notes:
+//   * `printUsage()` writes to stdout (`fd 1`) via std::cout; the unknown-option
+//     branch writes its diagnostic to stderr and then the *same* usage text to
+//     stdout (it calls the shared `printUsage`). Both paths are reproduced by
+//     writing the usage text through `__ivy_write_str` with an explicit fd, so
+//     there is exactly one copy of the 29-line text in this file.
+//   * `__ivy_write_str` uses the CRT `_write`, which is in text mode, so LF is
+//     translated to CRLF exactly like std::cout / std::cerr (verified by
+//     comparing raw bytes with the oracle).
+//   * Extension diagnostics print the *lowercased* extension (the oracle
+//     lowercases `fileExtLower` before printing), hence `ext_lower_diag`.
+
+#pragma ivy cnumber
+export module cli;
+
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void  __ivy_write_str(int fd, const char* s);
+
+// One `-I` entry. Nodes are allocated on the heap and never freed (the process
+// exits right after parsing), the string itself points into argv.
+export struct CliPath {
+    char* value;
+    CliPath* next;
+};
+
+// Parsed command line. Field names follow the oracle's local variables.
+export struct CliArgs {
+    char* file;          // last positional argument (`std::filesystem::path file`)
+    char* out_path;      // `-o` value (`std::string outPath`), null when absent
+    CliPath* includes;   // head of the `-I` list
+    CliPath* includes_tail;
+    long include_count;
+    int32 show_tokens;
+    int32 show_lex;
+    int32 show_ast;
+    int32 show_hir;
+    int32 show_mir;
+    int32 show_llvm;
+    int32 do_run;
+    int32 compile_only;
+    int32 crt_static;
+    int32 link_mode;
+    int32 target;        // 0 = unset, 1 = itanium, 2 = msvc
+
+    void init() {
+        unsafe {
+            this.file = (char*)0;
+            this.out_path = (char*)0;
+            this.includes = (CliPath*)0;
+            this.includes_tail = (CliPath*)0;
+        }
+        this.include_count = 0;
+        this.show_tokens = 0;
+        this.show_lex = 0;
+        this.show_ast = 0;
+        this.show_hir = 0;
+        this.show_mir = 0;
+        this.show_llvm = 0;
+        this.do_run = 0;
+        this.compile_only = 0;
+        this.crt_static = 0;
+        this.link_mode = 0;
+        this.target = 0;
+    }
+
+    // --- string helpers -----------------------------------------------------
+
+    bool streq(const char* a, const char* b) {
+        long i = 0;
+        unsafe {
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) { return false; }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    // `arg.starts_with(prefix)`.
+    bool starts_with(const char* s, const char* prefix) {
+        long k = 0;
+        unsafe {
+            while (prefix[k] != 0) {
+                if (s[k] != prefix[k]) { return false; }
+                k = k + 1;
+            }
+        }
+        return true;
+    }
+
+    // `!arg.empty() && arg[0] == '-'`.
+    bool is_option(const char* s) {
+        unsafe {
+            return s[0] == 45;  // '-'
+        }
+        return false;
+    }
+
+    bool file_empty() {
+        unsafe {
+            char* p = this.file;
+            if (p == (char*)0) { return true; }
+            return p[0] == 0;
+        }
+        return true;
+    }
+
+    // `outPath.empty()` for the std::string the oracle keeps.
+    bool out_empty() {
+        unsafe {
+            char* p = this.out_path;
+            if (p == (char*)0) { return true; }
+            return p[0] == 0;
+        }
+        return true;
+    }
+
+    // Index of the last '.' in `s`, or -1 when there is none. This is
+    // `std::string_view::find_last_of('.')` - it scans the whole path, so a
+    // dot in a directory name counts too.
+    long ext_off(const char* s) {
+        long i = 0;
+        long last = -1;
+        unsafe {
+            char* p = (char*)s;
+            if (p == (char*)0) { return -1; }
+            while (p[i] != 0) {
+                if (p[i] == 46) { last = i; }  // '.'
+                i = i + 1;
+            }
+        }
+        return last;
+    }
+
+    // `hasExtension(path, ext)` - case-sensitive suffix compare, ext lowercase.
+    bool ext_eq(const char* path, const char* ext) {
+        long d = this.ext_off(path);
+        if (d < 0) { return false; }
+        long o = d + 1;
+        long k = 0;
+        unsafe {
+            while (ext[k] != 0) {
+                if (path[o + k] != ext[k]) { return false; }
+                k = k + 1;
+            }
+            return path[o + k] == 0;
+        }
+        return false;
+    }
+
+    // `getExtension(path)` lowercased == ext. Used where the oracle lowercases
+    // the extension before comparing ("ivy", "o", "obj", "cpp", ...).
+    bool ext_ieq(const char* path, const char* ext) {
+        long d = this.ext_off(path);
+        if (d < 0) { return false; }
+        long o = d + 1;
+        long k = 0;
+        unsafe {
+            while (ext[k] != 0) {
+                int c = (int) path[o + k];
+                if (c >= 65 && c <= 90) { c = c + 32; }  // 'A'..'Z'
+                if (c != (int) ext[k]) { return false; }
+                k = k + 1;
+            }
+            return path[o + k] == 0;
+        }
+        return false;
+    }
+
+    // `getExtension(path).empty()`: no dot at all, or a trailing dot.
+    bool ext_missing(const char* path) {
+        long d = this.ext_off(path);
+        if (d < 0) { return true; }
+        unsafe {
+            return path[d + 1] == 0;
+        }
+        return true;
+    }
+
+    void push_include(char* p) {
+        unsafe {
+            // char* (8) + CliPath* (8)
+            CliPath* n = (CliPath*)__ivy_alloc(16);
+            n->value = p;
+            n->next = (CliPath*)0;
+            if (this.includes == (CliPath*)0) {
+                this.includes = n;
+            } else {
+                this.includes_tail->next = n;
+            }
+            this.includes_tail = n;
+        }
+        this.include_count = this.include_count + 1;
+    }
+
+    // --- usage text ---------------------------------------------------------
+    //
+    // Byte-for-byte copy of `printUsage()` (src/app/main.cpp:33-63). Written
+    // through `__ivy_write_str` so stdout/stderr share one copy.
+
+    void usage(int32 fd) {
+        __ivy_write_str(fd, "usage: ivy [options] <file.ivy>\n");
+        __ivy_write_str(fd, "\n");
+        __ivy_write_str(fd, "Source files:\n");
+        __ivy_write_str(fd, "  .ivy        Ivy source (only accepted extension)\n");
+        __ivy_write_str(fd, "\n");
+        __ivy_write_str(fd, "options:\n");
+        __ivy_write_str(fd, "  --tokens   print the token stream after preprocessing (debug)\n");
+        __ivy_write_str(fd, "  --lex      print the raw lexer token stream, before preprocessing (debug)\n");
+        __ivy_write_str(fd, "  --ast      print the parsed AST (debug)\n");
+        __ivy_write_str(fd, "  --hir      print the analyzed HIR (debug)\n");
+        __ivy_write_str(fd, "  --mir      print the lowered MIR with lifetime annotations (debug)\n");
+        __ivy_write_str(fd, "  --llvm     emit LLVM IR to stdout\n");
+        __ivy_write_str(fd, "  --run      interpret the program via IvyInterpret v0.2 (MIR-based)\n");
+        __ivy_write_str(fd, "  -c         compile to native object file (.o / .obj), no linking\n");
+        __ivy_write_str(fd, "  (default)  compile and link to a native executable\n");
+        __ivy_write_str(fd, "  --crt-static  link the C runtime statically (like Rust crt-static)\n");
+        __ivy_write_str(fd, "               Windows: libcmt instead of msvcrt/ucrt\n");
+        __ivy_write_str(fd, "               POSIX:   libc.a  instead of libc.so\n");
+        __ivy_write_str(fd, "               (default: dynamic CRT linking)\n");
+        __ivy_write_str(fd, "  --target <abi>  set the C++ ABI for name mangling:\n");
+        __ivy_write_str(fd, "               itanium (POSIX) or msvc (Windows)\n");
+        __ivy_write_str(fd, "               (default: auto-detect from host)\n");
+        __ivy_write_str(fd, "  -o <file>  write output to <file>:\n");
+        __ivy_write_str(fd, "               .ll  -> LLVM IR\n");
+        __ivy_write_str(fd, "               .i/.ii -> C++ source after #include expansion\n");
+        __ivy_write_str(fd, "               .o/.obj -> native object file (implies -c)\n");
+        __ivy_write_str(fd, "               .exe (Windows) / no extension (POSIX) -> link executable\n");
+        __ivy_write_str(fd, "  -I <dir>   add <dir> to the #include <...> search path (repeatable)\n");
+        __ivy_write_str(fd, "  -h, --help show this help\n");
+    }
+
+    // Extension diagnostics (main.cpp:1567-1586). `legacy` selects the
+    // legacy-C/C++ message; both print the lowercased extension.
+    void ext_lower_diag(int32 legacy) {
+        unsafe {
+            long o = this.ext_off(this.file) + 1;
+            long n = (long)__ivy_strlen(this.file) - o;
+            char* e = (char*)__ivy_alloc(n + 1);
+            long k = 0;
+            while (k < n) {
+                int c = (int) this.file[o + k];
+                if (c >= 65 && c <= 90) { c = c + 32; }
+                e[k] = (char)c;
+                k = k + 1;
+            }
+            e[n] = 0;
+            if (legacy != 0) {
+                io::eprintln("ivy: error: legacy '.{}' files are no longer accepted — use the .ivy extension (rename to .ivy; C++ interop via 'import cpp ...')", e);
+            } else {
+                io::eprintln("ivy: error: unrecognized file extension '.{}' — expected .ivy", e);
+            }
+            __ivy_free(e);
+        }
+    }
+
+    // --- parse --------------------------------------------------------------
+    //
+    // Returns -1 when parsing succeeded (the caller continues), otherwise the
+    // process exit code (0 for `-h`/`--help`, 2 for every CLI diagnostic).
+
+    int32 parse(long argc, char** argv) {
+        unsafe {
+            long i = 1;
+            while (i < argc) {
+                char* arg = argv[i];
+                if (this.streq(arg, "--tokens")) {
+                    this.show_tokens = 1;
+                } else if (this.streq(arg, "--lex")) {
+                    this.show_lex = 1;
+                } else if (this.streq(arg, "--ast")) {
+                    this.show_ast = 1;
+                } else if (this.streq(arg, "--hir")) {
+                    this.show_hir = 1;
+                } else if (this.streq(arg, "--mir")) {
+                    this.show_mir = 1;
+                } else if (this.streq(arg, "--llvm")) {
+                    this.show_llvm = 1;
+                } else if (this.streq(arg, "--run")) {
+                    this.do_run = 1;
+                } else if (this.streq(arg, "-c")) {
+                    this.compile_only = 1;
+                } else if (this.streq(arg, "--crt-static")) {
+                    this.crt_static = 1;
+                } else if (this.streq(arg, "--target")) {
+                    if (i + 1 >= argc) {
+                        io::eprintln("ivy: error: option '--target' requires an ABI name");
+                        return 2;
+                    }
+                    i = i + 1;
+                    char* t = argv[i];
+                    if (this.streq(t, "itanium")) {
+                        this.target = 1;
+                    } else if (this.streq(t, "msvc")) {
+                        this.target = 2;
+                    } else {
+                        io::eprintln("ivy: error: unknown target ABI '{}' (expected 'itanium' or 'msvc')", t);
+                        return 2;
+                    }
+                } else if (this.streq(arg, "-o")) {
+                    if (i + 1 >= argc) {
+                        io::eprintln("ivy: error: option '-o' requires a file name");
+                        return 2;
+                    }
+                    i = i + 1;
+                    this.out_path = argv[i];
+                } else if (this.streq(arg, "-I")) {
+                    if (i + 1 >= argc) {
+                        io::eprintln("ivy: error: option '-I' requires a directory");
+                        return 2;
+                    }
+                    i = i + 1;
+                    this.push_include(argv[i]);
+                } else if (this.starts_with(arg, "-I")) {
+                    // `-Idir` joined form: `arg.substr(2)`.
+                    this.push_include(arg + 2);
+                } else if (this.streq(arg, "-h") || this.streq(arg, "--help")) {
+                    this.usage(1);
+                    return 0;
+                } else if (this.is_option(arg)) {
+                    io::eprintln("ivy: error: unknown option '{}'", arg);
+                    this.usage(1);  // printUsage() writes to std::cout
+                    return 2;
+                } else {
+                    this.file = arg;
+                }
+                i = i + 1;
+            }
+        }
+
+        if (this.file_empty()) {
+            this.usage(1);
+            return 2;
+        }
+
+        // H7.2: the oracle also appends <cwd>/lib, <cwd>/../lib or
+        // <cwd>/../../lib to `includePaths` here (main.cpp:1547-1565). Deferred.
+
+        // E5: only `.ivy` is accepted.
+        if (!this.ext_ieq(this.file, "ivy")) {
+            if (this.ext_missing(this.file)) {
+                io::eprintln("ivy: error: missing file extension — use the .ivy extension");
+            } else if (this.ext_ieq(this.file, "cpp") || this.ext_ieq(this.file, "cc") ||
+                       this.ext_ieq(this.file, "cxx") || this.ext_ieq(this.file, "c")) {
+                this.ext_lower_diag(1);
+            } else {
+                this.ext_lower_diag(0);
+            }
+            return 2;
+        }
+
+        // 8.2: `-o *.o` / `-o *.obj` implies `-c` (case-insensitive).
+        if (this.compile_only == 0 && !this.out_empty()) {
+            if (this.ext_ieq(this.out_path, "o") || this.ext_ieq(this.out_path, "obj")) {
+                this.compile_only = 1;
+            }
+        }
+
+        // 8.2: `-o *.ll` implies `--llvm` (case-sensitive, like hasExtension).
+        if (this.show_llvm == 0 && this.ext_eq(this.out_path, "ll")) {
+            this.show_llvm = 1;
+        }
+
+        // 8.2: default action is compile + link unless an action flag or a
+        // non-executable `-o` extension says otherwise.
+        this.link_mode = 0;
+        if (this.show_tokens == 0 && this.show_lex == 0 && this.show_ast == 0 &&
+            this.show_hir == 0 && this.show_mir == 0 && this.show_llvm == 0 &&
+            this.do_run == 0 && this.compile_only == 0) {
+            if (this.out_empty()) {
+                this.link_mode = 1;
+            } else if (!this.ext_eq(this.out_path, "ll") &&
+                       !this.ext_eq(this.out_path, "i") &&
+                       !this.ext_eq(this.out_path, "ii")) {
+                this.link_mode = 1;
+            }
+        }
+        return -1;
+    }
+
+    // --- debug dump ---------------------------------------------------------
+    //
+    // `IVY_CLI_DUMP=1` makes main.ivy print the parse result instead of the
+    // "dispatch not ported" stub. Stable one-line-per-field format, used by
+    // selfhost/app/build_cli_smoke.ps1 to check flag/derived-mode handling.
+
+    void dump() {
+        unsafe {
+            char* f = this.file;
+            if (f == (char*)0 || f[0] == 0) {
+                io::println("file=-");
+            } else {
+                io::println("file={}", f);
+            }
+        }
+        io::println("tokens={}", this.show_tokens);
+        io::println("lex={}", this.show_lex);
+        io::println("ast={}", this.show_ast);
+        io::println("hir={}", this.show_hir);
+        io::println("mir={}", this.show_mir);
+        io::println("llvm={}", this.show_llvm);
+        io::println("run={}", this.do_run);
+        io::println("compile_only={}", this.compile_only);
+        io::println("crt_static={}", this.crt_static);
+        io::println("link_mode={}", this.link_mode);
+        if (this.target == 1) {
+            io::println("target=itanium");
+        } else if (this.target == 2) {
+            io::println("target=msvc");
+        } else {
+            io::println("target=none");
+        }
+        unsafe {
+            char* o = this.out_path;
+            if (o == (char*)0 || o[0] == 0) {
+                io::println("out=-");
+            } else {
+                io::println("out={}", o);
+            }
+            CliPath* n = this.includes;
+            while (n != (CliPath*)0) {
+                io::println("include={}", n->value);
+                n = n->next;
+            }
+        }
+    }
+};
