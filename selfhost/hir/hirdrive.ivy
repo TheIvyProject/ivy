@@ -84,6 +84,13 @@ struct HDumper {
         io::println("");
     }
 
+    // H6.2y: `virtual_call '<method>' slot=<n> : <ret>`.
+    void header_vcall(HExpr e, long depth) {
+        io::print("virtual_call '{}' slot={} : ", e.msval, e.ival);
+        this.dump_type(e.type);
+        io::println("");
+    }
+
     void dump_expr(long idx, long depth) {
         HExpr e;
         unsafe {
@@ -149,7 +156,11 @@ struct HDumper {
             return;
         }
         if (e.kind == 12) {
-            this.header_op(e, depth, "call", e.sval);
+            if (e.flag != 0) {
+                this.header_vcall(e, depth);
+            } else {
+                this.header_op(e, depth, "call", e.sval);
+            }
             long j = 0;
             while (j < e.an) {
                 long ai = -1;

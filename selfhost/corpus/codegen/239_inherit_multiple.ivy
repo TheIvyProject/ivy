@@ -1,0 +1,40 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct A {
+    int a;
+    virtual void fa() { printf("fa\n"); }
+    virtual ~A() {}
+};
+
+struct B {
+    int b;
+    virtual void fb() { printf("fb\n"); }
+    virtual ~B() {}
+};
+
+struct C : public A, public B {
+    int c;
+    void fa() override { printf("C::fa\n"); }
+    void fb() override { printf("C::fb\n"); }
+    ~C() {}
+};
+
+int main() {
+    C obj;
+    obj.a = 1;
+    obj.b = 2;
+    obj.c = 3;
+    {
+        A& ra = obj;
+        ra.fa();
+    }
+    {
+        B& rb = obj;
+        rb.fb();
+    }
+    return 0;
+}

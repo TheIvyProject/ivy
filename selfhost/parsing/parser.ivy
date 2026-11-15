@@ -239,6 +239,7 @@ export struct Parser {
     long ce_;   // constexpr flag (scratch, set by parse_constexpr_spec)
     long cv_;   // consteval flag
     long pure_virtual_;  // set by parse_method_tail for `= 0` methods
+    long is_override_;   // set by parse_method_tail for `override` methods
 
     void setup(Token* input, long in_count, char* arena, long src_len) {
         this.toks_ = input;
@@ -318,7 +319,7 @@ export struct Parser {
         this.cv_ = 0;
         this.pure_virtual_ = 0;
         unsafe {
-        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 224);
+        this.fpool_ = (AFunction*) __ivy_alloc(this.fn_cap_ * 240);
         this.apool_ = (AAttr*) __ivy_alloc(this.ap_cap_ * 40);
         this.ppool_ = (AParam*) __ivy_alloc(this.pp_cap_ * 128);
         this.sbuf_ = (char*) __ivy_alloc(this.sb_cap_);
@@ -348,7 +349,7 @@ export struct Parser {
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
-        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 224);
+        this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 240);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
         this.enupool_ = (AEnumerator*) __ivy_alloc(this.enu_cap_ * 32);
         this.alpool_ = (AAlias*) __ivy_alloc(this.al_cap_ * 56);
@@ -3842,6 +3843,9 @@ export struct Parser {
         // H6.2s: free functions have no constructor member initializer list.
         f.minit_start = 0;
         f.minit_n = 0;
+        // H6.2y: a free function is neither an override nor pure virtual.
+        f.is_override = 0;
+        f.is_pure_virtual = 0;
         if (this.at("{")) {
             f.body = this.parse_compound();
         } else {
@@ -4027,10 +4031,12 @@ export struct Parser {
 
     long parse_method_tail() {
         this.pure_virtual_ = 0;
+        this.is_override_ = 0;
         if (this.kw("const")) {
             this.next();
         }
         if (this.kw("override")) {
+            this.is_override_ = 1;
             this.next();
         }
         if (this.at("{")) {
@@ -4048,7 +4054,8 @@ export struct Parser {
     }
 
     void push_method_record(const char* name, AType ret, AParamList pl, long body,
-                            long is_virtual, long line, long col) {
+                            long is_virtual, long is_pure, long is_override,
+                            long line, long col) {
         AFunction m;
         m.attrs = this.apool_;
         m.nattrs = 0;
@@ -4075,6 +4082,8 @@ export struct Parser {
         m.is_variadic = pl.variadic;
         m.minit_start = 0;
         m.minit_n = 0;
+        m.is_override = is_override;
+        m.is_pure_virtual = is_pure;
         this.push_method(m);
     }
 
@@ -4116,7 +4125,8 @@ export struct Parser {
                     this.expect(";", "expected '{' for constructor body or ';' for a declaration");
                 }
                 const char* qn = this.intern_join3(bare, "::", bare);
-                this.push_method_record(qn, ret, pl, body, is_virtual, mstart.line, mstart.col);
+                this.push_method_record(qn, ret, pl, body, is_virtual, 0, 0,
+                                        mstart.line, mstart.col);
                 unsafe {
                     this.mpool_[this.m_n_ - 1].minit_start = mi_start;
                     this.mpool_[this.m_n_ - 1].minit_n = mi_cnt;
@@ -4136,17 +4146,20 @@ export struct Parser {
                 AType ret = this.empty_type();
                 ret.base = "void";
                 long body = -1;
+                long is_pure_dtor = 0;
                 if (this.at("{")) {
                     body = this.parse_compound();
                 } else if (this.at("=")) {
                     this.next();
                     this.expect("integer", "expected '0' for pure virtual destructor");
                     this.expect(";", "expected ';' after pure virtual destructor");
+                    is_pure_dtor = 1;
                 } else {
                     this.expect(";", "expected '{' for destructor body or ';' for a declaration");
                 }
                 const char* qn = this.intern_join3(bare, "::~", bare);
-                this.push_method_record(qn, ret, pl, body, is_virtual, mstart.line, mstart.col);
+                this.push_method_record(qn, ret, pl, body, is_virtual, is_pure_dtor, 0,
+                                        mstart.line, mstart.col);
                 continue;
             }
             if (this.is_type_start() == 0) {
@@ -4169,6 +4182,7 @@ export struct Parser {
                 const char* qn = this.intern_join3(bare, "::operator", op);
                 this.push_method_record(qn, ftype, pl, body,
                                         is_virtual != 0 ? 1 : this.pure_virtual_,
+                                        this.pure_virtual_, this.is_override_,
                                         mstart.line, mstart.col);
                 continue;
             }
@@ -4187,6 +4201,7 @@ export struct Parser {
                 const char* qn = this.intern_join3(bare, "::", member);
                 this.push_method_record(qn, ftype, pl, body,
                                         is_virtual != 0 ? 1 : this.pure_virtual_,
+                                        this.pure_virtual_, this.is_override_,
                                         nametok.line, nametok.col);
                 continue;
             }

@@ -642,12 +642,21 @@ export struct MirBuilder {
             // H6.2e: the struct definitions and their field run.
             long nst = u.struct_n + 8;
             this.mu.st_cap = nst;
-            this.mu.structs = (MStruct*) __ivy_alloc(nst * 40);
+            this.mu.structs = (MStruct*) __ivy_alloc(nst * 80);
             this.mu.st_n = 0;
             long nfld = u.fld_n + 8;
             this.mu.fld_cap = nfld;
             this.mu.fields = (MField*) __ivy_alloc(nfld * 56);
             this.mu.fld_n = 0;
+            // H6.2y: the base-class name pool and the vtable entries.
+            long nbn = u.bn_n + 16;
+            this.mu.bn_cap = nbn;
+            this.mu.bnames = (long*) __ivy_alloc(nbn * 8);
+            this.mu.bn_n = 0;
+            long nvt = u.struct_n * 8 + 64;
+            this.mu.vt_cap = nvt;
+            this.mu.vts = (MVTable*) __ivy_alloc(nvt * 24);
+            this.mu.vt_n = 0;
 
             // H6.2m: the enum definitions.
             long nen = u.enum_n + 8;
@@ -656,7 +665,7 @@ export struct MirBuilder {
             this.mu.en_n = 0;
 
             this.mu.fn_cap = u.fn_n + 16;
-            this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 136);
+            this.mu.fns = (MFunction*) __ivy_alloc(this.mu.fn_cap * 160);
             this.mu.fn_n = 0;
 
             long nsc = u.st_n * 2 + 64;
@@ -753,6 +762,8 @@ export struct MirBuilder {
             __ivy_free(this.mu.arm_blk);
             __ivy_free(this.mu.structs);
             __ivy_free(this.mu.fields);
+            __ivy_free(this.mu.bnames);
+            __ivy_free(this.mu.vts);
             __ivy_free(this.mu.enums);
             __ivy_free(this.sc_name_);
             __ivy_free(this.sc_lt_);
@@ -2063,6 +2074,9 @@ export struct MirBuilder {
         unsafe {
             this.mu.exprs[i].sval = this.ep[idx].sval;
             this.mu.exprs[i].type = this.ep[idx].type;
+            // H6.2y: the virtual-dispatch flag and the vtable slot.
+            this.mu.exprs[i].flag = this.ep[idx].flag;
+            this.mu.exprs[i].ival = this.ep[idx].ival;
             this.mu.exprs[i].astart = argstart;
             this.mu.exprs[i].an = an;
             this.mu.exprs[i].lt = this.lt_kind_;
@@ -3345,10 +3359,132 @@ export struct MirBuilder {
         return "";
     }
 
+    // H6.2y: the index of the HIR struct named `name`, or -1.
+    long find_hstruct(const char* name) {
+        long i = 0;
+        while (i < this.hu.struct_n) {
+            HStruct hs;
+            unsafe {
+                hs = this.hu.structs[i];
+            }
+            if (this.seq(hs.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // H6.2y: the index of the MIR struct named `name`, or -1.
+    long find_mstruct(const char* name) {
+        long i = 0;
+        while (i < this.mu.st_n) {
+            MStruct ms;
+            unsafe {
+                ms = this.mu.structs[i];
+            }
+            if (this.seq(ms.name, name)) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // H6.2y: the length of the bare method name (after the last "::").
+    long bare_name_len(const char* q) {
+        long n = this.slen(q);
+        long i = n - 1;
+        while (i > 0) {
+            unsafe {
+                if (q[i] == ':') {
+                    return n - i - 1;
+                }
+            }
+            i = i - 1;
+        }
+        return n;
+    }
+
+    // H6.2y: a destructor's qualified name ends in `::~<Struct>`.
+    bool name_is_dtor(const char* q) {
+        long n = this.slen(q);
+        long bl = this.bare_name_len(q);
+        long off = n - bl;
+        if (bl <= 0) {
+            return false;
+        }
+        unsafe {
+            if (q[off] == '~') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // H6.2y: the bare names of two qualified method names are equal (two
+    // destructors are always equal — they share the `~dtor` vtable slot).
+    bool bare_name_eq(const char* a, const char* b) {
+        if (this.name_is_dtor(a) != 0 && this.name_is_dtor(b) != 0) {
+            return true;
+        }
+        long la = this.bare_name_len(a);
+        long lb = this.bare_name_len(b);
+        if (la != lb) {
+            return false;
+        }
+        long oa = this.slen(a) - la;
+        long ob = this.slen(b) - lb;
+        long k = 0;
+        unsafe {
+            while (k < la) {
+                if (a[oa + k] != b[ob + k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+        }
+        return true;
+    }
+
+    // H6.2y: append a vtable entry to struct `mi` unless its bare method name
+    // already has a slot; otherwise replace the slot's function.
+    void vtable_put(long mi, const char* full, long is_pure) {
+        MStruct ms;
+        unsafe {
+            ms = this.mu.structs[mi];
+        }
+        long i = 0;
+        unsafe {
+            while (i < ms.vn) {
+                if (this.bare_name_eq(ms.vtable[i].method, full)) {
+                    ms.vtable[i].func = full;
+                    ms.vtable[i].is_pure = is_pure;
+                    return;
+                }
+                i = i + 1;
+            }
+        }
+        long vn = this.mu.vt_n;
+        if (vn < this.mu.vt_cap) {
+            unsafe {
+                this.mu.vts[vn].method = full;
+                this.mu.vts[vn].func = full;
+                this.mu.vts[vn].is_pure = is_pure;
+            }
+            this.mu.vt_n = vn + 1;
+            unsafe {
+                this.mu.structs[mi].vn = ms.vn + 1;
+            }
+        }
+    }
+
     // The entry point: build() in mir_builder.cpp.
     void build() {
         // H6.2e: copy the struct definitions first (source order), so the
         // emitter can print `%struct.Name` and resolve members.
+        // H6.2y: the inherited fields are flattened first (mirror of the
+        // oracle's StructInfo population), then the own fields.
         long si = 0;
         while (si < this.hu.struct_n) {
             HStruct hs;
@@ -3363,6 +3499,67 @@ export struct MirBuilder {
                     this.mu.structs[mi].nfields = 0;
                     this.mu.structs[mi].line = hs.line;
                     this.mu.structs[mi].col = hs.col;
+                    this.mu.structs[mi].is_poly = hs.is_poly;
+                    this.mu.structs[mi].nbases = 0;
+                    this.mu.structs[mi].bstart = this.mu.bn_n;
+                    this.mu.structs[mi].vtable = this.mu.vts + this.mu.vt_n;
+                    this.mu.structs[mi].vn = 0;
+                }
+                // Base-class names.
+                long bk = 0;
+                while (bk < hs.nbases) {
+                    long bp = 0;
+                    unsafe {
+                        bp = this.hu.bnames[hs.bstart + bk];
+                    }
+                    long bn = this.mu.bn_n;
+                    if (bn < this.mu.bn_cap) {
+                        unsafe {
+                            this.mu.bnames[bn] = bp;
+                            this.mu.structs[mi].nbases =
+                                this.mu.structs[mi].nbases + 1;
+                        }
+                        this.mu.bn_n = bn + 1;
+                    }
+                    bk = bk + 1;
+                }
+                // Inherited fields come first (after the vptr).
+                bk = 0;
+                while (bk < hs.nbases) {
+                    long bp = 0;
+                    unsafe {
+                        bp = this.hu.bnames[hs.bstart + bk];
+                    }
+                    long bi = -1;
+                    unsafe {
+                        const char* bnm = reinterpret_cast<const char*>(bp);
+                        bi = this.find_hstruct(bnm);
+                    }
+                    if (bi >= 0) {
+                        HStruct bs;
+                        unsafe {
+                            bs = this.hu.structs[bi];
+                        }
+                        long bfj = 0;
+                        while (bfj < bs.nfields) {
+                            HField bf;
+                            unsafe {
+                                bf = bs.fields[bfj];
+                            }
+                            long mf = this.mu.fld_n;
+                            if (mf < this.mu.fld_cap) {
+                                unsafe {
+                                    this.mu.fields[mf].name = bf.name;
+                                    this.mu.fields[mf].type = bf.type;
+                                    this.mu.structs[mi].nfields =
+                                        this.mu.structs[mi].nfields + 1;
+                                }
+                                this.mu.fld_n = mf + 1;
+                            }
+                            bfj = bfj + 1;
+                        }
+                    }
+                    bk = bk + 1;
                 }
                 long fj = 0;
                 while (fj < hs.nfields) {
@@ -3381,6 +3578,60 @@ export struct MirBuilder {
                         this.mu.fld_n = mf + 1;
                     }
                     fj = fj + 1;
+                }
+                // Vtable: the base entries first, then this struct's own
+                // virtual methods (an override replaces the base slot).
+                if (hs.is_poly != 0) {
+                    bk = 0;
+                    while (bk < hs.nbases) {
+                        long bp = 0;
+                        unsafe {
+                            bp = this.hu.bnames[hs.bstart + bk];
+                        }
+                        long bmi = -1;
+                        unsafe {
+                            const char* bnm = reinterpret_cast<const char*>(bp);
+                            bmi = this.find_mstruct(bnm);
+                        }
+                        if (bmi >= 0) {
+                            MStruct bs;
+                            unsafe {
+                                bs = this.mu.structs[bmi];
+                            }
+                            long be = 0;
+                            while (be < bs.vn) {
+                                MVTable vte;
+                                unsafe {
+                                    vte = bs.vtable[be];
+                                }
+                                // Copy the base entry verbatim: the oracle does
+                                // not deduplicate the copied runs, so two
+                                // bases with a destructor keep both slots.
+                                long vn = this.mu.vt_n;
+                                if (vn < this.mu.vt_cap) {
+                                    unsafe {
+                                        this.mu.vts[vn] = vte;
+                                        this.mu.structs[mi].vn =
+                                            this.mu.structs[mi].vn + 1;
+                                    }
+                                    this.mu.vt_n = vn + 1;
+                                }
+                                be = be + 1;
+                            }
+                        }
+                        bk = bk + 1;
+                    }
+                    long fi2 = 0;
+                    while (fi2 < this.hu.fn_n) {
+                        HFunction hf2;
+                        unsafe {
+                            hf2 = this.hu.fns[fi2];
+                        }
+                        if (hf2.is_virtual != 0 && this.seq(hf2.vtable_of, hs.name)) {
+                            this.vtable_put(mi, hf2.name, hf2.is_pure);
+                        }
+                        fi2 = fi2 + 1;
+                    }
                 }
                 this.mu.st_n = mi + 1;
             }

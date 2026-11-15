@@ -1,0 +1,17 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    int a = 1;
+    int b = 2;
+    int c = 0;
+    if (move(a) > 0) {
+        c = 1;
+    }
+    int d = c > 0 ? move(b) : 0;
+    printf("%d %d\n", c, d);
+    return 0;
+}

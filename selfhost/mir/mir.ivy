@@ -128,6 +128,10 @@ export struct MFunction {
     long has_body;       // 0 = declaration only
     // H6.2p: the declaration's parameter list ends in `...`.
     long is_variadic;
+    // H6.2y: virtual dispatch flags and the owning vtable's struct name.
+    long is_virtual;
+    long is_pure;
+    const char* vtable_of;
 };
 
 // H6.2e: a struct field in MIR.  The type is already alias/template resolved
@@ -137,15 +141,31 @@ export struct MField {
     AType type;
 };
 
+// H6.2y: a vtable entry.  `method` is the bare method name (destructors are
+// normalized to `~dtor`), `func` the full name of the function and `is_pure`
+// the pure-virtual flag (the entry is a null pointer).
+export struct MVTable {
+    const char* method;
+    const char* func;
+    long is_pure;
+};
+
 // H6.2e: a struct/class definition in MIR.  `fields` points into the
 // contiguous `MUnit.fields` pool.  The order is the source order of the
 // accepted declarations (the emitter prints them in this order).
+// H6.2y: `fields` already includes the inherited (base) fields first; the
+// emitter prepends the synthetic `__vptr` field of a polymorphic struct.
 export struct MStruct {
     const char* name;
     MField* fields;
     long nfields;
     long line;
     long col;
+    long is_poly;
+    long nbases;
+    long bstart;      // index into the `MUnit.bnames` pool
+    MVTable* vtable;
+    long vn;
 };
 
 // H6.2m: an enum definition in MIR.  Mirrors `mir::EnumInfo`: the name, the
@@ -194,6 +214,15 @@ export struct MUnit {
     MField* fields;
     long fld_n;
     long fld_cap;
+    // H6.2y: the base-class names (the `MStruct.bstart` / `nbases` fields
+    // index into this run) and the vtable entries (the `MStruct.vtable` /
+    // `vn` fields index into this run).
+    long* bnames;
+    long bn_n;
+    long bn_cap;
+    MVTable* vts;
+    long vt_n;
+    long vt_cap;
     // H6.2m: the enum definitions (source order).
     MEnum* enums;
     long en_n;

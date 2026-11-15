@@ -171,6 +171,11 @@ export struct HirBuilder {
     const char* base_name_;  // scratch: current base-class name
     long* ovl_;           // scratch: overload candidate indices
     long ovl_cap_;
+    // H6.2y: scratch vtable method names (pointers stored as `long`) used to
+    // resolve the slot of a virtual call.
+    long* vt_name_;
+    long vt_n_;
+    long vt_cap_;
 
     // --- template instantiation (H4.4) ---
     //
@@ -335,10 +340,10 @@ export struct HirBuilder {
             this.sbctr_ = 0;
             this.rfc_ = 0;
             this.u.fn_cap = ntoks + 64;
-            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 128);
+            this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 152);
             this.u.fn_n = 0;
             this.u.ex_cap = ntoks * 8 + 256;
-            this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 144);
+            this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 152);
             this.u.ex_n = 0;
             this.u.st_cap = ntoks * 3 + 128;
             this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 136);
@@ -414,11 +419,27 @@ export struct HirBuilder {
                 sfi = sfi + 1;
             }
             this.u.struct_cap = nstructs + 8;
-            this.u.structs = (HStruct*) __ivy_alloc(this.u.struct_cap * 40);
+            this.u.structs = (HStruct*) __ivy_alloc(this.u.struct_cap * 64);
             this.u.struct_n = 0;
             this.u.fld_cap = total_fields;
             this.u.fields = (HField*) __ivy_alloc(this.u.fld_cap * 56);
             this.u.fld_n = 0;
+            // H6.2y: the base-class names of the exported structs.
+            long total_bases = 16;
+            long sbi = 0;
+            while (sbi < nstructs) {
+                AStruct sb = this.get_struct(sbi);
+                total_bases = total_bases + sb.nbases;
+                sbi = sbi + 1;
+            }
+            this.u.bn_cap = total_bases;
+            this.u.bnames = (long*) __ivy_alloc(this.u.bn_cap * 8);
+            this.u.bn_n = 0;
+            // H6.2y: scratch vtable-name stack (a struct's vtable is at most
+            // its own methods plus every base method).
+            this.vt_cap_ = nstructs * 8 + 64;
+            this.vt_name_ = (long*) __ivy_alloc(this.vt_cap_ * 8);
+            this.vt_n_ = 0;
 
             // H6.2m: the exported enum definitions (name + underlying type).
             long nenums = this.pa.enum_count();
@@ -576,6 +597,8 @@ export struct HirBuilder {
             __ivy_free(this.u.args);
             __ivy_free(this.u.structs);
             __ivy_free(this.u.fields);
+            __ivy_free(this.u.bnames);
+            __ivy_free(this.vt_name_);
             __ivy_free(this.u.enums);
             __ivy_free(this.snm_);
             __ivy_free(this.sty_);
@@ -2738,6 +2761,7 @@ export struct HirBuilder {
         e.line = line;
         e.col = col;
         e.fval = 0.0;
+        e.msval = "";
         return e;
     }
 
@@ -3477,6 +3501,9 @@ export struct HirBuilder {
         f.lt_start = lt_start;
         f.lt_n = lt_n;
         f.is_variadic = 0;
+        f.is_virtual = 0;
+        f.is_pure = 0;
+        f.vtable_of = "";
         unsafe {
             f.return_lifetime = (char*)ret_lt;
         }
@@ -3638,6 +3665,29 @@ export struct HirBuilder {
         long idx = this.add_function_at(mf.name, ret, 0, mf.is_constexpr, pstart,
                                         -1, 0, 0);
         this.finish_function(idx);
+        // H6.2y: mirror buildStruct's `fn->isVirtual` / `vtableOf` flags.  A
+        // destructor of a polymorphic class is virtual even without the
+        // keyword, and an `override` inherits virtuality from its base.
+        long poly = 0;
+        long gsi = this.find_struct(sd.name);
+        if (gsi >= 0) {
+            poly = this.struct_poly(gsi);
+        }
+        long isv = 0;
+        if (mf.is_virtual != 0 || mf.is_pure_virtual != 0 || mf.is_override != 0) {
+            isv = 1;
+        }
+        long isdtor = this.name_is_struct_dtor(mf.name, sd.name);
+        if (isdtor != 0 && poly != 0) {
+            isv = 1;
+        }
+        if (isv != 0) {
+            unsafe {
+                this.u.fns[idx].is_virtual = 1;
+                this.u.fns[idx].is_pure = mf.is_pure_virtual;
+                this.u.fns[idx].vtable_of = sd.name;
+            }
+        }
     }
 
     void build_structs() {
@@ -3684,6 +3734,25 @@ export struct HirBuilder {
                     this.u.structs[hsi].nfields = 0;
                     this.u.structs[hsi].line = sd.line;
                     this.u.structs[hsi].col = sd.col;
+                    this.u.structs[hsi].is_poly = this.struct_poly(i);
+                    this.u.structs[hsi].nbases = 0;
+                    this.u.structs[hsi].bstart = this.u.bn_n;
+                }
+                // H6.2y: export the base-class names (source order) so the
+                // MIR can flatten the inherited fields and rebuild the vtable.
+                long bk = 0;
+                while (bk < sd.nbases) {
+                    this.load_base(sd, bk);
+                    long bn = this.u.bn_n;
+                    if (bn < this.u.bn_cap) {
+                        unsafe {
+                            this.u.bnames[bn] = (long) this.base_name_;
+                            this.u.structs[hsi].nbases =
+                                this.u.structs[hsi].nbases + 1;
+                        }
+                        this.u.bn_n = bn + 1;
+                    }
+                    bk = bk + 1;
                 }
                 long fj = 0;
                 while (fj < sd.nfields) {
@@ -5400,6 +5469,13 @@ export struct HirBuilder {
                 be = this.u.exprs[base];
             }
             AType bt = be.type;
+            // H6.2y: a virtual method is dispatched through the vtable only
+            // when the receiver is a reference or a pointer (the oracle's
+            // `wasRefOrPtr`); a value object uses static dispatch.
+            long was_ref_or_ptr = 0;
+            if (bt.is_ref != 0 || bt.ptr_depth > 0) {
+                was_ref_or_ptr = 1;
+            }
             long arrow_bad = 0;
             long mfn = -1;
             long si = -1;
@@ -5455,6 +5531,17 @@ export struct HirBuilder {
                     }
                     e.sval = hf.name;
                     e.type = hf.ret;
+                    // H6.2y: virtual dispatch through a reference/pointer.
+                    // The slot comes from the *static* type's vtable.
+                    if (hf.is_virtual != 0 && was_ref_or_ptr != 0) {
+                        AStruct vsd = this.get_struct(si);
+                        long vs = this.vtable_slot(vsd, si, ca.sval);
+                        if (vs >= 0) {
+                            e.flag = 1;
+                            e.ival = vs;
+                            e.msval = ca.sval;
+                        }
+                    }
                 } else if (this.count_fns(this.tmp_) == 0) {
                     AStruct sd = this.get_struct(si);
                     this.err_no_method(a.line, a.col, sd.name, ca.sval);
@@ -6057,6 +6144,120 @@ export struct HirBuilder {
         HExpr e = this.new_expr(8, a.line, a.col);
         e.type = this.ty_dummy();
         return this.push_expr(e);
+    }
+
+    // H6.2y: does the bare name of the qualified method name `q` equal
+    // `name`?  (`q` is either a `Struct::method` name or the normalized
+    // `~dtor` vtable key.)
+    bool bare_method_eq(const char* q, const char* name) {
+        long bl = this.bare_method_len(q);
+        long nl = this.slen(name);
+        if (bl != nl) {
+            return false;
+        }
+        long n = this.slen(q);
+        long off = n - bl;
+        long k = 0;
+        unsafe {
+            while (k < bl) {
+                if (q[off + k] != name[k]) {
+                    return false;
+                }
+                k = k + 1;
+            }
+        }
+        return true;
+    }
+
+    // Collect the vtable method names of struct `sd` (global index `gidx`)
+    // in slot order, mirroring buildStruct's vtable loop: the base vtables
+    // are appended verbatim (in base order), then this struct's virtual
+    // methods in declaration order replace the first matching slot or are
+    // appended.  A destructor is stored under the shared `~dtor` key.  The
+    // names are left in `vt_name_` / `vt_n_`.
+    void collect_vtable(AStruct sd, long gidx) {
+        long k = 0;
+        while (k < sd.nbases) {
+            this.load_base(sd, k);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                AStruct bs = this.get_struct(bi);
+                // The base's complete vtable is copied as-is: two bases with
+                // a destructor each keep both slots (the oracle does not
+                // deduplicate the copied runs).
+                this.collect_vtable(bs, bi);
+            }
+            k = k + 1;
+        }
+        long poly = this.struct_poly(gidx);
+        long j = 0;
+        while (j < sd.nmethods) {
+            AFunction mf;
+            unsafe {
+                mf = sd.methods[j];
+            }
+            long isv = 0;
+            if (mf.is_virtual != 0 || mf.is_pure_virtual != 0 ||
+                mf.is_override != 0) {
+                isv = 1;
+            }
+            long isdtor = this.name_is_struct_dtor(mf.name, sd.name);
+            if (isdtor != 0 && poly != 0) {
+                isv = 1;
+            }
+            long isctor = this.name_is_struct_ctor(mf.name, sd.name);
+            if (isv != 0 && isctor == 0) {
+                unsafe {
+                    const char* bn = mf.name;
+                    if (isdtor != 0) {
+                        bn = "~dtor";
+                    }
+                    long slot = -1;
+                    long i = 0;
+                    while (i < this.vt_n_) {
+                        long p = this.vt_name_[i];
+                        const char* en = reinterpret_cast<const char*>(p);
+                        if (this.bare_method_eq(en, bn)) {
+                            slot = i;
+                            break;
+                        }
+                        i = i + 1;
+                    }
+                    if (slot >= 0) {
+                        this.vt_name_[slot] = (long) bn;
+                    } else {
+                        long vn = this.vt_n_;
+                        if (vn < this.vt_cap_) {
+                            this.vt_name_[vn] = (long) bn;
+                            this.vt_n_ = vn + 1;
+                        }
+                    }
+                }
+            }
+            j = j + 1;
+        }
+    }
+
+    // The vtable slot of method `name` in struct `sd`, or -1 when the struct
+    // has no such virtual method.
+    long vtable_slot(AStruct sd, long gidx, const char* name) {
+        this.vt_n_ = 0;
+        this.collect_vtable(sd, gidx);
+        long i = 0;
+        while (i < this.vt_n_) {
+            long p = 0;
+            unsafe {
+                p = this.vt_name_[i];
+            }
+            unsafe {
+                const char* en = reinterpret_cast<const char*>(p);
+                if (this.bare_method_eq(en, name)) {
+                    return i;
+                }
+            }
+            i = i + 1;
+        }
+        return -1;
     }
 
     // Find the method `name` in the struct's method table or in one of its
@@ -8698,6 +8899,9 @@ export struct HirBuilder {
                 this.u.structs[hsi].nfields = 0;
                 this.u.structs[hsi].line = rec.line;
                 this.u.structs[hsi].col = rec.col;
+                this.u.structs[hsi].is_poly = 0;
+                this.u.structs[hsi].nbases = 0;
+                this.u.structs[hsi].bstart = -1;
             }
             long fj = 0;
             while (fj < rec.nfields) {

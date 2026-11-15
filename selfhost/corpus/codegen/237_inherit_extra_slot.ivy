@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Base {
+    int x;
+    virtual void base_only() { printf("base only\n"); }
+    virtual ~Base() {}
+};
+
+struct Derived : public Base {
+    int y;
+    virtual void extra() { printf("extra\n"); }
+    ~Derived() {}
+};
+
+int main() {
+    Derived d;
+    d.x = 1;
+    d.y = 2;
+    Derived& r = d;
+    r.extra();
+    r.base_only();
+    return 0;
+}

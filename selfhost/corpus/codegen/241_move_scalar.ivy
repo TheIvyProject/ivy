@@ -1,0 +1,19 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int main() {
+    int a = 10;
+    int b = move(a);
+    a = 20;
+    float f = 1.5;
+    float g = move(f);
+    f = 2.5;
+    int p = 3;
+    int q = 4;
+    int r = move(p) + move(q);
+    printf("%d %d %d %d\n", b, a, r, a + b + r);
+    return 0;
+}

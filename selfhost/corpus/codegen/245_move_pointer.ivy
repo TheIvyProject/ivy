@@ -1,0 +1,18 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+    void* __ivy_alloc(unsigned long long n);
+    void __ivy_free(void* p);
+}
+
+int main() {
+    unsafe {
+        int* p = (int*)__ivy_alloc(4);
+        *p = 9;
+        int* q = move(p);
+        printf("%d\n", *q);
+        __ivy_free(q);
+    }
+    return 0;
+}

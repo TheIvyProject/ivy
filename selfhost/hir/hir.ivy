@@ -27,6 +27,9 @@ export struct HExpr {
     long line;          // source line (for diagnostics)
     long col;           // source column (for diagnostics)
     double fval;        // exact value of a float literal (2)
+    // H6.2y: for a call (12), the bare method name when the call is a
+    // virtual dispatch (`flag` = 1, `ival` = vtable slot); "" otherwise.
+    const char* msval;
 };
 
 // Statement kinds (mirror dumpHirStmt in src/app/main.cpp):
@@ -100,6 +103,12 @@ export struct HStruct {
     long nfields;
     long line;
     long col;
+    // H6.2y: the struct is polymorphic (a vptr is laid out at offset 0) and
+    // the base-class names live in the `HUnit.bnames` pool
+    // (`bstart`..`bstart + nbases`).
+    long is_poly;
+    long nbases;
+    long bstart;
 };
 
 // H6.2m: an enum definition in HIR.  Only what the codegen needs survives the
@@ -132,6 +141,12 @@ export struct HFunction {
     const char* return_lifetime;  // the return lifetime name (NULL when none)
     // H6.2p: the declaration's parameter list ends in `...`.
     long is_variadic;
+    // H6.2y: the method is dispatched through a vtable (`is_virtual`), is a
+    // pure virtual (`is_pure`), and the struct whose vtable it is an entry
+    // of (`vtable_of`, "" for a non-virtual function).
+    long is_virtual;
+    long is_pure;
+    const char* vtable_of;
 };
 
 // A whole HIR translation unit. Flat pools are owned by HirBuilder.
@@ -168,6 +183,11 @@ export struct HUnit {
     HField* fields;
     long fld_n;
     long fld_cap;
+    // H6.2y: the base-class names of every exported struct (the
+    // `HStruct.bstart` / `HStruct.nbases` fields index into this run).
+    long* bnames;
+    long bn_n;
+    long bn_cap;
     // H6.2m: the enum definitions of the unit (source order).
     HEnum* enums;
     long enum_n;

@@ -1,0 +1,16 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int twice(int v) {
+    return v * 2;
+}
+
+int main() {
+    int a = 5;
+    int b = twice(move(a));
+    printf("%d\n", b);
+    return 0;
+}

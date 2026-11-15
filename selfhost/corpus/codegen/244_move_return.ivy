@@ -1,0 +1,16 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+int pass(int v) {
+    return move(v);
+}
+
+int main() {
+    int a = 7;
+    int b = pass(a);
+    printf("%d\n", b);
+    return 0;
+}

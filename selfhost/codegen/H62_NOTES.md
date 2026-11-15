@@ -3206,3 +3206,236 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62x\` (và `h62s`, `h62n`,
 `h62r`, `h62verify` cho verify độc lập).
 
+## 48. H6.2y - inheritance + virtual dispatch
+
+#### 48.1 Phạm vi
+
+- `struct Derived : public Base` (một hoặc nhiều base trực tiếp), kế thừa
+  field, method, constructor/destructor.
+- Method `virtual`, `override`, pure virtual `= 0`, destructor virtual
+  (kể cả khi class polymorphic mà dtor không ghi `virtual`).
+- Virtual dispatch qua vtable khi receiver là reference hoặc pointer;
+  receiver là object value dùng static dispatch (mirror
+  `wasRefOrPtr` của oracle).
+- Field access trong method phải viết `this.field`: oracle **không**
+  resolve tên field trần trong thân method (`side` → "undeclared
+  identifier"), chỉ `this.side` mới hợp lệ. Đây là hành vi của oracle,
+  port giữ nguyên.
+- Kế thừa nhiều tầng (grandchild) **ngoài subset**: MIR oracle chỉ
+  flatten field của base trực tiếp, nên field của ông nội rơi khỏi
+  `StructInfo.fields` và `lowerMemberAddr` lặng lẽ dùng GEP index 0
+  (ghi đè vptr). Port báo lỗi `unknown struct member is out of scope for
+  H6.2e` thay vì sinh IR sai.
+
+#### 48.2 Parser (`selfhost/parsing/ast.ivy`, `parser.ivy`)
+
+- `AFunction` thêm `is_override` / `is_pure_virtual` (224 → 240 byte);
+  `fpool_`/`mpool_` cấp phát 240 byte mỗi record.
+- `parse_method_tail` ghi `is_override_` khi thấy `override` và
+  `pure_virtual_` khi thấy `= 0`; dtor `= 0` cũng đánh dấu pure.
+- `push_method_record` nhận thêm 2 tham số `is_pure`, `is_override`
+  (ctor/dtor/operator/method đều truyền); free function khởi tạo 0.
+
+#### 48.3 HIR (`selfhost/hir/hir.ivy`, `hir_builder.ivy`)
+
+- `HExpr.msval` (tên method trần của virtual call).
+- `HStruct.is_poly`/`nbases`/`bstart`; `HFunction.is_virtual`/`is_pure`/
+  `vtable_of`; `HUnit.bnames`/`bn_n`/`bn_cap`. Kích thước cấp phát:
+  `HFunction` 152, `HExpr` 152, `HStruct` 64.
+- `build_structs` export base name (source order) + `is_poly` lấy từ
+  `struct_poly(i)` (layout đã chạy trước); specialization export
+  `is_poly = 0`, `nbases = 0`, `bstart = -1`.
+- `build_method_signature` set `is_virtual = 1` khi method `virtual`,
+  pure, `override`, hoặc là dtor của class polymorphic; `vtable_of` =
+  tên struct.
+- `collect_vtable` mirror `buildStruct`: **append nguyên văn** vtable của
+  từng base (đệ quy, theo thứ tự base), rồi method của struct hiện tại
+  thay slot đầu tiên trùng bare name, không trùng thì append. Dtor lưu
+  key chung `~dtor`.
+  - Hệ quả bug-compat: đa kế thừa giữ **hai** slot dtor (mỗi base một
+    slot); override của derived chỉ thay slot dtor đầu tiên, y hệt
+    oracle (`@_ZTVC` 4 entry trong fixture 239).
+- `build_call` nhánh method: ghi `was_ref_or_ptr` từ type receiver
+  trước khi clear `is_ref`; nếu target `hf.is_virtual != 0` và receiver
+  ref/ptr thì tra slot trong vtable của **static type** (`vtable_slot`),
+  set `flag = 1`, `ival = slot`, `msval = ca.sval`.
+- `hirdrive.ivy`: `header_vcall` in
+  `virtual_call '<method>' slot=<n> : <ret>` khi `flag != 0`.
+
+#### 48.4 MIR (`selfhost/mir/mir.ivy`, `mir_builder.ivy`)
+
+- `MVTable { method, func, is_pure }`; `MStruct` thêm
+  `is_poly`/`nbases`/`bstart`/`vtable`/`vn`; `MUnit` thêm
+  `bnames`/`vts`. `MFunction` 136 → 160 byte, `MStruct` 40 → 80 byte.
+- `build()`: với mỗi HIR struct, copy base name; flatten field của
+  **base trực tiếp** (chỉ field riêng của base, mirror
+  `mir_builder.cpp:1093-1099`) rồi field riêng; dựng vtable nếu poly:
+  copy entry của từng base **nguyên văn** (không dedup), rồi quét
+  `hu.fns` có `vtable_of == struct` và `is_virtual`, `vtable_put`
+  (thay slot đầu tiên trùng bare name, dtor coi là bằng nhau).
+- `ex_call` copy `flag`/`ival` sang MIR.
+- Vtable entry lưu **full function name** trong `method`; so sánh bare
+  name (suffix sau `::`) + dtor coi là bằng nhau, tránh pointer
+  arithmetic trên `const char*` (subset không hỗ trợ).
+
+#### 48.5 Emitter (`selfhost/codegen/emitter.ivy`)
+
+- `find_field` cộng 1 khi `is_poly` (vptr là GEP index 0).
+- `sizeof_type` cộng 8 byte vptr; `emit_struct_defs` in `ptr` đầu tiên.
+- `emit_vtables` (gọi sau `emit_struct_defs`, trước globals): in
+  `@_ZTV<escaped> = internal constant [ N x ptr ] [` + entry 0
+  `  ptr <sym>` + mỗi entry sau `, ` rồi `  ptr <sym>` + `]`; blank
+  line sau tất cả vtable.
+- `init_vptr`: khi decl struct zeroinit, nếu poly thì GEP field 0 và
+  `store ptr @_ZTV<name>`.
+- `lower_virtual_call` (dispatch khi `e.flag != 0`): `lower_lvalue`
+  receiver → `load ptr` (vptr) → `getelementptr ptr, ptr <vptr>, i32
+  <slot>` → `load ptr` → build args (arg 0 ref → `lower_lvalue` lần
+  nữa) → `call ... %tmp(...)`.
+- Dtor cuối scope vẫn theo static type và thứ tự ngược khai báo; dtor
+  virtual của class poly được `record_dtor_var` như cũ.
+
+#### 48.6 Fixture mới (235-240)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `235_inherit_virtual_dtor.ivy` | dtor virtual qua `Base&` trong scope, field base qua ref |
+| `236_inherit_pure_virtual.ivy` | `virtual int area() = 0`, override trả int, dispatch qua ref |
+| `237_inherit_extra_slot.ivy` | derived thêm virtual method mới (slot nối sau base) |
+| `238_inherit_virtual_args.ivy` | virtual method có tham số + `this.field` |
+| `239_inherit_multiple.ivy` | đa kế thừa `C : public A, public B`, hai ref trong scope riêng |
+| `240_inherit_base_method.ivy` | method không virtual kế thừa, đọc `this.x` |
+
+#### 48.7 Kết quả (2026-11-15)
+
+```text
+cgdiff.ps1:    PASS 240 / 240
+indep_verify:  INDEP PASS 240 / 240
+interpdiff:    PASS 23 / 23
+build_smoke:   PASS (h61 smoke ok)
+```
+
+Trên 65 example oracle chấp nhận: **44 MATCH** (trước y: 42). Hai file
+mới khớp byte là `test_inherit` và `test_inherit2`; không regress.
+21 DIFF còn lại: `test_b5_*`/`test_b6_*`/`test_d1..d7`/`test_d4_*`
+(`test_move_*` = z), `test_return_value`/`test_module_math` (aa).
+
+HIR khớp byte (sau khi bỏ dòng `=== path ===`) cho `test_inherit`,
+`test_inherit2` và 6 fixture mới; negative case grandchild chỉ khác ở
+chẩn đoán của port (oracle sinh IR sai) nên không đưa vào corpus.
+
+#### 48.8 Trạng thái H6.2y
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/ast.ivy`, `parser.ivy`: `is_override`/`is_pure_virtual`;
+- `selfhost/hir/hir.ivy`, `hir_builder.ivy`: flags vtable, base pool,
+  `collect_vtable`/`vtable_slot`/`build_call`;
+- `selfhost/mir/mir.ivy`, `mir_builder.ivy`: `MVTable`, flatten field,
+  dựng vtable;
+- `selfhost/codegen/emitter.ivy`: vptr layout, `emit_vtables`,
+  `init_vptr`, `lower_virtual_call`;
+- `selfhost/hir/hirdrive.ivy`: `header_vcall`;
+- `selfhost/corpus/codegen/235..240_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 48 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..y ... 240/240`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62y\` (và `h62n`, `h62r`,
+`h62verify` cho verify độc lập).
+
+## 49. H6.2z - `move()`
+
+#### 49.1 Phạm vi
+
+- `move(x)` với `x` là **bare identifier** (scalar, struct, pointer). Đây
+  là builtin A4/B3: HIR/MIR đánh dấu biến moved-out và kiểm tra
+  use-after-move; codegen chỉ pass-through giá trị.
+- `move` trong mọi ngữ cảnh biểu thức: khởi tạo, gán, tham số call, toán
+  hạng binary, điều kiện `if`, nhánh ternary, `return`.
+- Ngoài subset: `move(a.x)` và `move(a[0])`. Oracle coi `move` là
+  "undeclared identifier"/"undeclared function" khi operand không phải
+  identifier (không có overload nhận lvalue member/index), nên port giữ
+  nguyên chẩn đoán đó.
+- Ngoài subset: người dùng tự định nghĩa hàm tên `move`. HIR oracle vẫn
+  coi call là builtin (mark moved-out trước khi resolve), nên chương
+  trình báo `use of moved-out variable`; port khớp byte chẩn đoán
+  (probe `t11_shadow`).
+
+#### 49.2 Emitter (`selfhost/codegen/emitter.ivy`)
+
+- `lower_call` thêm nhánh đầu (sau virtual dispatch, trước `io::print`):
+  `move` + `an == 1` → `lower_expr(args[astart])`, không cấp temp cho
+  call và không emit `call`. Đây là mirror `codegen.cpp:1542-1548`
+  (`isBuiltinCall && v.callee == "move"` → `lowerExpr(*v.args[0])`).
+- HIR/MIR move tracking đã có từ A4/B3 (`mark_moved_out`,
+  `mir_builder.cpp:558-585`); MIR **vẫn giữ** node `Call 'move'` để
+  `markMovedOut`/`isMovedOut` hoạt động — chỉ emitter bỏ qua node đó.
+- Hệ quả byte-compat: `int b = move(a);` sinh đúng
+  `%tmp.N = load i32, ptr %a.M` + `store`, y hệt một lần đọc thường, nên
+  temp numbering không lệch.
+- Nhánh `an != 1` (không xảy ra trong subset) rơi xuống đường call thường
+  để giữ chẩn đoán "call to a function without a MIR entry".
+
+#### 49.3 Probe (oracle so với port)
+
+| Probe | Nội dung | Kết quả |
+| --- | --- | --- |
+| `t1_struct` | `P b = move(a)` với struct | MATCH |
+| `t2_arg` | `twice(move(a))` | MATCH |
+| `t3_return` | `return move(v)` | MATCH |
+| `t6_struct_arg` | `sum(move(a))` struct by value | MATCH |
+| `t7_ptr` | `int* q = move(p)` trong `unsafe` | MATCH |
+| `10_cond` | `if (move(a) > 0)` + ternary `move(b)` | MATCH |
+| `t4_use_after` | đọc `a` sau move | MATCH (exit 1, stderr byte) |
+| `t5_already` | move hai lần | MATCH (exit 1, stderr byte) |
+| `t8_member` | `move(a.x)` | MATCH (cả hai báo undeclared `move`) |
+| `t9_index` | `move(a[0])` | MATCH (như trên) |
+| `t11_shadow` | tự định nghĩa `move` | MATCH (moved-out) |
+
+#### 49.4 Fixture (`selfhost/corpus/codegen`)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `241_move_scalar.ivy` | scalar int/float, reassign, `move(p) + move(q)` |
+| `242_move_struct.ivy` | struct by value + đọc member sau move |
+| `243_move_call_arg.ivy` | `twice(move(a))` |
+| `244_move_return.ivy` | `return move(v)` |
+| `245_move_pointer.ivy` | pointer move trong `unsafe` |
+| `246_move_cond.ivy` | move trong `if` và ternary |
+
+#### 49.5 Kết quả (2026-11-15)
+
+```text
+cgdiff.ps1:    PASS 246 / 246
+indep_verify:  INDEP PASS 246 / 246
+interpdiff:    PASS 23 / 23
+build_smoke:   PASS (h61 smoke ok)
+```
+
+Trên 65 example oracle chấp nhận: **46 MATCH** (trước z: 44). Hai file
+mới khớp byte là `test_move_a4` và `test_move_b3`; không regress.
+`test_d4_move` vẫn DIFF vì `import unique_ptr` (module/std, aa).
+
+HIR khớp byte (sau khi bỏ dòng `=== path ===`) cho `test_move_a4`,
+`test_move_b3` và 6 fixture mới. Negative (`t4_use_after`,
+`t5_already`) khớp byte cả stdout/stderr/exit code.
+
+#### 49.6 Trạng thái H6.2z
+
+Tập thêm/sửa:
+
+- `selfhost/codegen/emitter.ivy`: nhánh pass-through `move` trong
+  `lower_call`;
+- `selfhost/corpus/codegen/241..246_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 49 này);
+- `PLAN.md` dòng H6.2 → `◐ H6.2a..z ... 246/246`.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62z\` (và `h62n`, `h62r`,
+`h62verify` cho verify độc lập).
+

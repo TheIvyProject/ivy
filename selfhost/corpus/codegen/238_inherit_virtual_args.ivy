@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Base {
+    int x;
+    virtual int calc(int a, int b) { return a + b; }
+    virtual ~Base() {}
+};
+
+struct Derived : public Base {
+    int y;
+    int calc(int a, int b) override { return a * b + this.y; }
+    ~Derived() {}
+};
+
+int main() {
+    Derived d;
+    d.x = 1;
+    d.y = 10;
+    Base& r = d;
+    int v = r.calc(3, 4);
+    printf("%d\n", v);
+    return 0;
+}

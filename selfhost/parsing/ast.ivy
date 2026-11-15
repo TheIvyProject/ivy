@@ -188,6 +188,12 @@ export struct AFunction {
     // `this.field = arg` assignments at the head of the body.
     long minit_start;
     long minit_n;
+    // H6.2y: the `override` marker and the pure-virtual `= 0` marker.  The
+    // oracle distinguishes these from plain `virtual` when it builds the
+    // vtable (an override replaces the base slot; a pure virtual emits a
+    // null function pointer).
+    long is_override;
+    long is_pure_virtual;
 };
 
 // A struct/class field declaration.

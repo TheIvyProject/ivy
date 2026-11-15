@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Shape {
+    int id;
+    virtual int area() = 0;
+    virtual ~Shape() {}
+};
+
+struct Square : public Shape {
+    int side;
+    int area() override { return this.side * this.side; }
+    ~Square() {}
+};
+
+int main() {
+    Square s;
+    s.id = 7;
+    s.side = 5;
+    Shape& sh = s;
+    int a = sh.area();
+    printf("%d\n", a);
+    return 0;
+}
