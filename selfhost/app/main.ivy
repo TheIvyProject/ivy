@@ -1,4 +1,4 @@
-// selfhost/app/main.ivy - H7.1 entry point for the self-host driver.
+// selfhost/app/main.ivy - self-host driver entry point (H7.1 + H7.2).
 //
 // The oracle's `main(int argc, char** argv)` (src/app/main.cpp:1454) parses
 // arguments and then calls `run(...)`. Ivy's entry point is synthesized by the
@@ -14,19 +14,34 @@
 // argc/argv, including arguments containing spaces, arrive unchanged.
 //
 // H7.1 scope: parse the command line with `cli::CliArgs` (mirror of the oracle
-// loop) and reproduce its help/usage/diagnostic bytes and exit codes. The
-// oracle then dispatches to the frontend/codegen; that is H7.2+, so a
-// *successful* parse currently stops with an explicit "dispatch not ported"
-// diagnostic and exit 3. Set IVY_CLI_DUMP=1 to print the parsed options
-// instead (used by build_cli_smoke.ps1).
+// loop) and reproduce its help/usage/diagnostic bytes and exit codes.
+//
+// H7.2 scope: the first part of `run(...)`:
+//   * auto `lib/` include path (`main.cpp:1547-1565`) via `Imports.auto_lib_dir`;
+//   * open the source file (`cannot open file`, exit 2);
+//   * lex + preprocess, printing lexer/preprocessor diagnostics the same way;
+//   * the `import` pre-scan (`main.cpp:930-1019`): resolve each module to a
+//     `.ivm` and report missing ones (exit 1).
+//
+// Still not ported (H7.3+): reading the `.ivm`, the parser and everything
+// after it. `--tokens` / `--lex` / `-o *.i|*.ii` are gated to the stub too,
+// because they run *before* the import scan in the oracle. A successful scan
+// without IVY_IMPORT_DUMP=1 therefore ends with an explicit "dispatch not
+// ported" diagnostic and exit 3. IVY_CLI_DUMP=1 (H7.1) prints the parsed
+// options; IVY_IMPORT_DUMP=1 prints the include path and resolved imports.
 
 #pragma ivy cnumber
 import cli;
+import imports;
 import io;
+import token;
+import lexer;
+import preprocessor;
 
 extern "C" int*   __p___argc();
 extern "C" char*** __p___argv();
 extern "C" char*  getenv(const char* name);
+extern "C" unsigned long long __ivy_strlen(const char* s);
 
 int32 main() {
     unsafe {
@@ -41,13 +56,103 @@ int32 main() {
             return rc;  // help (0) or a CLI diagnostic (2) already printed
         }
 
+        // H7.2: append the auto `lib/` include path, exactly like the oracle
+        // does right after the empty-file check and before extension
+        // validation (main.cpp:1547-1565).
+        Imports im;
+        im.init();
+        char* libdir = im.auto_lib_dir();
+        if (libdir != (char*)0) {
+            args.push_include(libdir);
+        }
+
         char* dump = getenv("IVY_CLI_DUMP");
         if (dump != (char*)0 && dump[0] != 0) {
             args.dump();
             return 0;
         }
 
-        io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.1: argument parsing only)");
+        // Modes that the oracle handles *before* the import scan but that are
+        // not ported yet: `--lex`, `-o *.i|*.ii` and `--tokens`. Stub them
+        // here so a missing module never masks them.
+        if (args.show_lex != 0 || args.out_preprocessed() != 0 || args.show_tokens != 0) {
+            io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.2: import resolution only)");
+            return 3;
+        }
+
+        // run(): open the source (`main.cpp:831-835`).
+        char* path = args.file;
+        char* content = io::read_file(path);
+        if (content == (char*)0) {
+            io::eprint("ivy: error: cannot open file '");
+            args.print_path_quoted(path);
+            io::eprintln("'");
+            return 2;
+        }
+
+        uint64 len = __ivy_strlen(content);
+
+        // Lexer (`main.cpp:838-846`). Lexer diagnostics are printed by
+        // `Lexer::err` itself; H7.4 will make that match the oracle exactly
+        // (stderr + escaped path), so the harness avoids lex-error fixtures.
+        Lexer lx;
+        lx.setup(content, len, path);
+        lx.lex_all((long)len + 16);
+        if (lx.had_error()) {
+            return 1;
+        }
+
+        // Preprocessor (`main.cpp:874-892`).
+        long in_n = lx.token_count();
+        long out_cap = in_n * 8 + 256;
+        Preprocessor pp;
+        pp.setup(lx.tokens(), in_n, content, (long)len, path, (long)__ivy_strlen(path),
+                 out_cap, 1024);
+        pp.run();
+
+        long failed = 0;
+        char* fname = path;
+        if (pp.has_line_file() != 0) {
+            fname = pp.line_file();
+        }
+        long dc = pp.diag_count();
+        long di = 0;
+        while (di < dc) {
+            long w = pp.diag_warn(di);
+            if (w == 0) {
+                failed = 1;
+            }
+            io::eprint(fname);
+            io::eprint(":");
+            io::eprint("{}", pp.diag_line(di));
+            io::eprint(":");
+            io::eprint("{}", pp.diag_col(di));
+            if (w != 0) {
+                io::eprint(": warning: ");
+            } else {
+                io::eprint(": error: ");
+            }
+            io::eprintln("{}", pp.diag_msg(di));
+            di = di + 1;
+        }
+        if (failed != 0) {
+            return 1;
+        }
+
+        // `import` pre-scan (`main.cpp:930-1019`). H7.2 stops after resolving
+        // the paths: reading the `.ivm` is H7.3.
+        im.scan(pp.output(), pp.output_count(), pp.arena(), args.includes);
+        if (im.failed != 0) {
+            return 1;
+        }
+
+        char* idump = getenv("IVY_IMPORT_DUMP");
+        if (idump != (char*)0 && idump[0] != 0) {
+            im.dump(args.includes);
+            return 0;
+        }
+
+        io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.2: import resolution only)");
         return 3;
     }
     return 3;

@@ -80,10 +80,10 @@ function Quote-Arg([string]$s) {
 # with the other harnesses; pass "".
 function Invoke-Separate([string]$exe, [string[]]$argList, [string]$stdinPath,
                          [string]$outPath, [string]$errPath,
-                         [int]$TimeoutMs = 0) {
+                         [int]$TimeoutMs = 0, [string]$WorkingDirectory = $repo) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $exe
-    $psi.WorkingDirectory = $repo
+    $psi.WorkingDirectory = $WorkingDirectory
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
@@ -156,39 +156,48 @@ function Show-Text([byte[]]$b) {
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # ---------------------------------------------------------------------------
-# [1/5] Build the cli module (writes cli.ivm into the scratch directory).
+# Build one selfhost module with the oracle. Each `-c -o <run>/<m>.obj` also
+# writes `<run>/<m>.ivm`, which the next module imports through `-I <run>`.
 # ---------------------------------------------------------------------------
-Write-Output "[1/5] building cli module ..."
-$cliObj = Join-Path $runDir "cli.obj"
-$code = Invoke-Separate $ivy @((Join-Path $appDir "cli.ivy"), "-I", $stdDir,
-                               "-c", "-o", $cliObj) "" `
-             (Join-Path $runDir "build_cli.out") (Join-Path $runDir "build_cli.err")
-if ($code -ne 0 -or -not (Test-Path -LiteralPath $cliObj)) {
-    Write-Output ("BUILD FAILED (cli, exit " + $code + ")")
-    Write-Output (Show-Text (Read-Bytes (Join-Path $runDir "build_cli.err")))
-    exit 1
+function Build-Mod([string]$source, [string]$obj, [string[]]$incs) {
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($obj)
+    $argList = @($source) + $incs + @("-c", "-o", $obj)
+    $code = Invoke-Separate $ivy $argList "" `
+                 (Join-Path $runDir ("build_" + $name + ".out")) `
+                 (Join-Path $runDir ("build_" + $name + ".err"))
+    if ($code -ne 0 -or -not (Test-Path -LiteralPath $obj)) {
+        Write-Output ("BUILD FAILED (" + $name + ", exit " + $code + ")")
+        Write-Output (Show-Text (Read-Bytes (Join-Path $runDir ("build_" + $name + ".err"))))
+        exit 1
+    }
 }
+
+# ---------------------------------------------------------------------------
+# [1/6] Build the frontend + driver modules (H7.2 needs token/lexer/preprocessor
+# in addition to cli/imports).
+# ---------------------------------------------------------------------------
+Write-Output "[1/6] building modules ..."
+$tokenObj = Join-Path $runDir "token.obj"
+$lexerObj = Join-Path $runDir "lexer.obj"
+$ppObj = Join-Path $runDir "preprocessor.obj"
+$cliObj = Join-Path $runDir "cli.obj"
+$importsObj = Join-Path $runDir "imports.obj"
+$mainObj = Join-Path $runDir "main.obj"
+
+Build-Mod (Join-Path $repo "selfhost\parsing\token.ivy") $tokenObj @()
+Build-Mod (Join-Path $repo "selfhost\parsing\lexer.ivy") $lexerObj @("-I", $runDir)
+Build-Mod (Join-Path $repo "selfhost\parsing\preprocessor.ivy") $ppObj @("-I", $runDir)
+Build-Mod (Join-Path $appDir "cli.ivy") $cliObj @("-I", $runDir, "-I", $stdDir)
+Build-Mod (Join-Path $appDir "imports.ivy") $importsObj @("-I", $runDir, "-I", $stdDir)
+Build-Mod (Join-Path $appDir "main.ivy") $mainObj @("-I", $runDir, "-I", $stdDir)
+
 $cliIvm = Join-Path $runDir "cli.ivm"
 if (-not (Test-Path -LiteralPath $cliIvm)) { Fail ("module interface missing: " + $cliIvm) }
 
 # ---------------------------------------------------------------------------
-# [2/5] Build the driver (imports cli from the scratch directory).
+# [2/6] Build the Ivy runtime.
 # ---------------------------------------------------------------------------
-Write-Output "[2/5] building driver ..."
-$mainObj = Join-Path $runDir "main.obj"
-$code = Invoke-Separate $ivy @((Join-Path $appDir "main.ivy"), "-I", $runDir,
-                               "-I", $stdDir, "-c", "-o", $mainObj) "" `
-             (Join-Path $runDir "build_main.out") (Join-Path $runDir "build_main.err")
-if ($code -ne 0 -or -not (Test-Path -LiteralPath $mainObj)) {
-    Write-Output ("BUILD FAILED (main, exit " + $code + ")")
-    Write-Output (Show-Text (Read-Bytes (Join-Path $runDir "build_main.err")))
-    exit 1
-}
-
-# ---------------------------------------------------------------------------
-# [3/5] Build the Ivy runtime.
-# ---------------------------------------------------------------------------
-Write-Output "[3/5] building runtime ..."
+Write-Output "[2/6] building runtime ..."
 $rtObj = Join-Path $runDir "ivyrt.obj"
 $code = Invoke-Separate $clang @("-c", (Join-Path $libDir "ivyrt.c"),
                                  "-I", $libDir, "-o", $rtObj) "" `
@@ -200,11 +209,12 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $rtObj)) {
 }
 
 # ---------------------------------------------------------------------------
-# [4/5] Link the driver.
+# [3/6] Link the driver.
 # ---------------------------------------------------------------------------
-Write-Output "[4/5] linking driver ..."
+Write-Output "[3/6] linking driver ..."
 $mainExe = Join-Path $runDir "main.exe"
-$code = Invoke-Separate $clang @($mainObj, $cliObj, $rtObj, "-o", $mainExe) "" `
+$code = Invoke-Separate $clang @($mainObj, $importsObj, $cliObj, $lexerObj, $ppObj,
+                                 $tokenObj, $rtObj, "-o", $mainExe) "" `
              (Join-Path $runDir "link.out") (Join-Path $runDir "link.err")
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $mainExe)) {
     Write-Output ("BUILD FAILED (link, exit " + $code + ")")
@@ -212,6 +222,12 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $mainExe)) {
     exit 1
 }
 Write-Output ("      scratch: " + $runDir)
+
+# H7.2: `main.ivy` appends the auto `lib/` include path when it exists. To keep
+# the H7.1 dump text unchanged, run the dump cases from a directory that has no
+# `lib/` in itself, its parent or its grandparent.
+$dumpCwd = Join-Path $runDir "cwd\deep\nest"
+New-Item -ItemType Directory -Force -Path $dumpCwd | Out-Null
 
 # ---------------------------------------------------------------------------
 # Expected dump text. Field order is fixed by CliArgs::dump.
@@ -241,9 +257,9 @@ function New-Expect([string]$fileVal, [string]$outVal, [string]$targetVal,
 }
 
 # ---------------------------------------------------------------------------
-# [5/5] CLI smoke.
+# [4/6] CLI smoke.
 # ---------------------------------------------------------------------------
-Write-Output "[5/5] CLI smoke ..."
+Write-Output "[4/6] CLI smoke ..."
 
 $pass = 0
 $fail = 0
@@ -395,7 +411,7 @@ foreach ($case in $dumpCases) {
     $oErr = Join-Path $runDir ("do" + $dumpIndex + ".err")
 
     $env:IVY_CLI_DUMP = "1"
-    $sCode = Invoke-Separate $mainExe $case.Args "" $sOut $sErr
+    $sCode = Invoke-Separate $mainExe $case.Args "" $sOut $sErr 0 $dumpCwd
     Remove-Item Env:\IVY_CLI_DUMP -ErrorAction SilentlyContinue
 
     $oCode = Invoke-Separate $ivy $case.Args "" $oOut $oErr
@@ -436,14 +452,18 @@ foreach ($case in $dumpCases) {
     }
 }
 
-# (c) Stub case: a successful parse without IVY_CLI_DUMP must not compile.
+# (c) Stub case: a successful scan without IVY_CLI_DUMP must not compile.
+# H7.2 opens/lexes/preprocesses the source first, so use a real (empty of
+# imports) file rather than a missing one.
+$stubFile = Join-Path $dumpCwd "ok.ivy"
+[System.IO.File]::WriteAllText($stubFile, "int32 main() { return 0; }`n")
 $stubOut = Join-Path $runDir "stub.out"
 $stubErr = Join-Path $runDir "stub.err"
-$stubCode = Invoke-Separate $mainExe @($missing) "" $stubOut $stubErr
+$stubCode = Invoke-Separate $mainExe @("ok.ivy") "" $stubOut $stubErr 0 $dumpCwd
 $stubOutB = Read-Bytes $stubOut
 $stubErrB = Read-Bytes $stubErr
 $stubExpected = $utf8NoBom.GetBytes(
-    "ivy: error: selfhost driver dispatch is not ported yet (H7.1: argument parsing only)`r`n")
+    "ivy: error: selfhost driver dispatch is not ported yet (H7.2: import resolution only)`r`n")
 if ($stubCode -eq 3 -and $stubOutB.Length -eq 0 -and
     (Test-BytesEqual $stubExpected $stubErrB)) {
     Write-Output "PASS dispatch-stub (exit 3, one stderr line, no stdout)"

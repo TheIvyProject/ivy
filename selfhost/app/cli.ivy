@@ -13,9 +13,10 @@
 //
 // Two oracle details are deliberately mirrored even though they look odd:
 //
-//   * the auto-added `lib/` include path (`main.cpp:1547-1565`) is NOT part of
-//     H7.1 - it needs the include-search-path work of H7.2 - so `include=`
-//     dump lines only list explicit `-I` arguments;
+//   * the auto-added `lib/` include path (`main.cpp:1547-1565`) is appended by
+//     `main.ivy` (H7.2), not here, because finding it needs the filesystem
+//     helpers of `imports.ivy`; `CliArgs::dump` prints whatever the list holds
+//     by then, so the auto path shows up when it exists;
 //   * `std::filesystem::path::empty()` is emulated with a "null or empty
 //     string" test, which is why `-o ""` behaves exactly like no `-o` at all
 //     (it does not imply `-c` and does not disable `linkMode`).
@@ -194,6 +195,15 @@ export struct CliArgs {
         return false;
     }
 
+    // `emitPreprocessed` in `run()` (main.cpp:866-867): `-o *.i` / `-o *.ii`.
+    // Both tests are case-sensitive (`hasExtension`), and `outPath` must be
+    // non-empty first.
+    bool out_preprocessed() {
+        if (this.out_empty()) { return false; }
+        if (this.ext_eq(this.out_path, "i")) { return true; }
+        return this.ext_eq(this.out_path, "ii");
+    }
+
     // `getExtension(path).empty()`: no dot at all, or a trailing dot.
     bool ext_missing(const char* path) {
         long d = this.ext_off(path);
@@ -278,6 +288,39 @@ export struct CliArgs {
                 io::eprintln("ivy: error: unrecognized file extension '.{}' — expected .ivy", e);
             }
             __ivy_free(e);
+        }
+    }
+
+    // Stream a path exactly like `std::filesystem::path`'s `operator<<`, which
+    // is `os << std::quoted(p.string())`: wrap in double quotes and escape
+    // every `\` and `"` with a backslash. Used by the `cannot open file`
+    // diagnostic (`main.cpp:833`), which streams the `fs::path` directly.
+    void print_path_quoted(const char* p) {
+        unsafe {
+            char* q = (char*)p;
+            if (q == (char*)0) { q = (char*)""; }
+            long n = (long)__ivy_strlen(q);
+            // Worst case: every byte escaped, plus two quotes and the NUL.
+            char* out = (char*)__ivy_alloc(n * 2 + 3);
+            long o = 0;
+            out[o] = 34;  // '"'
+            o = o + 1;
+            long i = 0;
+            while (i < n) {
+                char c = q[i];
+                if (c == 92 || c == 34) {  // '\\' or '"'
+                    out[o] = 92;
+                    o = o + 1;
+                }
+                out[o] = c;
+                o = o + 1;
+                i = i + 1;
+            }
+            out[o] = 34;
+            o = o + 1;
+            out[o] = 0;
+            io::eprint("{}", out);
+            __ivy_free(out);
         }
     }
 

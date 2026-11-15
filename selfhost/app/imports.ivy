@@ -1,0 +1,338 @@
+// selfhost/app/imports.ivy - H7.2 `import` pre-scan + module search paths.
+//
+// Mirror of two pieces of the oracle:
+//
+//   1. `ivy::resolveModulePath` (src/parsing/module_io.cpp:478-495): search the
+//      `-I` directories in order, then `<cwd>/<name>.ivm`, then
+//      `<cwd>/std/<name>.ivm`; the first existing candidate wins.
+//   2. the pre-scan block in `run()` (src/app/main.cpp:930-1019): walk the
+//      *post-preprocessor* token stream looking for `import`, skip the
+//      `import cpp` and `import c <...>` / `import c "..."` forms, take the
+//      module name from `import <ident>` or `import "<name>"`, resolve it and
+//      record the `.ivm` path. A name that does not resolve prints
+//      `ivy: error: module '<name>' not found (searched .ivm files in include
+//      paths)` on stderr and sets `failed`; the scan keeps going so every
+//      missing module is reported, then the caller exits 1.
+//
+// H7.2 deliberately stops before `readModuleInterface` (H7.3) and before the
+// parser: `scan()` only resolves paths and reports missing modules.
+//
+// The auto-added `lib/` include path (`main.cpp:1547-1565`) also lives here:
+// `auto_lib_dir()` mirrors the `<cwd>/lib`, `<cwd>/../lib`, `<cwd>/../../lib`
+// probe (first existing wins, appended to the include list by `main.ivy`).
+//
+// Path joining mirrors `std::filesystem::path::operator/` on Windows:
+//   * an absolute right-hand side replaces the left side;
+//   * an empty left side (or one that already ends in `\` / `/`) is used as-is;
+//   * otherwise `\` is inserted between the two components.
+// `std::filesystem::path` does not normalise `..`, so the probe for
+// `<cwd>/../lib` produces a literal `..` component, exactly like the oracle.
+//
+// `std::filesystem::exists` is `_access(path, 0) == 0` (true for files and
+// directories); `std::filesystem::current_path()` is `_getcwd`.
+
+#pragma ivy cnumber
+export module imports;
+
+import token;
+import cli;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" char* _getcwd(char* buf, int n);
+extern "C" int   _access(const char* path, int mode);
+
+// One resolved `import`. `name` is a heap copy of the module name (the token
+// lexeme, quotes stripped for the string form); `path` is the resolved `.ivm`
+// path exactly as the oracle's `std::filesystem::path` would print it
+// (relative when it came from a relative `-I`, absolute for the cwd/std
+// fallbacks).
+export struct ImportRec {
+    char* name;
+    char* path;
+    ImportRec* next;
+};
+
+// sizeof(ImportRec) = 8 + 8 + 8 = 24 bytes.
+export struct Imports {
+    ImportRec* head;
+    ImportRec* tail;
+    long count;
+    long failed;
+
+    void init() {
+        unsafe {
+            this.head = (ImportRec*)0;
+            this.tail = (ImportRec*)0;
+        }
+        this.count = 0;
+        this.failed = 0;
+    }
+
+    // --- small string helpers ----------------------------------------------
+
+    bool streq(const char* a, const char* b) {
+        long i = 0;
+        unsafe {
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) { return false; }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    // `std::filesystem::path(name).is_absolute()` on Windows: a leading
+    // separator (`\foo`, `/foo`, `\\server`) or a drive letter followed by a
+    // separator (`C:\foo`, `C:/foo`).
+    bool rhs_absolute(const char* name) {
+        unsafe {
+            if (name[0] == 92 || name[0] == 47) { return true; }
+            if (name[0] != 0 && name[1] == 58 && (name[2] == 92 || name[2] == 47)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Heap copy of `[off, off+n)` from the preprocessor arena (NUL-terminated).
+    char* dup_range(char* arena, long off, long n) {
+        unsafe {
+            char* p = (char*)__ivy_alloc(n + 1);
+            long k = 0;
+            while (k < n) {
+                p[k] = arena[off + k];
+                k = k + 1;
+            }
+            p[n] = 0;
+            return p;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `dir / (name + ext)` as described in the file header.
+    char* join(const char* dir, const char* name, const char* ext) {
+        unsafe {
+            long dl = (long)__ivy_strlen(dir);
+            long nl = (long)__ivy_strlen(name);
+            long el = (long)__ivy_strlen(ext);
+
+            // Absolute rhs wins outright.
+            if (this.rhs_absolute(name)) {
+                char* p = (char*)__ivy_alloc(nl + el + 1);
+                long k = 0;
+                while (k < nl) { p[k] = name[k]; k = k + 1; }
+                long m = 0;
+                while (m < el) { p[nl + m] = ext[m]; m = m + 1; }
+                p[nl + el] = 0;
+                return p;
+            }
+
+            // Separator unless the lhs is empty, already ends in a separator,
+            // or is a bare drive (`C:`) - `path("C:") / "x"` is `C:x`.
+            long sep = 0;
+            if (dl > 0) {
+                char last = dir[dl - 1];
+                if (last != 92 && last != 47 && last != 58) { sep = 1; }
+            }
+
+            char* p = (char*)__ivy_alloc(dl + sep + nl + el + 1);
+            long o = 0;
+            long i = 0;
+            while (i < dl) { p[o] = dir[i]; o = o + 1; i = i + 1; }
+            if (sep != 0) { p[o] = 92; o = o + 1; }
+            i = 0;
+            while (i < nl) { p[o] = name[i]; o = o + 1; i = i + 1; }
+            i = 0;
+            while (i < el) { p[o] = ext[i]; o = o + 1; i = i + 1; }
+            p[o] = 0;
+            return p;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `std::filesystem::exists(path)` (files and directories).
+    bool exists(const char* p) {
+        return _access(p, 0) == 0;
+    }
+
+    // `std::filesystem::current_path()` as an absolute heap string.
+    char* cwd() {
+        unsafe {
+            char* buf = (char*)__ivy_alloc(4096);
+            char* r = _getcwd(buf, 4096);
+            if (r == (char*)0) { buf[0] = 0; }
+            return buf;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // Auto include path probe (`main.cpp:1547-1565`): `<cwd>/lib`,
+    // `<cwd>/../lib`, `<cwd>/../../lib`; first existing wins. Returns null
+    // when none exists (the oracle then appends nothing).
+    char* auto_lib_dir() {
+        unsafe {
+            char* base = this.cwd();
+            char* c1 = this.join(base, "lib", "");
+            if (this.exists(c1)) { return c1; }
+            __ivy_free(c1);
+
+            char* up1 = this.join(base, "..", "");
+            char* c2 = this.join(up1, "lib", "");
+            if (this.exists(c2)) { return c2; }
+            __ivy_free(c2);
+
+            char* up2 = this.join(up1, "..", "");
+            char* c3 = this.join(up2, "lib", "");
+            if (this.exists(c3)) { return c3; }
+            __ivy_free(c3);
+            return (char*)0;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `ivy::resolveModulePath`: `-I` dirs in order, then `<cwd>/<name>.ivm`,
+    // then `<cwd>/std/<name>.ivm`. Null when nothing exists.
+    char* resolve(const char* name, CliPath* dirs) {
+        unsafe {
+            CliPath* d = dirs;
+            while (d != (CliPath*)0) {
+                char* c = this.join(d->value, name, ".ivm");
+                if (this.exists(c)) { return c; }
+                __ivy_free(c);
+                d = d->next;
+            }
+
+            char* base = this.cwd();
+            char* c = this.join(base, name, ".ivm");
+            if (this.exists(c)) { return c; }
+            __ivy_free(c);
+
+            char* stdDir = this.join(base, "std", "");
+            char* s = this.join(stdDir, name, ".ivm");
+            if (this.exists(s)) { return s; }
+            __ivy_free(s);
+            __ivy_free(stdDir);
+            return (char*)0;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    void add(char* name, char* path) {
+        unsafe {
+            ImportRec* r = (ImportRec*)__ivy_alloc(24);
+            r->name = name;
+            r->path = path;
+            r->next = (ImportRec*)0;
+            if (this.head == (ImportRec*)0) {
+                this.head = r;
+            } else {
+                this.tail->next = r;
+            }
+            this.tail = r;
+        }
+        this.count = this.count + 1;
+    }
+
+    // Resolve one module name, reporting it exactly like the oracle when it is
+    // missing (stderr, one line) and recording the path otherwise.
+    void handle(char* name, CliPath* dirs) {
+        unsafe {
+            char* p = this.resolve(name, dirs);
+            if (p == (char*)0) {
+                io::eprintln("ivy: error: module '{}' not found (searched .ivm files in include paths)", name);
+                this.failed = 1;
+                return;
+            }
+            this.add(name, p);
+        }
+    }
+
+    // --- token helpers ------------------------------------------------------
+
+    bool kind_eq(Token* toks, long i, const char* kind) {
+        unsafe {
+            return this.streq(toks[i].kind, kind);
+        }
+        return false;
+    }
+
+    // Compare token `i`'s lexeme (in the preprocessor arena) with a literal.
+    bool lex_eq(char* arena, Token* toks, long i, const char* lit) {
+        unsafe {
+            long n = toks[i].len;
+            long k = 0;
+            while (k < n) {
+                if (lit[k] == 0) { return false; }
+                if (arena[toks[i].off + k] != lit[k]) { return false; }
+                k = k + 1;
+            }
+            return lit[k] == 0;
+        }
+        return false;
+    }
+
+    // --- pre-scan -----------------------------------------------------------
+
+    // Walk the post-preprocessor token stream. `i + 2 < n` is the oracle's loop
+    // condition (the stream always ends with an `eof` token), so a bare
+    // `import <name>` with no following token is never scanned.
+    void scan(Token* toks, long n, char* arena, CliPath* dirs) {
+        unsafe {
+            long i = 0;
+            while (i + 2 < n) {
+                if (this.kind_eq(toks, i, "keyword") && this.lex_eq(arena, toks, i, "import")) {
+                    if (this.kind_eq(toks, i + 1, "keyword") && this.lex_eq(arena, toks, i + 1, "cpp")) {
+                        // `import cpp ...` - C++ interop, not a module.
+                    } else if (this.kind_eq(toks, i + 1, "identifier") &&
+                               this.lex_eq(arena, toks, i + 1, "c") &&
+                               (this.kind_eq(toks, i + 2, "<") ||
+                                this.kind_eq(toks, i + 2, "string"))) {
+                        // `import c <header>` / `import c "header"` - C interop.
+                    } else if (this.kind_eq(toks, i + 1, "string")) {
+                        // `import "name";` - strip the two quote characters when
+                        // present (the oracle does not unescape; len < 2 keeps
+                        // the raw lexeme).
+                        long off = toks[i + 1].off;
+                        long len = toks[i + 1].len;
+                        char* nm = (char*)0;
+                        if (len >= 2) {
+                            nm = this.dup_range(arena, off + 1, len - 2);
+                        } else {
+                            nm = this.dup_range(arena, off, len);
+                        }
+                        this.handle(nm, dirs);
+                    } else if (this.kind_eq(toks, i + 1, "identifier")) {
+                        char* nm = this.dup_range(arena, toks[i + 1].off, toks[i + 1].len);
+                        this.handle(nm, dirs);
+                    }
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // --- debug dump ---------------------------------------------------------
+    //
+    // `IVY_IMPORT_DUMP=1` makes main.ivy print the include search path and the
+    // resolved imports instead of the "dispatch not ported" stub. Used by
+    // selfhost/app/build_import_smoke.ps1.
+    void dump(CliPath* dirs) {
+        unsafe {
+            CliPath* d = dirs;
+            while (d != (CliPath*)0) {
+                io::println("include={}", d->value);
+                d = d->next;
+            }
+            io::println("imports={}", this.count);
+            ImportRec* r = this.head;
+            while (r != (ImportRec*)0) {
+                io::println("import={} -> {}", r->name, r->path);
+                r = r->next;
+            }
+        }
+    }
+};
