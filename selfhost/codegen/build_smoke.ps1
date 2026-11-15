@@ -138,8 +138,11 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $smokeObj)) {
 # libxml2s.lib in this toolchain) are skipped and reported.
 # ---------------------------------------------------------------------------
 Write-Output "[3/4] linking smoke executable ..."
-$llvmLibs = @((& $llvmConfig --libs core target irreader) -split '\s+' | Where-Object { $_ -ne "" })
-if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs returned nothing" }
+# H6.3: codegen.obj also contains the X86 target initializers used by ObjEmit,
+# so the link set includes the X86 target archives (`--libs x86` already pulls
+# in core/target/irreader and the codegen/asmprinter dependencies).
+$llvmLibs = @((& $llvmConfig --libs x86) -split '\s+' | Where-Object { $_ -ne "" })
+if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs x86 returned nothing" }
 
 $systemArgs = @()
 $systemNames = @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ -ne "" })

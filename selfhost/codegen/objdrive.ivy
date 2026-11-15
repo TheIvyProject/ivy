@@ -1,0 +1,123 @@
+// selfhost/codegen/objdrive.ivy - H6.3 driver for native object emission.
+//
+// Reads two or three lines from stdin:
+//   <path to LLVM IR text>
+//   <path of the object file to write>
+//   [source path, used only to shape diagnostics like the oracle]
+// Parses the IR text and writes a native COFF object through
+// codegen::ObjEmit (mirror of `ivy -c`, CodeGen::emitObject in
+// src/codegen/codegen.cpp:2729-2804).
+//
+// Usage:
+//   ivy.exe selfhost\codegen\objdrive.ivy -I selfhost\codegen -I std -c -o objdrive.obj
+//   (then link objdrive.obj + codegen.obj + lib/ivyrt.c with clang + LLVM libs)
+//   objdrive.exe < paths.txt
+//
+// stdout stays empty on success (the object file is the only output);
+// diagnostics go to stderr in the oracle's shape. With the optional source
+// path the parse-failure message is byte-identical to `ivy -c`:
+//   <src>:0:0: error: LLVM IR parse error: ivy: <LLVM diagnostic>
+// Exit 0 on success, 1 on emission failure, 2 on missing/invalid input.
+
+#pragma ivy cnumber
+import codegen;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+long run() {
+    long result = 1;
+    unsafe {
+        char* ir_path = io::read_line();
+        if (ir_path == (char*) 0) {
+            io::eprintln("objdrive: no IR path on stdin");
+            return 2;
+        }
+        long n = (long) __ivy_strlen(ir_path);
+        while (n > 0 && (ir_path[n - 1] == 13 || ir_path[n - 1] == 10)) {
+            ir_path[n - 1] = 0;
+            n = n - 1;
+        }
+
+        char* out_path = io::read_line();
+        if (out_path == (char*) 0) {
+            io::eprintln("objdrive: no output path on stdin");
+            __ivy_free(ir_path);
+            return 2;
+        }
+        n = (long) __ivy_strlen(out_path);
+        while (n > 0 && (out_path[n - 1] == 13 || out_path[n - 1] == 10)) {
+            out_path[n - 1] = 0;
+            n = n - 1;
+        }
+
+        // Optional third line: the source path, used only to shape
+        // diagnostics the way the oracle does.
+        char* src_path = io::read_line();
+        if (src_path != (char*) 0) {
+            n = (long) __ivy_strlen(src_path);
+            while (n > 0 && (src_path[n - 1] == 13 || src_path[n - 1] == 10)) {
+                src_path[n - 1] = 0;
+                n = n - 1;
+            }
+        }
+
+        char* ir = io::read_file(ir_path);
+        if (ir == (char*) 0) {
+            io::eprint("ivy: error: cannot open file '");
+            io::eprint(ir_path);
+            io::eprintln("'");
+            __ivy_free(ir_path);
+            __ivy_free(out_path);
+            if (src_path != (char*) 0) {
+                __ivy_free(src_path);
+            }
+            return 2;
+        }
+
+        long len = (long) __ivy_strlen(ir);
+        ObjEmit oe;
+        int rc = oe.emit_text(ir, (unsigned long long) len, out_path);
+        if (rc != 0) {
+            long code = oe.code();
+            if (src_path != (char*) 0) {
+                io::eprint(src_path);
+                io::eprint(":0:0: error: ");
+                if (code == 3) {
+                    io::eprint("LLVM IR parse error: ivy: ");
+                } else if (code == 4) {
+                    io::eprint("LLVM target lookup failed: ");
+                }
+            } else {
+                io::eprint("ivy: error: ");
+                if (code == 3) {
+                    io::eprint("LLVM IR parse error: ");
+                } else if (code == 4) {
+                    io::eprint("LLVM target lookup failed: ");
+                }
+            }
+            io::eprintln("{}", oe.err());
+            result = 1;
+        } else {
+            result = 0;
+        }
+
+        __ivy_free(ir);
+        __ivy_free(ir_path);
+        __ivy_free(out_path);
+        if (src_path != (char*) 0) {
+            __ivy_free(src_path);
+        }
+    }
+    return result;
+}
+
+int32 main() {
+    long r = run();
+    unsafe {
+        return (int32) r;
+    }
+    return 0;
+}

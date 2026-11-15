@@ -23,6 +23,7 @@ export module codegen;
 
 import c <llvm-c/Core.h>;
 import c <llvm-c/Analysis.h>;
+import c <llvm-c/IRReader.h>;
 import c <llvm-c/Target.h>;
 import c <llvm-c/TargetMachine.h>;
 
@@ -48,6 +49,20 @@ extern "C" char* LLVMPrintModuleToString(void* m);
 extern "C" int   LLVMPrintModuleToFile(void* m, const char* filename, char** error_message);
 extern "C" void  LLVMDumpModule(void* m);
 extern "C" void  LLVMDisposeMessage(char* message);
+
+// ---------------------------------------------------------------------------
+// IR parsing (llvm-c/IRReader.h + memory buffers from llvm-c/Core.h)
+//
+// H6.3 parses the textual IR produced by the H6.2 emitter, mirroring
+// `CodeGen::emitObject` (src/codegen/codegen.cpp:2729-2804). LLVMParseIRInContext
+// takes ownership of the memory buffer, so the buffer is never disposed here.
+// ---------------------------------------------------------------------------
+
+extern "C" void* LLVMCreateMemoryBufferWithMemoryRangeCopy(const char* input_data,
+                                                           unsigned long long input_data_length,
+                                                           const char* buffer_name);
+extern "C" int   LLVMParseIRInContext(void* context_ref, void* mem_buf,
+                                      void** out_m, char** out_message);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -376,5 +391,227 @@ export struct LlvmC {
         unsafe {
             return LLVMConstInt(int_ty, n, sign_extend);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // H6.3: IR parsing and native object emission (pass-through only).
+    // -----------------------------------------------------------------------
+
+    void* memory_buffer_copy(const char* input_data, unsigned long long n,
+                             const char* buffer_name) {
+        unsafe {
+            return LLVMCreateMemoryBufferWithMemoryRangeCopy(input_data, n,
+                                                             buffer_name);
+        }
+    }
+
+    int parse_ir_in_context(void* context_ref, void* mem_buf, void** out_m,
+                            char** out_message) {
+        unsafe {
+            return LLVMParseIRInContext(context_ref, mem_buf, out_m, out_message);
+        }
+    }
+
+    void target_initialize() {
+        unsafe {
+            LLVMInitializeX86TargetInfo();
+            LLVMInitializeX86Target();
+            LLVMInitializeX86TargetMC();
+            LLVMInitializeX86AsmPrinter();
+            LLVMInitializeX86AsmParser();
+        }
+    }
+
+    char* default_target_triple() {
+        unsafe {
+            return LLVMGetDefaultTargetTriple();
+        }
+    }
+
+    int target_from_triple(const char* triple, void** target, char** error_message) {
+        unsafe {
+            return LLVMGetTargetFromTriple(triple, target, error_message);
+        }
+    }
+
+    void* create_target_machine(void* target, const char* triple, const char* cpu,
+                                const char* features, int level, int reloc,
+                                int code_model) {
+        unsafe {
+            return LLVMCreateTargetMachine(target, triple, cpu, features, level,
+                                           reloc, code_model);
+        }
+    }
+
+    void dispose_target_machine(void* target_machine) {
+        unsafe {
+            LLVMDisposeTargetMachine(target_machine);
+        }
+    }
+
+    void set_target(void* m, const char* triple) {
+        unsafe {
+            LLVMSetTarget(m, triple);
+        }
+    }
+
+    void set_data_layout(void* m, const char* layout) {
+        unsafe {
+            LLVMSetDataLayout(m, layout);
+        }
+    }
+
+    void* create_target_data_layout(void* target_machine) {
+        unsafe {
+            return LLVMCreateTargetDataLayout(target_machine);
+        }
+    }
+
+    void set_module_data_layout(void* m, void* target_data) {
+        unsafe {
+            LLVMSetModuleDataLayout(m, target_data);
+        }
+    }
+
+    void dispose_target_data(void* target_data) {
+        unsafe {
+            LLVMDisposeTargetData(target_data);
+        }
+    }
+
+    int target_machine_emit_to_file(void* target_machine, void* m,
+                                    const char* filename, int codegen,
+                                    char** error_message) {
+        unsafe {
+            return LLVMTargetMachineEmitToFile(target_machine, m, filename, codegen,
+                                               error_message);
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// H6.3: native object emission
+//
+// Mirror of `CodeGen::emitObject` (src/codegen/codegen.cpp:2729-2804): parse
+// the textual IR produced by the H6.2 emitter into a Module, configure the
+// host TargetMachine exactly like the oracle (host triple, empty CPU/features,
+// default relocation/code model, `CodeGenOptLevel::Default`), then write a
+// COFF object file. The oracle links only the native target, so the X86
+// initializers above are sufficient.
+//
+// Return codes: 0 success, 1 context, 2 memory buffer, 3 IR parse, 4 target
+// lookup, 5 TargetMachine creation, 6 emit-to-file. `err()` exposes the
+// LLVM-provided detail message (or a short fallback); it stays valid until the
+// process exits. `code()` returns the same code for callers that want to
+// prefix the oracle-style diagnostic.
+// ---------------------------------------------------------------------------
+
+export struct ObjEmit {
+    long tag;
+    const char* err_;
+    long code_;
+
+    int emit_text(const char* ir, unsigned long long len, const char* out_path) {
+        unsafe {
+            this.err_ = "";
+            this.code_ = 0;
+            LlvmC api;
+            // 2) Initialize the native target. The oracle guards this with a
+            // process-wide flag; the X86 entry points are idempotent.
+            api.target_initialize();
+
+            // 3) Parse the IR text into a Module.
+            void* ctx = api.context_create();
+            if (ctx == (void*) 0) {
+                this.err_ = "LLVM context creation failed";
+                this.code_ = 1;
+                return 1;
+            }
+            void* buf = api.memory_buffer_copy(ir, len, "ivy-module");
+            if (buf == (void*) 0) {
+                api.context_dispose(ctx);
+                this.err_ = "LLVM memory buffer creation failed";
+                this.code_ = 2;
+                return 2;
+            }
+            void* m = (void*) 0;
+            char* perr = (char*) 0;
+            int bad = api.parse_ir_in_context(ctx, buf, &m, &perr);
+            if (bad != 0 || m == (void*) 0) {
+                if (perr != (char*) 0) {
+                    this.err_ = perr;
+                } else {
+                    this.err_ = "LLVM IR parse error";
+                }
+                api.context_dispose(ctx);
+                this.code_ = 3;
+                return 3;
+            }
+
+            // 4) Host triple; 5) target lookup; 6) TargetMachine.
+            char* triple = api.default_target_triple();
+            api.set_target(m, triple);
+            api.set_data_layout(m, "");
+
+            void* target = (void*) 0;
+            char* terr = (char*) 0;
+            int trc = api.target_from_triple(triple, &target, &terr);
+            if (trc != 0 || target == (void*) 0) {
+                if (terr != (char*) 0) {
+                    this.err_ = terr;
+                } else {
+                    this.err_ = "LLVM target lookup failed";
+                }
+                api.message_dispose(triple);
+                api.module_dispose(m);
+                api.context_dispose(ctx);
+                this.code_ = 4;
+                return 4;
+            }
+
+            void* tm = api.create_target_machine(target, triple, "", "", 2, 0, 0);
+            if (tm == (void*) 0) {
+                this.err_ = "LLVM TargetMachine creation failed";
+                api.message_dispose(triple);
+                api.module_dispose(m);
+                api.context_dispose(ctx);
+                this.code_ = 5;
+                return 5;
+            }
+            api.message_dispose(triple);
+
+            void* td = api.create_target_data_layout(tm);
+            api.set_module_data_layout(m, td);
+            api.dispose_target_data(td);
+
+            // 7) Emit the object file (LLVMCodeGenFileType::LLVMObjectFile = 1).
+            char* eerr = (char*) 0;
+            int erc = api.target_machine_emit_to_file(tm, m, out_path, 1, &eerr);
+            if (erc != 0) {
+                if (eerr != (char*) 0) {
+                    this.err_ = eerr;
+                } else {
+                    this.err_ = "LLVM TargetMachine cannot emit object file for this target";
+                }
+                api.dispose_target_machine(tm);
+                api.module_dispose(m);
+                api.context_dispose(ctx);
+                this.code_ = 6;
+                return 6;
+            }
+
+            api.dispose_target_machine(tm);
+            api.module_dispose(m);
+            api.context_dispose(ctx);
+            return 0;
+        }
+    }
+
+    const char* err() {
+        return this.err_;
+    }
+
+    long code() {
+        return this.code_;
     }
 };
