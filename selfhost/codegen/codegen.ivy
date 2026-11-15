@@ -29,6 +29,24 @@ import c <llvm-c/TargetMachine.h>;
 
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" char* __ivy_strdup(const char* s);
+
+// ---------------------------------------------------------------------------
+// H6.4: C runtime used by linker orchestration
+//
+// `_popen`/`_pclose` are the MSVC CRT spellings the oracle uses in its
+// `_WIN32` branch (`src/codegen/codegen.cpp:2840-2858`). `system` runs the
+// linker command; see `Linker::link_text` for the cmd.exe quoting note.
+// ---------------------------------------------------------------------------
+
+extern "C" char* getenv(const char* name);
+extern "C" void* _popen(const char* command, const char* mode);
+extern "C" char* fgets(char* s, int n, void* stream);
+extern "C" int   _pclose(void* stream);
+extern "C" int   system(const char* command);
+extern "C" int   remove(const char* path);
 
 // ---------------------------------------------------------------------------
 // Context and module lifetime
@@ -613,5 +631,339 @@ export struct ObjEmit {
 
     long code() {
         return this.code_;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// H6.4: growable byte buffer
+//
+// The Ivy CLI has no std::string, so command lines are assembled in this small
+// growable buffer. `add` copies `n` bytes with `__ivy_memcpy` (the source may
+// be a const string literal, a caller-owned path or the getenv() value).
+// `str()` always returns a NUL-terminated buffer that stays valid until
+// `release()` or the next mutation.
+// ---------------------------------------------------------------------------
+
+struct StrBuf {
+    char* data_;
+    unsigned long long len_;
+    unsigned long long cap_;
+
+    void setup(unsigned long long cap) {
+        unsafe {
+            if (cap < 32) {
+                cap = 32;
+            }
+            this.data_ = (char*) __ivy_alloc(cap);
+            this.len_ = 0;
+            this.cap_ = cap;
+            this.data_[0] = 0;
+        }
+    }
+
+    void ensure(unsigned long long extra) {
+        unsafe {
+            unsigned long long need = this.len_ + extra + 1;
+            if (need <= this.cap_) {
+                return;
+            }
+            unsigned long long ncap = this.cap_ * 2;
+            while (ncap < need) {
+                ncap = ncap * 2;
+            }
+            char* grown = (char*) __ivy_alloc(ncap);
+            __ivy_memcpy(grown, this.data_, this.len_ + 1);
+            __ivy_free(this.data_);
+            this.data_ = grown;
+            this.cap_ = ncap;
+        }
+    }
+
+    void add(const char* s) {
+        unsafe {
+            // The Ivy parser rejects `(const char*) 0`, so compare through a
+            // `char*` view (the value is never written through it).
+            char* p = (char*) s;
+            if (p == (char*) 0) {
+                return;
+            }
+            unsigned long long n = __ivy_strlen(s);
+            this.ensure(n);
+            __ivy_memcpy(this.data_ + this.len_, s, n);
+            this.len_ = this.len_ + n;
+            this.data_[this.len_] = 0;
+        }
+    }
+
+    void add_char(char c) {
+        unsafe {
+            this.ensure(1);
+            this.data_[this.len_] = c;
+            this.len_ = this.len_ + 1;
+            this.data_[this.len_] = 0;
+        }
+    }
+
+    // Appends `"s"` - the oracle quotes every path it puts on the linker
+    // command line (`codegen.cpp:2998-3011`).
+    void add_quoted(const char* s) {
+        this.add_char(34);
+        this.add(s);
+        this.add_char(34);
+    }
+
+    const char* str() {
+        return this.data_;
+    }
+
+    long length() {
+        unsafe {
+            return (long) this.len_;
+        }
+    }
+
+    void release() {
+        unsafe {
+            if (this.data_ != (char*) 0) {
+                __ivy_free(this.data_);
+            }
+            this.data_ = (char*) 0;
+            this.len_ = 0;
+            this.cap_ = 0;
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// H6.4: linker orchestration
+//
+// Mirror of `CodeGen::linkExecutable` (`src/codegen/codegen.cpp:2810-3063`)
+// for the single-module subset of the selfhost port. Per run:
+//
+//   1. temp object path next to the exe: `<dir>/<stem>__tmp.obj`;
+//   2. emit it through `ObjEmit` (the H6.3 `emitObject` mirror);
+//   3. locate the linker: `IVY_LINKER`, else the first line of
+//      `_popen("where clang++")`;
+//   4. run `"<linker>" "<obj>" -o "<exe>" "<ivyrt>"` (every path quoted);
+//   5. delete the temp object on success, keep it on failure.
+//
+// Out of subset (documented in H64_NOTES.md): `import cpp` / `import c` header
+// objects, `-D1` module objects, `--crt-static`. The oracle appends those to
+// the same command line; none of them exist in the H6 corpus.
+//
+// `code()` values: 0 success, 1 object emission failed, 2 no linker found,
+// 3 linker exited non-zero. `emit_code()` is the `ObjEmit` code (1-6) when
+// `code() == 1`. `link_rc()` is the linker process exit status when
+// `code() == 3`. `err()` is the detail message (no path prefix) and `cmd()`
+// is the exact command line handed to the linker (kept alive until the next
+// `link_text` call; the driver prints it in the failure diagnostic).
+// ---------------------------------------------------------------------------
+
+export struct Linker {
+    long tag;
+    long code_;
+    long emit_code_;
+    long link_rc_;
+    const char* err_;
+    char* cmd_own_;
+
+    // `<dir>/<stem>__tmp.obj`, mirroring `exeP.parent_path() / (stem +
+    // "__tmp" + ".obj")` (codegen.cpp:2813-2822). Both separators are
+    // accepted; the parent prefix is copied verbatim. A leading dot is not
+    // treated as an extension, like std::filesystem::path::stem().
+    char* temp_obj_path(const char* exe_path) {
+        unsafe {
+            long n = (long) __ivy_strlen(exe_path);
+            long sep = -1;
+            long i = 0;
+            while (i < n) {
+                if (exe_path[i] == 92 || exe_path[i] == 47) {
+                    sep = i;
+                }
+                i = i + 1;
+            }
+            long start = sep + 1;
+            long dot = -1;
+            i = n;
+            while (i > start) {
+                i = i - 1;
+                if (exe_path[i] == 46) {
+                    dot = i;
+                    break;
+                }
+            }
+            if (dot == start) {
+                dot = -1;
+            }
+            long stem_end = n;
+            if (dot >= 0) {
+                stem_end = dot;
+            }
+
+            char* out = (char*) __ivy_alloc((unsigned long long) (n + 16));
+            long o = 0;
+            i = 0;
+            while (i < start) {
+                out[o] = exe_path[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            i = start;
+            while (i < stem_end) {
+                out[o] = exe_path[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            const char* suffix = "__tmp.obj";
+            i = 0;
+            while (suffix[i] != 0) {
+                out[o] = suffix[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            out[o] = 0;
+            return out;
+        }
+    }
+
+    // `IVY_LINKER` first, then `where clang++` (codegen.cpp:2830-2860).
+    // Returns an owned copy, or null when neither yields a path.
+    char* find_linker() {
+        unsafe {
+            char* env = getenv("IVY_LINKER");
+            if (env != (char*) 0 && env[0] != 0) {
+                return __ivy_strdup(env);
+            }
+
+            void* pipe = _popen("where clang++", "r");
+            if (pipe == (void*) 0) {
+                return (char*) 0;
+            }
+            char* buf = (char*) __ivy_alloc(1024);
+            char* got = fgets(buf, 1024, pipe);
+            char* found = (char*) 0;
+            if (got != (char*) 0) {
+                long n = (long) __ivy_strlen(buf);
+                while (n > 0 && (buf[n - 1] == 10 || buf[n - 1] == 13)) {
+                    buf[n - 1] = 0;
+                    n = n - 1;
+                }
+                if (n > 0) {
+                    found = __ivy_strdup(buf);
+                }
+            }
+            __ivy_free(buf);
+            _pclose(pipe);
+            return found;
+        }
+    }
+
+    int link_text(const char* ir, unsigned long long len, const char* exe_path,
+                  const char* ivyrt_lib) {
+        unsafe {
+            this.code_ = 0;
+            this.emit_code_ = 0;
+            this.link_rc_ = 0;
+            this.err_ = "";
+            // A previous command buffer is intentionally not freed: the
+            // driver calls link_text once and exits.
+            this.cmd_own_ = (char*) 0;
+
+            char* obj_path = this.temp_obj_path(exe_path);
+
+            // 2) Emit the object file.
+            ObjEmit oe;
+            int erc = oe.emit_text(ir, len, obj_path);
+            if (erc != 0) {
+                this.code_ = 1;
+                this.emit_code_ = oe.code();
+                this.err_ = oe.err();
+                __ivy_free(obj_path);
+                return 1;
+            }
+
+            // 3) Locate the linker.
+            char* linker = this.find_linker();
+            if (linker == (char*) 0 || linker[0] == 0) {
+                if (linker != (char*) 0) {
+                    __ivy_free(linker);
+                }
+                remove(obj_path);
+                __ivy_free(obj_path);
+                this.code_ = 2;
+                this.err_ = "cannot locate a linker (clang++); set IVY_LINKER or add clang++ to PATH";
+                return 2;
+            }
+
+            // 4) Build the command line: "linker" "obj" -o "exe" ["ivyrt"].
+            StrBuf cmd;
+            cmd.setup(256);
+            cmd.add_quoted(linker);
+            cmd.add_char(32);
+            cmd.add_quoted(obj_path);
+            cmd.add(" -o ");
+            cmd.add_quoted(exe_path);
+            char* rt = (char*) ivyrt_lib;
+            if (rt != (char*) 0 && rt[0] != 0) {
+                cmd.add_char(32);
+                cmd.add_quoted(ivyrt_lib);
+            }
+            // Keep the buffer (no release): `cmd()` must stay valid.
+            this.cmd_own_ = (char*) cmd.str();
+
+            // 5) Run it. system() goes through cmd.exe, which strips the
+            // first and last quote when the command line holds more than two
+            // quotes; wrapping the whole line in one extra pair makes cmd.exe
+            // remove that pair and hand the real quoting to the linker. The
+            // executed string is therefore `"<cmd>"`, while `cmd()` keeps the
+            // oracle's un-wrapped spelling for diagnostics.
+            StrBuf run;
+            run.setup((unsigned long long) (cmd.length() + 8));
+            run.add_char(34);
+            run.add(this.cmd_own_);
+            run.add_char(34);
+            int rc = system(run.str());
+            run.release();
+
+            this.link_rc_ = (long) rc;
+            if (rc != 0) {
+                // Link failed - keep the temp object for debugging.
+                this.code_ = 3;
+                __ivy_free(linker);
+                __ivy_free(obj_path);
+                return 3;
+            }
+
+            // 6) Clean up the temporary object file.
+            remove(obj_path);
+            __ivy_free(linker);
+            __ivy_free(obj_path);
+            return 0;
+        }
+    }
+
+    long code() {
+        return this.code_;
+    }
+
+    long emit_code() {
+        return this.emit_code_;
+    }
+
+    long link_rc() {
+        return this.link_rc_;
+    }
+
+    const char* err() {
+        return this.err_;
+    }
+
+    const char* cmd() {
+        unsafe {
+            if (this.cmd_own_ == (char*) 0) {
+                return "";
+            }
+        }
+        return this.cmd_own_;
     }
 };

@@ -144,6 +144,20 @@ Write-Output "[3/4] linking smoke executable ..."
 $llvmLibs = @((& $llvmConfig --libs x86) -split '\s+' | Where-Object { $_ -ne "" })
 if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs x86 returned nothing" }
 
+# H6.4: codegen.obj also contains Linker (getenv/_popen/system/remove plus the
+# __ivy_* helpers), so the smoke links against lib/ivyrt.c like the other
+# selfhost drivers.
+$ivyrtObj = Join-Path $runDir "ivyrt.obj"
+$rOut = Join-Path $runDir "ivyrt.build.out"
+$rErr = Join-Path $runDir "ivyrt.build.err"
+$rArgs = @("-c", (Join-Path $repo "lib\ivyrt.c"), "-I", (Join-Path $repo "lib"),
+           "-o", $ivyrtObj)
+$code = Invoke-Separate $clang $rArgs $rOut $rErr
+if ($code -ne 0 -or -not (Test-Path -LiteralPath $ivyrtObj)) {
+    Show-Tool-Error "ivyrt" $rOut $rErr
+    Fail ("runtime compile failed (exit " + $code + ")")
+}
+
 $systemArgs = @()
 $systemNames = @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ -ne "" })
 foreach ($n in $systemNames) {
@@ -171,7 +185,7 @@ foreach ($n in $systemNames) {
 $exe = Join-Path $runDir "h61_smoke.exe"
 $lOut = Join-Path $runDir "link.out"
 $lErr = Join-Path $runDir "link.err"
-$lArgs = @($smokeObj, $codegenObj) + $llvmLibs + $systemArgs + @("-o", $exe)
+$lArgs = @($smokeObj, $codegenObj, $ivyrtObj) + $llvmLibs + $systemArgs + @("-o", $exe)
 $code = Invoke-Separate $clang $lArgs $lOut $lErr
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $exe)) {
     Show-Tool-Error "link" $lOut $lErr

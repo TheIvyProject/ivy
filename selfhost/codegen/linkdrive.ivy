@@ -1,0 +1,145 @@
+// selfhost/codegen/linkdrive.ivy - H6.4 driver for linker orchestration.
+//
+// Reads four lines from stdin:
+//   <path to LLVM IR text>
+//   <path of the executable to produce>
+//   <source path, used only to shape diagnostics like the oracle>
+//   <path to libivyrt (empty line = link without a runtime library)>
+// Emits the object next to the executable (`<stem>__tmp.obj`) through
+// codegen::Linker (mirror of CodeGen::linkExecutable in
+// src/codegen/codegen.cpp:2810-3063), then runs the linker.
+//
+// Usage:
+//   ivy.exe selfhost\codegen\linkdrive.ivy -I selfhost\codegen -I std -c -o linkdrive.obj
+//   (then link linkdrive.obj + codegen.obj + lib/ivyrt.c with clang + LLVM libs)
+//   linkdrive.exe < paths.txt
+//
+// stdout stays empty on success (the executable is the only output);
+// diagnostics go to stderr in the oracle's shape:
+//   <src>:0:0: error: LLVM IR parse error: ivy: <LLVM diagnostic>
+//   <src>:0:0: error: cannot locate a linker (clang++); set IVY_LINKER or add clang++ to PATH
+//   <src>:0:0: error: linker failed (exit code <rc>): <command line>
+// Exit 0 on success, 1 on failure, 2 on missing/invalid input.
+
+#pragma ivy cnumber
+import codegen;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+long run() {
+    long result = 1;
+    unsafe {
+        char* ir_path = io::read_line();
+        if (ir_path == (char*) 0) {
+            io::eprintln("linkdrive: no IR path on stdin");
+            return 2;
+        }
+        long n = (long) __ivy_strlen(ir_path);
+        while (n > 0 && (ir_path[n - 1] == 13 || ir_path[n - 1] == 10)) {
+            ir_path[n - 1] = 0;
+            n = n - 1;
+        }
+
+        char* exe_path = io::read_line();
+        if (exe_path == (char*) 0) {
+            io::eprintln("linkdrive: no executable path on stdin");
+            __ivy_free(ir_path);
+            return 2;
+        }
+        n = (long) __ivy_strlen(exe_path);
+        while (n > 0 && (exe_path[n - 1] == 13 || exe_path[n - 1] == 10)) {
+            exe_path[n - 1] = 0;
+            n = n - 1;
+        }
+
+        char* src_path = io::read_line();
+        if (src_path != (char*) 0) {
+            n = (long) __ivy_strlen(src_path);
+            while (n > 0 && (src_path[n - 1] == 13 || src_path[n - 1] == 10)) {
+                src_path[n - 1] = 0;
+                n = n - 1;
+            }
+        }
+
+        // Fourth line: runtime library path; an empty line (or EOF) means
+        // "link without libivyrt", matching the oracle's `IVYRT_LIB_PATH`
+        // fallback to an empty string.
+        char* ivyrt_lib = io::read_line();
+        if (ivyrt_lib == (char*) 0) {
+            ivyrt_lib = (char*) __ivy_alloc(1);
+            ivyrt_lib[0] = 0;
+        } else {
+            n = (long) __ivy_strlen(ivyrt_lib);
+            while (n > 0 && (ivyrt_lib[n - 1] == 13 || ivyrt_lib[n - 1] == 10)) {
+                ivyrt_lib[n - 1] = 0;
+                n = n - 1;
+            }
+        }
+
+        char* ir = io::read_file(ir_path);
+        if (ir == (char*) 0) {
+            io::eprint("ivy: error: cannot open file '");
+            io::eprint(ir_path);
+            io::eprintln("'");
+            __ivy_free(ir_path);
+            __ivy_free(exe_path);
+            if (src_path != (char*) 0) {
+                __ivy_free(src_path);
+            }
+            __ivy_free(ivyrt_lib);
+            return 2;
+        }
+
+        long len = (long) __ivy_strlen(ir);
+        Linker lk;
+        int rc = lk.link_text(ir, (unsigned long long) len, exe_path, ivyrt_lib);
+        if (rc != 0) {
+            if (src_path != (char*) 0) {
+                io::eprint(src_path);
+                io::eprint(":0:0: error: ");
+            } else {
+                io::eprint("ivy: error: ");
+            }
+            long code = lk.code();
+            if (code == 1) {
+                long ec = lk.emit_code();
+                if (ec == 3) {
+                    io::eprint("LLVM IR parse error: ivy: ");
+                } else if (ec == 4) {
+                    io::eprint("LLVM target lookup failed: ");
+                }
+                io::eprintln("{}", lk.err());
+            } else if (code == 2) {
+                io::eprintln("{}", lk.err());
+            } else {
+                io::eprint("linker failed (exit code ");
+                io::eprint("{}", lk.link_rc());
+                io::eprint("): ");
+                io::eprintln("{}", lk.cmd());
+            }
+            result = 1;
+        } else {
+            result = 0;
+        }
+
+        __ivy_free(ir);
+        __ivy_free(ir_path);
+        __ivy_free(exe_path);
+        if (src_path != (char*) 0) {
+            __ivy_free(src_path);
+        }
+        __ivy_free(ivyrt_lib);
+    }
+    return result;
+}
+
+int32 main() {
+    long r = run();
+    unsafe {
+        return (int32) r;
+    }
+    return 0;
+}
