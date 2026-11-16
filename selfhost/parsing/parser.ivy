@@ -247,6 +247,38 @@ export struct Parser {
     long pure_virtual_;  // set by parse_method_tail for `= 0` methods
     long is_override_;   // set by parse_method_tail for `override` methods
 
+    // H6.2aa: saved state of the main unit while an imported module source is
+    // parsed into the same pools (`begin_module_source` / `end_module_source`).
+    // The declaration pools are truncated back afterwards; the expression /
+    // statement / call-argument / designator / case / member-init pools are
+    // *kept* because a spliced body is an index into them.
+    Token* sv_toks_;
+    long sv_n_;
+    long sv_pos_;
+    long sv_failed_;
+    long sv_cnumber_;
+    long sv_in_unsafe_;
+    char* sv_src_;
+    const char* sv_module_name_;
+    long sv_is_module_export_;
+    long sv_fn_;
+    long sv_ap_;
+    long sv_pp_;
+    long sv_st_;
+    long sv_fld_;
+    long sv_m_;
+    long sv_en_;
+    long sv_enu_;
+    long sv_al_;
+    long sv_tpp_;
+    long sv_con_;
+    long sv_req_;
+    long sv_lt_;
+    long sv_ll_;
+    long sv_b_;
+    long sv_diag_;
+    long sv_source_failed_;
+
     void setup(Token* input, long in_count, char* arena, long src_len) {
         this.toks_ = input;
         this.n_ = in_count;
@@ -255,12 +287,18 @@ export struct Parser {
         this.cnumber_ = 0;
         this.in_unsafe_ = 0;
         this.src_ = arena;
+        // H6.2aa: the pools are sized for the main translation unit plus a
+        // fixed slack.  The slack is what lets `parse_module_source` parse an
+        // imported module's `.ivy` source into the *same* pools (so a spliced
+        // template body is just a pool index, no deep clone is needed).  The
+        // largest std module source is under 10 KB (~2k tokens), so these
+        // constants cover one such source per imported module.
         this.fn_n_ = 0;
-        this.fn_cap_ = in_count + 16;
+        this.fn_cap_ = in_count + 1024;
         this.ap_n_ = 0;
-        this.ap_cap_ = in_count + 16;
+        this.ap_cap_ = in_count + 1024;
         this.pp_n_ = 0;
-        this.pp_cap_ = in_count + 16;
+        this.pp_cap_ = in_count + 4096;
         this.sb_n_ = 0;
         // The intern arena holds every interned string.  It is never
         // reallocated (an interned pointer must stay valid for the whole
@@ -270,53 +308,53 @@ export struct Parser {
         // `record_attr_args` splits them into the individual lifetime
         // names, and the native `lifetime<...>` names once more.  Four
         // times the source length plus a fixed slack covers those copies.
-        this.sb_cap_ = src_len * 4 + 65536;
+        this.sb_cap_ = src_len * 4 + 262144;
         this.ep_n_ = 0;
-        this.ep_cap_ = in_count * 8 + 256;
+        this.ep_cap_ = in_count * 8 + 16384;
         this.sp_n_ = 0;
-        this.sp_cap_ = in_count * 2 + 64;
+        this.sp_cap_ = in_count * 2 + 4096;
         this.ca_n_ = 0;
-        this.ca_cap_ = in_count + 64;
+        this.ca_cap_ = in_count + 4096;
         this.argn_n_ = 0;
-        this.argn_cap_ = in_count * 4 + 64;
+        this.argn_cap_ = in_count * 4 + 4096;
         this.cp_n_ = 0;
-        this.cp_cap_ = in_count + 16;
+        this.cp_cap_ = in_count + 1024;
         this.dp_n_ = 0;
-        this.dp_cap_ = in_count + 16;
+        this.dp_cap_ = in_count + 1024;
         this.sbnm_n_ = 0;
-        this.sbnm_cap_ = in_count + 16;
+        this.sbnm_cap_ = in_count + 1024;
         this.tn_n_ = 0;
-        this.tn_cap_ = in_count + 16;
+        this.tn_cap_ = in_count + 256;
         this.tp_n_ = 0;
-        this.tp_cap_ = in_count + 16;
+        this.tp_cap_ = in_count + 256;
         this.st_n_ = 0;
-        this.st_cap_ = in_count + 16;
+        this.st_cap_ = in_count + 256;
         this.fld_n_ = 0;
-        this.fld_cap_ = in_count * 2 + 64;
+        this.fld_cap_ = in_count * 2 + 1024;
         this.m_n_ = 0;
-        this.m_cap_ = in_count + 16;
+        this.m_cap_ = in_count + 1024;
         this.en_n_ = 0;
-        this.en_cap_ = in_count + 16;
+        this.en_cap_ = in_count + 256;
         this.enu_n_ = 0;
-        this.enu_cap_ = in_count * 2 + 64;
+        this.enu_cap_ = in_count * 2 + 1024;
         this.al_n_ = 0;
-        this.al_cap_ = in_count + 16;
+        this.al_cap_ = in_count + 256;
         this.tpp_n_ = 0;
-        this.tpp_cap_ = in_count + 16;
+        this.tpp_cap_ = in_count + 256;
         this.con_n_ = 0;
-        this.con_cap_ = in_count + 16;
+        this.con_cap_ = in_count + 256;
         this.req_n_ = 0;
-        this.req_cap_ = in_count * 4 + 64;
+        this.req_cap_ = in_count * 4 + 1024;
         this.lt_n_ = 0;
-        this.lt_cap_ = in_count + 16;
+        this.lt_cap_ = in_count + 256;
         this.ll_n_ = 0;
-        this.ll_cap_ = in_count + 16;
+        this.ll_cap_ = in_count + 256;
         this.argst_n_ = 0;
-        this.argst_cap_ = in_count * 2 + 64;
+        this.argst_cap_ = in_count * 2 + 4096;
         this.argblk_n_ = 0;
-        this.argblk_cap_ = in_count + 16;
+        this.argblk_cap_ = in_count + 4096;
         this.b_n_ = 0;
-        this.b_cap_ = in_count + 16;
+        this.b_cap_ = in_count + 1024;
         this.module_name_ = "";
         this.is_module_export_ = 0;
         this.ce_ = 0;
@@ -342,7 +380,7 @@ export struct Parser {
         this.casepool_ = (ACase*) __ivy_alloc(this.cp_cap_ * 32);
         this.dpool_ = (long*) __ivy_alloc(this.dp_cap_ * 8);
         this.sbnm_ = (long*) __ivy_alloc(this.sbnm_cap_ * 8);
-        this.mi_cap_ = in_count + 16;
+        this.mi_cap_ = in_count + 1024;
         this.miname_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
         this.miarg_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
         this.mi_n_ = 0;
@@ -1862,6 +1900,84 @@ export struct Parser {
         return this.ca_n_;
     }
 
+    // H6.2aa: pool counts and bases used by `ModuleUnit.merge_into` to build
+    // the contiguous runs of an imported declaration.
+    long param_count() {
+        return this.pp_n_;
+    }
+
+    AParam* param_at(long i) {
+        unsafe {
+            return this.ppool_ + i;
+        }
+    }
+
+    long field_count() {
+        return this.fld_n_;
+    }
+
+    long method_count() {
+        return this.m_n_;
+    }
+
+    long base_count() {
+        return this.b_n_;
+    }
+
+    long tpl_count() {
+        return this.tpp_n_;
+    }
+
+    long enumerator_count() {
+        return this.enu_n_;
+    }
+
+    // H6.2aa: copy a spliced method body into a destination method.  The
+    // destination struct lives in the main unit's pools; `body` and the
+    // member-init run are indices into the expression / statement / member-init
+    // pools, which `end_module_source` keeps alive.
+    void set_method_body(long si, long mi, long body, long minit_start, long minit_n) {
+        AStruct sd = this.get_struct(si);
+        unsafe {
+            if (mi >= 0 && mi < sd.nmethods) {
+                sd.methods[mi].body = body;
+                sd.methods[mi].minit_start = minit_start;
+                sd.methods[mi].minit_n = minit_n;
+            }
+        }
+    }
+
+    // H6.2aa: read a pool record past the current count.  Used right after
+    // `end_module_source` to copy the source module's `extern "C"`
+    // declarations into the main unit (their records are still in the pool
+    // memory, only the count was rolled back).
+    AFunction raw_fn(long i) {
+        unsafe {
+            if (i >= 0 && i < this.fn_cap_) {
+                return this.fpool_[i];
+            }
+            return this.fpool_[0];
+        }
+    }
+
+    AParam raw_param(long i) {
+        unsafe {
+            if (i >= 0 && i < this.pp_cap_) {
+                return this.ppool_[i];
+            }
+            return this.ppool_[0];
+        }
+    }
+
+    // H6.2aa: pool index of a param pointer (AParam is 128 bytes).
+    long param_offset(AParam* p) {
+        unsafe {
+            long a = (long) p;
+            long b = (long) this.ppool_;
+            return (a - b) / 128;
+        }
+    }
+
     long struct_count() {
         return this.st_n_;
     }
@@ -2053,6 +2169,10 @@ export struct Parser {
 
     long concept_count() {
         return this.con_n_;
+    }
+
+    long requirement_count() {
+        return this.req_n_;
     }
 
     AConcept get_concept(long i) {
@@ -4752,6 +4872,113 @@ export struct Parser {
 
     long is_module_export() {
         return this.is_module_export_;
+    }
+
+    // --- H6.2aa: imported module declarations and template bodies ----------
+    //
+    // `ModuleUnit.merge_into` appends the imported declarations through the
+    // push helpers below; these accessors hand it the pool bases it needs to
+    // build the contiguous `AStruct.fields` / `.methods` / `.tpl_params`
+    // runs and the `AEnum.enumerators` run.
+    AFunction* method_at(long i) {
+        unsafe {
+            return this.mpool_ + i;
+        }
+    }
+
+    AField* field_at(long i) {
+        unsafe {
+            return this.fldpool_ + i;
+        }
+    }
+
+    AEnumerator* enumerator_at(long i) {
+        unsafe {
+            return this.enupool_ + i;
+        }
+    }
+
+    ATemplateParam* tpl_param_at(long i) {
+        unsafe {
+            return this.tppool_ + i;
+        }
+    }
+
+    long cnumber_enabled() {
+        return this.cnumber_;
+    }
+
+    // Parse an imported module's `.ivy` source into the existing pools.  The
+    // main unit's token stream, arena, module state and `failed_` flag are
+    // saved; the declaration pools are truncated by `end_module_source` so
+    // the source's own functions/structs do not join the unit.  The
+    // expression/statement pools are kept: a spliced template body is an
+    // index into them (the oracle clones the AST instead).
+    void begin_module_source(Token* toks, long n, char* arena) {
+        this.sv_toks_ = this.toks_;
+        this.sv_n_ = this.n_;
+        this.sv_pos_ = this.pos_;
+        this.sv_failed_ = this.failed_;
+        this.sv_cnumber_ = this.cnumber_;
+        this.sv_in_unsafe_ = this.in_unsafe_;
+        this.sv_src_ = this.src_;
+        this.sv_module_name_ = this.module_name_;
+        this.sv_is_module_export_ = this.is_module_export_;
+        this.sv_fn_ = this.fn_n_;
+        this.sv_ap_ = this.ap_n_;
+        this.sv_pp_ = this.pp_n_;
+        this.sv_st_ = this.st_n_;
+        this.sv_fld_ = this.fld_n_;
+        this.sv_m_ = this.m_n_;
+        this.sv_en_ = this.en_n_;
+        this.sv_enu_ = this.enu_n_;
+        this.sv_al_ = this.al_n_;
+        this.sv_tpp_ = this.tpp_n_;
+        this.sv_con_ = this.con_n_;
+        this.sv_req_ = this.req_n_;
+        this.sv_lt_ = this.lt_n_;
+        this.sv_ll_ = this.ll_n_;
+        this.sv_b_ = this.b_n_;
+        this.sv_diag_ = this.diags_.count();
+        this.toks_ = toks;
+        this.n_ = n;
+        this.pos_ = 0;
+        this.src_ = arena;
+        this.failed_ = 0;
+        this.in_unsafe_ = 0;
+        this.module_name_ = "";
+        this.is_module_export_ = 0;
+    }
+
+    // Returns 1 when the source failed to parse (the oracle's `!srcTu`).
+    long end_module_source() {
+        long src_failed = this.failed_;
+        this.toks_ = this.sv_toks_;
+        this.n_ = this.sv_n_;
+        this.pos_ = this.sv_pos_;
+        this.failed_ = this.sv_failed_;
+        this.cnumber_ = this.sv_cnumber_;
+        this.in_unsafe_ = this.sv_in_unsafe_;
+        this.src_ = this.sv_src_;
+        this.module_name_ = this.sv_module_name_;
+        this.is_module_export_ = this.sv_is_module_export_;
+        this.fn_n_ = this.sv_fn_;
+        this.ap_n_ = this.sv_ap_;
+        this.pp_n_ = this.sv_pp_;
+        this.st_n_ = this.sv_st_;
+        this.fld_n_ = this.sv_fld_;
+        this.m_n_ = this.sv_m_;
+        this.en_n_ = this.sv_en_;
+        this.enu_n_ = this.sv_enu_;
+        this.al_n_ = this.sv_al_;
+        this.tpp_n_ = this.sv_tpp_;
+        this.con_n_ = this.sv_con_;
+        this.req_n_ = this.sv_req_;
+        this.lt_n_ = this.sv_lt_;
+        this.ll_n_ = this.sv_ll_;
+        this.b_n_ = this.sv_b_;
+        this.diags_.truncate(this.sv_diag_);
+        return src_failed;
     }
 
     void parse_module_decl() {

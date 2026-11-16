@@ -182,6 +182,14 @@ export struct Emitter {
     // whether the module ends with `declare @__ivy_alloc` / `@__ivy_free`.
     long uses_alloc_;
     long uses_free_;
+    // H6.2aa: the oracle's `declaredC_` — the names of the `extern "C"`
+    // prototypes without a body.  It is collected before any declaration is
+    // emitted and suppresses the duplicate `@__ivy_alloc`/`@__ivy_free`/
+    // `@__ivy_panic` declares at the end of the module (a spliced module
+    // source already declared them at the top).
+    long dcl_n_;
+    long dcl_cap_;
+    void* dcl_names_;
     long dec_len_;
     long str_n_;
     long str_cap_;
@@ -288,6 +296,8 @@ export struct Emitter {
         this.uses_io_file_ = 0;
         this.uses_alloc_ = 0;
         this.uses_free_ = 0;
+        this.dcl_n_ = 0;
+        this.dcl_cap_ = 4096;
         this.dec_len_ = -1;
         this.str_n_ = 0;
         this.str_cap_ = 4096;
@@ -322,6 +332,7 @@ export struct Emitter {
             this.cap_x_ = __ivy_alloc((unsigned long long) this.cap_xcap_);
             this.num_buf_ = __ivy_alloc(64);
             this.mangle_buf_ = __ivy_alloc(1024);
+            this.dcl_names_ = __ivy_alloc((unsigned long long) this.dcl_cap_ * 8);
         }
     }
 
@@ -345,6 +356,7 @@ export struct Emitter {
             __ivy_free(this.cap_x_);
             __ivy_free(this.num_buf_);
             __ivy_free(this.mangle_buf_);
+            __ivy_free(this.dcl_names_);
             __ivy_free((void*) this.mu);
         }
     }
@@ -1663,17 +1675,39 @@ export struct Emitter {
                     }
                     long np = f.pn;
                     long ok = 1;
-                    if (np > an) {
-                        ok = 0;
-                    }
-                    if (ok != 0 && f.is_extern_c == 0 && np != an) {
-                        ok = 0;
+                    long pi0 = 0;
+                    long cmp_n = 0;
+                    // D1: a ctor's params[0] is `this`.  Two shapes are valid:
+                    // the declaration form (`na == np`, `this` already in the
+                    // args) and the bare-expression form (`na == np - 1`).
+                    if (this.is_ctor_name(f.name) != 0) {
+                        if (np < 1) {
+                            ok = 0;
+                        } else if (an != np && an != np - 1) {
+                            ok = 0;
+                        } else {
+                            if (an == np - 1) {
+                                pi0 = 1;
+                                cmp_n = an;
+                            } else {
+                                cmp_n = np < an ? np : an;
+                            }
+                        }
+                    } else {
+                        if (np > an) {
+                            ok = 0;
+                        }
+                        if (ok != 0 && f.is_extern_c == 0 && np != an) {
+                            ok = 0;
+                        }
+                        if (ok != 0) {
+                            cmp_n = np < an ? np : an;
+                        }
                     }
                     if (ok != 0) {
-                        long cmp_n = np < an ? np : an;
                         long k = 0;
                         while (k < cmp_n && ok != 0) {
-                            MParam p = this.mu->params[f.pstart + k];
+                            MParam p = this.mu->params[f.pstart + pi0 + k];
                             long ai = this.mu->args[astart + k];
                             if (ai < 0) {
                                 ok = 0;
@@ -1747,10 +1781,6 @@ export struct Emitter {
             this.fail(line, col, "array return types are out of scope for H6.2b");
             return false;
         }
-        if (f.ret.ptr_depth > 0) {
-            this.fail(line, col, "pointer return types are out of scope for H6.2i");
-            return false;
-        }
         long j = 0;
         while (j < f.pn) {
             MParam p;
@@ -1759,10 +1789,6 @@ export struct Emitter {
             }
             if (p.type.array_size > 0) {
                 this.fail(line, col, "array parameters are out of scope for H6.2b");
-                return false;
-            }
-            if (p.type.ptr_depth > 0) {
-                this.fail(line, col, "pointer parameters are out of scope for H6.2h");
                 return false;
             }
             j = j + 1;
@@ -1914,6 +1940,40 @@ export struct Emitter {
         return true;
     }
 
+    // True when `name` is a constructor: the last `::` component equals the
+    // preceding component with any template-argument list stripped (e.g.
+    // `string::string`, `vector<int32_t>::vector`).  A destructor
+    // (`X::~X`) is not a constructor.  `MFunction` has no `is_ctor` flag, so
+    // the shape of the name is the only signal.
+    bool is_ctor_name(const char* name) {
+        long np = this.name_part_count(name);
+        if (np < 2) {
+            return false;
+        }
+        long loff = this.name_part_off(name, np - 1);
+        long llen = this.name_part_len(name, np - 1);
+        long poff = this.name_part_off(name, np - 2);
+        unsafe {
+            if (llen > 0 && name[loff] == '~') {
+                return false;
+            }
+            long i = 0;
+            while (i < llen) {
+                char b = name[poff + i];
+                if (b == '<') {
+                    return i == llen;
+                }
+                if (b != name[loff + i]) {
+                    return false;
+                }
+                i = i + 1;
+            }
+            char end = name[poff + llen];
+            return end == '<' || end == ':';
+        }
+        return false;
+    }
+
     // Print component `idx` of a qualified name.
     void emit_name_part(const char* name, long idx) {
         long off = this.name_part_off(name, idx);
@@ -1955,15 +2015,15 @@ export struct Emitter {
         }
         long np = this.name_part_count(name);
         long is_dtor = 0;
-        long is_ctor = 0;
         long loff = this.name_part_off(name, np - 1);
         unsafe {
             if (name[loff] == '~') {
                 is_dtor = 1;
             }
         }
-        if (is_dtor == 0 && np >= 2) {
-            if (this.name_part_eq(name, np - 1, np - 2)) {
+        long is_ctor = 0;
+        if (is_dtor == 0) {
+            if (this.is_ctor_name(name)) {
                 is_ctor = 1;
             }
         }
@@ -3004,6 +3064,17 @@ export struct Emitter {
         if (!this.check_fn_signature(callee, e.line, e.col)) {
             return this.imm(0);
         }
+        // D1: ctor calls come in two shapes (CodeGen::lowerExpr's Call
+        // branch): the declaration form (`this` already in the args) and the
+        // bare-expression form, where `this` is implicit and codegen
+        // materializes a temp slot for it.
+        long ctor_bare = 0;
+        long pi0 = 0;
+        if (this.is_ctor_name(callee.name) != 0 && callee.pn >= 1 &&
+            e.an == callee.pn - 1) {
+            ctor_bare = 1;
+            pi0 = 1;
+        }
         long an = e.an;
         long base = this.arg_sp_;
         if (base + an > this.arg_cap_) {
@@ -3023,8 +3094,9 @@ export struct Emitter {
                 MExpr a = this.mu->exprs[ai];
                 VRef v;
                 const char* ty = "i8";
-                if (j < callee.pn) {
-                    MParam p = this.mu->params[callee.pstart + j];
+                long pi = pi0 + j;
+                if (pi < callee.pn) {
+                    MParam p = this.mu->params[callee.pstart + pi];
                     if (p.type.is_ref != 0) {
                         // H6.2h: pass by reference - emit the address of the
                         // lvalue and pass it as `ptr` (CodeGen::lowerExpr's
@@ -3057,6 +3129,48 @@ export struct Emitter {
                 at[base + j] = (long) ty;
             }
             j = j + 1;
+        }
+        // D1: for a bare-expression ctor call, prepend the materialized `this`
+        // slot.  The ctor returns void; the expression value is the loaded
+        // struct (usable in phi/store/return).  Callers that need an address
+        // (e.g. a method `this`) go through lower_lvalue, which materializes a
+        // fresh slot.
+        if (ctor_bare != 0) {
+            unsafe {
+                if (this.streq(e.type.base, "") || this.streq(e.type.base, "void")) {
+                    this.fail(e.line, e.col,
+                              "internal: ctor call expression has void/empty type");
+                    this.arg_sp_ = base;
+                    return this.imm(0);
+                }
+                const char* rt2 = this.llvm_type(e.type, 0);
+                VRef slot = this.new_temp();
+                this.cap_phase_ = 3;
+                this.emit_val(slot);
+                this.ps(" = alloca ");
+                this.ps(rt2);
+                this.nl();
+                this.cap_phase_ = 2;
+                this.ps("call void @");
+                this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+                this.ps("(ptr ");
+                this.emit_val(slot);
+                if (an > 0) {
+                    this.ps(", ");
+                    this.emit_call_args(base, an);
+                }
+                this.ps(")");
+                this.nl();
+                this.arg_sp_ = base;
+                VRef loaded = this.new_temp();
+                this.emit_val(loaded);
+                this.ps(" = load ");
+                this.ps(rt2);
+                this.ps(", ptr ");
+                this.emit_val(slot);
+                this.nl();
+                return loaded;
+            }
         }
         if (this.streq(this.llvm_type(e.type, 0), "void")) {
             this.ps("call void @");
@@ -4752,6 +4866,50 @@ export struct Emitter {
         }
     }
 
+    // H6.2aa: mirror of CodeGen::declaredC_.  Records the name of an
+    // `extern "C"` prototype that has no body.  The trailing
+    // `@__ivy_alloc`/`@__ivy_free`/`@__ivy_panic` declares are suppressed when
+    // the name was already declared (a spliced module source declares them at
+    // the top of the module).
+    void note_declared_c(const char* name) {
+        if (this.dcl_n_ >= this.dcl_cap_) {
+            return;
+        }
+        unsafe {
+            long* p = (long*) this.dcl_names_;
+            p[this.dcl_n_] = (long) name;
+        }
+        this.dcl_n_ = this.dcl_n_ + 1;
+    }
+
+    bool is_declared_c(const char* name) {
+        long i = 0;
+        unsafe {
+            long* p = (long*) this.dcl_names_;
+            while (i < this.dcl_n_) {
+                if (this.streq((char*) p[i], name)) {
+                    return true;
+                }
+                i = i + 1;
+            }
+        }
+        return false;
+    }
+
+    void collect_declared_c() {
+        long i = 0;
+        while (i < this.mu->fn_n) {
+            MFunction f;
+            unsafe {
+                f = this.mu->fns[i];
+            }
+            if (f.is_extern_c != 0 && f.has_body == 0) {
+                this.note_declared_c(f.name);
+            }
+            i = i + 1;
+        }
+    }
+
     // Mirror of the `declare` loops of CodeGen::generate(): the signature has
     // the parameter types only (no names) and extern "C" symbols are left
     // unmangled.  Declarations are emitted before every definition.
@@ -4812,6 +4970,7 @@ export struct Emitter {
         // H6.2r: CodeGen::generate() calls emitGlobals() after the struct
         // definitions and before the extern "C" declaration loop.
         this.emit_globals();
+        this.collect_declared_c();
         // CodeGen::generate() emits extern "C" declarations first, then the
         // declarations of bodyless non-extern functions, then the definitions.
         long fi = 0;
@@ -4862,10 +5021,10 @@ export struct Emitter {
         }
         // H6.2n: the Ivy-safe allocator declarations follow the entry point
         // and precede the io runtime (CodeGen::generate's emitIvyAllocators).
-        if (this.uses_alloc_ != 0) {
+        if (this.uses_alloc_ != 0 && !this.is_declared_c("__ivy_alloc")) {
             this.pl("declare ptr @__ivy_alloc(i64)");
         }
-        if (this.uses_free_ != 0) {
+        if (this.uses_free_ != 0 && !this.is_declared_c("__ivy_free")) {
             this.pl("declare void @__ivy_free(ptr)");
         }
         if (this.uses_io_print_ != 0) {
@@ -4880,7 +5039,7 @@ export struct Emitter {
         // H6.2d: like CodeGen::generate(), the panic declaration follows the
         // string constants because emitBoundsCheck() adds its message globals
         // (and sets this flag) while functions are lowered.
-        if (this.declared_panic_ != 0) {
+        if (this.declared_panic_ != 0 && !this.is_declared_c("__ivy_panic")) {
             this.pl("declare void @__ivy_panic(ptr, i32)");
         }
         return 0;

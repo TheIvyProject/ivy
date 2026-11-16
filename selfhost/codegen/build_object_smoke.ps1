@@ -196,7 +196,7 @@ foreach ($n in $systemNames) {
 # ---------------------------------------------------------------------------
 Write-Output "[1/6] building selfhost IR emitter driver ..."
 $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
-                "selfhost\codegen", "std")
+                "selfhost\codegen", "selfhost\app", "std")
 $inc = @("-I", $runDir)
 foreach ($md in $moduleDirs) { $inc += @("-I", (Join-Path $repo $md)) }
 
@@ -208,6 +208,9 @@ $modules = @(
     @("selfhost\parsing", "preprocessor"),
     @("selfhost\parsing", "ast"),
     @("selfhost\parsing", "parser"),
+    @("selfhost\parsing", "module_io"),
+    @("selfhost\app", "cli"),
+    @("selfhost\app", "imports"),
     @("selfhost\hir", "hir"),
     @("selfhost\hir", "hir_builder"),
     @("selfhost\mir", "mir"),

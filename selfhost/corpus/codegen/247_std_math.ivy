@@ -1,0 +1,21 @@
+// H6.2aa: call free functions from an imported module interface (math).
+#pragma ivy cnumber
+
+import math;
+
+int main() {
+    int32 a = math::abs(-7);
+    int32 b = math::clamp(25, 1, 9);
+    double d = math::sqrt(9.0);
+    if (a != 7) {
+        return 1;
+    }
+    if (b != 9) {
+        return 2;
+    }
+    if (d < 2.9 || d > 3.1) {
+        return 3;
+    }
+    io::println("{} {} {}", a, b, d);
+    return 0;
+}

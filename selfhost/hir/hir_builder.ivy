@@ -154,6 +154,13 @@ export struct HirBuilder {
 
     long cur_fn_;
     AType cur_ret_;
+    // H6.2aa: the module name of the unit being built.  A module interface
+    // unit's top-level functions are registered under `module::name` (the
+    // oracle's `buildSignature`, src/hir/hir_builder.cpp:828-845).
+    const char* module_name_;
+    // H6.2aa: scratch slot for the HIR name of the free function currently
+    // being registered (`set_fn_hir_name`).
+    const char* qname_;
     long eval_hit_;
     const char* tmp_;
     long* abuf_;
@@ -339,22 +346,23 @@ export struct HirBuilder {
             this.sbnm_ = p.sbnms();
             this.sbctr_ = 0;
             this.rfc_ = 0;
-            this.u.fn_cap = ntoks + 64;
+            this.module_name_ = p.module_name();
+            this.u.fn_cap = ntoks + 1024;
             this.u.fns = (HFunction*) __ivy_alloc(this.u.fn_cap * 152);
             this.u.fn_n = 0;
-            this.u.ex_cap = ntoks * 8 + 256;
+            this.u.ex_cap = ntoks * 8 + 16384;
             this.u.exprs = (HExpr*) __ivy_alloc(this.u.ex_cap * 152);
             this.u.ex_n = 0;
-            this.u.st_cap = ntoks * 3 + 128;
+            this.u.st_cap = ntoks * 3 + 4096;
             this.u.stmts = (HStmt*) __ivy_alloc(this.u.st_cap * 136);
             this.u.st_n = 0;
-            this.u.p_cap = ntoks * 2 + 64;
+            this.u.p_cap = ntoks * 2 + 4096;
             this.u.params = (HParam*) __ivy_alloc(this.u.p_cap * 88);
             this.u.p_n = 0;
-            this.u.c_cap = ntoks + 16;
+            this.u.c_cap = ntoks + 1024;
             this.u.cases = (HCase*) __ivy_alloc(this.u.c_cap * 32);
             this.u.c_n = 0;
-            this.u.a_cap = ntoks * 4 + 64;
+            this.u.a_cap = ntoks * 4 + 4096;
             this.u.args = (long*) __ivy_alloc(this.u.a_cap * 8);
             this.u.a_n = 0;
 
@@ -418,10 +426,10 @@ export struct HirBuilder {
                 total_fields = total_fields + sf.nfields;
                 sfi = sfi + 1;
             }
-            this.u.struct_cap = nstructs + 8;
+            this.u.struct_cap = nstructs + 256;
             this.u.structs = (HStruct*) __ivy_alloc(this.u.struct_cap * 64);
             this.u.struct_n = 0;
-            this.u.fld_cap = total_fields;
+            this.u.fld_cap = total_fields + 256;
             this.u.fields = (HField*) __ivy_alloc(this.u.fld_cap * 56);
             this.u.fld_n = 0;
             // H6.2y: the base-class names of the exported structs.
@@ -2161,8 +2169,28 @@ export struct HirBuilder {
 
     // --- H6.2s: constructors, destructors and RAII ------------------------
 
-    // True when `name` is exactly `<sname>::<sname>` (the qualified name the
-    // parser gives a constructor).
+    // Offset just past the last `::` of `s` (0 when `s` is unqualified).
+    long last_scope_off(const char* s) {
+        unsafe {
+            long n = this.slen(s);
+            long i = n - 1;
+            while (i >= 1) {
+                if (s[i - 1] == ':' && s[i] == ':') {
+                    return i + 1;
+                }
+                i = i - 1;
+            }
+        }
+        return 0;
+    }
+
+    // True when `name` is a constructor of `sname`: `name` is scoped by
+    // `sname` and its bare name equals the bare last component of `sname`
+    // (with any template-argument list stripped).  For an ordinary struct that
+    // is `<S>::<S>`; a specialization's ctor is `<Spec>::<template>` (e.g.
+    // `vector<int32_t>::vector`), because the parser qualifies a ctor with the
+    // name the method was declared under.  The oracle carries an explicit
+    // `isCtor` flag; the port derives it from the name.
     bool name_is_struct_ctor(const char* name, const char* sname) {
         long n = this.slen(sname);
         unsafe {
@@ -2176,22 +2204,33 @@ export struct HirBuilder {
             if (name[n] != ':' || name[n + 1] != ':') {
                 return false;
             }
-            long p = n + 2;
-            k = 0;
-            while (k < n) {
-                if (name[p + k] != sname[k]) {
+        }
+        long nb = this.last_scope_off(name);
+        long sb = this.last_scope_off(sname);
+        unsafe {
+            long i = 0;
+            while (i < 4096) {
+                char a = name[nb + i];
+                char b = sname[sb + i];
+                if (b == '<') {
+                    return a == 0;
+                }
+                if (a != b) {
                     return false;
                 }
-                k = k + 1;
-            }
-            if (name[p + n] != 0) {
-                return false;
+                if (a == 0) {
+                    return i > 0;
+                }
+                i = i + 1;
             }
         }
-        return true;
+        return false;
     }
 
-    // True when `name` is exactly `<sname>::~<sname>`.
+    // True when `name` is a destructor method of `sname`: `<sname>::~<bare>`.
+    // The oracle uses the AST's `isDtor` flag; the port derives it from the
+    // name.  A specialization's dtor is `<Spec>::~<template>` (e.g.
+    // `vector<int32_t>::~vector`), so the bare part is only checked for `~`.
     bool name_is_struct_dtor(const char* name, const char* sname) {
         long n = this.slen(sname);
         unsafe {
@@ -2205,23 +2244,12 @@ export struct HirBuilder {
             if (name[n] != ':' || name[n + 1] != ':') {
                 return false;
             }
-            long p = n + 2;
-            if (name[p] != '~') {
+            if (name[n + 2] != '~') {
                 return false;
             }
-            p = p + 1;
-            k = 0;
-            while (k < n) {
-                if (name[p + k] != sname[k]) {
-                    return false;
-                }
-                k = k + 1;
-            }
-            if (name[p + n] != 0) {
-                return false;
-            }
+            return name[n + 3] != 0;
         }
-        return true;
+        return false;
     }
 
     bool struct_has_ctor(const char* sname) {
@@ -2261,7 +2289,7 @@ export struct HirBuilder {
     // the most exact match is preferred.  -1 when nothing matches.
     long find_ctor(const char* sname, long astart, long argcount, long line, long col) {
         long best = -1;
-        long best_score = -1;
+        long best_score = 0;
         long ambiguous = 0;
         long i = 0;
         while (i < this.u.fn_n) {
@@ -2273,7 +2301,11 @@ export struct HirBuilder {
                 long expected = f.pn - 1;
                 if (expected == argcount) {
                     long ok = 1;
-                    long score = 100;
+                    long score = 0;
+                    // Default ctor (0 user params, 0 args) is an exact match.
+                    if (expected == 0 && argcount == 0) {
+                        score = score + 100;
+                    }
                     long k = 0;
                     while (k < argcount && ok != 0) {
                         HParam p;
@@ -2295,10 +2327,29 @@ export struct HirBuilder {
                             pt.is_ref = 0;
                             AType at = ae.type;
                             at.is_ref = 0;
-                            if (this.is_assignable(pt, at) == 0) {
-                                ok = 0;
-                            } else if (this.same_type(pt, at) == 0) {
+                            // D3: array-to-pointer decay (same as overload
+                            // resolution).
+                            if (at.array_size > 0 && pt.ptr_depth > 0 &&
+                                pt.array_size == 0) {
+                                at.ptr_depth = 1;
+                                at.array_size = 0;
+                            }
+                            if (this.same_type(pt, at) != 0) {
+                                score = score + 100;
+                            } else if (this.is_numeric(pt) && this.is_numeric(at)) {
+                                long pw = this.type_width(pt.base);
+                                long aw = this.type_width(at.base);
+                                if (pw > 0 && aw > 0) {
+                                    long d = 0;
+                                    if (pw > aw) { d = pw - aw; } else { d = aw - pw; }
+                                    score = score + (90 - d);
+                                } else {
+                                    score = score + 50;
+                                }
+                            } else if (this.is_assignable(pt, at) != 0) {
                                 score = score + 1;
+                            } else {
+                                ok = 0;
                             }
                         }
                         k = k + 1;
@@ -2308,7 +2359,7 @@ export struct HirBuilder {
                             best_score = score;
                             best = i;
                             ambiguous = 0;
-                        } else if (score == best_score) {
+                        } else if (score == best_score && score > 0) {
                             ambiguous = 1;
                         }
                     }
@@ -3529,6 +3580,36 @@ export struct HirBuilder {
         }
     }
 
+    // H6.2aa: the HIR name of a free function.  In a module interface unit the
+    // top-level functions are registered as `module::name` so that HIR
+    // resolution and MSVC mangling include the module scope (the oracle's
+    // `buildSignature`).  `extern "C"` and already-qualified names are
+    // unchanged.
+    bool name_has_dcolon(const char* s) {
+        unsafe {
+            long i = 0;
+            while (s[i] != 0) {
+                if (s[i] == 58 && s[i + 1] == 58) { return true; }
+                i = i + 1;
+            }
+        }
+        return false;
+    }
+
+    void set_fn_hir_name(AFunction af) {
+        unsafe {
+            this.qname_ = af.name;
+            if (af.is_extern_c != 0) { return; }
+            if (this.module_name_[0] == 0) { return; }
+            if (this.name_has_dcolon(af.name)) { return; }
+            this.sb_reset();
+            this.sb_put(this.module_name_);
+            this.sb_put("::");
+            this.sb_put(af.name);
+            this.qname_ = this.sb_save();
+        }
+    }
+
     void build_free_signature(AFunction af, long astIdx) {
         // A template definition is not registered as a function: it is
         // stored in the template registry and instantiated on demand.
@@ -3606,7 +3687,8 @@ export struct HirBuilder {
         if (af.body >= 0 && ret.ptr_depth > 0 && ret_lt == 0) {
             this.err_ptr_ret_no_lt(af.line, af.col, af.name);
         }
-        long idx = this.add_function_at(af.name, ret, af.is_extern_c, af.is_constexpr,
+        this.set_fn_hir_name(af);
+        long idx = this.add_function_at(this.qname_, ret, af.is_extern_c, af.is_constexpr,
                                         pstart, lt_start, lt_n, ret_lt);
         if (idx < this.u.fn_n) {
             unsafe {
@@ -4685,6 +4767,10 @@ export struct HirBuilder {
                 }
                 if (this.is_assignable(rt, ve.type) == 0) {
                     this.err_return_types(a.line, a.col, rt, ve.type);
+                } else if (this.seq(rt.base, ve.type.base) == 0) {
+                    // B5 / B6: auto-wrap T -> expected<T, E> / optional<T> on
+                    // return (hir_builder.cpp:1694-1743).
+                    val = this.wrap_value(rt, val, a.line, a.col);
                 }
             }
         } else {
@@ -5781,6 +5867,7 @@ export struct HirBuilder {
                     // The struct template is instantiated with the explicit
                     // arguments (substituted with the active type mapping,
                     // like the oracle's `currentTypeMapping_`).
+                    long specIdx = -1;
                     unsafe {
                         AType* targs = this.alloc_types(a.tpl_n);
                         long k = 0;
@@ -5789,15 +5876,37 @@ export struct HirBuilder {
                             targs[k] = this.substitute_type(ta, this.gmap_base_);
                             k = k + 1;
                         }
-                        this.instantiate_struct_template(stplIdx, ca.sval, targs,
-                                                         a.tpl_n, a.line, a.col);
+                        specIdx = this.instantiate_struct_template(
+                            stplIdx, ca.sval, targs, a.tpl_n, a.line, a.col);
                     }
                     // The oracle resolves the constructor of the
-                    // specialization.  The port has no constructor
-                    // resolution (deferred), so the call stays unresolved:
-                    // the callee keeps the bare name and the type is the
-                    // dummy type - exactly what the oracle produces for a
-                    // specialization without a constructor.
+                    // specialization (hir_builder.cpp:3057-3080): when the
+                    // specialization declares constructors, the call is a
+                    // constructor call and its type is the specialization.
+                    if (specIdx >= 0) {
+                        unsafe {
+                            const char* spec = this.spec_name(specIdx);
+                            if (this.struct_has_ctor(spec) != 0) {
+                                long ci = this.find_ctor(spec, e.astart, e.an,
+                                                         a.line, a.col);
+                                if (ci >= 0) {
+                                    HFunction hf;
+                                    hf = this.u.fns[ci];
+                                    e.sval = hf.name;
+                                    AType st = this.ty_empty();
+                                    st.base = spec;
+                                    e.type = st;
+                                    return this.push_expr(e);
+                                }
+                                // resolve_ctor already reported the problem.
+                                e.sval = ca.sval;
+                                e.type = this.ty_dummy();
+                                return this.push_expr(e);
+                            }
+                        }
+                    }
+                    // A specialization without a constructor: the call stays
+                    // unresolved with the dummy type.
                     e.sval = ca.sval;
                     e.type = this.ty_dummy();
                     return this.push_expr(e);
@@ -9107,39 +9216,43 @@ export struct HirBuilder {
     // `skip` is the number of leading HIR parameters to ignore (1 for a
     // method, whose first parameter is the implicit `this`).
     long find_fn_sig(AFunction af, long skip) {
-        long i = 0;
-        while (i < this.u.fn_n) {
-            HFunction f;
-            unsafe {
+        // H6.2aa: a free function of a module interface unit is registered
+        // under its qualified name.
+        unsafe {
+            const char* want = af.name;
+            if (skip == 0) {
+                this.set_fn_hir_name(af);
+                want = this.qname_;
+            }
+            long i = 0;
+            while (i < this.u.fn_n) {
+                HFunction f;
                 f = this.u.fns[i];
-            }
-            if (this.seq(f.name, af.name) && f.pn == af.nparams + skip) {
-                long k = 0;
-                long ok = 1;
-                while (k < af.nparams && ok != 0) {
-                    AParam p;
-                    unsafe {
+                if (this.seq(f.name, want) && f.pn == af.nparams + skip) {
+                    long k = 0;
+                    long ok = 1;
+                    while (k < af.nparams && ok != 0) {
+                        AParam p;
                         p = af.params[k];
-                    }
-                    AType a = this.resolve_template_struct_type(
-                        this.resolve_alias(p.type), p.line, p.col);
-                    a.is_ref = 0;
-                    HParam hp;
-                    unsafe {
+                        AType a = this.resolve_template_struct_type(
+                            this.resolve_alias(p.type), p.line, p.col);
+                        a.is_ref = 0;
+                        HParam hp;
                         hp = this.u.params[f.pstart + skip + k];
+                        AType b = hp.type;
+                        b.is_ref = 0;
+                        if (this.same_type(a, b) == 0) {
+                            ok = 0;
+                        }
+                        k = k + 1;
                     }
-                    AType b = hp.type;
-                    b.is_ref = 0;
-                    if (this.same_type(a, b) == 0) {
-                        ok = 0;
+                    if (ok != 0) {
+                        return i;
                     }
-                    k = k + 1;
                 }
-                if (ok != 0) {
-                    return i;
-                }
+                i = i + 1;
             }
-            i = i + 1;
+            return -1;
         }
         return -1;
     }

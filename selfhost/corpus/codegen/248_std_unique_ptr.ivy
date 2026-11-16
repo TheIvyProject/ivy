@@ -1,0 +1,23 @@
+// H6.2aa: instantiate a struct template from an imported module interface
+// (unique_ptr) and call its ctor / methods / dtor.
+#pragma ivy cnumber
+
+import unique_ptr;
+
+int main() {
+    unsafe {
+        unique_ptr<int32> p = unique_ptr<int32>(new int32(5));
+        int32 v = *p;
+        if (v != 5) {
+            return 1;
+        }
+    }
+    unique_ptr<int32> q;
+    unsafe {
+        if (q.get() != (int32*)0) {
+            return 2;
+        }
+    }
+    io::println("unique_ptr ok");
+    return 0;
+}

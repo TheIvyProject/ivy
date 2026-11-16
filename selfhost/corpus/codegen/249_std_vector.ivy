@@ -1,0 +1,28 @@
+// H6.2aa: instantiate vector<T> from an imported module interface and use
+// push / len / operator[] / range-for.
+#pragma ivy cnumber
+
+import vector;
+
+int main() {
+    vector<int32> v;
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    if (v.len() != 3) {
+        return 1;
+    }
+    if (v[1] != 2) {
+        return 2;
+    }
+    v[1] = 20;
+    int32 s = 0;
+    for (int32 x : v) {
+        s = s + x;
+    }
+    if (s != 24) {
+        return 3;
+    }
+    io::println("{} {}", v[1], s);
+    return 0;
+}

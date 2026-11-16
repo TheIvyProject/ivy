@@ -221,6 +221,35 @@ export struct Imports {
         unsafe { return (char*)0; }
     }
 
+    // D2: locate a module's `.ivy` source: the `-I` directories in order,
+    // then `<cwd>/std`, then `<cwd>` (`main.cpp:1090-1098`). Null when the
+    // module has no source next to its `.ivm` (e.g. a pre-compiled module).
+    char* resolve_source(const char* name, CliPath* dirs) {
+        unsafe {
+            CliPath* d = dirs;
+            while (d != (CliPath*)0) {
+                char* c = this.join(d->value, name, ".ivy");
+                if (this.exists(c)) { return c; }
+                __ivy_free(c);
+                d = d->next;
+            }
+
+            char* base = this.cwd();
+            char* stdDir = this.join(base, "std", "");
+            char* s = this.join(stdDir, name, ".ivy");
+            if (this.exists(s)) { return s; }
+            __ivy_free(s);
+            __ivy_free(stdDir);
+
+            char* c = this.join(base, name, ".ivy");
+            if (this.exists(c)) { return c; }
+            __ivy_free(c);
+            __ivy_free(base);
+            return (char*)0;
+        }
+        unsafe { return (char*)0; }
+    }
+
     void add(char* name, char* path) {
         unsafe {
             ImportRec* r = (ImportRec*)__ivy_alloc(24);

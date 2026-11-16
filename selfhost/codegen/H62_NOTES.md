@@ -3439,3 +3439,171 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 `C:\Users\ASUS\AppData\Local\Temp\opencode\h62z\` (và `h62n`, `h62r`,
 `h62verify` cho verify độc lập).
 
+## 50. H6.2aa - `import` module/std (merge `.ivm`, splice template body, ghi `.ivm`)
+
+#### 50.1 Phạm vi
+
+Port đoạn `import` của `run()` (`src/app/main.cpp:917-1301`):
+
+- pre-scan token sau preprocessor (đã có từ H7.2) → resolve + đọc từng `.ivm`
+  (H7.3) → **predeclare** tên struct/enum/alias trước khi parser chạy;
+- sau `pa.parse()`: **merge** declaration của từng module vào translation unit
+  (function append, type dedup theo tên);
+- với template struct import: parse **source `.ivy`** của module vào cùng pool
+  của parser rồi **splice index** body method vào method bodyless của `.ivm`
+  (không deep-clone AST như oracle);
+- nếu source là module interface unit (`module X;` + `export`): ghi `.ivm`
+  cạnh source **trước** khi HIR chạy.
+
+Nhờ đó 22 example trong `examples/` (import `string`, `vector`, `slice`,
+`unique_ptr`, `hash_map`, `hash_set`, `math`) khớp byte với oracle `--llvm`.
+Ngoài phạm vi: `import cpp`, `import c <...>` (skip y như oracle), concept
+constraint nâng cao, module pre-compiled không có source cạnh `.ivm` (khi đó
+method template giữ bodyless).
+
+#### 50.2 Parser (`selfhost/parsing/parser.ivy`)
+
+- Capacity các pool được nới theo `in_count` + slack cố định (fn/ap +1024,
+  pp +4096, …) để **một** module source (~2k token) parse được vào cùng pool
+  với main unit.
+- `begin_module_source(toks, n, arena)` / `end_module_source()`: lưu/khôi phục
+  token stream, arena, `module_name_`, `is_module_export_`, `failed_`,
+  `cnumber_`, `in_unsafe_` và **mọi** pool khai báo; truncate các pool khai
+  báo về mốc cũ, nhưng **giữ** epool/spool/call-arg/designator/case/member-init
+  vì body splice là index vào chúng. `end_module_source` trả `1` khi source
+  parse lỗi (oracle: `!srcTu`).
+- Accessor cho `ModuleUnit`: `method_at`, `field_at`, `enumerator_at`,
+  `tpl_param_at`, `param_at`, `param_count`, `raw_fn`, `raw_param`,
+  `param_offset`, `set_method_body`, `mark_fn_exported`,
+  `module_name`, `is_module_export`, `cnumber_enabled`, các `*_count()` của
+  pool. `merge_into` ghi thẳng record qua các accessor này.
+- Parser không qualify tên free function của module; việc đó ở HIR (50.6).
+
+#### 50.3 `ModuleUnit` (`selfhost/parsing/module_io.ivy`)
+
+- `from_parser(Parser pa)`, `read_module(path)`, `write(path)`, `dump()` dùng
+  chung `IvmBuf` (H7.3).
+- `method_flags(name, sname)`: suy `is_ctor`/`is_dtor` từ **hình dạng tên**
+  khi đọc `.ivm` (oracle đọc flag từ file; port dựng lại từ tên, vì
+  `ModMethod` không mang flag).
+- Reader qualify free function thành `module::name` (H7.3), bỏ value
+  enumerator (`-1`).
+
+#### 50.4 `Imports.resolve_source`
+
+`selfhost/app/imports.ivy`: tìm source `.ivy` của module theo thứ tự
+`-I` → `<cwd>/std` → `<cwd>` (`main.cpp:1090-1098`); trả null khi module
+không có source (pre-compiled).
+
+#### 50.5 Driver (`selfhost/codegen/cgdrive.ivy`)
+
+- `Cg` giữ `Parser pa` và `Imports im`; **mọi** thao tác mutate parser là
+  method của `Cg` (Ivy truyền struct parameter **by value**, nên helper nhận
+  `Parser` sẽ sửa một bản copy).
+- `run()`: lexer → preprocessor → `im.scan` → đọc/predeclare từng `.ivm` →
+  `pa.parse()` → `merge_unit` từng module → `splice_all()` → `write_ivm`
+  (nếu là module interface unit) → HIR → MIR → `Emitter.emit()`.
+- `mods` là mảng `ModuleUnit` cấp phát `(nmod + 1) * 448` byte (stride thật
+  của `ModuleUnit` là 432; `sizeof` fold sai nên dùng literal) và **giữ sống
+  đến cuối `run()`** — tên đã merge trỏ vào buffer của unit.
+- `merge_unit`: append function/struct/enum/using/concept, dedup type theo
+  tên, dựng lại các run `fields`/`methods`/`tpl_params`/`enumerators` liên tục
+  trong pool của parser.
+- `prepare_splice`/`find_tpl`/`splice_extern_c`/`splice_module`/`splice_all`:
+  - `splice_extern_c` chép **extern "C" declaration** từ source module
+    (`__ivy_alloc`, `__ivy_free`, `__ivy_memcpy`, `__ivy_panic`) vào TU, đúng
+    như `main.cpp:1173-1200`; nhờ đó các declare này nằm ở **đầu** module;
+  - `splice_module` parse source module, tìm template struct đích, ghép body
+    method theo signature (bỏ `this`), chép member-init của ctor.
+- `write_ivm(path)`: `ModuleUnit.from_parser(pa).write(path)`, in
+  `ivy: module interface written to '<path>'` / warning y oracle.
+
+#### 50.6 HIR (`selfhost/hir/hir_builder.ivy`)
+
+- `module_name_` + `qname_`: free function của module interface unit được
+  đăng ký dưới tên `module::name` (`set_fn_hir_name`); `find_fn_sig` tra theo
+  tên đã qualify. Đây là chỗ duy nhất qualify, parser giữ tên trần.
+- `name_is_struct_ctor` / `name_is_struct_dtor`: nhận diện theo **hình dạng
+  tên**, không theo flag (HIR/MIR của port không có `isCtor`/`isDtor`):
+  ctor = `<scope>::<bare>` với `bare` = component cuối của scope đã bỏ
+  `<...>` (vd `vector<int32_t>::vector`); dtor = `<sname>::~<bất kỳ>`.
+  Helper `last_scope_off`.
+- `find_ctor`: ranking mới — score 0 base, exact +100, numeric 90-diff,
+  assignable +1, empty ctor +100; `s == bestScore && s > 0` ⇒ ambiguous.
+- `build_return`: mọi `return` bọc giá trị qua `wrap_value(rt, val, line, col)`
+  (B5/B6).
+- Struct-template ctor call `T<args>(...)`: resolve ctor của specialization
+  qua `spec_name(specIdx)` + `struct_has_ctor` + `find_ctor`, bọc `unsafe`.
+
+#### 50.7 Emitter (`selfhost/codegen/emitter.ivy`)
+
+- `is_ctor_name`: last component bằng component trước **sau khi bỏ `<...>`**
+  (khớp `string::string`, `vector<int32_t>::vector`), loại `~`.
+- `find_call_target`: ctor có 2 dạng — declaration form (`an == pn`, `this`
+  đã ở args) và bare-expression form (`an == pn - 1`).
+- `lower_call`: dạng bare cấp `this` slot qua entry-alloca, `call void
+  @<mangled>`, rồi `load` struct; trả value dùng được trong phi/store/return.
+- Bỏ gate `check_fn_signature` cho pointer param/return (oracle không có;
+  mangling `PAV`/`AAV` đã có).
+- `emit_mangled_name`: dùng `is_ctor_name` thay so sánh 2 component thô.
+- **`declaredC_`**: thêm `dcl_names_`/`dcl_n_`/`dcl_cap_` +
+  `collect_declared_c()` (mirror `codegen.cpp:2645-2649`) gọi trước vòng
+  declare; 3 declare cuối `@__ivy_alloc`/`@__ivy_free`/`@__ivy_panic` bị bỏ
+  khi tên đã được declare ở đầu (extern "C" splice từ module source). Đây là
+  lỗi cuối cùng của `test_d3_slice`: oracle giữ `declare @__ivy_panic` ở đầu
+  và **không** phát lại ở cuối.
+
+#### 50.8 Harness
+
+- `selfhost/codegen/cgdiff.ps1`: thêm `selfhost\app` vào `$moduleDirs` và 3
+  module `module_io`, `cli`, `imports` vào danh sách build.
+- `build_object_smoke.ps1` + `build_link_smoke.ps1`: cùng thay đổi (driver
+  `cgdrive.ivy` giờ import `module_io`/`cli`/`imports`).
+
+#### 50.9 Fixture (`selfhost/corpus/codegen`)
+
+| Fixture | Nội dung |
+| --- | --- |
+| `247_std_math.ivy` | `import math`, gọi free function `abs`/`clamp`/`sqrt` |
+| `248_std_unique_ptr.ivy` | `import unique_ptr`, ctor từ `new int32(5)`, `operator*`, `get`, dtor |
+| `249_std_vector.ivy` | `import vector`, `push`/`len`/`operator[]`/range-for |
+
+Không thêm fixture module-interface unit để tránh ghi `.ivm` vào corpus.
+
+#### 50.10 Kết quả (2026-11-16)
+
+```text
+cmp_examples (22 example):  PASS 22 / 22
+cgdiff.ps1:                 PASS 249 / 249
+interpdiff.ps1:             PASS 23 / 23
+build_object_smoke.ps1:     object 249 / 249 + run 8 / 8
+build_link_smoke.ps1:       run 8 / 8, negative 2 / 2, space 1 / 1
+build_smoke.ps1:            PASS (h61 smoke ok)
+```
+
+Byte-identical gồm cả stdout, stderr và exit status. Không regress bất kỳ
+fixture nào của H6.2a..z.
+
+#### 50.11 Trạng thái H6.2aa
+
+Tập thêm/sửa:
+
+- `selfhost/parsing/parser.ivy` (pool, `begin/end_module_source`, accessor);
+- `selfhost/parsing/module_io.ivy` (`method_flags`);
+- `selfhost/app/imports.ivy` (`resolve_source`);
+- `selfhost/codegen/cgdrive.ivy` (merge/splice/`.ivm` writer + pipeline);
+- `selfhost/hir/hir_builder.ivy` (qualify, ctor/dtor shape, `find_ctor`,
+  `wrap_value`, struct-template ctor);
+- `selfhost/codegen/emitter.ivy` (ctor, mangling, `declaredC_`);
+- `selfhost/codegen/cgdiff.ps1`, `build_object_smoke.ps1`,
+  `build_link_smoke.ps1`;
+- `selfhost/corpus/codegen/247..249_*.ivy` (mới);
+- `selfhost/codegen/H62_NOTES.md` (mục 50 này);
+- `PLAN.md` dòng H6.2.
+
+Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
+mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
+`.obj`, `.ivm`, `.exe` mới trong cây làm việc; mọi scratch nằm dưới
+`C:\Users\ASUS\AppData\Local\Temp\opencode\h62aa\`.
+
+
