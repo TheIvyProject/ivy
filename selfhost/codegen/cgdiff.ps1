@@ -115,13 +115,14 @@ function Show-Bytes([byte[]]$b) {
 
 # 1. Build the selfhost modules + driver in the fresh run directory.
 Write-Output "[1/4] building selfhost LLVM IR emitter driver ..."
-$moduleDirs = @("selfhost\parsing", "selfhost\hir", "selfhost\mir",
+$moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
                 "selfhost\codegen", "std")
 $inc = @("-I", $runDir)
 foreach ($md in $moduleDirs) { $inc += @("-I", (Join-Path $repo $md)) }
 
 $modules = @(
     @("std", "io"),
+    @("selfhost\common", "diagnostic"),
     @("selfhost\parsing", "token"),
     @("selfhost\parsing", "lexer"),
     @("selfhost\parsing", "preprocessor"),

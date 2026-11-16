@@ -9,15 +9,19 @@
 // H1.4 adds the full longest-match operator/punctuation table and the
 // EndOfFile token. H1.5 adds comment and full-whitespace trivia. H1.6 adds
 // lexer error diagnostics (unexpected character, invalid hex/bin literals,
-// unterminated string/char/raw literals and block comments) reported in the
-// oracle format `"path":line:col: error: message`.
+// unterminated string/char/raw literals and block comments).  H7.4 moves them
+// into a `Diags` (selfhost/common/diagnostic.ivy): the lexer only collects
+// them, and the driver prints them in the oracle format
+// `"path":line:col: error: message` (quoted path, because `main.cpp` streams
+// the `std::filesystem::path` through `std::quoted`).
 //
 // Oracle: src/parsing/lexer.cpp via `ivy --lex`.
-// Harness: selfhost/difftest.ps1
+// Harness: selfhost/difftest.ps1, selfhost/common/build_diag_smoke.ps1
 
 #pragma ivy cnumber
 export module lexer;
 import token;
+import diagnostic;
 
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
@@ -36,6 +40,7 @@ export struct Lexer {
     Token* toks_;
     long tokcap_;
     long tokcount_;
+    Diags diags_;
 
     void setup(char* source, uint64 len, char* path) {
         this.src_ = source;
@@ -52,12 +57,16 @@ export struct Lexer {
         }
         this.tokcap_ = 0;
         this.tokcount_ = 0;
+        // H7.4: one diagnostics collection per lexer instance (setup is called
+        // once per pass; lexdrive uses a fresh Lexer for its token pass).
+        this.diags_.init(16);
     }
 
     // H2: lex the whole source into an owned Token[] (no stdout output). The
     // buffer includes the lexer's trailing `eof` token (at the final lexer
     // position); the preprocessor ignores it and appends its own 0:0 eof.
-    // Lexer diagnostics (H1.6) are still printed by err().
+    // Lexer diagnostics are collected in `diags_`; the driver prints them with
+    // `print_diags` / `print_diags_out` after the pass.
     void lex_all(long cap) {
         unsafe {
             this.toks_ = (Token*) __ivy_alloc(cap * 32);
@@ -83,6 +92,7 @@ export struct Lexer {
                 __ivy_free(this.toks_);
             }
         }
+        this.diags_.release();
     }
 
     // When quiet, token emission is suppressed but lexing (and thus error
@@ -95,11 +105,25 @@ export struct Lexer {
         return this.had_error_;
     }
 
-    // H1.6: report a lexer diagnostic exactly like `ivy --lex`
-    // (std::filesystem::path's operator<< wraps the path in double quotes).
+    // H1.6/H7.4: record a lexer diagnostic.  Printing is the driver's job:
+    // `ivy --lex` reports these on stderr with the path streamed through
+    // `std::filesystem::path` (quoted), so the port has both a quoted and a
+    // plain form, on stderr (driver) and stdout (differential drivers).
     void err(uint32 line, uint32 col, const char* msg) {
         this.had_error_ = true;
-        io::println("\"{}\":{}:{}: error: {}", this.path_, line, col, msg);
+        this.diags_.add(line, col, msg, false);
+    }
+
+    long diag_count() {
+        return this.diags_.count();
+    }
+
+    void print_diags() {
+        this.diags_.print_quoted(this.path_);
+    }
+
+    void print_diags_out() {
+        this.diags_.print_out_quoted(this.path_);
     }
 
     // Byte-exact compare of src_[off..off+n) with a NUL-terminated literal.

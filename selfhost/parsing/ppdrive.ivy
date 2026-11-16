@@ -7,6 +7,9 @@
 // (-Oracle --tokens -Module preprocessor -Driver ppdrive).
 
 #pragma ivy cnumber
+// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
+// linker only links the objects of modules this file imports).
+import diagnostic;
 import token;
 import lexer;
 import preprocessor;
@@ -85,35 +88,27 @@ void run() {
                 lx.setup(content, len, line);
                 lx.lex_all(cap);
 
-                if (!lx.had_error()) {
+                if (lx.had_error()) {
+                    // H7.4: the lexer only collects; print like `ivy --tokens`
+                    // (quoted path, no token dump after a lex error).
+                    lx.print_diags_out();
+                } else {
                     long in_n = lx.token_count();
                     long out_cap = in_n * 8 + 256;
                     Preprocessor pp;
                     pp.setup(lx.tokens(), in_n, content, (long)len, line, (long)np,
                              out_cap, 1024);
                     pp.run();
-                    long dc = pp.diag_count();
-                    long di = 0;
                     bool failed = false;
                     char* fname = line;
                     if (pp.has_line_file() != 0) {
                         fname = pp.line_file();
                     }
-                    while (di < dc) {
-                        long w = pp.diag_warn(di);
-                        if (w == 0) {
-                            failed = true;
-                        }
-                        io::print(fname);
-                        io::print(":{}", pp.diag_line(di));
-                        io::print(":{}", pp.diag_col(di));
-                        if (w != 0) {
-                            io::print(": warning: ");
-                        } else {
-                            io::print(": error: ");
-                        }
-                        io::println("{}", pp.diag_msg(di));
-                        di = di + 1;
+                    // H7.4: the shared Diags printer (stdout: the harness merges
+                    // both streams and the `=== path ===` marker is ours).
+                    pp.print_diags_out(fname);
+                    if (pp.diag_failed() != 0) {
+                        failed = true;
                     }
                     if (!failed) {
                         Printer pr;

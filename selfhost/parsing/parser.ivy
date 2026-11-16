@@ -23,6 +23,7 @@ import token;
 import lexer;
 import preprocessor;
 import ast;
+import diagnostic;
 
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
@@ -238,12 +239,8 @@ export struct Parser {
     long* sexp_;
     long* eexp_;
 
-    // diagnostics
-    long* dline_;
-    long* dcol_;
-    long* dmsg_;
-    long dn_;
-    long dcap_;
+    // diagnostics (H7.4: shared collection; the message text is owned by it)
+    Diags diags_;
 
     long ce_;   // constexpr flag (scratch, set by parse_constexpr_spec)
     long cv_;   // consteval flag
@@ -322,8 +319,6 @@ export struct Parser {
         this.b_cap_ = in_count + 16;
         this.module_name_ = "";
         this.is_module_export_ = 0;
-        this.dn_ = 0;
-        this.dcap_ = in_count + 16;
         this.ce_ = 0;
         this.cv_ = 0;
         this.pure_virtual_ = 0;
@@ -351,9 +346,6 @@ export struct Parser {
         this.miname_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
         this.miarg_ = (long*) __ivy_alloc(this.mi_cap_ * 8);
         this.mi_n_ = 0;
-        this.dline_ = (long*) __ivy_alloc(this.dcap_ * 8);
-        this.dcol_ = (long*) __ivy_alloc(this.dcap_ * 8);
-        this.dmsg_ = (long*) __ivy_alloc(this.dcap_ * 8);
         this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
         this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
@@ -378,6 +370,9 @@ export struct Parser {
         __ivy_memset(this.sexp_, 0, (unsigned long long)(this.st_cap_ * 8));
         __ivy_memset(this.eexp_, 0, (unsigned long long)(this.en_cap_ * 8));
         }
+        // H7.4: shared diagnostics collection (grows on demand, so the old
+        // `in_count + 16` hard cap is only the initial capacity).
+        this.diags_.init(in_count + 16);
     }
 
     void set_cnumber(long v) {
@@ -401,9 +396,6 @@ export struct Parser {
             __ivy_free(this.sbnm_);
             __ivy_free(this.miname_);
             __ivy_free(this.miarg_);
-            __ivy_free(this.dline_);
-            __ivy_free(this.dcol_);
-            __ivy_free((void*)this.dmsg_);
             __ivy_free(this.tnames_);
             __ivy_free(this.tpnames_);
             __ivy_free(this.stpool_);
@@ -431,6 +423,7 @@ export struct Parser {
             __ivy_free(this.sexp_);
             __ivy_free(this.eexp_);
         }
+        this.diags_.release();
     }
 
     // --- string helpers ---------------------------------------------------
@@ -598,41 +591,39 @@ export struct Parser {
                 return;
             }
         }
-        if (this.dn_ >= this.dcap_) {
-            return;
-        }
-        unsafe {
-            this.dline_[this.dn_] = t.line;
-            this.dcol_[this.dn_] = t.col;
-            this.dmsg_[this.dn_] = (long) msg;
-        }
-        this.dn_ = this.dn_ + 1;
+        // H7.4: the shared Diags grows on demand, so the old hard cap (which
+        // silently dropped the tail of a long error cascade) is gone.
+        this.diags_.add(t.line, t.col, msg, false);
         this.failed_ = 1;
     }
 
     long diag_count() {
-        return this.dn_;
+        return this.diags_.count();
     }
 
     long diag_line(long i) {
-        unsafe {
-            return this.dline_[i];
-        }
-        return 0;
+        return this.diags_.line(i);
     }
 
     long diag_col(long i) {
-        unsafe {
-            return this.dcol_[i];
-        }
-        return 0;
+        return this.diags_.col(i);
     }
 
     const char* diag_msg(long i) {
         unsafe {
-            return reinterpret_cast<const char*>(this.dmsg_[i]);
+            return this.diags_.msg(i);
         }
         return "";
+    }
+
+    // stderr, plain `diagFile` (the oracle driver's form).
+    void print_diags(char* fname) {
+        this.diags_.print(fname);
+    }
+
+    // stdout, plain `diagFile` (differential-test drivers merge the streams).
+    void print_diags_out(char* fname) {
+        this.diags_.print_out(fname);
     }
 
     void expect(const char* kind, const char* msg) {
@@ -1626,15 +1617,7 @@ export struct Parser {
     }
 
     void error_at_ll(long line, long col, const char* msg) {
-        if (this.dn_ >= this.dcap_) {
-            return;
-        }
-        unsafe {
-            this.dline_[this.dn_] = line;
-            this.dcol_[this.dn_] = col;
-            this.dmsg_[this.dn_] = (long) msg;
-        }
-        this.dn_ = this.dn_ + 1;
+        this.diags_.add(line, col, msg, false);
         this.failed_ = 1;
     }
 
@@ -3185,7 +3168,7 @@ export struct Parser {
             // the correct precedence (the speculative parse may have emitted
             // diagnostics, which the oracle discards).
             long fsave = this.pos_;
-            long fdiag = this.dn_;
+            long fdiag = this.diags_.count();
             long ffailed = this.failed_;
             long finner = this.parse_unary();
             AExpr fe2 = this.fresh(25);
@@ -3210,7 +3193,7 @@ export struct Parser {
                 // Not a fold: reparse the whole parenthesized content as a
                 // full conditional expression.
                 this.pos_ = fsave;
-                this.dn_ = fdiag;
+                this.diags_.truncate(fdiag);
                 this.failed_ = ffailed;
                 long full = this.parse_conditional();
                 this.expect(")", "expected ')' to close parenthesized expression");
@@ -3218,7 +3201,7 @@ export struct Parser {
             }
             // No fold operator ahead: reparse uniformly for precedence.
             this.pos_ = fsave;
-            this.dn_ = fdiag;
+            this.diags_.truncate(fdiag);
             this.failed_ = ffailed;
             long content = this.parse_conditional();
             this.expect(")", "expected ')' to close parenthesized expression");

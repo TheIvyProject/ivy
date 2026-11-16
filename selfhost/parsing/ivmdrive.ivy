@@ -11,15 +11,17 @@
 //       unit (one line per declaration, same field order as the file).  Used
 //       to check that the reader interpreted every field correctly.
 //
-// The parser diagnostics are printed on stderr in the oracle format.  Lexer
-// diagnostics are still printed by the lexer itself (H7.4 gap), so the
-// harness only feeds lexically valid fixtures.
+// The lexer, preprocessor and parser diagnostics are printed on stderr in the
+// oracle format through the shared `Diags` printer (H7.4).
 //
 // The helpers live in a struct because a free function with raw pointer
 // parameters needs an `unsafe` block at its declaration site, which only the
 // methods of a struct can do in the Ivy subset.
 
 #pragma ivy cnumber
+// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
+// linker only links the objects of modules this file imports).
+import diagnostic;
 import module_io;
 import ast;
 import parser;
@@ -60,6 +62,7 @@ export struct IvmDrive {
             lx.setup(content, len, path);
             lx.lex_all((long) len + 16);
             if (lx.had_error()) {
+                lx.print_diags();
                 lx.release();
                 return 1;
             }
@@ -71,28 +74,13 @@ export struct IvmDrive {
                      (long) __ivy_strlen(path), out_cap, 1024);
             pp.run();
 
-            long failed = 0;
             char* fname = path;
             if (pp.has_line_file() != 0) {
                 fname = pp.line_file();
             }
-            long dc = pp.diag_count();
-            long di = 0;
-            while (di < dc) {
-                long w = pp.diag_warn(di);
-                if (w == 0) { failed = 1; }
-                io::eprint(fname);
-                io::eprint(":{}", pp.diag_line(di));
-                io::eprint(":{}", pp.diag_col(di));
-                if (w != 0) {
-                    io::eprint(": warning: ");
-                } else {
-                    io::eprint(": error: ");
-                }
-                io::eprintln("{}", pp.diag_msg(di));
-                di = di + 1;
-            }
-            if (failed != 0) {
+            // H7.4: shared Diags printer (stderr, like the oracle driver).
+            pp.print_diags(fname);
+            if (pp.diag_failed() != 0) {
                 pp.release();
                 lx.release();
                 return 1;
@@ -103,16 +91,7 @@ export struct IvmDrive {
             pa.set_cnumber(pp.cnumber_enabled());
             pa.parse();
             if (pa.failed() != 0) {
-                long nd = pa.diag_count();
-                long k = 0;
-                while (k < nd) {
-                    io::eprint(fname);
-                    io::eprint(":{}", pa.diag_line(k));
-                    io::eprint(":{}", pa.diag_col(k));
-                    io::eprint(": error: ");
-                    io::eprintln("{}", pa.diag_msg(k));
-                    k = k + 1;
-                }
+                pa.print_diags(fname);
                 pa.release();
                 pp.release();
                 lx.release();

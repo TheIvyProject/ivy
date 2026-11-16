@@ -211,6 +211,7 @@ function Build-Mod([string]$source, [string]$obj, [string[]]$incs) {
 
 Write-Output "[1/5] building modules ..."
 $incs = @("-I", $runDir, "-I", $stdDir)
+$diagObj = Join-Path $runDir "diagnostic.obj"
 $tokenObj = Join-Path $runDir "token.obj"
 $lexerObj = Join-Path $runDir "lexer.obj"
 $ppObj = Join-Path $runDir "preprocessor.obj"
@@ -219,6 +220,7 @@ $parserObj = Join-Path $runDir "parser.obj"
 $moduleObj = Join-Path $runDir "module_io.obj"
 $driveObj = Join-Path $runDir "ivmdrive.obj"
 
+Build-Mod (Join-Path $repo "selfhost\common\diagnostic.ivy") $diagObj $incs
 Build-Mod (Join-Path $parseDir "token.ivy") $tokenObj $incs
 Build-Mod (Join-Path $parseDir "lexer.ivy") $lexerObj $incs
 Build-Mod (Join-Path $parseDir "preprocessor.ivy") $ppObj $incs
@@ -240,7 +242,7 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $rtObj)) {
 
 $exe = Join-Path $runDir "ivmdrive.exe"
 $code = Invoke-Separate $clang @($driveObj, $moduleObj, $parserObj, $astObj, $ppObj,
-                                 $lexerObj, $tokenObj, $rtObj, "-o", $exe) "" `
+                                 $lexerObj, $tokenObj, $diagObj, $rtObj, "-o", $exe) "" `
              (Join-Path $runDir "link.out") (Join-Path $runDir "link.err")
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $exe)) {
     Write-Output ("BUILD FAILED (link, exit " + $code + ")")

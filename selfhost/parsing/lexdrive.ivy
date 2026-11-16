@@ -9,6 +9,9 @@
 // parameters on free functions, and raw locals/indices outside unsafe).
 
 #pragma ivy cnumber
+// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
+// linker only links the objects of modules this file imports).
+import diagnostic;
 import lexer;
 
 extern "C" void __ivy_free(void* p);
@@ -30,15 +33,23 @@ void run() {
             if (content != (char*)0) {
                 uint64 len = __ivy_strlen(content);
                 Lexer lx;
-                // H1.6: diagnostic pre-pass. If the source lexes clean we then
-                // re-run to emit the token stream; otherwise the oracle prints
-                // only diagnostics (and exits non-zero) with no token dump.
+                // H1.6/H7.4: diagnostic pre-pass. If the source lexes clean we
+                // then run a fresh lexer to emit the token stream; otherwise
+                // the oracle prints only diagnostics (and exits non-zero) with
+                // no token dump. Diagnostics go to stdout because the harness
+                // merges both streams and the `=== path ===` marker is ours.
                 lx.setup(content, len, line);
                 lx.set_quiet(true);
                 lx.dump();
-                if (!lx.had_error()) {
-                    lx.setup(content, len, line);
-                    lx.dump();
+                if (lx.had_error()) {
+                    lx.print_diags_out();
+                    lx.release();
+                } else {
+                    lx.release();
+                    Lexer lx2;
+                    lx2.setup(content, len, line);
+                    lx2.dump();
+                    lx2.release();
                 }
                 __ivy_free(content);
             }

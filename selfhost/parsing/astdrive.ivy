@@ -9,6 +9,9 @@
 //   (-Oracle --ast -Modules token,lexer,preprocessor,parser,ast -Driver astdrive).
 
 #pragma ivy cnumber
+// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
+// linker only links the objects of modules this file imports).
+import diagnostic;
 import token;
 import lexer;
 import preprocessor;
@@ -469,35 +472,27 @@ void run() {
                 lx.setup(content, len, line);
                 lx.lex_all(cap);
 
-                if (!lx.had_error()) {
+                if (lx.had_error()) {
+                    // H7.4: the lexer only collects; print like `ivy --ast`
+                    // (quoted path, no token/AST dump after a lex error).
+                    lx.print_diags_out();
+                } else {
                     long in_n = lx.token_count();
                     long out_cap = in_n * 8 + 256;
                     Preprocessor pp;
                     pp.setup(lx.tokens(), in_n, content, (long)len, line, (long)np,
                              out_cap, 1024);
                     pp.run();
-                    long dc = pp.diag_count();
-                    long di = 0;
                     bool pp_failed = false;
                     char* fname = line;
                     if (pp.has_line_file() != 0) {
                         fname = pp.line_file();
                     }
-                    while (di < dc) {
-                        long w = pp.diag_warn(di);
-                        if (w == 0) {
-                            pp_failed = true;
-                        }
-                        io::print(fname);
-                        io::print(":{}", pp.diag_line(di));
-                        io::print(":{}", pp.diag_col(di));
-                        if (w != 0) {
-                            io::print(": warning: ");
-                        } else {
-                            io::print(": error: ");
-                        }
-                        io::println("{}", pp.diag_msg(di));
-                        di = di + 1;
+                    // H7.4: shared Diags printer (stdout for the differential
+                    // driver; the harness merges both streams).
+                    pp.print_diags_out(fname);
+                    if (pp.diag_failed() != 0) {
+                        pp_failed = true;
                     }
                     if (!pp_failed) {
                         Parser pa;
@@ -505,16 +500,7 @@ void run() {
                         pa.set_cnumber(pp.cnumber_enabled());
                         pa.parse();
                         if (pa.failed() != 0) {
-                            long nd = pa.diag_count();
-                            long k = 0;
-                            while (k < nd) {
-                                io::print(fname);
-                                io::print(":{}", pa.diag_line(k));
-                                io::print(":{}", pa.diag_col(k));
-                                io::print(": error: ");
-                                io::println("{}", pa.diag_msg(k));
-                                k = k + 1;
-                            }
+                            pa.print_diags_out(fname);
                         } else {
                             if (pa.is_module_export() != 0) {
                                 long slash = -1;

@@ -17,6 +17,9 @@
 // diagnostic on stderr and no dump at all) and the driver exits with 1.
 
 #pragma ivy cnumber
+// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
+// linker only links the objects of modules this file imports).
+import diagnostic;
 import token;
 import lexer;
 import preprocessor;

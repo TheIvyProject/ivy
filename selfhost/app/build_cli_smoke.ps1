@@ -177,6 +177,7 @@ function Build-Mod([string]$source, [string]$obj, [string[]]$incs) {
 # in addition to cli/imports).
 # ---------------------------------------------------------------------------
 Write-Output "[1/6] building modules ..."
+$diagObj = Join-Path $runDir "diagnostic.obj"
 $tokenObj = Join-Path $runDir "token.obj"
 $lexerObj = Join-Path $runDir "lexer.obj"
 $ppObj = Join-Path $runDir "preprocessor.obj"
@@ -184,6 +185,7 @@ $cliObj = Join-Path $runDir "cli.obj"
 $importsObj = Join-Path $runDir "imports.obj"
 $mainObj = Join-Path $runDir "main.obj"
 
+Build-Mod (Join-Path $repo "selfhost\common\diagnostic.ivy") $diagObj @()
 Build-Mod (Join-Path $repo "selfhost\parsing\token.ivy") $tokenObj @()
 Build-Mod (Join-Path $repo "selfhost\parsing\lexer.ivy") $lexerObj @("-I", $runDir)
 Build-Mod (Join-Path $repo "selfhost\parsing\preprocessor.ivy") $ppObj @("-I", $runDir)
@@ -214,7 +216,7 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $rtObj)) {
 Write-Output "[3/6] linking driver ..."
 $mainExe = Join-Path $runDir "main.exe"
 $code = Invoke-Separate $clang @($mainObj, $importsObj, $cliObj, $lexerObj, $ppObj,
-                                 $tokenObj, $rtObj, "-o", $mainExe) "" `
+                                 $tokenObj, $diagObj, $rtObj, "-o", $mainExe) "" `
              (Join-Path $runDir "link.out") (Join-Path $runDir "link.err")
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $mainExe)) {
     Write-Output ("BUILD FAILED (link, exit " + $code + ")")

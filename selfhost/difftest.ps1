@@ -181,6 +181,13 @@ $sh = "selfhost\parsing"
 if ($ModuleDirs -eq "") { $ModuleDirs = "selfhost/parsing" }
 if ($DriverDir -eq "") { $DriverDir = "selfhost/parsing" }
 $mds = @($ModuleDirs.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+# H7.4: `diagnostic` (selfhost/common) is a dependency of the lexer,
+# preprocessor and parser. Always search that directory and build it first, so
+# the feature-specific invocations above do not have to list it.
+if (-not ($mds -contains "selfhost/common")) { $mds += "selfhost/common" }
+if (-not (@($Modules.Split(",") | ForEach-Object { $_.Trim() }) -contains "diagnostic")) {
+    $Modules = "diagnostic," + $Modules
+}
 $inc = (($mds | ForEach-Object { "-I `"$_`"" }) -join " ")
 
 # 1. Build the port modules + driver with the C++ compiler (freshness).

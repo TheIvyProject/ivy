@@ -12,6 +12,10 @@
 // identical to interpdrive.ivy; the interpreter is replaced by Emitter.
 
 #pragma ivy cnumber
+// H7.4: `diagnostic` is imported directly so the oracle's linker (which links
+// the objects of the modules the main file imports, src/app/main.cpp:929-1016)
+// pulls in diagnostic.obj; the lexer/preprocessor/parser reference its symbols.
+import diagnostic;
 import token;
 import lexer;
 import preprocessor;

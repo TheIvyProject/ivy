@@ -1,0 +1,379 @@
+// selfhost/common/diagnostic.ivy - shared diagnostic collection (H7.4).
+//
+// Mirror of `ivy::Diagnostic` (src/common/diagnostic.h) plus the printing that
+// `src/app/main.cpp` performs at every pipeline stage:
+//
+//     <file>:<line>:<col>: error: <message>\n
+//     <file>:<line>:<col>: warning: <message>\n
+//
+// A `Diags` owns both the records and the text of the messages, so a stage can
+// hand it a prefix plus a source slice (`add_slice`) or a plain string (`add`)
+// and forget about it.  The record array and the text arena grow on demand,
+// like the oracle's `std::vector<Diagnostic>` + `std::string`; nothing is
+// dropped on overflow.
+//
+// Two printers exist because the oracle has two call sites:
+//
+//   * the lexer diagnostics are printed with the source path streamed through
+//     `std::filesystem::path`'s operator<<, which is `std::quoted`: the path is
+//     wrapped in double quotes and `\` / `"` are escaped (`print_quoted`);
+//   * the preprocessor / parser / HIR / MIR diagnostics use the plain
+//     `diagFile` string (`print`).
+//
+// The differential-test drivers must write the same lines to *stdout* (the
+// oracle's stderr is merged into stdout by the harness, and the `=== path ===`
+// marker is written to stdout by the driver), so every printer has an `_out`
+// variant.  The real driver uses the stderr variants.
+//
+// The messages are copied: a caller may reuse its scratch buffer right after
+// `add` (the parser interns into its own arena, the preprocessor slices its
+// source arena).
+
+#pragma ivy cnumber
+export module diagnostic;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
+extern "C" unsigned long long __ivy_strlen(const char* s);
+
+// sizeof(Diag): line(8) + col(8) + warn(8) + msg(8) = 32 bytes.  The oracle's
+// Diagnostic is {uint32 line, uint32 col, std::string message, bool isWarning};
+// the port keeps the same information in fixed-size slots and stores the text
+// in the Diags arena (`msg` points into it).
+export struct Diag {
+    long line;
+    long col;
+    long warn;
+    char* msg;
+};
+
+export struct Diags {
+    Diag* items_;
+    long n_;
+    long cap_;
+    char* txt_;
+    long txt_n_;
+    long txt_cap_;
+
+    // Allocate the record array and the text arena.  Called once per stage
+    // instance, before any `add` (a second call would leak the old buffers).
+    void init(long cap) {
+        long c = cap;
+        if (c < 8) {
+            c = 8;
+        }
+        unsafe {
+            this.items_ = (Diag*) __ivy_alloc(c * 32);
+            this.txt_ = (char*) __ivy_alloc(65536);
+        }
+        this.n_ = 0;
+        this.cap_ = c;
+        this.txt_n_ = 0;
+        this.txt_cap_ = 65536;
+    }
+
+    // Grow the text arena so that `need` more bytes (including the NUL) fit.
+    void ensure_txt(long need) {
+        if (this.txt_n_ + need <= this.txt_cap_) {
+            return;
+        }
+        long ncap = this.txt_cap_ * 2;
+        if (ncap < this.txt_n_ + need + 1024) {
+            ncap = this.txt_n_ + need + 1024;
+        }
+        unsafe {
+            char* nb = (char*) __ivy_alloc(ncap);
+            if (this.txt_n_ > 0) {
+                __ivy_memcpy(nb, this.txt_, (unsigned long long) this.txt_n_);
+            }
+            __ivy_free(this.txt_);
+            this.txt_ = nb;
+        }
+        this.txt_cap_ = ncap;
+    }
+
+    // Grow the record array by one slot (doubling, minimum 8).
+    void ensure_items() {
+        if (this.n_ < this.cap_) {
+            return;
+        }
+        long ncap = this.cap_ * 2;
+        if (ncap < 8) {
+            ncap = 8;
+        }
+        unsafe {
+            Diag* nb = (Diag*) __ivy_alloc(ncap * 32);
+            if (this.n_ > 0) {
+                __ivy_memcpy(nb, this.items_, (unsigned long long) (this.n_ * 32));
+            }
+            __ivy_free(this.items_);
+            this.items_ = nb;
+        }
+        this.cap_ = ncap;
+    }
+
+    // Append a record whose message points at `off` in the text arena.
+    void push(long line, long col, bool warn, long off) {
+        this.ensure_items();
+        long w = 0;
+        if (warn) {
+            w = 1;
+        }
+        unsafe {
+            this.items_[this.n_].line = line;
+            this.items_[this.n_].col = col;
+            this.items_[this.n_].warn = w;
+            this.items_[this.n_].msg = this.txt_ + off;
+        }
+        this.n_ = this.n_ + 1;
+    }
+
+    // Record `msg` (copied) as an error or a warning.
+    void add(long line, long col, const char* msg, bool warn) {
+        long n = 0;
+        unsafe {
+            char* m = (char*) msg;
+            if (m != (char*) 0) {
+                n = (long) __ivy_strlen(m);
+            }
+        }
+        this.ensure_txt(n + 1);
+        long off = this.txt_n_;
+        unsafe {
+            char* m = (char*) msg;
+            long i = 0;
+            while (i < n) {
+                this.txt_[off + i] = m[i];
+                i = i + 1;
+            }
+            this.txt_[off + n] = 0;
+        }
+        this.txt_n_ = off + n + 1;
+        this.push(line, col, warn, off);
+    }
+
+    // Record `prefix` + the source slice [aoff, aoff+alen) (copied).  A
+    // negative `aoff` means "no suffix" (the preprocessor uses this for
+    // directives without an argument).
+    void add_slice(long line, long col, const char* prefix, char* src,
+                   long aoff, long alen, bool warn) {
+        long pn = 0;
+        unsafe {
+            char* p = (char*) prefix;
+            if (p != (char*) 0) {
+                pn = (long) __ivy_strlen(p);
+            }
+        }
+        if (aoff < 0) {
+            alen = 0;
+        }
+        this.ensure_txt(pn + alen + 1);
+        long off = this.txt_n_;
+        unsafe {
+            char* p = (char*) prefix;
+            long i = 0;
+            while (i < pn) {
+                this.txt_[off + i] = p[i];
+                i = i + 1;
+            }
+            long j = 0;
+            while (j < alen) {
+                this.txt_[off + pn + j] = src[aoff + j];
+                j = j + 1;
+            }
+            this.txt_[off + pn + alen] = 0;
+        }
+        this.txt_n_ = off + pn + alen + 1;
+        this.push(line, col, warn, off);
+    }
+
+    long count() {
+        return this.n_;
+    }
+
+    long line(long i) {
+        Diag d;
+        unsafe {
+            d = this.items_[i];
+        }
+        return d.line;
+    }
+
+    long col(long i) {
+        Diag d;
+        unsafe {
+            d = this.items_[i];
+        }
+        return d.col;
+    }
+
+    long warn(long i) {
+        Diag d;
+        unsafe {
+            d = this.items_[i];
+        }
+        return d.warn;
+    }
+
+    char* msg(long i) {
+        Diag d;
+        unsafe {
+            d = this.items_[i];
+        }
+        return d.msg;
+    }
+
+    // True when at least one recorded diagnostic is an error.  `#error`
+    // always records one, so this also covers `Preprocessor::hasError()`.
+    bool has_error() {
+        long i = 0;
+        while (i < this.n_) {
+            if (this.warn(i) == 0) {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // Drop the records past `n` (the parser's speculative-parse rollback).
+    // The text arena is not rewound: messages are only appended and a dropped
+    // record simply leaves its text unreferenced, exactly like a `std::string`
+    // that went out of scope.
+    void truncate(long n) {
+        if (n < this.n_) {
+            this.n_ = n;
+        }
+    }
+
+    // Forget every record but keep the allocated buffers (used by
+    // `Preprocessor::run`, which can be called on a reused instance).
+    void reset() {
+        this.n_ = 0;
+        this.txt_n_ = 0;
+    }
+
+    void release() {
+        unsafe {
+            __ivy_free(this.items_);
+            __ivy_free(this.txt_);
+            this.items_ = (Diag*) 0;
+            this.txt_ = (char*) 0;
+        }
+        this.n_ = 0;
+        this.cap_ = 0;
+        this.txt_n_ = 0;
+        this.txt_cap_ = 0;
+    }
+
+    // Emit one record.  `quoted` selects the `std::filesystem::path` form and
+    // `to_err` the stderr stream (the oracle's) versus stdout (the port's
+    // differential drivers, which merge both streams).
+    void emit(long i, const char* file, long quoted, long to_err) {
+        Diag d;
+        unsafe {
+            d = this.items_[i];
+        }
+        if (quoted != 0) {
+            this.print_path_quoted(file, to_err);
+        } else {
+            if (to_err != 0) {
+                io::eprint("{}", file);
+            } else {
+                io::print("{}", file);
+            }
+        }
+        if (to_err != 0) {
+            io::eprint(":{}:{}: ", d.line, d.col);
+        } else {
+            io::print(":{}:{}: ", d.line, d.col);
+        }
+        if (d.warn != 0) {
+            if (to_err != 0) {
+                io::eprint("warning: ");
+            } else {
+                io::print("warning: ");
+            }
+        } else {
+            if (to_err != 0) {
+                io::eprint("error: ");
+            } else {
+                io::print("error: ");
+            }
+        }
+        if (to_err != 0) {
+            io::eprintln("{}", d.msg);
+        } else {
+            io::println("{}", d.msg);
+        }
+    }
+
+    // `std::quoted`-style path: wrap in `"` and escape `\` and `"`.
+    void print_path_quoted(const char* p, long to_err) {
+        unsafe {
+            char* q = (char*) p;
+            if (q == (char*) 0) {
+                q = (char*) "";
+            }
+            long n = (long) __ivy_strlen(q);
+            // Worst case: every byte escaped, plus two quotes and the NUL.
+            char* out = (char*) __ivy_alloc(n * 2 + 3);
+            long o = 0;
+            out[o] = 34;  // '"'
+            o = o + 1;
+            long i = 0;
+            while (i < n) {
+                char c = q[i];
+                if (c == 92 || c == 34) {  // '\\' or '"'
+                    out[o] = 92;
+                    o = o + 1;
+                }
+                out[o] = c;
+                o = o + 1;
+                i = i + 1;
+            }
+            out[o] = 34;
+            o = o + 1;
+            out[o] = 0;
+            if (to_err != 0) {
+                io::eprint("{}", out);
+            } else {
+                io::print("{}", out);
+            }
+            __ivy_free(out);
+        }
+    }
+
+    void print(const char* file) {
+        long i = 0;
+        while (i < this.n_) {
+            this.emit(i, file, 0, 1);
+            i = i + 1;
+        }
+    }
+
+    void print_quoted(const char* file) {
+        long i = 0;
+        while (i < this.n_) {
+            this.emit(i, file, 1, 1);
+            i = i + 1;
+        }
+    }
+
+    void print_out(const char* file) {
+        long i = 0;
+        while (i < this.n_) {
+            this.emit(i, file, 0, 0);
+            i = i + 1;
+        }
+    }
+
+    void print_out_quoted(const char* file) {
+        long i = 0;
+        while (i < this.n_) {
+            this.emit(i, file, 1, 0);
+            i = i + 1;
+        }
+    }
+};
