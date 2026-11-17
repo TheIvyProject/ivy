@@ -159,9 +159,13 @@ Tat ca cac loi tren chi xay ra o moi truong CI: gate chay day du o local
 | `driver_smoke.ps1 -SkipOwn -FullCorpus` - link + run | 249 / 249 match (2 fixture UB chi so buoc link) |
 | `selfhost/dogfood.ps1 -SkipBootstrap -Stage1 <stage1>` | **DOGFOOD PASS** |
 
+GitHub Actions (`selfhost dogfood`, run `44128908682`, commit `1788353`,
+`windows-latest`, 6m14s): `--- F2 PASS ---`, `1052 / 1052 match` cho ca `--llvm`
+va `-c`, `249 / 249 match` cho link + run, `--- DOGFOOD PASS ---`.
+
 ## 6. Con lai
 
-- Workflow chi duoc kiem chung khi chay that tren GitHub Actions.
+- Job CI tai lai archive LLVM 21.1.6 (~900 MB) moi lan chay; chua cache.
 - Gate chua gom cac mode dump/interpreter (`--lex`, `--ast`, `--hir`, `--mir`,
   `--run`) - chung van la stub exit 3 cua driver, se vao gate khi cac tang
   tuong ung duoc port.
