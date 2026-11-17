@@ -216,8 +216,18 @@ function Link-Stage([string]$outDir) {
     $largs = $objs + @($ivyrt) + $llvmLibs + $systemArgs + @("-Wl,/Brepro", "-o", $exe)
     $code = Invoke-Separate $clang $largs (Join-Path $outDir "link.out") (Join-Path $outDir "link.err")
     if ($code -ne 0) {
+        # The MSVC linker reports the individual unresolved symbols on stdout and
+        # the driver's summary on stderr, so show both (and the link line) before
+        # failing: without them a CI failure is just "exit code 1120".
         Write-Output "LINK FAILED"
-        Get-Content (Join-Path $outDir "link.err") | Select-Object -First 20
+        Write-Output ("linker: " + $clang)
+        Write-Output ("libraries: " + ($llvmLibs.Count + $systemArgs.Count))
+        Write-Output "--- stderr ---"
+        Get-Content (Join-Path $outDir "link.err") | Select-Object -First 40
+        Write-Output "--- stdout ---"
+        Get-Content (Join-Path $outDir "link.out") | Select-Object -First 40
+        Write-Output "--- command line ---"
+        Write-Output (@($largs | ForEach-Object { Quote-Arg $_ }) -join " ")
         exit 1
     }
     return $exe

@@ -115,5 +115,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dogfood-logs
-          path: ${{ runner.temp }}/h82/**/*.err
+          # `*.err` holds stderr, `*.out` holds stdout (the MSVC linker writes its
+          # unresolved-symbol lines to stdout).
+          path: |
+            ${{ runner.temp }}/h82/**/*.err
+            ${{ runner.temp }}/h82/**/*.out
           if-no-files-found: ignore
