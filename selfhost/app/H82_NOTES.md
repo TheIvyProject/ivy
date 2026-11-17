@@ -105,15 +105,20 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
 `.github/workflows/selfhost-dogfood.yml` (`windows-latest`, timeout 120 phut):
 
 1. checkout;
-2. `choco install llvm` -> `C:\Program Files\LLVM`, them `bin` vao `PATH`
-   (oracle goi `clang++` khi link) va dat `LLVM_ROOT`;
+2. cai **LLVM day du**: ban LLVM co san tren runner (goi choco `llvm`, tuc la
+   `LLVM-<ver>-win64.exe`) chi co CLI tools - khong headers, khong libs,
+   khong `llvm-config`, khong CMake package
+   (actions/runner-images#12565), nen job tai archive
+   `clang+llvm-20.1.8-x86_64-pc-windows-msvc.tar.xz` (896 MB), giai nen vao
+   `C:\LLVM`, them `bin` vao `PATH` (oracle goi `clang++` khi link) va dat
+   `LLVM_ROOT`;
 3. CMake `-G "Visual Studio 17 2022" -A x64 -DLLVM_DIR=...` build oracle
    Release (`build/Release/ivy.exe` khong duoc commit);
 4. `selfhost/dogfood.ps1 -TempRoot $env:RUNNER_TEMP\h82`;
 5. khi fail: upload `${{ runner.temp }}/h82/**/*.err` lam artifact.
 
-Workflow chua chay duoc o local; co the phai chinh sau lan CI dau (phien ban
-VS/LLVM tren runner, duong dan LLVM). Phan gate thi da chay that o local.
+Lan CI dau tien that bai ngay o buoc cai LLVM (dung van de tren), nen workflow
+da doi sang archive `clang+llvm`. Phan gate thi da chay that o local.
 
 ## 5. Ket qua
 

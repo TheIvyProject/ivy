@@ -6,7 +6,8 @@ name: selfhost dogfood
 # compiler must match the oracle on the whole selfhost corpus.
 #
 # The oracle is not committed (build/ is ignored), so the job builds it from
-# source first: CMake + MSVC + the LLVM package that CMakeLists.txt requires.
+# source first: CMake + MSVC + the full LLVM distribution that CMakeLists.txt
+# requires (development libraries, headers, CMake package and `llvm-config`).
 # `clang++` must be on PATH because the oracle links executables with it.
 
 on:
@@ -29,15 +30,41 @@ jobs:
 
       - name: Install LLVM
         run: |
-          choco install llvm --no-progress -y
-          $llvm = "C:\Program Files\LLVM"
-          if (-not (Test-Path "$llvm\bin\llvm-config.exe")) {
-            throw "LLVM not found at $llvm"
+          # The LLVM preinstalled on windows-latest (the choco `llvm` package,
+          # i.e. the official `LLVM-<ver>-win64.exe`) ships only the command
+          # line tools: no headers, no libraries, no `llvm-config` and no CMake
+          # package (actions/runner-images#12565).  The full distribution is the
+          # `clang+llvm` archive, which is what CMakeLists.txt and
+          # `bootstrap_smoke.ps1` (`llvm-config --libs x86 --system-libs`) need.
+          $ver = "20.1.8"
+          $root = "C:\LLVM"
+          $name = "clang+llvm-$ver-x86_64-pc-windows-msvc"
+          $prefix = Join-Path $root $name
+          function Test-FullLlvm([string]$p) {
+            if (-not $p) { return $false }
+            return (Test-Path "$p\bin\clang.exe") -and
+                   (Test-Path "$p\bin\clang++.exe") -and
+                   (Test-Path "$p\bin\llvm-config.exe") -and
+                   (Test-Path "$p\lib\cmake\llvm\LLVMConfig.cmake")
           }
-          # `where clang++` (used by the oracle's linker) and the selfhost
-          # harnesses both rely on PATH.
-          Add-Content -Path $env:GITHUB_PATH -Value "$llvm\bin"
-          "LLVM_ROOT=$llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if (-not (Test-FullLlvm $prefix)) {
+            $archive = Join-Path $env:RUNNER_TEMP "$name.tar.xz"
+            curl.exe -L --fail --retry 3 -o $archive `
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/$name.tar.xz"
+            if ($LASTEXITCODE -ne 0) { throw "LLVM download failed" }
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            tar.exe -xf $archive -C $root
+            if ($LASTEXITCODE -ne 0) { throw "LLVM extraction failed" }
+          }
+          if (-not (Test-FullLlvm $prefix)) {
+            throw "full LLVM is not usable at $prefix"
+          }
+          # `clang++` (used by the oracle's linker) and the selfhost harnesses
+          # both rely on PATH; LLVM_ROOT is what `bootstrap_smoke.ps1`
+          # auto-detects.
+          Add-Content -Path $env:GITHUB_PATH -Value "$prefix\bin"
+          "LLVM_ROOT=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$prefix\bin\llvm-config.exe" --version
 
       - name: Build the C++ oracle
         run: |
