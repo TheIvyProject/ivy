@@ -68,8 +68,12 @@ jobs:
 
       - name: Build the C++ oracle
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-                -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
+          # Do not hardcode a Visual Studio generator: windows-latest moved to
+          # VS 2026 (generator "Visual Studio 18 2026", CMake >= 4.2) in 2026,
+          # so let CMake pick its default generator for the installed VS.
+          cmake --version | Select-Object -First 1
+          cmake -S . -B build -A x64 -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
+          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_GENERATOR:').Line
           cmake --build build --config Release --parallel
           if (-not (Test-Path "build\Release\ivy.exe")) {
             throw "oracle was not built"

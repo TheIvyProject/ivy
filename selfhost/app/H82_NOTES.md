@@ -112,13 +112,17 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
    `clang+llvm-20.1.8-x86_64-pc-windows-msvc.tar.xz` (896 MB), giai nen vao
    `C:\LLVM`, them `bin` vao `PATH` (oracle goi `clang++` khi link) va dat
    `LLVM_ROOT`;
-3. CMake `-G "Visual Studio 17 2022" -A x64 -DLLVM_DIR=...` build oracle
-   Release (`build/Release/ivy.exe` khong duoc commit);
+3. CMake (generator mac dinh cho VS cai san - runner da chuyen sang VS 2026)
+   `-A x64 -DLLVM_DIR=...` build oracle Release (`build/Release/ivy.exe` khong
+   duoc commit);
 4. `selfhost/dogfood.ps1 -TempRoot $env:RUNNER_TEMP\h82`;
 5. khi fail: upload `${{ runner.temp }}/h82/**/*.err` lam artifact.
 
 Lan CI dau tien that bai ngay o buoc cai LLVM (dung van de tren), nen workflow
-da doi sang archive `clang+llvm`. Phan gate thi da chay that o local.
+da doi sang archive `clang+llvm`. Lan thu hai that bai o buoc CMake vi
+`windows-latest` da chuyen sang VS 2026 va generator `Visual Studio 17 2022`
+khong con: bo `-G` co dinh, de CMake tu chon generator mac dinh. Phan gate thi
+da chay that o local.
 
 ## 5. Ket qua
 
