@@ -3528,9 +3528,10 @@ export struct HirBuilder {
         }
     }
 
-    long add_function(const char* name, AType ret, long is_ext, long is_constexpr) {
-        return this.add_function_at(name, ret, is_ext, is_constexpr, this.u.p_n,
-                                    -1, 0, 0);
+    long add_function(const char* name, AType ret, long is_ext, long is_constexpr,
+                      long is_consteval) {
+        return this.add_function_at(name, ret, is_ext, is_constexpr, is_consteval,
+                                    this.u.p_n, -1, 0, 0);
     }
 
     // Add a function whose parameters were already pushed into the
@@ -3539,7 +3540,7 @@ export struct HirBuilder {
     // (-1 when it declares none) and `ret_lt` is the address of its return
     // lifetime name (0 when it has none).
     long add_function_at(const char* name, AType ret, long is_ext, long is_constexpr,
-                         long pstart, long lt_start, long lt_n,
+                         long is_consteval, long pstart, long lt_start, long lt_n,
                          long ret_lt) {
         HFunction f;
         f.name = name;
@@ -3549,6 +3550,7 @@ export struct HirBuilder {
         f.pstart = pstart;
         f.pn = 0;
         f.is_constexpr = is_constexpr;
+        f.is_consteval = is_consteval;
         f.lt_start = lt_start;
         f.lt_n = lt_n;
         f.is_variadic = 0;
@@ -3689,7 +3691,7 @@ export struct HirBuilder {
         }
         this.set_fn_hir_name(af);
         long idx = this.add_function_at(this.qname_, ret, af.is_extern_c, af.is_constexpr,
-                                        pstart, lt_start, lt_n, ret_lt);
+                                        af.is_consteval, pstart, lt_start, lt_n, ret_lt);
         if (idx < this.u.fn_n) {
             unsafe {
                 this.u.fns[idx].is_variadic = af.is_variadic;
@@ -3744,8 +3746,8 @@ export struct HirBuilder {
                 k = k + 1;
             }
         }
-        long idx = this.add_function_at(mf.name, ret, 0, mf.is_constexpr, pstart,
-                                        -1, 0, 0);
+        long idx = this.add_function_at(mf.name, ret, 0, mf.is_constexpr,
+                                        mf.is_consteval, pstart, -1, 0, 0);
         this.finish_function(idx);
         // H6.2y: mirror buildStruct's `fn->isVirtual` / `vtableOf` flags.  A
         // destructor of a polymorphic class is virtual even without the
@@ -8540,7 +8542,8 @@ export struct HirBuilder {
         }
         // The substituted signature.
         AType ret = this.substitute_type(tpl.ret, mbase);
-        long idx = this.add_function(mangled, ret, tpl.is_extern_c, tpl.is_constexpr);
+        long idx = this.add_function(mangled, ret, tpl.is_extern_c, tpl.is_constexpr,
+                                     tpl.is_consteval);
         long j = 0;
         long pushed = 0;
         long firstElem = -1;
@@ -9082,8 +9085,8 @@ export struct HirBuilder {
                 this.set_param_default(this.u.p_n - 1, ap.default_value);
                 p = p + 1;
             }
-            long idx = this.add_function_at(qname, ret, 0, mf.is_constexpr, pstart,
-                                            -1, 0, 0);
+            long idx = this.add_function_at(qname, ret, 0, mf.is_constexpr,
+                                            mf.is_consteval, pstart, -1, 0, 0);
             this.finish_function(idx);
             if (this.spcfns_n_ < this.spcfns_cap_) {
                 this.spcfns_[this.spcfns_n_] = idx;

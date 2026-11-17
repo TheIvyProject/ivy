@@ -3681,6 +3681,7 @@ export struct MirBuilder {
                 this.mu.fns[fi].is_extern_c = externc;
                 this.mu.fns[fi].return_lifetime = reinterpret_cast<const char*>(retlt);
                 this.mu.fns[fi].has_body = body >= 0 ? 1 : 0;
+                this.mu.fns[fi].is_consteval = this.hu.fns[i].is_consteval;
                 this.mu.fns[fi].pstart = this.mu.pa_n;
                 this.mu.fns[fi].pn = pn;
                 this.mu.fns[fi].lt_start = -1;

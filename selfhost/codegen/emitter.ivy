@@ -581,6 +581,53 @@ export struct Emitter {
         return 0;
     }
 
+    // H8.2: the oracle's D1-debug fallthrough diagnostic of lowerLValue
+    // (codegen.cpp:1106-1116).  An expression that is not assignable reports
+    // `expression is not assignable [nodeIdx=<kind> type.base=<base>
+    // isRef=<n>]` and lowers to the literal `null`.  The message is built in a
+    // fresh heap buffer so it outlives the `fail` call (the driver prints it
+    // before release(), which does not own this block).
+    long not_assignable_msg(MExpr e) {
+        unsafe {
+            char* buf = (char*) __ivy_alloc(256);
+            long o = 0;
+            const char* pre = "expression is not assignable [nodeIdx=";
+            long i = 0;
+            while (pre[i] != 0) {
+                buf[o] = pre[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            o = this.put_long(buf, o, e.kind);
+            const char* mid = " type.base=";
+            i = 0;
+            while (mid[i] != 0) {
+                buf[o] = mid[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            i = 0;
+            while (e.type.base[i] != 0) {
+                buf[o] = e.type.base[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            const char* ref = " isRef=";
+            i = 0;
+            while (ref[i] != 0) {
+                buf[o] = ref[i];
+                o = o + 1;
+                i = i + 1;
+            }
+            o = this.put_long(buf, o, e.type.is_ref);
+            buf[o] = ']';
+            o = o + 1;
+            buf[o] = 0;
+            return (long) buf;
+        }
+        return 0;
+    }
+
     // --- H6.2c: string decoding / escaping -------------------------------
 
     // Mirror of readHexEscape/readOctalEscape helpers in codegen.cpp.
@@ -1229,7 +1276,11 @@ export struct Emitter {
         if (this.streq(t.base, "size_t")) return "i64";
         if (this.streq(t.base, "ptrdiff_t")) return "i64";
         if (this.streq(t.base, "uptr_t")) return "i64";
-        if (this.streq(t.base, "nullptr_t") || this.streq(t.base, "nullptr")) return "ptr";
+        if (this.streq(t.base, "nullptr_t")) return "ptr";
+        // H8.2: the literal type `nullptr` (no `_t`) is not `nullptr_t`; the
+        // oracle's llvmType falls through to the unknown-base `i8`
+        // (`auto a = nullptr` allocates `i8`), codegen.cpp:227/239.
+        if (this.streq(t.base, "nullptr")) return "i8";
         if (this.streq(t.base, "max_align_t")) return "i8";
         return "i8";
     }
@@ -1462,6 +1513,12 @@ export struct Emitter {
     }
 
     void emit_bb(long global) {
+        // H8.2: a null jump target (e.g. `continue` inside a `switch`) has no
+        // entry in the oracle's `blockNames_`, so it prints a bare `%`.
+        if (global < 0) {
+            this.ps("%");
+            return;
+        }
         this.out_str("%bb");
         this.out_long(global - this.cur_block_start_);
     }
@@ -1635,9 +1692,21 @@ export struct Emitter {
     // value.  At or above 2^63 the exact expansion is printed by
     // `emit_big_double` (H8.1).
     void emit_double_lit(double v) {
+        long neg = 0;
         if (v < 0.0) {
-            this.ps("-");
+            neg = 1;
             v = -v;
+        }
+        if (v == 0.0) {
+            // H8.2: a negative zero keeps its sign (`std::to_string(-0.0)` is
+            // "-0.000000"); `-0.0 < 0.0` is false, so recover the sign from
+            // 1.0 / v (which is -inf for a negative zero).
+            if (neg == 0 && (1.0 / v) < 0.0) {
+                neg = 1;
+            }
+        }
+        if (neg != 0) {
+            this.ps("-");
         }
         if (v >= 9223372036854775808.0) {
             this.emit_big_double(v);
@@ -1792,9 +1861,15 @@ export struct Emitter {
                                     long tb = this.int_bits(pt.base);
                                     if (fb > 0 && tb > 0) {
                                         // int -> int widening is compatible
-                                    } else if (this.is_float_base(at.base) &&
-                                               this.is_float_base(pt.base)) {
-                                        // float -> float widening
+                                    } else if (this.is_fp_ir(at.base) &&
+                                               this.is_fp_ir(pt.base)) {
+                                        // float -> float widening.  H8.2: the
+                                        // oracle classifies the *base spelling*
+                                        // (`isFpType(a.base)`, codegen.cpp:1517),
+                                        // so `double` (a float literal) does not
+                                        // match a `float64_t` parameter and the
+                                        // name-only fallback picks the first
+                                        // overload of that name.
                                     } else {
                                         ok = 0;
                                     }
@@ -1847,18 +1922,9 @@ export struct Emitter {
             this.fail(line, col, "array return types are out of scope for H6.2b");
             return false;
         }
-        long j = 0;
-        while (j < f.pn) {
-            MParam p;
-            unsafe {
-                p = this.mu->params[f.pstart + j];
-            }
-            if (p.type.array_size > 0) {
-                this.fail(line, col, "array parameters are out of scope for H6.2b");
-                return false;
-            }
-            j = j + 1;
-        }
+        // H8.2: an array parameter is legal — the oracle keeps it in the
+        // signature (`define i32 @"?arr_int32_t_@@YHH@Z"([4 x i32] %arg0)`)
+        // and decays the argument to `ptr` at the call site.
         return true;
     }
 
@@ -1870,7 +1936,11 @@ export struct Emitter {
     //   void ?A (a void *return* is spelled X by msvcMangleFunction).
     void emit_mangle_type(AType t, long line, long col) {
         if (t.array_size > 0) {
-            this.fail(line, col, "array type mangling is out of scope for H6.2b");
+            // H8.2: the oracle's msvcMangleType has no array branch, so an
+            // array mangles as its element type (`int32_t[4]` -> "H").
+            AType elem = t;
+            elem.array_size = 0;
+            this.emit_mangle_type(elem, line, col);
             return;
         }
         // H6.2h: the oracle's msvcMangleType maps every pointer/reference to
@@ -2151,6 +2221,24 @@ export struct Emitter {
             return;
         }
         this.emit_mangled_name(name, fi, line, col);
+    }
+
+    // H8.2: the symbol of a call whose callee has no MIR entry (an unresolved
+    // template-id call).  The oracle's `mangleFunction(name, nullptr)` uses the
+    // int return fallback and the empty parameter list, e.g. `?TCall@@YHX@Z`
+    // (codegen.cpp:2450-2464).
+    void emit_unresolved_symbol(const char* name) {
+        long np = this.name_part_count(name);
+        this.ps("\"?");
+        this.emit_name_part(name, np - 1);
+        this.ps("@");
+        long k = np - 2;
+        while (k >= 0) {
+            this.emit_name_part(name, k);
+            this.ps("@");
+            k = k - 1;
+        }
+        this.ps("@YHX@Z\"");
     }
 
     // --- casts ------------------------------------------------------------
@@ -3108,8 +3196,12 @@ export struct Emitter {
         }
         // H6.2z: `move(x)` is a pass-through at codegen (A4/B3): lower the
         // operand exactly as a plain read.  The MIR builder keeps the call
-        // node only for its move-state bookkeeping.
-        if (this.streq(e.sval, "move") && e.an == 1) {
+        // node only for its move-state bookkeeping.  H8.2: the oracle only
+        // takes this path when the callee has *no* MIR entry
+        // (`isBuiltinCall = !callee && isCodegenBuiltin(...)`,
+        // codegen.cpp:1539), so a user-defined `move` overload is a real call.
+        if (this.streq(e.sval, "move") && e.an == 1 &&
+            this.find_call_target(e.sval, e.astart, e.an) < 0) {
             long mi = -1;
             unsafe {
                 mi = this.mu->args[e.astart];
@@ -3142,16 +3234,19 @@ export struct Emitter {
             return this.lower_io_read_file(e);
         }
         long fi = this.find_call_target(e.sval, e.astart, e.an);
-        if (fi < 0) {
-            this.fail(e.line, e.col, "call to a function without a MIR entry is out of scope for H6.2b");
-            return this.imm(0);
-        }
+        // H8.2: a callee without a MIR entry is still emitted as a real call
+        // (the oracle's `callee == nullptr` path): the arguments are lowered
+        // without parameter types and the symbol is the 0-param mangle.
+        long has_fn = 0;
         MFunction callee;
-        unsafe {
-            callee = this.mu->fns[fi];
-        }
-        if (!this.check_fn_signature(callee, e.line, e.col)) {
-            return this.imm(0);
+        if (fi >= 0) {
+            has_fn = 1;
+            unsafe {
+                callee = this.mu->fns[fi];
+            }
+            if (!this.check_fn_signature(callee, e.line, e.col)) {
+                return this.imm(0);
+            }
         }
         // D1: ctor calls come in two shapes (CodeGen::lowerExpr's Call
         // branch): the declaration form (`this` already in the args) and the
@@ -3159,7 +3254,7 @@ export struct Emitter {
         // materializes a temp slot for it.
         long ctor_bare = 0;
         long pi0 = 0;
-        if (this.is_ctor_name(callee.name) != 0 && callee.pn >= 1 &&
+        if (has_fn != 0 && this.is_ctor_name(callee.name) != 0 && callee.pn >= 1 &&
             e.an == callee.pn - 1) {
             ctor_bare = 1;
             pi0 = 1;
@@ -3184,7 +3279,7 @@ export struct Emitter {
                 VRef v;
                 const char* ty = "i8";
                 long pi = pi0 + j;
-                if (pi < callee.pn) {
+                if (has_fn != 0 && pi < callee.pn) {
                     MParam p = this.mu->params[callee.pstart + pi];
                     if (p.type.is_ref != 0) {
                         // H6.2h: pass by reference - emit the address of the
@@ -3192,9 +3287,13 @@ export struct Emitter {
                         // Call branch for a reference parameter).
                         v = this.lower_lvalue(ai);
                         ty = "ptr";
-                    } else if (a.type.array_size > 0 && p.type.ptr_depth > 0) {
-                        // H6.2p: array-to-pointer decay for a pointer
-                        // parameter (CodeGen::lowerExpr's Call branch).
+                    } else if (a.type.array_size > 0) {
+                        // H6.2p / H8.2: array-to-pointer decay, unconditional
+                        // on the parameter type (CodeGen::lowerExpr's Call
+                        // branch): the argument decays to its address and no
+                        // cast is applied, even when the parameter kept the
+                        // array type (`define i32 @f([4 x i32])` called with
+                        // `ptr`).
                         v = this.lower_lvalue(ai);
                         ty = "ptr";
                     } else {
@@ -3209,8 +3308,16 @@ export struct Emitter {
                         }
                     }
                 } else {
-                    v = this.lower_expr(ai);
-                    ty = this.llvm_type(a.type, 1);
+                    // H8.2: array-to-pointer decay fallback (no callee
+                    // information): an array argument decays to its address
+                    // (CodeGen::lowerExpr's `a->type.arraySize > 0` branch).
+                    if (a.type.array_size > 0) {
+                        v = this.lower_lvalue(ai);
+                        ty = "ptr";
+                    } else {
+                        v = this.lower_expr(ai);
+                        ty = this.llvm_type(a.type, 1);
+                    }
                 }
                 VRef* av = (VRef*) this.arg_vals_;
                 av[base + j] = v;
@@ -3263,7 +3370,11 @@ export struct Emitter {
         }
         if (this.streq(this.llvm_type(e.type, 0), "void")) {
             this.ps("call void @");
-            this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+            if (has_fn == 0) {
+                this.emit_unresolved_symbol(e.sval);
+            } else {
+                this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+            }
             this.ps("(");
             this.emit_call_args(base, an);
             this.ps(")");
@@ -3276,7 +3387,11 @@ export struct Emitter {
         this.ps(" = call ");
         this.ps(this.llvm_type(e.type, 0));
         this.ps(" @");
-        this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+        if (has_fn == 0) {
+            this.emit_unresolved_symbol(e.sval);
+        } else {
+            this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
+        }
         this.ps("(");
         this.emit_call_args(base, an);
         this.ps(")");
@@ -4353,8 +4468,14 @@ export struct Emitter {
         if (e.kind == 8 && this.streq(e.sval, "*")) {
             return this.lower_expr(e.a);
         }
-        this.fail(e.line, e.col, "lvalue is out of scope for H6.2e");
-        return this.imm(0);
+        // H8.2: an expression that is not an lvalue is not assignable: the
+        // oracle reports the D1-debug diagnostic and lowers the operand to
+        // `null` (it keeps generating the rest of the function).
+        unsafe {
+            long mp = this.not_assignable_msg(e);
+            this.fail(e.line, e.col, reinterpret_cast<const char*>(mp));
+        }
+        return this.null_ref();
     }
 
     // --- instruction / block lowering -------------------------------------
@@ -5101,7 +5222,7 @@ export struct Emitter {
             unsafe {
                 func = this.mu->fns[fi];
             }
-            if (func.is_extern_c == 0 && func.has_body == 0) {
+            if (func.is_extern_c == 0 && func.has_body == 0 && func.is_consteval == 0) {
                 this.emit_declaration(fi);
                 if (this.failed_ != 0) {
                     return 1;
@@ -5115,11 +5236,11 @@ export struct Emitter {
             unsafe {
                 func = this.mu->fns[fi];
             }
-            if (func.has_body != 0) {
+            if (func.has_body != 0 && func.is_consteval == 0) {
                 this.lower_function(fi);
-                if (this.failed_ != 0) {
-                    return 1;
-                }
+                // H8.2: the oracle keeps lowering the remaining functions
+                // after an error (`error()` only sets `hadError_`); the
+                // failure is reported once at the end of `emit()`.
             }
             fi = fi + 1;
         }
@@ -5149,6 +5270,11 @@ export struct Emitter {
         // (and sets this flag) while functions are lowered.
         if (this.declared_panic_ != 0 && !this.is_declared_c("__ivy_panic")) {
             this.pl("declare void @__ivy_panic(ptr, i32)");
+        }
+        // H8.2: the diagnostic is reported after the whole module has been
+        // lowered, exactly like the oracle's `hadError_`.
+        if (this.failed_ != 0) {
+            return 1;
         }
         return 0;
     }

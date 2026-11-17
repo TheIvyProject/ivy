@@ -1,0 +1,62 @@
+name: selfhost dogfood
+
+# H8.2: the C++-built compiler (`build/Release/ivy.exe`) builds the Ivy port of
+# itself, and the resulting compiler (`ivy_selfhost.exe`) must reproduce the
+# C++-built one: stage1 -> stage2 must be byte-identical (F2) and the Ivy-built
+# compiler must match the oracle on the whole selfhost corpus.
+#
+# The oracle is not committed (build/ is ignored), so the job builds it from
+# source first: CMake + MSVC + the LLVM package that CMakeLists.txt requires.
+# `clang++` must be on PATH because the oracle links executables with it.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  dogfood:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: |
+          choco install llvm --no-progress -y
+          $llvm = "C:\Program Files\LLVM"
+          if (-not (Test-Path "$llvm\bin\llvm-config.exe")) {
+            throw "LLVM not found at $llvm"
+          }
+          # `where clang++` (used by the oracle's linker) and the selfhost
+          # harnesses both rely on PATH.
+          Add-Content -Path $env:GITHUB_PATH -Value "$llvm\bin"
+          "LLVM_ROOT=$llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build the C++ oracle
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+                -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
+          cmake --build build --config Release --parallel
+          if (-not (Test-Path "build\Release\ivy.exe")) {
+            throw "oracle was not built"
+          }
+          & "build\Release\ivy.exe" --help | Select-Object -First 1
+
+      - name: Dogfood (F2 + full-corpus parity)
+        run: |
+          pwsh -NoProfile -File selfhost\dogfood.ps1 -TempRoot "$env:RUNNER_TEMP\h82"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-logs
+          path: ${{ runner.temp }}/h82/**/*.err
+          if-no-files-found: ignore

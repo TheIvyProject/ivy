@@ -136,6 +136,10 @@ export struct HFunction {
     long pstart;        // first HParam index
     long pn;            // HParam count
     long is_constexpr;  // `constexpr` / `consteval` function
+    // H8.2: `consteval` is distinct from `constexpr` in codegen: a consteval
+    // function has no runtime representation (the oracle skips it in the
+    // declare/definition loops, codegen.cpp:2674/2695).
+    long is_consteval;
     long lt_start;      // first lifetime name index (-1 when absent)
     long lt_n;          // number of declared lifetime names
     const char* return_lifetime;  // the return lifetime name (NULL when none)

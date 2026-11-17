@@ -1436,86 +1436,84 @@ export struct Parser {
                 t.is_unsigned = this.ivy_unsign(t.base);
             }
         }
-        if (this.kw("nullptr_t")) {
-            this.next();
-            t.base = "nullptr_t";
-        }
-        if (this.kw("max_align_t")) {
-            this.next();
-            t.base = "max_align_t";
-        }
-        if (this.kw("char")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'char' requires #pragma ivy cnumber; use int8/uint8");
-            }
-            this.next();
-            t.base = "char";
-        }
-        if (this.kw("short")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'short' requires #pragma ivy cnumber; use int16/uint16");
-            }
-            this.next();
-            if (this.kw("int")) {
+        // H8.2: the oracle's chain is mutually exclusive (`else if`), so a
+        // second C-style keyword is left to the declarator parser (`int long`
+        // reports one cnumber error, then "expected function name" at the
+        // `long`).  A flat sequence of `if`s consumed both and reported a
+        // second cnumber error the oracle never prints.
+        if (this.cstr_len(t.base) == 0) {
+            if (this.kw("nullptr_t")) {
                 this.next();
-            }
-            t.base = "short";
-        }
-        if (this.kw("int")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'int' requires #pragma ivy cnumber; use int32/uint32");
-            }
-            this.next();
-            t.base = "int";
-        }
-        if (this.kw("float")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'float' requires #pragma ivy cnumber; use float32");
-            }
-            this.next();
-            t.base = "float";
-        }
-        if (this.kw("double")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'double' requires #pragma ivy cnumber; use float64");
-            }
-            this.next();
-            t.base = "double";
-        }
-        if (this.kw("bool")) {
-            this.next();
-            t.base = "bool";
-        }
-        if (this.kw("void")) {
-            this.next();
-            t.base = "void";
-        }
-        if (this.kw("long")) {
-            if (this.cnumber_ == 0) {
-                this.error_at(this.peek(0),
-                              "C-style type 'long' requires #pragma ivy cnumber; use int64");
-            }
-            this.next();
-            if (this.kw("long")) {
+                t.base = "nullptr_t";
+            } else if (this.kw("max_align_t")) {
+                this.next();
+                t.base = "max_align_t";
+            } else if (this.kw("char")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'char' requires #pragma ivy cnumber; use int8/uint8");
+                }
+                this.next();
+                t.base = "char";
+            } else if (this.kw("short")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'short' requires #pragma ivy cnumber; use int16/uint16");
+                }
                 this.next();
                 if (this.kw("int")) {
                     this.next();
                 }
-                t.base = "long long";
-            } else {
-                if (this.kw("double")) {
+                t.base = "short";
+            } else if (this.kw("int")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'int' requires #pragma ivy cnumber; use int32/uint32");
+                }
+                this.next();
+                t.base = "int";
+            } else if (this.kw("float")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'float' requires #pragma ivy cnumber; use float32");
+                }
+                this.next();
+                t.base = "float";
+            } else if (this.kw("double")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'double' requires #pragma ivy cnumber; use float64");
+                }
+                this.next();
+                t.base = "double";
+            } else if (this.kw("bool")) {
+                this.next();
+                t.base = "bool";
+            } else if (this.kw("void")) {
+                this.next();
+                t.base = "void";
+            } else if (this.kw("long")) {
+                if (this.cnumber_ == 0) {
+                    this.error_at(this.peek(0),
+                                  "C-style type 'long' requires #pragma ivy cnumber; use int64");
+                }
+                this.next();
+                if (this.kw("long")) {
                     this.next();
-                    t.base = "long double";
-                } else {
                     if (this.kw("int")) {
                         this.next();
                     }
-                    t.base = "long";
+                    t.base = "long long";
+                } else {
+                    if (this.kw("double")) {
+                        this.next();
+                        t.base = "long double";
+                    } else {
+                        if (this.kw("int")) {
+                            this.next();
+                        }
+                        t.base = "long";
+                    }
                 }
             }
         }

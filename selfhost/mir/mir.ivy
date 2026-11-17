@@ -126,6 +126,9 @@ export struct MFunction {
     long block_start;    // the first block index
     long block_n;        // the number of blocks
     long has_body;       // 0 = declaration only
+    // H8.2: a `consteval` function has no runtime representation (the emitter
+    // skips its declaration and definition, codegen.cpp:2674/2695).
+    long is_consteval;
     // H6.2p: the declaration's parameter list ends in `...`.
     long is_variadic;
     // H6.2y: virtual dispatch flags and the owning vtable's struct name.

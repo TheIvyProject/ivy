@@ -23,12 +23,19 @@
 # Usage (from the repository root):
 #   powershell -NoProfile -File selfhost/app/bootstrap_smoke.ps1
 #   powershell -NoProfile -File selfhost/app/bootstrap_smoke.ps1 -TempRoot C:\scratch\h81
+#   powershell -NoProfile -File selfhost/app/bootstrap_smoke.ps1 -LlvmRoot "C:\Program Files\LLVM"
+#
+# -LlvmRoot selects the LLVM installation; without it the script uses
+# $env:LLVM_ROOT, then D:\Cpp\Clang, then `llvm-config` on PATH.
+# -Stage1File writes the path of the freshly linked stage 1 compiler there (the
+# dogfood gate reuses it instead of building a second one).
 #
 # Exit 0 iff F2 holds.
 
 param(
     [string]$TempRoot = "",
-    [string]$LlvmRoot = "D:\Cpp\Clang"
+    [string]$LlvmRoot = "",
+    [string]$Stage1File = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +50,37 @@ $ivy = Join-Path $repo "build\Release\ivy.exe"
 if (-not (Test-Path -LiteralPath $ivy)) { Fail ("oracle not found: " + $ivy) }
 $ivyrt = Join-Path $repo "build\Release\ivyrt.lib"
 if (-not (Test-Path -LiteralPath $ivyrt)) { Fail ("runtime library not found: " + $ivyrt) }
+
+# Locate the LLVM installation: -LlvmRoot first, then $env:LLVM_ROOT, then the
+# historical D:\Cpp\Clang, then whatever `llvm-config` is on PATH.  The gate in
+# CI passes -LlvmRoot explicitly; a developer machine usually just has one of
+# the other three.
+function Test-LlvmRoot([string]$root) {
+    if ($root -eq "") { return $false }
+    return (Test-Path -LiteralPath (Join-Path $root "bin\clang.exe")) -and
+           (Test-Path -LiteralPath (Join-Path $root "bin\llvm-config.exe"))
+}
+if (-not (Test-LlvmRoot $LlvmRoot)) {
+    $found = ""
+    if (Test-LlvmRoot $env:LLVM_ROOT) {
+        $found = $env:LLVM_ROOT
+    } elseif (Test-LlvmRoot "D:\Cpp\Clang") {
+        $found = "D:\Cpp\Clang"
+    } else {
+        $cmd = Get-Command "llvm-config" -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $prefix = (& $cmd.Source "--prefix")
+            if ($prefix) {
+                $prefix = ([string]$prefix).Trim()
+                if (Test-LlvmRoot $prefix) { $found = $prefix }
+            }
+        }
+    }
+    if ($found -eq "") {
+        Fail ("LLVM not found: pass -LlvmRoot, set LLVM_ROOT, or put llvm-config on PATH")
+    }
+    $LlvmRoot = $found
+}
 
 $clang = Join-Path $LlvmRoot "bin\clang.exe"
 $llvmConfig = Join-Path $LlvmRoot "bin\llvm-config.exe"
@@ -216,6 +254,11 @@ Write-Output "[1/3] stage 0 (oracle) builds stage 1 ..."
 Build-Stage $ivy $stage1
 $stage1Exe = Link-Stage $stage1
 Write-Output ("      " + $stage1Exe)
+# H8.2: the dogfood gate reuses this freshly built compiler instead of building
+# it a second time.
+if ($Stage1File -ne "") {
+    Set-Content -LiteralPath $Stage1File -Value $stage1Exe -Encoding ascii
+}
 
 # --- 2. stage 1 -> stage 2 ----------------------------------------------------
 Write-Output "[2/3] stage 1 builds stage 2 ..."
