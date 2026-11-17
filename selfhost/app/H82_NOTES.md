@@ -112,7 +112,11 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
    `clang+llvm-21.1.6-x86_64-pc-windows-msvc.tar.xz` (899 MB) - dung phien ban
    LLVM ma source dang viet (`Module::setTargetTriple(Triple)` chi co o 21.x,
    khong co o 20.x) - giai nen vao `C:\LLVM`, them `bin` vao `PATH` (oracle goi
-   `clang++` khi link) va dat `LLVM_ROOT`;
+   `clang++` khi link) va dat `LLVM_ROOT`; va **patch DIA SDK**: package
+   Windows cua LLVM ghi cung duong dan `.../Visual Studio/2019/Professional/DIA
+   SDK/lib/amd64/diaguids.lib` vao `LLVMExports.cmake` (link se bao LNK1181),
+   nen job tro no ve DIA SDK cua runner (giong patch thu cong ma CMakeLists.txt
+   ghi cho may dev);
 3. CMake (generator mac dinh cho VS cai san - runner da chuyen sang VS 2026)
    `-A x64 -DLLVM_DIR=...` build oracle Release (`build/Release/ivy.exe` khong
    duoc commit);

@@ -61,6 +61,30 @@ jobs:
           if (-not (Test-FullLlvm $prefix)) {
             throw "full LLVM is not usable at $prefix"
           }
+          # LLVM's Windows package bakes the DIA SDK path of the machine that
+          # built it (`.../Visual Studio/2019/Professional/DIA SDK/...`) into
+          # LLVMExports.cmake; the linker then fails with LNK1181.  Point it at
+          # this runner's DIA SDK (the same manual patch CMakeLists.txt
+          # documents for the development machine).
+          $exports = Join-Path $prefix "lib\cmake\llvm\LLVMExports.cmake"
+          $text = Get-Content -LiteralPath $exports -Raw
+          if ($text -match 'DIA SDK/lib/amd64/diaguids\.lib') {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+            $dia = $null
+            foreach ($inst in (& $vswhere -all -products * -property installationPath)) {
+              $candidate = Join-Path $inst.Trim() "DIA SDK\lib\amd64\diaguids.lib"
+              if (Test-Path -LiteralPath $candidate) { $dia = $candidate; break }
+            }
+            if (-not $dia) { throw "DIA SDK (diaguids.lib) not found" }
+            $dia = $dia -replace '\\', '/'
+            $patched = [regex]::Replace($text,
+              '(?i)[A-Z]:/[^";]*?DIA SDK/lib/amd64/diaguids\.lib', $dia)
+            if ($patched -eq $text) { throw "cannot patch the DIA SDK path in $exports" }
+            Set-Content -LiteralPath $exports -Value $patched -NoNewline
+            "patched DIA SDK path: $dia"
+          } else {
+            "LLVMExports.cmake has no DIA SDK reference"
+          }
           # `clang++` (used by the oracle's linker) and the selfhost harnesses
           # both rely on PATH; LLVM_ROOT is what `bootstrap_smoke.ps1`
           # auto-detects.
