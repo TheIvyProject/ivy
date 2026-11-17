@@ -806,7 +806,7 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 
 | STT | Tính năng | trạng thái |
 |-----|-----------|-----------|
-| H8.1 | `ivy` biên dịch chính nó (F2) | ☐ |
+| H8.1 | `ivy` biên dịch chính nó (F2) | ✅ `app/pipeline.ivy` (tách `Cg` khỏi `cgdrive`; `compile/unit/diag_file/release/import_count/module_object`) + `app/main.ivy` driver hợp nhất (`struct Driver`: `-c` → `ObjEmit`, link mode → `Linker` + D1 module objects + `libivyrt`, unit không `main` ⇒ object, `--llvm` ra stdout/`-o`; IR capture bằng `_open/_dup/_dup2` + `_tempnam`; stub exit 3 cho `--lex/--tokens/-o *.i|*.ii/--ast/--hir/--mir/--run`); `mir.ivy` `MUnit.has_main()`; `codegen.ivy` `Linker.mods_/nmod_/capmod_` + `add_module_object()`; sửa `module_io.ivy` escape tên type gốc (`long\slong`) + `type_raw()` cho return type free function (quirk `module_io.cpp:132`); **stage1→stage2: 18/18 object + 17/17 `.ivm` + exe byte-identical** (`h81/stage2.ps1`, link deterministic `-Wl,/Brepro`); driver parity: 17/17 object compiler, `--llvm` 249/249, `-c` 249/249, link+run 249/249 (2 fixture UB bỏ so output); `cgdiff` 249/249, `cmp_selfhost` 19/19 (2026-11-17) |
 | H8.2 | CI dogfood — output khớp bản C++-built | ☐ |
 | H9.1 | Port std/runtime (`libivyrt` + std) sang Ivy | ☐ |
 

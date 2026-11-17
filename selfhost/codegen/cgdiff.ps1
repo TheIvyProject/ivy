@@ -135,7 +135,8 @@ $modules = @(
     @("selfhost\hir", "hir_builder"),
     @("selfhost\mir", "mir"),
     @("selfhost\mir", "mir_builder"),
-    @("selfhost\codegen", "emitter")
+    @("selfhost\codegen", "emitter"),
+    @("selfhost\app", "pipeline")
 )
 
 foreach ($m in $modules) {

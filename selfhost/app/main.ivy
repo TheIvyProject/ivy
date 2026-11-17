@@ -1,4 +1,4 @@
-// selfhost/app/main.ivy - self-host driver entry point (H7.1 + H7.2).
+// selfhost/app/main.ivy - the self-host driver entry point (H7.1 + H7.2 + H8.1).
 //
 // The oracle's `main(int argc, char** argv)` (src/app/main.cpp:1454) parses
 // arguments and then calls `run(...)`. Ivy's entry point is synthesized by the
@@ -13,136 +13,584 @@
 // (both exported by ucrt; declared in <stdlib.h>). Verified on this checkout:
 // argc/argv, including arguments containing spaces, arrive unchanged.
 //
-// H7.1 scope: parse the command line with `cli::CliArgs` (mirror of the oracle
-// loop) and reproduce its help/usage/diagnostic bytes and exit codes.
+// What is ported:
+//   * H7.1: the whole command line (`cli::CliArgs`), its help/usage text and
+//     diagnostics, plus the derived modes (`-o *.o|*.obj` implies `-c`,
+//     `-o *.ll` implies `--llvm`, the default link mode);
+//   * H7.2: the auto `lib/` include path, opening the source, the lexer and
+//     preprocessor diagnostics, the `import` pre-scan;
+//   * H8.1: the rest of `run()`: the shared frontend (`pipeline::Cg`, which
+//     also writes the `.ivm`), then
+//       - `-c`: IR text -> `codegen::ObjEmit` -> native object;
+//       - link mode: IR text -> `codegen::Linker` (with the D1 module objects
+//         and libivyrt) -> native executable; a module interface unit (no
+//         `main`) falls back to an object file, like main.cpp:1367-1397;
+//       - `--llvm`: IR text to stdout or to `-o`.
 //
-// H7.2 scope: the first part of `run(...)`:
-//   * auto `lib/` include path (`main.cpp:1547-1565`) via `Imports.auto_lib_dir`;
-//   * open the source file (`cannot open file`, exit 2);
-//   * lex + preprocess, printing lexer/preprocessor diagnostics the same way;
-//   * the `import` pre-scan (`main.cpp:930-1019`): resolve each module to a
-//     `.ivm` and report missing ones (exit 1).
+// The IR text is produced by `Emitter`, which writes to host stdout.  The two
+// modes that need the text in memory (or in a file the user named) therefore
+// capture fd 1 into a temporary file with `_dup`/`_dup2` and read it back,
+// exactly the way the H6.3/H6.4 harnesses feed the oracle's `--llvm` output to
+// `objdrive`/`linkdrive`.  Stdout is restored before anything else is printed.
 //
-// Still not ported (H7.3+): reading the `.ivm`, the parser and everything
-// after it. `--tokens` / `--lex` / `-o *.i|*.ii` are gated to the stub too,
-// because they run *before* the import scan in the oracle. A successful scan
-// without IVY_IMPORT_DUMP=1 therefore ends with an explicit "dispatch not
-// ported" diagnostic and exit 3. IVY_CLI_DUMP=1 (H7.1) prints the parsed
-// options; IVY_IMPORT_DUMP=1 prints the include path and resolved imports.
+// The helpers live in `struct Driver` rather than as free functions because a
+// *free* function may not take or return a raw pointer without a lifetime
+// annotation (hir_builder.cpp:855-886), while struct methods may.  The driver
+// is also careful never to take the address of a struct local: `&structValue`
+// is not supported by the HIR builder, so `ObjEmit`/`Linker` are passed by
+// value to the reporting helpers.
+//
+// Still stubbed (exit 3 with an explicit diagnostic): `--lex`, `--tokens`,
+// `-o *.i|*.ii`, `--ast`, `--hir`, `--mir` and `--run`.  None of them is needed
+// to self-host the compiler; the dumps and the interpreter are later tiers.
+// `IVY_CLI_DUMP=1` / `IVY_IMPORT_DUMP=1` keep the H7 debug dumps.
 
 #pragma ivy cnumber
-// H7.4: direct import so the oracle's linker pulls in diagnostic.obj (the
-// linker only links the objects of modules this file imports).
+// H7.4: direct imports so the oracle's linker pulls in the objects of every
+// module this driver reaches (the linker only links the modules a file imports,
+// src/app/main.cpp:929-1016).  H8.1 adds the shared pipeline and the two
+// backends.
 import diagnostic;
-import cli;
-import imports;
-import io;
 import token;
 import lexer;
 import preprocessor;
+import ast;
+import parser;
+import module_io;
+import imports;
+import cli;
+import hir;
+import hir_builder;
+import mir;
+import mir_builder;
+import pipeline;
+import emitter;
+import codegen;
+import io;
 
 extern "C" int*   __p___argc();
 extern "C" char*** __p___argv();
 extern "C" char*  getenv(const char* name);
+extern "C" void*  __ivy_alloc(unsigned long long n);
+extern "C" void   __ivy_free(void* p);
 extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" int    _access(const char* path, int mode);
+extern "C" int    _open(const char* path, int flags, int mode);
+extern "C" int    _close(int fd);
+extern "C" int    _dup(int fd);
+extern "C" int    _dup2(int fd1, int fd2);
+extern "C" char*  _tempnam(const char* dir, const char* prefix);
+extern "C" int    remove(const char* path);
+
+struct Driver {
+    // --- small path helpers ------------------------------------------------
+
+    long slen(const char* s) {
+        long i = 0;
+        unsafe {
+            while (s[i] != 0) { i = i + 1; }
+        }
+        return i;
+    }
+
+    bool seq(const char* a, const char* b) {
+        unsafe {
+            long i = 0;
+            while (a[i] != 0 && b[i] != 0) {
+                if (a[i] != b[i]) { return false; }
+                i = i + 1;
+            }
+            return a[i] == b[i];
+        }
+        return false;
+    }
+
+    bool file_exists(const char* p) {
+        return _access(p, 0) == 0;
+    }
+
+    // Index of the last path separator, or -1.
+    long last_sep(const char* p) {
+        long n = this.slen(p);
+        long sep = -1;
+        long i = 0;
+        unsafe {
+            while (i < n) {
+                if (p[i] == 92 || p[i] == 47) { sep = i; }
+                i = i + 1;
+            }
+        }
+        return sep;
+    }
+
+    // `<dir of p>` (everything before the last separator; "" when none).
+    char* dir_of(const char* p) {
+        long sep = this.last_sep(p);
+        unsafe {
+            if (sep < 0) {
+                char* r0 = (char*) __ivy_alloc(1);
+                r0[0] = 0;
+                return r0;
+            }
+            char* r = (char*) __ivy_alloc(sep + 1);
+            long k = 0;
+            while (k < sep) { r[k] = p[k]; k = k + 1; }
+            r[sep] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `std::filesystem::path::stem()` end offset: the filename without its
+    // last extension (a leading dot is not an extension).
+    long stem_end(const char* p) {
+        long n = this.slen(p);
+        long sep = this.last_sep(p);
+        long start = sep + 1;
+        long dot = -1;
+        long i = n;
+        unsafe {
+            while (i > start) {
+                i = i - 1;
+                if (p[i] == 46) { dot = i; break; }
+            }
+        }
+        if (dot == start) { dot = -1; }
+        if (dot >= 0) { return dot; }
+        return n;
+    }
+
+    // `<dir>/<stem><ext>`, mirroring `path.parent_path() / (stem + ext)`.
+    char* with_ext(const char* p, const char* ext) {
+        long end = this.stem_end(p);
+        long el = this.slen(ext);
+        unsafe {
+            char* r = (char*) __ivy_alloc(end + el + 1);
+            long k = 0;
+            while (k < end) { r[k] = p[k]; k = k + 1; }
+            long m = 0;
+            while (m < el) { r[end + m] = ext[m]; m = m + 1; }
+            r[end + el] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `<dir>/<name><ext>`.
+    char* join_path(const char* dir, const char* name, const char* ext) {
+        long dl = this.slen(dir);
+        long nl = this.slen(name);
+        long el = this.slen(ext);
+        long sep = 0;
+        unsafe {
+            if (dl > 0) {
+                char last = dir[dl - 1];
+                if (last != 92 && last != 47) { sep = 1; }
+            }
+            char* r = (char*) __ivy_alloc(dl + sep + nl + el + 1);
+            long o = 0;
+            long i = 0;
+            while (i < dl) { r[o] = dir[i]; o = o + 1; i = i + 1; }
+            if (sep != 0) { r[o] = 92; o = o + 1; }
+            i = 0;
+            while (i < nl) { r[o] = name[i]; o = o + 1; i = i + 1; }
+            i = 0;
+            while (i < el) { r[o] = ext[i]; o = o + 1; i = i + 1; }
+            r[o] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `p + s` (gives the scratch name its `.ll` suffix).
+    char* append_str(const char* p, const char* s) {
+        long pl = this.slen(p);
+        long sl = this.slen(s);
+        unsafe {
+            char* r = (char*) __ivy_alloc(pl + sl + 1);
+            long k = 0;
+            while (k < pl) { r[k] = p[k]; k = k + 1; }
+            k = 0;
+            while (k < sl) { r[pl + k] = s[k]; k = k + 1; }
+            r[pl + sl] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // A unique scratch path in TEMP/TMP, ending in `.ll`.
+    char* temp_ir_path() {
+        unsafe {
+            char* t = getenv("TEMP");
+            if (t == (char*)0 || t[0] == 0) { t = getenv("TMP"); }
+            if (t == (char*)0) { t = (char*) ""; }
+            char* base = _tempnam(t, "ivy");
+            if (base == (char*)0) {
+                base = this.join_path(t, "ivy_selfhost", "");
+            }
+            char* r = this.append_str(base, ".ll");
+            __ivy_free(base);
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // --- IR capture --------------------------------------------------------
+
+    // Emit the IR of `mu` into fd 1.  On failure print the oracle's diagnostic
+    // (`<diagFile>:<line>:<col>: error: <message>`) and return non-zero.
+    long emit_ir(MUnit mu, char* fname) {
+        Emitter em;
+        em.setup(mu);
+        long erc = em.emit();
+        if (erc != 0) {
+            io::eprint(fname);
+            io::eprint(":");
+            io::eprint("{}", em.err_line());
+            io::eprint(":");
+            io::eprint("{}", em.err_col());
+            io::eprintln(": error: {}", em.err_msg());
+        }
+        em.release();
+        return erc;
+    }
+
+    // Redirect fd 1 into `path`, emit the IR, restore fd 1.  Returns the emit
+    // status (0 on success), or -1 when the scratch file cannot be opened.
+    long capture_ir(MUnit mu, char* fname, char* path) {
+        long erc = -1;
+        unsafe {
+            // _O_WRONLY | _O_CREAT | _O_TRUNC
+            int fd = _open(path, 0x0301, 0x0180);
+            if (fd < 0) {
+                return -1;
+            }
+            int saved = _dup(1);
+            _dup2(fd, 1);
+            _close(fd);
+            erc = this.emit_ir(mu, fname);
+            _dup2(saved, 1);
+            _close(saved);
+        }
+        return erc;
+    }
+
+    // --- runtime library lookup --------------------------------------------
+
+    // The oracle bakes `IVYRT_LIB_PATH` into the compiler at build time
+    // (CMakeLists.txt:53-55).  The selfhost build cannot do that, so look at
+    // `IVYRT_LIB_PATH` first and then next to the running executable
+    // (argv[0]).  Returns an owned string; "" means "link without a runtime".
+    char* find_ivyrt(char* argv0) {
+        unsafe {
+            char* env = getenv("IVYRT_LIB_PATH");
+            if (env != (char*)0 && env[0] != 0) {
+                long n = this.slen(env);
+                char* r = (char*) __ivy_alloc(n + 1);
+                long k = 0;
+                while (k < n) { r[k] = env[k]; k = k + 1; }
+                r[n] = 0;
+                return r;
+            }
+            char* dir = this.dir_of(argv0);
+            char* cand = this.join_path(dir, "ivyrt.lib", "");
+            if (this.file_exists(cand)) {
+                __ivy_free(dir);
+                return cand;
+            }
+            __ivy_free(cand);
+            cand = this.join_path(dir, "libivyrt.a", "");
+            if (this.file_exists(cand)) {
+                __ivy_free(dir);
+                return cand;
+            }
+            __ivy_free(cand);
+            __ivy_free(dir);
+            char* empty = (char*) __ivy_alloc(1);
+            empty[0] = 0;
+            return empty;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // --- diagnostics for the backends --------------------------------------
+
+    // `CodeGen::emitObject` diagnostics (codegen.cpp:2751-2804).
+    long report_emit_failure(char* fname, ObjEmit oe) {
+        io::eprint(fname);
+        io::eprint(":0:0: error: ");
+        long code = oe.code();
+        if (code == 3) {
+            io::eprint("LLVM IR parse error: ivy: ");
+        } else if (code == 4) {
+            io::eprint("LLVM target lookup failed: ");
+        }
+        io::eprintln("{}", oe.err());
+        return 1;
+    }
+
+    // `CodeGen::linkExecutable` diagnostics (codegen.cpp:2995-3063).
+    long report_link_failure(char* fname, Linker lk) {
+        io::eprint(fname);
+        io::eprint(":0:0: error: ");
+        long code = lk.code();
+        if (code == 1) {
+            long ec = lk.emit_code();
+            if (ec == 3) {
+                io::eprint("LLVM IR parse error: ivy: ");
+            } else if (ec == 4) {
+                io::eprint("LLVM target lookup failed: ");
+            }
+            io::eprintln("{}", lk.err());
+        } else if (code == 2) {
+            io::eprintln("{}", lk.err());
+        } else {
+            io::eprint("linker failed (exit code ");
+            io::eprint("{}", lk.link_rc());
+            io::eprint("): ");
+            io::eprintln("{}", lk.cmd());
+        }
+        return 1;
+    }
+
+    // Emit `obj_path` from the captured IR text.
+    long emit_object(MUnit mu, char* fname, char* obj_path) {
+        long result = 1;
+        unsafe {
+            char* scratch = this.temp_ir_path();
+            long erc = this.capture_ir(mu, fname, scratch);
+            if (erc == 0) {
+                char* ir = io::read_file(scratch);
+                if (ir == (char*)0) {
+                    io::eprint("ivy: error: cannot open file '");
+                    io::eprint(scratch);
+                    io::eprintln("'");
+                } else {
+                    long len = this.slen(ir);
+                    ObjEmit oe;
+                    int rc = oe.emit_text(ir, (unsigned long long) len, obj_path);
+                    if (rc != 0) {
+                        result = this.report_emit_failure(fname, oe);
+                    } else {
+                        io::eprintln("ivy: '{}' generated", obj_path);
+                        result = 0;
+                    }
+                    __ivy_free(ir);
+                }
+            }
+            remove(scratch);
+            __ivy_free(scratch);
+        }
+        return result;
+    }
+
+    // Link `exe_path` from the captured IR text plus the D1 module objects.
+    long link_executable(Cg cg, MUnit mu, char* fname, char* exe_path, char* argv0) {
+        long result = 1;
+        unsafe {
+            char* scratch = this.temp_ir_path();
+            long erc = this.capture_ir(mu, fname, scratch);
+            if (erc == 0) {
+                char* ir = io::read_file(scratch);
+                if (ir == (char*)0) {
+                    io::eprint("ivy: error: cannot open file '");
+                    io::eprint(scratch);
+                    io::eprintln("'");
+                } else {
+                    long len = this.slen(ir);
+                    char* ivyrt = this.find_ivyrt(argv0);
+                    Linker lk;
+                    long i = 0;
+                    while (i < cg.import_count()) {
+                        char* obj = cg.module_object(i);
+                        if (obj != (char*)0) {
+                            lk.add_module_object(obj);
+                        }
+                        i = i + 1;
+                    }
+                    int rc = lk.link_text(ir, (unsigned long long) len, exe_path, ivyrt);
+                    if (rc != 0) {
+                        result = this.report_link_failure(fname, lk);
+                    } else {
+                        io::eprintln("ivy: '{}' generated", exe_path);
+                        result = 0;
+                    }
+                    // The module object paths are owned by this frame.
+                    i = 0;
+                    while (i < lk.nmod_) {
+                        __ivy_free(lk.mods_[i]);
+                        i = i + 1;
+                    }
+                    if (lk.mods_ != (char**)0) {
+                        __ivy_free((void*) lk.mods_);
+                    }
+                    __ivy_free(ivyrt);
+                    __ivy_free(ir);
+                }
+            }
+            remove(scratch);
+            __ivy_free(scratch);
+        }
+        return result;
+    }
+
+    // `--llvm`: IR text to stdout, or to `-o` when given (main.cpp:1427-1448).
+    long write_llvm(MUnit mu, char* fname, char* out_path) {
+        unsafe {
+            if (out_path == (char*)0 || out_path[0] == 0) {
+                return this.emit_ir(mu, fname);
+            }
+            int fd = _open(out_path, 0x0301, 0x0180);
+            if (fd < 0) {
+                io::eprintln("ivy: error: cannot open output file '{}'", out_path);
+                return 2;
+            }
+            int saved = _dup(1);
+            _dup2(fd, 1);
+            _close(fd);
+            long erc = this.emit_ir(mu, fname);
+            _dup2(saved, 1);
+            _close(saved);
+            return erc;
+        }
+        return 1;
+    }
+
+    // --- run ---------------------------------------------------------------
+
+    long run(char* argv0) {
+        unsafe {
+            int* argc_p = __p___argc();
+            char** argv = *__p___argv();
+            long argc = (long) *argc_p;
+
+            CliArgs args;
+            args.init();
+            int32 rc = args.parse(argc, argv);
+            if (rc >= 0) {
+                return (long) rc;  // help (0) or a CLI diagnostic (2)
+            }
+
+            // H7.2: append the auto `lib/` include path (main.cpp:1547-1565).
+            Imports im;
+            im.init();
+            char* libdir = im.auto_lib_dir();
+            if (libdir != (char*)0) {
+                args.push_include(libdir);
+            }
+
+            char* dump = getenv("IVY_CLI_DUMP");
+            if (dump != (char*)0 && dump[0] != 0) {
+                args.dump();
+                return 0;
+            }
+
+            // Modes handled before the import scan that are not ported yet.
+            if (args.show_lex != 0 || args.out_preprocessed() != 0 ||
+                args.show_tokens != 0) {
+                io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H8.1: --lex/--tokens/-o *.i|*.ii)");
+                return 3;
+            }
+
+            // run(): open the source (`main.cpp:831-835`).
+            char* path = args.file;
+            char* content = io::read_file(path);
+            if (content == (char*)0) {
+                io::eprint("ivy: error: cannot open file '");
+                args.print_path_quoted(path);
+                io::eprintln("'");
+                return 2;
+            }
+
+            // H8.1: lexer -> preprocessor -> imports -> parser -> `.ivm` ->
+            // HIR -> MIR, all in the shared pipeline (`cgdrive` uses the same).
+            Cg cg;
+            long crc = cg.compile(path, content, (long) __ivy_strlen(content),
+                                  args.includes, args.out_path);
+            if (crc != 0) {
+                cg.release();
+                __ivy_free(content);
+                return 1;
+            }
+
+            MUnit mu = cg.unit();
+            char* fname = cg.diag_file();
+
+            // Dumps that are not ported yet (they would run right after MIR).
+            if (args.show_ast != 0 || args.show_hir != 0 || args.show_mir != 0 ||
+                args.do_run != 0) {
+                io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H8.1: --ast/--hir/--mir/--run)");
+                cg.release();
+                __ivy_free(content);
+                return 3;
+            }
+
+            if (args.compile_only != 0) {
+                // 8.1: compile to a native object (main.cpp:1340-1365).
+                char* obj_path = args.out_path;
+                char* owned = (char*)0;
+                if (obj_path == (char*)0 || obj_path[0] == 0) {
+                    owned = this.with_ext(path, ".obj");
+                    obj_path = owned;
+                }
+                long r = this.emit_object(mu, fname, obj_path);
+                if (owned != (char*)0) { __ivy_free(owned); }
+                cg.release();
+                __ivy_free(content);
+                return r;
+            }
+
+            if (args.link_mode != 0) {
+                // D1: a module interface unit (no `main`) is not linked into
+                // an executable; emit its object instead (main.cpp:1367-1397).
+                if (!mu.has_main()) {
+                    char* obj_path = args.out_path;
+                    char* owned = (char*)0;
+                    if (obj_path == (char*)0 || obj_path[0] == 0) {
+                        owned = this.with_ext(path, ".obj");
+                        obj_path = owned;
+                    }
+                    long r = this.emit_object(mu, fname, obj_path);
+                    if (owned != (char*)0) { __ivy_free(owned); }
+                    cg.release();
+                    __ivy_free(content);
+                    return r;
+                }
+                // 8.2: compile and link to a native executable.
+                char* exe_path = args.out_path;
+                char* owned = (char*)0;
+                if (exe_path == (char*)0 || exe_path[0] == 0) {
+                    owned = this.with_ext(path, ".exe");
+                    exe_path = owned;
+                }
+                long r = this.link_executable(cg, mu, fname, exe_path, argv0);
+                if (owned != (char*)0) { __ivy_free(owned); }
+                cg.release();
+                __ivy_free(content);
+                return r;
+            }
+
+            if (args.show_llvm != 0) {
+                long r = this.write_llvm(mu, fname, args.out_path);
+                cg.release();
+                __ivy_free(content);
+                return r;
+            }
+
+            cg.release();
+            __ivy_free(content);
+            return 0;
+        }
+        return 3;
+    }
+};
 
 int32 main() {
     unsafe {
-        int* argc_p = __p___argc();
         char** argv = *__p___argv();
-        long argc = (long) *argc_p;
-
-        CliArgs args;
-        args.init();
-        int32 rc = args.parse(argc, argv);
-        if (rc >= 0) {
-            return rc;  // help (0) or a CLI diagnostic (2) already printed
-        }
-
-        // H7.2: append the auto `lib/` include path, exactly like the oracle
-        // does right after the empty-file check and before extension
-        // validation (main.cpp:1547-1565).
-        Imports im;
-        im.init();
-        char* libdir = im.auto_lib_dir();
-        if (libdir != (char*)0) {
-            args.push_include(libdir);
-        }
-
-        char* dump = getenv("IVY_CLI_DUMP");
-        if (dump != (char*)0 && dump[0] != 0) {
-            args.dump();
-            return 0;
-        }
-
-        // Modes that the oracle handles *before* the import scan but that are
-        // not ported yet: `--lex`, `-o *.i|*.ii` and `--tokens`. Stub them
-        // here so a missing module never masks them.
-        if (args.show_lex != 0 || args.out_preprocessed() != 0 || args.show_tokens != 0) {
-            io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.2: import resolution only)");
-            return 3;
-        }
-
-        // run(): open the source (`main.cpp:831-835`).
-        char* path = args.file;
-        char* content = io::read_file(path);
-        if (content == (char*)0) {
-            io::eprint("ivy: error: cannot open file '");
-            args.print_path_quoted(path);
-            io::eprintln("'");
-            return 2;
-        }
-
-        uint64 len = __ivy_strlen(content);
-
-        // Lexer (`main.cpp:838-846`). H7.4: the lexer collects its diagnostics
-        // and the driver prints them exactly like the oracle (stderr, path
-        // quoted through `std::filesystem::path`'s operator<<), then exits 1
-        // before the preprocessor runs.
-        Lexer lx;
-        lx.setup(content, len, path);
-        lx.lex_all((long)len + 16);
-        if (lx.had_error()) {
-            lx.print_diags();
-            lx.release();
-            return 1;
-        }
-
-        // Preprocessor (`main.cpp:874-892`).
-        long in_n = lx.token_count();
-        long out_cap = in_n * 8 + 256;
-        Preprocessor pp;
-        pp.setup(lx.tokens(), in_n, content, (long)len, path, (long)__ivy_strlen(path),
-                 out_cap, 1024);
-        pp.run();
-
-        char* fname = path;
-        if (pp.has_line_file() != 0) {
-            fname = pp.line_file();
-        }
-        // H7.4: shared Diags printer (stderr, plain `diagFile`). `#error` always
-        // records an error, so `diag_failed` also covers the oracle's separate
-        // `pp.hasError()` check.
-        pp.print_diags(fname);
-        if (pp.diag_failed() != 0) {
-            return 1;
-        }
-
-        // `import` pre-scan (`main.cpp:930-1019`). H7.2 stops after resolving
-        // the paths: reading the `.ivm` is H7.3.
-        im.scan(pp.output(), pp.output_count(), pp.arena(), args.includes);
-        if (im.failed != 0) {
-            return 1;
-        }
-
-        char* idump = getenv("IVY_IMPORT_DUMP");
-        if (idump != (char*)0 && idump[0] != 0) {
-            im.dump(args.includes);
-            return 0;
-        }
-
-        io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H7.2: import resolution only)");
-        return 3;
+        Driver d;
+        long r = d.run(argv[0]);
+        return (int32) r;
     }
     return 3;
 }

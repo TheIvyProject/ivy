@@ -227,4 +227,30 @@ export struct MUnit {
     MEnum* enums;
     long en_n;
     long en_cap;
+
+    // H8.1: mirror of `mir::Unit::hasMain` (src/mir/mir.h): a user-defined
+    // `main` (with a body, not `extern "C"`) exists.  The qualified name of a
+    // namespaced function contains `::`, so an exact `main` match also implies
+    // an empty namespace prefix.
+    bool has_main() {
+        long i = 0;
+        unsafe {
+            const char* want = "main";
+            while (i < this.fn_n) {
+                MFunction f = this.fns[i];
+                if (f.is_extern_c == 0 && f.has_body != 0) {
+                    const char* n = f.name;
+                    long k = 0;
+                    while (n[k] != 0 && want[k] != 0 && n[k] == want[k]) {
+                        k = k + 1;
+                    }
+                    if (n[k] == 0 && want[k] == 0) {
+                        return true;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+        return false;
+    }
 };

@@ -766,6 +766,35 @@ export struct Linker {
     long link_rc_;
     const char* err_;
     char* cmd_own_;
+    // H8.1: the `.obj` files of the imported modules (D1).  The oracle
+    // appends them to the command line right after the main object
+    // (codegen.cpp:3005-3008); the driver fills them from the import list.
+    char** mods_;
+    long nmod_;
+    long capmod_;
+
+    // `CodeGen::setModuleObjects` / `moduleObjPaths_.push_back` (D1).
+    void add_module_object(const char* p) {
+        unsafe {
+            if (this.nmod_ >= this.capmod_) {
+                long ncap = this.capmod_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.nmod_) {
+                    nb[k] = this.mods_[k];
+                    k = k + 1;
+                }
+                if (this.mods_ != (char**) 0) {
+                    __ivy_free((void*) this.mods_);
+                }
+                this.mods_ = nb;
+                this.capmod_ = ncap;
+            }
+            this.mods_[this.nmod_] = (char*) p;
+            this.nmod_ = this.nmod_ + 1;
+        }
+    }
 
     // `<dir>/<stem>__tmp.obj`, mirroring `exeP.parent_path() / (stem +
     // "__tmp" + ".obj")` (codegen.cpp:2813-2822). Both separators are
@@ -901,6 +930,13 @@ export struct Linker {
             cmd.add_quoted(linker);
             cmd.add_char(32);
             cmd.add_quoted(obj_path);
+            // D1: imported module objects, before `-o` (codegen.cpp:3005-3008).
+            long mo = 0;
+            while (mo < this.nmod_) {
+                cmd.add_char(32);
+                cmd.add_quoted(this.mods_[mo]);
+                mo = mo + 1;
+            }
             cmd.add(" -o ");
             cmd.add_quoted(exe_path);
             char* rt = (char*) ivyrt_lib;

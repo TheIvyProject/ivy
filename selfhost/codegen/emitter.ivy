@@ -1563,18 +1563,84 @@ export struct Emitter {
         return r;
     }
 
+    // H8.1: std::to_string(v) for a finite double of magnitude >= 2^63.
+    // Such a value is an integer (2^63 > 2^52), so printf("%f") prints the
+    // exact decimal expansion of `mantissa * 2^exp` followed by ".000000".
+    // The oracle does exactly that, so the digits are produced by a
+    // big-integer base-1e9 shift rather than a floating-point approximation
+    // (a double cannot hold the 309 decimal digits of DBL_MAX).
+    void emit_big_double(double v) {
+        unsafe {
+            uint64 bits = *((uint64*) &v);
+            long bexp = (long) ((bits >> 52) & 2047);
+            // The 52-bit mask must be built by shifting: an unsuffixed decimal
+            // literal above 2^32 wraps to int32 first (`4503599627370495`
+            // becomes -1), which would keep every bit of `bits`.
+            uint64 low52 = ((uint64) 1 << 52) - 1;
+            uint64 mant = bits & low52;
+            if (bexp != 0) {
+                mant = mant | ((uint64) 1 << 52);
+            }
+            // value = mant * 2^(bexp - 1075); 2^63 implies an exponent >= 11.
+            long e = bexp - 1075;
+            // little-endian limbs, base 1e9; 309 digits fit in 35 limbs.
+            long* limbs = (long*) __ivy_alloc(128 * 8);
+            long n = 0;
+            uint64 rest = mant;
+            while (rest != 0) {
+                limbs[n] = (long) (rest % 1000000000);
+                rest = rest / 1000000000;
+                n = n + 1;
+            }
+            if (n == 0) {
+                limbs[0] = 0;
+                n = 1;
+            }
+            long k = 0;
+            while (k < e) {
+                long carry = 0;
+                long i = 0;
+                while (i < n) {
+                    long t = limbs[i] * 2 + carry;
+                    limbs[i] = t % 1000000000;
+                    carry = t / 1000000000;
+                    i = i + 1;
+                }
+                if (carry != 0) {
+                    limbs[n] = carry;
+                    n = n + 1;
+                }
+                k = k + 1;
+            }
+            this.out_long(limbs[n - 1]);
+            long i = n - 2;
+            while (i >= 0) {
+                long d = limbs[i];
+                long div = 100000000;
+                while (div > 0) {
+                    this.out_long(d / div);
+                    d = d - (d / div) * div;
+                    div = div / 10;
+                }
+                i = i - 1;
+            }
+            this.ps(".000000");
+            __ivy_free(limbs);
+        }
+    }
+
     // Print std::to_string(v) for the literal subset.  The integer part is
     // taken first (it fits i64 up to 2^63) and only the fractional part is
     // scaled by 1e6, so ordinary large literals do not overflow the scaled
-    // value.  Anything at or above 2^63 would need big-integer formatting
-    // and is rejected explicitly instead of emitting wrong IR.
+    // value.  At or above 2^63 the exact expansion is printed by
+    // `emit_big_double` (H8.1).
     void emit_double_lit(double v) {
         if (v < 0.0) {
             this.ps("-");
             v = -v;
         }
         if (v >= 9223372036854775808.0) {
-            this.fail(0, 0, "large floating-point literals are out of scope for H6.2j");
+            this.emit_big_double(v);
             return;
         }
         long ip = 0;
@@ -2283,7 +2349,14 @@ export struct Emitter {
     // the GEP, and returns the element address.  The oracle allocates the GEP
     // temporary BEFORE the bounds-check temporaries but emits it after the
     // ok-block label; that ordering fixes the `%tmp.N` numbering.
-    VRef lower_index_addr(MExpr e) {
+    // H8.1: `as_lvalue` selects the oracle branch, because the two disagree on
+    // the GEP element type of a pointer index:
+    //   * lowerLValue (codegen.cpp:1060) uses `llvmElemType(e.type)`, i.e. one
+    //     more pointer decay, so `p[i]` with `char** p` yields `i8`;
+    //   * lowerExpr (codegen.cpp:1747) uses `llvmType(e.type)`, so reading
+    //     `p[i]` yields `ptr`.
+    // Both must be mirrored byte for byte.
+    VRef lower_index_addr(MExpr e, long as_lvalue) {
         MExpr base;
         MExpr ix;
         unsafe {
@@ -2317,9 +2390,14 @@ export struct Emitter {
                 this.nl();
                 return gep;
             }
-            // H6.2p: pointer indexing (CodeGen::lowerExpr Index, pointer
-            // base).  No bounds check; the element type is the result type.
+            // H6.2p: pointer indexing (CodeGen::lowerExpr Index / lowerLValue
+            // Index, pointer base).  No bounds check; the GEP element type
+            // depends on the branch: `llvmElemType(resultType)` for an
+            // lvalue, `llvmType(resultType)` for a read.
             const char* elem_ty = this.llvm_type(e.type, 0);
+            if (as_lvalue != 0) {
+                elem_ty = this.llvm_elem_type(e.type);
+            }
             VRef bv = this.lower_expr(e.a);
             this.emit_val(gep);
             this.ps(" = getelementptr ");
@@ -2340,7 +2418,14 @@ export struct Emitter {
     // is lowered as an lvalue; an arrow base (`p->x`) is a pointer value.
     // The field index is resolved through the MIR struct table and becomes
     // the second GEP index, exactly like the oracle's lowerLValue Member.
-    VRef lower_member_addr(MExpr e) {
+    //
+    // H8.1: `strict` mirrors the two oracle branches.  `lowerLValue`
+    // (codegen.cpp:1095-1102) leaves the field index at 0 when the name does
+    // not match a field — that is how the HIR builder's synthetic `this`
+    // node (`Member{base, name = method, isArrow = true}`, hir_builder.cpp:
+    // 3287-3293) turns into the address of the receiver itself.
+    // `lowerExpr` (codegen.cpp:1797-1800) reports an internal error instead.
+    VRef lower_member_addr(MExpr e, long strict) {
         MExpr base;
         unsafe {
             base = this.mu->exprs[e.a];
@@ -2365,8 +2450,12 @@ export struct Emitter {
         }
         long fi = this.find_field(si, e.sval);
         if (fi < 0) {
-            this.fail(e.line, e.col, "unknown struct member is out of scope for H6.2e");
-            return this.imm(0);
+            if (strict != 0) {
+                this.fail(e.line, e.col, "internal: field not found in struct");
+                return this.imm(0);
+            }
+            // lowerLValue keeps the default index 0 (the synthetic `this`).
+            fi = 0;
         }
         VRef t = this.new_temp();
         this.emit_val(t);
@@ -3666,22 +3755,41 @@ export struct Emitter {
         if (this.uses_io_read_line_ == 0 && this.uses_io_file_ == 0) {
             return;
         }
-        if (this.uses_io_read_line_ != 0) {
+        if (this.uses_io_read_line_ != 0 && !this.is_declared_c("__ivy_read_line")) {
             this.pl("declare ptr @__ivy_read_line()");
         }
         if (this.uses_io_file_ != 0) {
-            this.pl("declare ptr @__ivy_read_file(ptr, ptr)");
-            this.pl("declare i32 @__ivy_write_file(ptr, ptr, i64)");
+            if (!this.is_declared_c("__ivy_read_file")) {
+                this.pl("declare ptr @__ivy_read_file(ptr, ptr)");
+            }
+            if (!this.is_declared_c("__ivy_write_file")) {
+                this.pl("declare i32 @__ivy_write_file(ptr, ptr, i64)");
+            }
         }
     }
 
+    // H8.1: each symbol is skipped when the module itself already declares it
+    // through an `extern "C"` prototype (CodeGen::emitIoPrintRuntime checks
+    // `declaredC_` for every one of the six).
     void emit_io_runtime() {
-        this.pl("declare void @__ivy_write_str(i32, ptr)");
-        this.pl("declare void @__ivy_write_char(i32, i8)");
-        this.pl("declare ptr @__ivy_fmt_int(i64)");
-        this.pl("declare ptr @__ivy_fmt_float(double)");
-        this.pl("declare ptr @__ivy_fmt_bool(i1)");
-        this.pl("declare void @__ivy_write_newline(i32)");
+        if (!this.is_declared_c("__ivy_write_str")) {
+            this.pl("declare void @__ivy_write_str(i32, ptr)");
+        }
+        if (!this.is_declared_c("__ivy_write_char")) {
+            this.pl("declare void @__ivy_write_char(i32, i8)");
+        }
+        if (!this.is_declared_c("__ivy_fmt_int")) {
+            this.pl("declare ptr @__ivy_fmt_int(i64)");
+        }
+        if (!this.is_declared_c("__ivy_fmt_float")) {
+            this.pl("declare ptr @__ivy_fmt_float(double)");
+        }
+        if (!this.is_declared_c("__ivy_fmt_bool")) {
+            this.pl("declare ptr @__ivy_fmt_bool(i1)");
+        }
+        if (!this.is_declared_c("__ivy_write_newline")) {
+            this.pl("declare void @__ivy_write_newline(i32)");
+        }
     }
 
     void emit_write_str(long fd, VRef v) {
@@ -4093,7 +4201,7 @@ export struct Emitter {
         }
         if (e.kind == 12) {
             // Index as an rvalue: address + load of the element type.
-            VRef gep = this.lower_index_addr(e);
+            VRef gep = this.lower_index_addr(e, 0);
             if (gep.kind == 0) {
                 return gep;
             }
@@ -4108,7 +4216,7 @@ export struct Emitter {
         }
         if (e.kind == 13) {
             // Member as an rvalue: address + load of the field type.
-            VRef gep = this.lower_member_addr(e);
+            VRef gep = this.lower_member_addr(e, 1);
             if (gep.kind == 0) {
                 return gep;
             }
@@ -4235,10 +4343,10 @@ export struct Emitter {
             return slot;
         }
         if (e.kind == 12) {
-            return this.lower_index_addr(e);
+            return this.lower_index_addr(e, 1);
         }
         if (e.kind == 13) {
-            return this.lower_member_addr(e);
+            return this.lower_member_addr(e, 0);
         }
         // H6.2n: `*p` as an lvalue is the pointer value itself
         // (CodeGen::lowerLValue's Unary "*" branch).

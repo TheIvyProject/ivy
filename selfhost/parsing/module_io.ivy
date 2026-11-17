@@ -232,11 +232,30 @@ export struct IvmBuf {
         }
     }
 
-    // `serializeType`.
+    // `serializeType`.  The oracle escapes the whole serialized string
+    // (`escape(serializeType(p.type))`), so the base name is escaped here: a
+    // C-style type such as `long long` contains a space and would otherwise be
+    // written raw, producing a .ivm the oracle never emits.  The one exception
+    // is a *function* return type, which the oracle writes unescaped
+    // (module_io.cpp:132); `type_raw` keeps that quirk byte-compatible.
     void type(AType t) {
+        this.type_x(t, 1);
+    }
+
+    void type_raw(AType t) {
+        this.type_x(t, 0);
+    }
+
+    void type_x(AType t, long esc_base) {
         long bp = 0;
         unsafe { bp = reinterpret_cast<long>(t.base); }
-        if (bp != 0) { this.add(t.base); }
+        if (bp != 0) {
+            if (esc_base != 0) {
+                this.esc(t.base);
+            } else {
+                this.add(t.base);
+            }
+        }
         if (t.is_unsigned) { this.add(":unsigned"); }
         if (t.is_const) { this.add(":const"); }
         if (t.is_ref) { this.add(":ref"); }
@@ -271,7 +290,7 @@ export struct IvmBuf {
         this.add("func ");
         this.add(f.name);
         this.ch(32);
-        this.type(f.ret);
+        this.type_raw(f.ret);
         this.ch(32);
         this.num(f.nparams);
         long k = 0;
