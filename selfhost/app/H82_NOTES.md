@@ -98,7 +98,9 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
 
 - auto-detect LLVM: `-LlvmRoot` -> `$env:LLVM_ROOT` -> `D:\Cpp\Clang` ->
   `llvm-config` tren PATH (CI chi can dat `LLVM_ROOT`);
-- `-Stage1File`: ghi duong dan stage 1 vua link ra file de gate dung lai.
+- `-Stage1File`: ghi duong dan stage 1 vua link ra file de gate dung lai;
+- khi link fail: in ca stderr, stdout (linker MSVC bao symbol thieu o stdout) va
+  command line, de log CI du de chan doan.
 
 ## 4. Workflow
 
@@ -121,13 +123,31 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
    `-A x64 -DLLVM_DIR=...` build oracle Release (`build/Release/ivy.exe` khong
    duoc commit);
 4. `selfhost/dogfood.ps1 -TempRoot $env:RUNNER_TEMP\h82`;
-5. khi fail: upload `${{ runner.temp }}/h82/**/*.err` lam artifact.
+5. khi fail: upload `${{ runner.temp }}/h82/**/*.err` **va** `*.out` lam artifact
+   (linker MSVC in symbol thieu ra stdout, khong phai stderr).
 
-Lan CI dau tien that bai ngay o buoc cai LLVM (dung van de tren), nen workflow
-da doi sang archive `clang+llvm`. Lan thu hai that bai o buoc CMake vi
-`windows-latest` da chuyen sang VS 2026 va generator `Visual Studio 17 2022`
-khong con: bo `-G` co dinh, de CMake tu chon generator mac dinh. Phan gate thi
-da chay that o local.
+Cac vong sua workflow (moi vong mot commit, chi sua workflow + notes):
+
+1. that bai o buoc cai LLVM: ban LLVM co san chi co CLI tools (muc 2) -> tai
+   archive `clang+llvm` day du;
+2. that bai o buoc CMake: `windows-latest` da chuyen sang VS 2026, generator
+   `Visual Studio 17 2022` khong con -> bo `-G`, de CMake tu chon;
+3. that bai khi compile oracle: source can LLVM 21
+   (`Module::setTargetTriple(Triple)`) -> dung archive 21.1.6;
+4. that bai khi link oracle: `LLVMExports.cmake` cua package ghi cung duong dan
+   DIA SDK -> patch (muc 2);
+5. that bai khi link stage 1 (F2): `LNK2019: unresolved external symbol
+   __imp_RtlGetLastNtStatus` (can `ntdll.lib`). Gate loc `--system-libs` bang
+   cach kiem tra file co trong `lib` cua LLVM hoac trong `$env:LIB`; runner
+   khong set `LIB` (chay ngoai developer prompt) nen `ntdll.lib` bi bo, trong
+   khi may dev co `LIB` nen khong lo ra. Sua: them danh sach lib cua Windows
+   SDK/MSVC (`$sdkLibs`) duoc giu lai du khong tim thay file - clang tu tim
+   chung qua search path no dat cho linker; lib khong ship cua LLVM
+   (`libxml2s.lib`, chi `LLVMWindowsManifest` dung) van bi bo. Sua o ca
+   `bootstrap_smoke.ps1` va `build_object_smoke.ps1`.
+
+Tat ca cac loi tren chi xay ra o moi truong CI: gate chay day du o local
+(`F2 PASS` + parity toan corpus) ca khi `LIB` duoc set lan khi khong.
 
 ## 5. Ket qua
 

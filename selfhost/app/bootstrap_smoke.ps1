@@ -189,6 +189,21 @@ $llvmLibs = @((& $llvmConfig --libs x86) -split '\s+' | Where-Object { $_ -ne ""
 if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs x86 returned nothing" }
 
 $systemArgs = @()
+# `llvm-config --system-libs` lists two kinds of entries on Windows:
+#   * libraries that ship with the Windows SDK / MSVC (`psapi.lib`, `ntdll.lib`,
+#     ...).  clang resolves those through the search paths it sets up for the
+#     linker, so they work even when this script runs outside a developer
+#     prompt and `LIB` is unset (a GitHub runner, for instance) - dropping
+#     `ntdll.lib` there breaks the link with LNK2019 __imp_RtlGetLastNtStatus;
+#   * libraries the LLVM build was configured against but the Windows package
+#     does not ship (LLVM 21.1.6: `libxml2s.lib`, only used by
+#     LLVMWindowsManifest, which `--libs x86` does not ask for).
+# Keep the former, drop the latter.
+$sdkLibs = @("advapi32", "bcrypt", "comdlg32", "crypt32", "dbghelp", "gdi32",
+             "imm32", "iphlpapi", "kernel32", "mpr", "mfuuid", "netapi32",
+             "ntdll", "ole32", "oleacc", "oleaut32", "powrprof", "psapi",
+             "secur32", "setupapi", "shell32", "shlwapi", "user32", "uuid",
+             "version", "wbemuuid", "winhttp", "winmm", "ws2_32", "wsock32")
 foreach ($n in @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ -ne "" })) {
     if ($n -match '\.lib$') {
         $base = $n.Substring(0, $n.Length - 4)
@@ -201,7 +216,7 @@ foreach ($n in @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ 
                 }
             }
         }
-        if (-not $installed) { continue }
+        if (-not $installed -and ($sdkLibs -notcontains $base.ToLowerInvariant())) { continue }
         $systemArgs += ("-l" + $base)
     } else {
         $systemArgs += $n

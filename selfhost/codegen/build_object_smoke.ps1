@@ -162,11 +162,19 @@ function Show-Bytes([byte[]]$b) {
 # ---------------------------------------------------------------------------
 # LLVM libraries + system libraries. `--libs x86` already pulls in core,
 # target, irreader, codegen, asmprinter, ... (the X86 target is required by
-# H6.3). System libs are rewritten to -l<name>; missing ones are skipped.
+# H6.3). System libs are rewritten to -l<name>; missing ones are skipped, except
+# the ones that ship with the Windows SDK / MSVC: clang resolves those through
+# the search paths it gives the linker, so they are available even when this
+# script runs outside a developer prompt and `LIB` is unset.
 # ---------------------------------------------------------------------------
 $llvmLibs = @((& $llvmConfig --libs x86) -split '\s+' | Where-Object { $_ -ne "" })
 if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs x86 returned nothing" }
 
+$sdkLibs = @("advapi32", "bcrypt", "comdlg32", "crypt32", "dbghelp", "gdi32",
+             "imm32", "iphlpapi", "kernel32", "mpr", "mfuuid", "netapi32",
+             "ntdll", "ole32", "oleacc", "oleaut32", "powrprof", "psapi",
+             "secur32", "setupapi", "shell32", "shlwapi", "user32", "uuid",
+             "version", "wbemuuid", "winhttp", "winmm", "ws2_32", "wsock32")
 $systemArgs = @()
 $systemNames = @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ -ne "" })
 foreach ($n in $systemNames) {
@@ -181,7 +189,7 @@ foreach ($n in $systemNames) {
                 }
             }
         }
-        if (-not $installed) {
+        if (-not $installed -and ($sdkLibs -notcontains $base.ToLowerInvariant())) {
             Write-Output ("      note: skipping missing system lib " + $n)
             continue
         }
