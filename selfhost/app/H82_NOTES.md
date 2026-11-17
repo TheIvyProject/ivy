@@ -109,9 +109,10 @@ Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
    `LLVM-<ver>-win64.exe`) chi co CLI tools - khong headers, khong libs,
    khong `llvm-config`, khong CMake package
    (actions/runner-images#12565), nen job tai archive
-   `clang+llvm-20.1.8-x86_64-pc-windows-msvc.tar.xz` (896 MB), giai nen vao
-   `C:\LLVM`, them `bin` vao `PATH` (oracle goi `clang++` khi link) va dat
-   `LLVM_ROOT`;
+   `clang+llvm-21.1.6-x86_64-pc-windows-msvc.tar.xz` (899 MB) - dung phien ban
+   LLVM ma source dang viet (`Module::setTargetTriple(Triple)` chi co o 21.x,
+   khong co o 20.x) - giai nen vao `C:\LLVM`, them `bin` vao `PATH` (oracle goi
+   `clang++` khi link) va dat `LLVM_ROOT`;
 3. CMake (generator mac dinh cho VS cai san - runner da chuyen sang VS 2026)
    `-A x64 -DLLVM_DIR=...` build oracle Release (`build/Release/ivy.exe` khong
    duoc commit);

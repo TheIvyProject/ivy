@@ -36,7 +36,9 @@ jobs:
           # package (actions/runner-images#12565).  The full distribution is the
           # `clang+llvm` archive, which is what CMakeLists.txt and
           # `bootstrap_smoke.ps1` (`llvm-config --libs x86 --system-libs`) need.
-          $ver = "20.1.8"
+          # The version must match the LLVM the sources are written against
+          # (`Module::setTargetTriple(Triple)` exists in 21.x, not in 20.x).
+          $ver = "21.1.6"
           $root = "C:\LLVM"
           $name = "clang+llvm-$ver-x86_64-pc-windows-msvc"
           $prefix = Join-Path $root $name
