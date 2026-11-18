@@ -97,9 +97,18 @@ jobs:
           # Do not hardcode a Visual Studio generator: windows-latest moved to
           # VS 2026 (generator "Visual Studio 18 2026", CMake >= 4.2) in 2026,
           # so let CMake pick its default generator for the installed VS.
+          #
+          # Pin the MSVC toolset to v143 (14.44): the runner's default v145
+          # toolset moved to 14.52 (2026-11-18) and that STL eagerly
+          # instantiates `Expr::Lambda`'s destructor in `interpreter.cpp`, which
+          # trips the `std::unique_ptr<Stmt>` incomplete-type static_assert in
+          # `src/parsing/ast.h` (14.51 and older defer it).  `src/**` is frozen
+          # until H9.9, so pin the toolset instead of touching the source.
           cmake --version | Select-Object -First 1
-          cmake -S . -B build -A x64 -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
-          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_GENERATOR:').Line
+          cmake -S . -B build -A x64 -T v143 -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
+          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_GENERATOR(_TOOLSET)?:').Line
+          # Print the resolved toolset so the next runner drift is obvious.
+          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_CXX_COMPILER:').Line
           cmake --build build --config Release --parallel
           if (-not (Test-Path "build\Release\ivy.exe")) {
             throw "oracle was not built"

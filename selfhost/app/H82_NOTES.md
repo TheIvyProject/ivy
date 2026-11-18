@@ -145,6 +145,14 @@ Cac vong sua workflow (moi vong mot commit, chi sua workflow + notes):
    chung qua search path no dat cho linker; lib khong ship cua LLVM
    (`libxml2s.lib`, chi `LLVMWindowsManifest` dung) van bi bo. Sua o ca
    `bootstrap_smoke.ps1` va `build_object_smoke.ps1`.
+6. that bai khi compile oracle (2026-11-18, run `44329867128`): runner nang
+   MSVC tu 14.51.36231 len 14.52.37025; STL 14.52 instantiate eager destructor
+   cua `Expr::Lambda` trong `interpreter.cpp`, nen `std::unique_ptr<Stmt>`
+   (`Stmt` moi chi forward-declare trong `src/parsing/ast.h`) trip
+   `static_assert: can't delete an incomplete type`. `src/**` bi dong bang cho
+   H9 nen ghim toolset `-T v143` (MSVC 14.44, co san side-by-side tren image)
+   thay vi sua source. Log cua green run 14.51 de doi chieu:
+   `VC/Tools/MSVC/14.51.36231`.
 
 Tat ca cac loi tren chi xay ra o moi truong CI: gate chay day du o local
 (`F2 PASS` + parity toan corpus) ca khi `LIB` duoc set lan khi khong.
