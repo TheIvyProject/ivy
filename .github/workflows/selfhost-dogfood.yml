@@ -108,7 +108,9 @@ jobs:
           cmake -S . -B build -A x64 -T v143 -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
           (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_GENERATOR(_TOOLSET)?:').Line
           # Print the resolved toolset so the next runner drift is obvious.
-          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_CXX_COMPILER:').Line
+          # (CMake 4.x keeps the compiler path in CMakeFiles/<ver>/, not the cache.)
+          (Select-String -Path build\CMakeFiles\*\CMakeCXXCompiler.cmake `
+            -Pattern '^set\(CMAKE_CXX_COMPILER(_VERSION)? ').Line
           cmake --build build --config Release --parallel
           if (-not (Test-Path "build\Release\ivy.exe")) {
             throw "oracle was not built"
