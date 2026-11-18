@@ -802,13 +802,61 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 | H7.3 | `.ivm` read/write | `module_io.cpp` | `parsing/module_io.ivy`, `parsing/ivmdrive.ivy` | module I/O | ✅ `ModuleUnit` (mirror `writeModuleInterface` + `readModuleInterface`): `IvmBuf` serialize dùng chung cho write/dump, `escape`/`unescape`, `deserializeType` (`tpl{}` lồng), reader qualify func + bỏ value enumerator, lỗi bad-magic/truncated/cannot-read/cannot-write khớp oracle; parser thêm export flags + `is_consteval` + enum underlying `int`; `build_ivm_smoke.ps1` PASS 43/43 (8 fixture write byte-identical + dump + oracle-import, 12 interface thật, 4 bad-interface, 3 driver error, 2026-11-15); diagnostics để H7.4 |
 | H7.4 | Diagnostics | `diagnostic.h` | `common/diagnostic.ivy` | err suite | ✅ `Diags` (mirror `Diagnostic`): record + text arena tăng trưởng, `has_error`/`truncate`/`reset`/`release`, 4 printer (stderr/stdout × plain/`std::quoted`); lexer/pp/parser bỏ pool riêng, pp bổ sung đủ diagnostic còn thiếu (directive/conditional/macro arity/paste/depth/`#if expression`), `diag_failed()` thay `hasError()`; driver in đúng stream; `build_diag_smoke.ps1` PASS 52/52 (10 lexer + 33 pp + 4 quoting + 5 stage-stdout), corpus regression 20/20 nhóm, các harness H5–H7 vẫn xanh (2026-11-16) |
 
-### H8/H9 — Bootstrap & Std
+### H8/H9 — Bootstrap, Std & loại bỏ bản C++
 
 | STT | Tính năng | trạng thái |
 |-----|-----------|-----------|
 | H8.1 | `ivy` biên dịch chính nó (F2) | ✅ `app/pipeline.ivy` (tách `Cg` khỏi `cgdrive`; `compile/unit/diag_file/release/import_count/module_object`) + `app/main.ivy` driver hợp nhất (`struct Driver`: `-c` → `ObjEmit`, link mode → `Linker` + D1 module objects + `libivyrt`, unit không `main` ⇒ object, `--llvm` ra stdout/`-o`; IR capture bằng `_open/_dup/_dup2` + `_tempnam`; stub exit 3 cho `--lex/--tokens/-o *.i|*.ii/--ast/--hir/--mir/--run`); `mir.ivy` `MUnit.has_main()`; `codegen.ivy` `Linker.mods_/nmod_/capmod_` + `add_module_object()`; sửa `module_io.ivy` escape tên type gốc (`long\slong`) + `type_raw()` cho return type free function (quirk `module_io.cpp:132`); **stage1→stage2: 18/18 object + 17/17 `.ivm` + exe byte-identical** (`h81/stage2.ps1`, link deterministic `-Wl,/Brepro`); driver parity: 17/17 object compiler, `--llvm` 249/249, `-c` 249/249, link+run 249/249 (2 fixture UB bỏ so output); `cgdiff` 249/249, `cmp_selfhost` 19/19 (2026-11-17) |
 | H8.2 | CI dogfood — output khớp bản C++-built | ✅ `selfhost/dogfood.ps1` (gate: `bootstrap_smoke.ps1 -Stage1File` → F2, rồi `driver_smoke.ps1 -SkipOwn -FullCorpus`) + `.github/workflows/selfhost-dogfood.yml` (windows-latest: choco LLVM → CMake VS17 `-DLLVM_DIR` build oracle → dogfood `-TempRoot RUNNER_TEMP\h82` → upload `*.err` khi fail); `driver_smoke.ps1` thêm `-Corpus/-LinkCorpus/-FullCorpus/-SkipOwn`, mỗi thư mục là một `-I`, tên fixture tương đối so `selfhost\corpus`, chuẩn hóa cả đường dẫn `.ivm` trong stderr; `bootstrap_smoke.ps1` auto-detect LLVM (`-LlvmRoot` → `LLVM_ROOT` → `D:\Cpp\Clang` → `llvm-config` PATH) + `-Stage1File`; sửa 12 fixture lệch: parser chain C-style exclusive (`pp/define_obj`), `is_consteval` xuyên HIR→MIR + skip declare/definition (`hir/constexpr`), `move(x)` chỉ pass-through khi không có MIR entry + giữ dấu `-0.0` (`hir/move`), `br label %` rỗng (`mir/cfg`), array param/decay/mangle + unresolved symbol (`hir/template`), `nullptr`→`i8`, `is_fp_ir` theo base spelling, message not-assignable + `emit()` tiếp tục sau lỗi (`hir/type`); **F2 PASS** 18/18 object + 17/17 `.ivm` + EXE identical, `--llvm` 1052/1052, `-c` 1052/1052, link+run 249/249 (2 fixture UB chỉ so link) — **DOGFOOD PASS** (2026-11-17) |
-| H9.1 | Port std/runtime (`libivyrt` + std) sang Ivy | ☐ |
+| H9.1 | Port std/runtime (`libivyrt` + std) sang Ivy | ☐ `lib/ivyrt.c` (41 export `__ivy_*`: `alloc`/`free`, write, `fmt_int`/`fmt_float`/`fmt_bool`, `panic`, `strlen`/`memcpy`/`memset`/`strcmp`/`strdup`, `read_line`, `__ivy_file_*`, `read_file`/`write_file`, 19 hàm math) → `std/rt.ivy` gọi UCRT qua `import c`, giữ nguyên tên symbol + layout `struct __ivy_file`; build `rt.obj` bằng chính `ivy -c` (bỏ `add_library(ivyrt STATIC lib/ivyrt.c)`); `Linker` nhận `rt.obj` thay `ivyrt.lib` (`IVYRT_LIB_PATH` đổi nghĩa) |
+| H9.2 | Nối các mode dump/interp còn stub vào driver | ☐ `app/main.ivy` exit 3 cho `--lex/--tokens/-o *.i\|*.ii/--ast/--hir/--mir/--run`; tách phần dump của `lexdrive/ppdrive/astdrive/hirdrive/mirdrive/interpdrive` thành hàm thư viện để `main.ivy` và các drive dùng chung (không nhân đôi code), `--run` = `interpdrive`; gate: `difftest.ps1`/`interpdiff.ps1` chạy được với `-Driver` là chính `ivy` |
+| H9.3 | Freeze baseline + golden outputs (H0.2) | ☐ tag `0.5-baseline`; `selfhost/freeze_golden.ps1` sinh `selfhost/golden/` từ oracle: 1052 fixture × (`--lex`, `--tokens`, `--ast`, `--hir`, `--mir`, `--llvm`, `-c` + SHA-256 object/`.ivm`, diagnostics, exit) + 249 link/run (exit/stdout/stderr, 2 fixture UB chỉ so link, side-effect `a.txt`/`b.txt` của 188/189) + `manifest.txt` (version oracle + SHA-256); gate: toàn bộ gate xanh khi **không có** `build/Release/ivy.exe` |
+| H9.4 | Self-link: compiler tự link chính nó | ☐ `Linker::link_text` hiện chỉ `"<linker>" "<obj>" -o "<exe>" ["ivyrt"]` → thêm passthrough `-l`/`-L`/`-Wl,` và mode `--self-link` đọc `llvm-config --libs x86 --system-libs` từ `LLVM_ROOT` (lọc `$sdkLibs` như `bootstrap_smoke.ps1`), thêm `/Brepro`; gate: exe do `ivy --self-link` byte-identical với exe do harness link, F2 vẫn PASS |
+| H9.5 | Bootstrap không cần oracle (`selfhost/build.ps1`) | ☐ stage 0 = binary Ivy build sẵn (`selfhost/bootstrap/ivy-stage0.exe` + SHA-256, sinh từ stage1 của H8.1), stage0 → stage1 → stage2 (F2: stage1 == stage2) rồi chạy corpus; không tham chiếu `build/Release/ivy.exe`; gate: máy chỉ có LLVM + MSVC CRT/SDK build + `DOGFOOD PASS` mà không build `src/**` |
+| H9.6 | CI chỉ dùng Ivy | ☐ `selfhost-dogfood.yml`: bỏ bước CMake/oracle, thêm stage0 + golden; giữ LLVM 21.1.6 + patch DIA SDK; cache archive LLVM (hiện tải lại ~900 MB mỗi lần); gate: xanh trên `windows-latest`, thời gian job không tăng |
+| H9.7 | Reproducible build + versioning | ☐ `/Brepro` cho mọi link, object không chứa đường dẫn tuyệt đối, 2 build ở 2 thư mục khác nhau → exe identical; `ivy --version` (version + git hash, thêm mới nếu oracle chưa có); stage0/release công bố kèm SHA-256 |
+| H9.8 | `import cpp` parity (tuỳ chọn, không cần cho self-build) | ☐ oracle compile header C++ bằng `clang++ -x c++ -c` lúc link (`codegen.cpp:2870-2912`), selfhost `Linker` chưa có → port để chương trình người dùng dùng `import cpp` giống oracle; gate: `build_link_smoke.ps1` thêm fixture `import cpp` khớp oracle |
+| H9.9 | Xoá bản C++ khỏi sản phẩm | ☐ sau khi H9.5/H9.6 xanh: xoá `src/**` (25 file), `CMakeLists.txt`, mọi tham chiếu `build/Release/ivy.exe` trong `selfhost/*.ps1`/docs; cập nhật `README.md`, `PLAN.md`, `docs/`, `selfhost/app/H9_NOTES.md`; gate: checkout **không có** `src/` vẫn build + test xanh |
+
+#### H9 — thứ tự thực hiện & tiêu chí thoát
+
+Mục tiêu: `ivy` (do Ivy build) là trình biên dịch duy nhất trong repo; `src/**`
+chỉ còn là lịch sử ở tag `0.5-baseline` và bị xoá ở bước cuối. Ba giai đoạn:
+
+1. **Không cần oracle để kiểm chứng**: H9.2 (mode dump) + H9.3 (golden) —
+   từ đây mọi gate so với output đã đóng băng, không chạy binary C++.
+2. **Không cần oracle để build**: H9.1 (runtime) + H9.4 (self-link) + H9.5
+   (stage0) — chuỗi build chỉ gồm binary Ivy + linker (`clang`/`link.exe`) +
+   LLVM static libs.
+3. **Không còn C++**: H9.6 (CI) + H9.7 (reproducible) + H9.9 (xoá) — H9.8 làm
+   song song nếu cần parity đầy đủ cho người dùng.
+
+Tiêu chí thoát (định nghĩa "đã loại bỏ hoàn toàn"):
+
+- `selfhost/build.ps1` chỉ gọi binary Ivy và linker; không `cmake`, không
+  `cl.exe`/`clang++` biên dịch mã của compiler.
+- CI xanh trên checkout **không có** `src/` (job không build C++).
+- `ivy` tự build chính nó ≥ 2 stage (stage1 == stage2; stage2 == stage3 nếu
+  chạy thêm) và pass golden 1052 fixture + link/run 249.
+- Không còn file `.c`/`.cpp` nào tham gia build (trừ fixture và `import cpp`
+  của chương trình người dùng).
+
+#### H10 — bug-compat & sửa sau self-host
+
+Bản Ivy **cố ý** tái hiện bug của oracle C++ để gate byte-identical (kể cả
+bug làm sai kết quả chương trình). Toàn bộ danh sách — kèm ID, vị trí oracle,
+vị trí port, bằng chứng, input **cấm** dùng trong corpus và các bug port
+**không** tái hiện — nằm ở
+[selfhost/ORACLE_BUGS.md](file:///d:/project/Ivy/ivyc/selfhost/ORACLE_BUGS.md).
+
+Quy ước:
+
+- **Không sửa lẻ** một bug-compat khi còn gate so với oracle (gate 1–3). Sửa
+  khi H9.3 (golden) + H9.5 (Ivy-only bootstrap) + H9.9 (xoá C++) đã xong.
+- Mỗi fix là một mục `H10.x`, sửa code **và** cập nhật `selfhost/golden/` trong
+  cùng commit (golden là output đã đóng băng của oracle, fix sẽ làm nó đỏ).
+- Mỗi bug có fixture hồi quy riêng; ưu tiên crash/UB → sai kết quả → sai
+  chẩn đoán → chỉ ảnh hưởng dump.
 
 ---
 
@@ -817,14 +865,19 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 1. **Per-feature**: oracle diff xanh trên corpus của tính năng.
 2. **Per-layer**: `selfhost/difftest.ps1` end-to-end **byte-identical** với
    baseline C++ trên suite đầy đủ.
-3. **Final**: H8 — binary do Ivy-built biên dịch chính nó và pass toàn suite.
+3. **Final (H8)**: binary do Ivy-built biên dịch chính nó và pass toàn suite.
+4. **Golden (H9.3)**: mọi gate ở trên chạy được với `selfhost/golden/` khi
+   `build/Release/ivy.exe` **không tồn tại**.
+5. **Ivy-only bootstrap (H9.5)**: stage0 (binary Ivy, không phải oracle) →
+   stage1 → stage2, F2 (stage1 == stage2), không `cmake`/`cl.exe`.
+6. **Không C++ (H9.9)**: checkout **không có** `src/**` vẫn build + pass gate 4–5.
 
 ---
 
 ## 7. Điều kiện tiên quyết & H0
 
 - [x] **H0.1** Gỡ hoàn toàn `bootstrap/` (đã xóa, không lưu trữ)
-- [ ] **H0.2** Freeze baseline C++ tại tag `0.5-baseline`
+- [ ] **H0.2** Freeze baseline C++ tại tag `0.5-baseline` (điều kiện của H9.3). Tag này là mốc tham chiếu **cuối cùng** của `src/**`; mọi bug-compat trong [selfhost/ORACLE_BUGS.md](file:///d:/project/Ivy/ivyc/selfhost/ORACLE_BUGS.md) được đóng băng đúng theo hành vi của tag này, và chỉ được sửa ở H10.
 - [x] **H0.3** Oracle cho lexer: tái dùng `ivy --lex` + lọc theo token-kind ở harness (chưa cần `extern "C"` shim)
 - [x] **H0.4** Dựng `selfhost/difftest.ps1` + `selfhost/corpus/`
 - [ ] **H0.5** Test suite baseline xanh
@@ -836,6 +889,8 @@ Mỗi tính năng: `C++ ref` ↔ `selfhost file` ↔ `oracle mode` ↔ `corpus` 
 - [OLD_PLAN1.md](file:///d:/project/Ivy/ivyc/OLD_PLAN1.md) — kế hoạch 0.1 (vừa bị thay)
 - [OLD_PLAN0.md](file:///d:/project/Ivy/ivyc/OLD_PLAN0.md) — kế hoạch gốc (Giai đoạn 1–10)
 - [spec/ivy05.md](file:///d:/project/Ivy/ivyc/spec/ivy05.md) — spec ngôn ngữ 0.5 (chuẩn port)
+- [selfhost/ORACLE_BUGS.md](file:///d:/project/Ivy/ivyc/selfhost/ORACLE_BUGS.md) — bug/quirk oracle phải giữ (bug-compat), input cấm, gap; fix ở H10
+- [DEPRECATION_TRACKING.md](file:///d:/project/Ivy/ivyc/DEPRECATION_TRACKING.md) — entry 8: compiler C++ → Ivy
 - [README.md](file:///d:/project/Ivy/ivyc/README.md)
 
 **Kiến trúc pipeline (không đổi)**:
