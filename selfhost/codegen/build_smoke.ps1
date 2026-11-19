@@ -144,17 +144,17 @@ Write-Output "[3/4] linking smoke executable ..."
 $llvmLibs = @((& $llvmConfig --libs x86) -split '\s+' | Where-Object { $_ -ne "" })
 if ($llvmLibs.Count -eq 0) { Fail "llvm-config --libs x86 returned nothing" }
 
-# H6.4: codegen.obj also contains Linker (getenv/_popen/system/remove plus the
-# __ivy_* helpers), so the smoke links against lib/ivyrt.c like the other
-# selfhost drivers.
-$ivyrtObj = Join-Path $runDir "ivyrt.obj"
-$rOut = Join-Path $runDir "ivyrt.build.out"
-$rErr = Join-Path $runDir "ivyrt.build.err"
-$rArgs = @("-c", (Join-Path $repo "lib\ivyrt.c"), "-I", (Join-Path $repo "lib"),
+# H6.4/H9.1: codegen.obj also contains Linker (getenv/_popen/system/remove plus
+# the __ivy_* helpers), so the smoke links against the Ivy runtime.  The runtime
+# is std/rt.ivy now; the oracle compiles it to rt.obj.
+$ivyrtObj = Join-Path $runDir "rt.obj"
+$rOut = Join-Path $runDir "rt.build.out"
+$rErr = Join-Path $runDir "rt.build.err"
+$rArgs = @("-c", (Join-Path $repo "std\rt.ivy"), "-I", (Join-Path $repo "std"),
            "-o", $ivyrtObj)
-$code = Invoke-Separate $clang $rArgs $rOut $rErr
+$code = Invoke-Separate $ivy $rArgs $rOut $rErr
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $ivyrtObj)) {
-    Show-Tool-Error "ivyrt" $rOut $rErr
+    Show-Tool-Error "rt" $rOut $rErr
     Fail ("runtime compile failed (exit " + $code + ")")
 }
 

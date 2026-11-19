@@ -120,9 +120,9 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 
 | ID | Loại | Triệu chứng | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|---|
-| **R1** | A | `__ivy_fmt_float` dùng `_gcvt(v, 15)` nên `2.0` in thành `"2."` (mất chữ số thập phân) | `lib/ivyrt.c:71-82` | `lib/ivyrt.c` (giữ tới H9.1 → `std/rt.ivy`) | `MIR_NOTES.md` §11.8 |
-| **R2** | A | `__ivy_fmt_int`/`__ivy_fmt_float` trả con trỏ tới **static buffer dùng chung**, bị ghi đè ở lần gọi kế tiếp | `lib/ivyrt.c:61-63`, `:65-69` | `lib/ivyrt.c` (→ H9.1) | `lib/ivyrt.c` comment |
-| **R3** | ghi chú | `_gcvt` được chọn vì `snprintf("%g", dbl)` hỏng ABI varargs double dưới LLJIT trên Windows x64. Khi port sang Ivy phải giữ **cùng output byte** | `lib/ivyrt.c:74-77` | `lib/ivyrt.c` (→ H9.1) | `lib/ivyrt.c` comment |
+| **R1** | A | `__ivy_fmt_float` dùng `_gcvt(v, 15)` nên `2.0` in thành `"2."` (mất chữ số thập phân) | `lib/ivyrt.c:71-82` | `std/rt.ivy` `__ivy_fmt_float` (H9.1) | `MIR_NOTES.md` §11.8 |
+| **R2** | A → **B** | `__ivy_fmt_int`/`__ivy_fmt_float` trả con trỏ tới **static buffer dùng chung**, bị ghi đè ở lần gọi kế tiếp | `lib/ivyrt.c:61-63`, `:65-69` | `std/rt.ivy` (H9.1) cấp **buffer mới** mỗi lần gọi → **không** tái hiện (subset không có static); xem §3 `B-R2` | `lib/ivyrt.c` comment |
+| **R3** | ghi chú | `_gcvt` được chọn vì `snprintf("%g", dbl)` hỏng ABI varargs double dưới LLJIT trên Windows x64. Khi port sang Ivy phải giữ **cùng output byte** | `lib/ivyrt.c:74-77` | `std/rt.ivy` `__ivy_fmt_float` (H9.1) giữ `_gcvt` | `lib/ivyrt.c` comment |
 
 ### 1.6 Interpreter
 
@@ -249,6 +249,7 @@ trong corpus (xem §4).
 | **B-P5** | `lifetime<$a> template<...> fn` consume `<` **hai lần** → parse error (`parser.cpp:789` + `:1649`) | `parser.ivy` `parse_template_params` chỉ consume `<` một lần → **parse đúng** | Port không tái hiện double-`<`; corpus **không** đặt `lifetime<...>` trên template function (`LIFETIME_NOTES.md` §8.4) |
 | **B-C3** | `&<biến local kiểu struct>` làm oracle **crash** `0xC0000005` | `emitter.ivy` `lower_unary` ≈L2564: nếu không thấy slot, `fail("internal: address-of is not in the variable table")` | Port báo lỗi sạch, không crash; corpus tránh mẫu này (`MIR_NOTES.md` §11.7, `PLAN.md` L719) |
 | **B-C19** | Record local sống qua call → machine code hỏng | Port **không** viết code theo pattern này; không tái hiện | Bug machine-code, không lộ ở IR; corpus H5.1 không có mẫu |
+| **B-R2** | `__ivy_fmt_int`/`__ivy_fmt_float` trả con trỏ vào **static buffer dùng chung** (`lib/ivyrt.c:61-69`); hai kết quả giữ lại cùng lúc sẽ thấy cùng nội dung | `std/rt.ivy` (H9.1) `malloc` buffer mới mỗi lần gọi → hai kết quả độc lập, nhưng **mỗi lần format là một lần cấp phát không được free** (codegen sinh ra truyền thẳng kết quả cho `_write`) | Ivy subset **không có** biến file-scope/`static` local nên không thể tái hiện buffer dùng chung. Khác biệt chỉ lộ khi caller giữ ≥ 2 kết quả, hoặc khi chương trình format trong vòng lặp dài (rò rỉ ~32/64 B mỗi lần). Không fixture nào trong corpus làm vậy; follow-up: arena/scratch buffer trong runtime hoặc để codegen tự giữ buffer (H10) |
 
 ---
 

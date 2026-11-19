@@ -19,22 +19,13 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 # We patched LLVMExports.cmake directly to point at the VS18 copy
 # (2.3 MB, valid). See git history / session notes for details.
 
-# C5: Ivy runtime static library (libivyrt).
-# Written in C (bootstrap).  Contains the __ivy_* runtime symbols
-# (allocator, I/O, panic).  Linked by default into every Ivy
-# executable; the linker drops unused symbols from the archive.
-add_library(ivyrt STATIC lib/ivyrt.c)
-target_include_directories(ivyrt PUBLIC lib)
-if(MSVC)
-    target_compile_options(ivyrt PRIVATE /W4)
-else()
-    target_compile_options(ivyrt PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-# Expose the built archive path to ivy via a compile definition so
-# linkExecutable() can find libivyrt.lib / libivyrt.a at runtime.
-# The generator expression $<TARGET_FILE:ivyrt> is evaluated by the
-# build system at compile time of ivy, baking the absolute path.
-# (Applied after add_executable below — target must exist first.)
+# H9.1: the Ivy runtime is Ivy source now (std/rt.ivy, ported from
+# lib/ivyrt.c).  The oracle compiles it into a single COFF object,
+# `build/rt.obj`, which replaces the `libivyrt` static archive.  It is
+# linked by default into every Ivy executable; the linker drops unused
+# sections from the object.  The command is declared after the `ivy`
+# target because it runs that compiler.
+set(IVYRT_OBJ "${CMAKE_BINARY_DIR}/rt.obj")
 
 add_executable(ivy
     src/app/main.cpp
@@ -50,9 +41,18 @@ add_executable(ivy
 
 target_include_directories(ivy PRIVATE src ${LLVM_INCLUDE_DIRS})
 
-# C5: Bake the absolute path to the built libivyrt archive into ivy.
+add_custom_command(
+    OUTPUT "${IVYRT_OBJ}"
+    COMMAND "$<TARGET_FILE:ivy>" -c "${CMAKE_SOURCE_DIR}/std/rt.ivy"
+            -I "${CMAKE_SOURCE_DIR}/std" -o "${IVYRT_OBJ}"
+    DEPENDS ivy "${CMAKE_SOURCE_DIR}/std/rt.ivy"
+    COMMENT "Compiling std/rt.ivy -> rt.obj"
+    VERBATIM)
+add_custom_target(ivyrt ALL DEPENDS "${IVYRT_OBJ}")
+
+# H9.1: Bake the absolute path to the runtime object into ivy.
 target_compile_definitions(ivy PRIVATE
-    IVYRT_LIB_PATH="$<TARGET_FILE:ivyrt>")
+    IVYRT_LIB_PATH="${IVYRT_OBJ}")
 
 # Suppress LLVM's C-style warnings when compiling our code.
 target_compile_definitions(ivy PRIVATE ${LLVM_DEFINITIONS})

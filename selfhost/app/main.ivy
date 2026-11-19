@@ -23,8 +23,9 @@
 //     also writes the `.ivm`), then
 //       - `-c`: IR text -> `codegen::ObjEmit` -> native object;
 //       - link mode: IR text -> `codegen::Linker` (with the D1 module objects
-//         and libivyrt) -> native executable; a module interface unit (no
-//         `main`) falls back to an object file, like main.cpp:1367-1397;
+//         and the H9.1 `rt.obj` runtime) -> native executable; a module
+//         interface unit (no `main`) falls back to an object file, like
+//         main.cpp:1367-1397;
 //       - `--llvm`: IR text to stdout or to `-o`.
 //
 // The IR text is produced by `Emitter`, which writes to host stdout.  The two
@@ -278,9 +279,10 @@ struct Driver {
     // --- runtime library lookup --------------------------------------------
 
     // The oracle bakes `IVYRT_LIB_PATH` into the compiler at build time
-    // (CMakeLists.txt:53-55).  The selfhost build cannot do that, so look at
+    // (CMakeLists.txt).  The selfhost build cannot do that, so look at
     // `IVYRT_LIB_PATH` first and then next to the running executable
-    // (argv[0]).  Returns an owned string; "" means "link without a runtime".
+    // (argv[0]).  H9.1: the runtime is `rt.obj`, built from std/rt.ivy.
+    // Returns an owned string; "" means "link without a runtime".
     char* find_ivyrt(char* argv0) {
         unsafe {
             char* env = getenv("IVYRT_LIB_PATH");
@@ -293,13 +295,7 @@ struct Driver {
                 return r;
             }
             char* dir = this.dir_of(argv0);
-            char* cand = this.join_path(dir, "ivyrt.lib", "");
-            if (this.file_exists(cand)) {
-                __ivy_free(dir);
-                return cand;
-            }
-            __ivy_free(cand);
-            cand = this.join_path(dir, "libivyrt.a", "");
+            char* cand = this.join_path(dir, "rt.obj", "");
             if (this.file_exists(cand)) {
                 __ivy_free(dir);
                 return cand;

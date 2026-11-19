@@ -1,0 +1,521 @@
+// std/rt.ivy — Ivy runtime library (H9.1)
+//
+// Ivy port of `lib/ivyrt.c`.  This translation unit defines the 41
+// `__ivy_*` symbols that the code generator emits calls to; the object
+// produced from it (`rt.obj`) replaces the C static library
+// (`libivyrt`).  The symbol names and the `struct __ivy_file` layout are
+// kept exactly as the C bootstrap defined them, so already-emitted IR
+// links unchanged.
+//
+// ABI note: the Ivy subset rejects raw pointer parameters and raw
+// pointer return types on functions with a body ("requires an unsafe
+// block", and `unsafe` cannot be attached to a signature).  Every
+// pointer-typed ABI slot is therefore spelled `uint64`.  On Win64 a
+// pointer and a `uint64` occupy the same 8-byte integer argument, so
+// the machine-level ABI is identical to the C prototypes in
+// `lib/ivyrt.h`; the casts below are the only places that know about
+// it.
+//
+// The UCRT is reached through `extern "C"` declarations (declarations
+// without a body are exempt from the raw-pointer rule), never through
+// `printf`: raw I/O uses `_write` so the call site owns formatting.
+//
+// Deliberate deviation from `lib/ivyrt.c`: `__ivy_fmt_int` /
+// `__ivy_fmt_float` return a freshly allocated buffer instead of a
+// static one, because the subset has no file-scope variables and no
+// function-local `static`.  Callers consume the result immediately, so
+// the observable text is the same; the cost is one unfreed 32/64-byte
+// block per format (the generated caller hands the pointer straight to
+// `_write`).  See selfhost/ORACLE_BUGS.md (B-R2).
+
+#pragma ivy cnumber
+
+import c <stdlib.h>;
+import c <string.h>;
+import c <stdio.h>;
+import c <io.h>;
+import c <math.h>;
+
+// ── UCRT imports ────────────────────────────────────────────────────
+
+extern "C" void*  malloc(uint64 n);
+extern "C" void   free(void* p);
+extern "C" void   abort();
+extern "C" int32  puts(const char* s);
+
+extern "C" uint64 strlen(const char* s);
+
+extern "C" int32  _write(int32 fd, const void* buf, int32 n);
+extern "C" char*  _gcvt(double value, int32 ndigit, char* buffer);
+
+extern "C" void*  __acrt_iob_func(int32 index);
+
+extern "C" void*  fopen(const char* path, const char* mode);
+extern "C" int32  fclose(void* fp);
+extern "C" uint64 fread(void* buf, uint64 sz, uint64 n, void* fp);
+extern "C" uint64 fwrite(const void* buf, uint64 sz, uint64 n, void* fp);
+extern "C" char*  fgets(char* s, int32 n, void* fp);
+
+extern "C" double sqrt(double x);
+extern "C" double sin(double x);
+extern "C" double cos(double x);
+extern "C" double tan(double x);
+extern "C" double pow(double base, double e);
+extern "C" double floor(double x);
+extern "C" double ceil(double x);
+extern "C" double round(double x);
+extern "C" double trunc(double x);
+extern "C" double exp(double x);
+extern "C" double log(double x);
+extern "C" double log2(double x);
+extern "C" double log10(double x);
+extern "C" double atan(double x);
+extern "C" double asin(double x);
+extern "C" double acos(double x);
+extern "C" double atan2(double y, double x);
+extern "C" double fmod(double a, double b);
+extern "C" double fabs(double x);
+
+// ── Allocator ───────────────────────────────────────────────────────
+
+extern "C" uint64 __ivy_alloc(uint64 n) {
+    unsafe {
+        return (uint64)malloc(n);
+    }
+    return 0;
+}
+
+extern "C" void __ivy_free(uint64 p) {
+    if (p == 0) {
+        return;                 // null-safe, unlike libc free
+    }
+    unsafe {
+        free((void*)p);
+    }
+}
+
+// ── Raw I/O ─────────────────────────────────────────────────────────
+
+extern "C" void __ivy_write_str(int32 fd, uint64 s) {
+    if (s == 0) {
+        return;
+    }
+    unsafe {
+        const char* p = (char*)s;
+        uint64 len = strlen(p);
+        _write(fd, (void*)p, (int32)len);
+    }
+}
+
+extern "C" void __ivy_write_char(int32 fd, char ch) {
+    unsafe {
+        _write(fd, (void*)&ch, 1);
+    }
+}
+
+extern "C" void __ivy_write_newline(int32 fd) {
+    unsafe {
+        char nl = 10;
+        _write(fd, (void*)&nl, 1);
+    }
+}
+
+// ── Format helpers ──────────────────────────────────────────────────
+// `lib/ivyrt.c` returned a pointer into a static scratch buffer.  The
+// subset has no statics, so each call returns a fresh buffer; callers
+// must still consume the result before formatting again (they always
+// do, since the result is passed straight to `_write`).
+
+extern "C" uint64 __ivy_fmt_int(int64 v) {
+    unsafe {
+        char* buf = (char*)malloc(32);
+        if (buf == (char*)0) {
+            return 0;
+        }
+        uint64 u = (uint64)v;
+        bool neg = v < 0;
+        if (neg) {
+            u = 0 - u;          // two's complement magnitude
+        }
+        int32 i = 31;
+        buf[i] = 0;
+        if (u == 0) {
+            i = i - 1;
+            buf[i] = 48;
+        }
+        while (u != 0) {
+            i = i - 1;
+            buf[i] = (char)(48 + (int32)(u % 10));
+            u = u / 10;
+        }
+        if (neg) {
+            i = i - 1;
+            buf[i] = 45;        // '-'
+        }
+        // Slide the digits down to the start of the buffer.
+        int32 k = 0;
+        while (buf[i + k] != 0) {
+            buf[k] = buf[i + k];
+            k = k + 1;
+        }
+        buf[k] = 0;
+        return (uint64)buf;
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_fmt_float(double v) {
+    unsafe {
+        char* buf = (char*)malloc(64);
+        if (buf == (char*)0) {
+            return 0;
+        }
+        // Non-variadic, so it avoids the Windows x64 varargs double ABI
+        // issue that `snprintf("%g", dbl)` has under LLJIT.  15
+        // significant digits is enough for IEEE-754 double, and the
+        // resulting spelling (e.g. "2." for 2.0) is the oracle's.
+        _gcvt(v, 15, buf);
+        return (uint64)buf;
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_fmt_bool(bool b) {
+    if (b) {
+        unsafe {
+            return (uint64)"true";
+        }
+    }
+    unsafe {
+        return (uint64)"false";
+    }
+    return 0;
+}
+
+// ── Panic ───────────────────────────────────────────────────────────
+
+extern "C" void __ivy_panic(uint64 msg, int32 line) {
+    if (msg != 0) {
+        unsafe {
+            puts((char*)msg);
+        }
+    }
+    abort();
+}
+
+// ── String operations ───────────────────────────────────────────────
+
+extern "C" uint64 __ivy_strlen(uint64 s) {
+    if (s == 0) {
+        return 0;
+    }
+    unsafe {
+        return (uint64)strlen((char*)s);
+    }
+    return 0;
+}
+
+extern "C" void __ivy_memcpy(uint64 dst, uint64 src, uint64 n) {
+    // Byte loop rather than libc memcpy, exactly like the C bootstrap:
+    // the buffers must not overlap.
+    unsafe {
+        char* d = (char*)dst;
+        const char* s = (char*)src;
+        uint64 i = 0;
+        while (i < n) {
+            d[i] = s[i];
+            i = i + 1;
+        }
+    }
+}
+
+extern "C" void __ivy_memset(uint64 dst, int32 c, uint64 n) {
+    unsafe {
+        char* d = (char*)dst;
+        char ch = (char)c;
+        uint64 i = 0;
+        while (i < n) {
+            d[i] = ch;
+            i = i + 1;
+        }
+    }
+}
+
+extern "C" int32 __ivy_strcmp(uint64 a, uint64 b) {
+    unsafe {
+        const char* pa = (char*)a;
+        const char* pb = (char*)b;
+        if (pa == (char*)0) { pa = ""; }
+        if (pb == (char*)0) { pb = ""; }
+        // libc strcmp semantics.
+        while (pa[0] != 0 && pa[0] == pb[0]) {
+            pa = pa + 1;
+            pb = pb + 1;
+        }
+        return (int32)(uint8)pa[0] - (int32)(uint8)pb[0];
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_strdup(uint64 s) {
+    if (s == 0) {
+        return 0;
+    }
+    unsafe {
+        const char* p = (char*)s;
+        uint64 len = strlen(p);
+        char* buf = (char*)__ivy_alloc(len + 1);
+        if (buf == (char*)0) {
+            return 0;
+        }
+        __ivy_memcpy((uint64)buf, (uint64)p, len + 1);
+        return (uint64)buf;
+    }
+    return 0;
+}
+
+// ── Stdin ───────────────────────────────────────────────────────────
+
+extern "C" uint64 __ivy_read_line() {
+    unsafe {
+        // The C bootstrap used a 1024-byte stack array.  The subset does
+        // not let an array decay to a pointer at a call site, so the
+        // chunk buffer is heap-allocated and freed on every exit path.
+        char* buf = (char*)__ivy_alloc(1024);
+        if (buf == (char*)0) {
+            return 0;
+        }
+        char* result = (char*)0;
+        uint64 resultLen = 0;
+
+        while (1 != 0) {
+            // `stdin` is a UCRT global variable, which the subset cannot
+            // declare; `__acrt_iob_func(0)` is the function behind it.
+            char* r = fgets(buf, 1024, __acrt_iob_func(0));
+            if (r == (char*)0) {
+                __ivy_free((uint64)buf);
+                return (uint64)result;   // EOF or error
+            }
+            uint64 chunkLen = strlen(buf);
+            bool hasNewline = false;
+            if (chunkLen > 0 && buf[chunkLen - 1] == 10) {
+                hasNewline = true;
+                chunkLen = chunkLen - 1;             // exclude newline
+            }
+
+            uint64 newLen = resultLen + chunkLen;
+            char* newBuf = (char*)__ivy_alloc(newLen + 1);
+            if (newBuf == (char*)0) {
+                __ivy_free((uint64)buf);
+                __ivy_free((uint64)result);
+                return 0;
+            }
+            if (result != (char*)0) {
+                __ivy_memcpy((uint64)newBuf, (uint64)result, resultLen);
+            }
+            __ivy_memcpy((uint64)(newBuf + resultLen), (uint64)buf, chunkLen);
+            newBuf[newLen] = 0;
+            __ivy_free((uint64)result);
+            result = newBuf;
+            resultLen = newLen;
+
+            if (hasNewline) {
+                __ivy_free((uint64)buf);
+                return (uint64)result;
+            }
+            // No newline: the line was longer than the chunk buffer.
+        }
+    }
+    return 0;
+}
+
+// ── File I/O ────────────────────────────────────────────────────────
+
+// Opaque handle; `handle` is really a `FILE*`.  Keeping the struct (and
+// therefore its size and alignment) identical to `lib/ivyrt.h` keeps
+// `__ivy_file*` values interchangeable with the C bootstrap.
+struct __ivy_file {
+    uint64 handle;
+};
+
+extern "C" uint64 __ivy_file_open_read(uint64 path) {
+    if (path == 0) {
+        return 0;
+    }
+    unsafe {
+        void* fp = fopen((char*)path, "rb");
+        if (fp == (void*)0) {
+            return 0;
+        }
+        __ivy_file* f = (__ivy_file*)__ivy_alloc(sizeof(__ivy_file));
+        if (f == (__ivy_file*)0) {
+            fclose(fp);
+            return 0;
+        }
+        f->handle = (uint64)fp;
+        return (uint64)f;
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_file_open_write(uint64 path) {
+    if (path == 0) {
+        return 0;
+    }
+    unsafe {
+        void* fp = fopen((char*)path, "wb");
+        if (fp == (void*)0) {
+            return 0;
+        }
+        __ivy_file* f = (__ivy_file*)__ivy_alloc(sizeof(__ivy_file));
+        if (f == (__ivy_file*)0) {
+            fclose(fp);
+            return 0;
+        }
+        f->handle = (uint64)fp;
+        return (uint64)f;
+    }
+    return 0;
+}
+
+extern "C" void __ivy_file_close(uint64 f) {
+    if (f == 0) {
+        return;
+    }
+    unsafe {
+        __ivy_file* h = (__ivy_file*)f;
+        if (h->handle != 0) {
+            fclose((void*)h->handle);
+        }
+        __ivy_free(f);
+    }
+}
+
+extern "C" uint64 __ivy_file_read(uint64 f, uint64 buf, uint64 n) {
+    if (f == 0 || buf == 0 || n == 0) {
+        return 0;
+    }
+    unsafe {
+        __ivy_file* h = (__ivy_file*)f;
+        if (h->handle == 0) {
+            return 0;
+        }
+        return (uint64)fread((void*)buf, 1, n, (void*)h->handle);
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_file_write(uint64 f, uint64 buf, uint64 n) {
+    if (f == 0 || buf == 0 || n == 0) {
+        return 0;
+    }
+    unsafe {
+        __ivy_file* h = (__ivy_file*)f;
+        if (h->handle == 0) {
+            return 0;
+        }
+        return (uint64)fwrite((void*)buf, 1, n, (void*)h->handle);
+    }
+    return 0;
+}
+
+extern "C" uint64 __ivy_read_file(uint64 path, uint64 outLen) {
+    unsafe {
+        if (outLen != 0) {
+            *((uint64*)outLen) = 0;
+        }
+        if (path == 0) {
+            return 0;
+        }
+        uint64 f = __ivy_file_open_read(path);
+        if (f == 0) {
+            return 0;
+        }
+
+        uint64 cap = 4096;
+        uint64 len = 0;
+        char* buf = (char*)__ivy_alloc(cap);
+        if (buf == (char*)0) {
+            __ivy_file_close(f);
+            return 0;
+        }
+
+        while (1 != 0) {
+            if (len + 4096 > cap) {
+                uint64 newCap = cap * 2;
+                char* newBuf = (char*)__ivy_alloc(newCap);
+                if (newBuf == (char*)0) {
+                    __ivy_free((uint64)buf);
+                    __ivy_file_close(f);
+                    return 0;
+                }
+                __ivy_memcpy((uint64)newBuf, (uint64)buf, len);
+                __ivy_free((uint64)buf);
+                buf = newBuf;
+                cap = newCap;
+            }
+            uint64 got = __ivy_file_read(f, (uint64)(buf + len), 4096);
+            if (got == 0) {
+                break;
+            }
+            len = len + got;
+        }
+        __ivy_file_close(f);
+
+        // NUL-terminate for convenience.
+        if (len >= cap) {
+            char* newBuf = (char*)__ivy_alloc(len + 1);
+            if (newBuf == (char*)0) {
+                __ivy_free((uint64)buf);
+                return 0;
+            }
+            __ivy_memcpy((uint64)newBuf, (uint64)buf, len);
+            __ivy_free((uint64)buf);
+            buf = newBuf;
+        }
+        buf[len] = 0;
+        if (outLen != 0) {
+            *((uint64*)outLen) = len;
+        }
+        return (uint64)buf;
+    }
+    return 0;
+}
+
+extern "C" int32 __ivy_write_file(uint64 path, uint64 buf, uint64 n) {
+    if (path == 0 || buf == 0) {
+        return 1;
+    }
+    uint64 f = __ivy_file_open_write(path);
+    if (f == 0) {
+        return 1;
+    }
+    uint64 wrote = __ivy_file_write(f, buf, n);
+    __ivy_file_close(f);
+    if (wrote == n) {
+        return 0;
+    }
+    return 1;
+}
+
+// ── Math wrappers (D7) ──────────────────────────────────────────────
+
+extern "C" double __ivy_sqrt(double x)  { return sqrt(x); }
+extern "C" double __ivy_sin(double x)   { return sin(x); }
+extern "C" double __ivy_cos(double x)   { return cos(x); }
+extern "C" double __ivy_tan(double x)   { return tan(x); }
+extern "C" double __ivy_pow(double b, double e) { return pow(b, e); }
+extern "C" double __ivy_floor(double x) { return floor(x); }
+extern "C" double __ivy_ceil(double x)  { return ceil(x); }
+extern "C" double __ivy_round(double x) { return round(x); }
+extern "C" double __ivy_trunc(double x) { return trunc(x); }
+extern "C" double __ivy_exp(double x)   { return exp(x); }
+extern "C" double __ivy_log(double x)   { return log(x); }
+extern "C" double __ivy_log2(double x)  { return log2(x); }
+extern "C" double __ivy_log10(double x) { return log10(x); }
+extern "C" double __ivy_atan(double x)  { return atan(x); }
+extern "C" double __ivy_asin(double x)  { return asin(x); }
+extern "C" double __ivy_acos(double x)  { return acos(x); }
+extern "C" double __ivy_atan2(double y, double x) { return atan2(y, x); }
+extern "C" double __ivy_fmod(double a, double b) { return fmod(a, b); }
+extern "C" double __ivy_fabs(double x)  { return fabs(x); }

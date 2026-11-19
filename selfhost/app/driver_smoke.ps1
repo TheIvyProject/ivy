@@ -84,9 +84,27 @@ New-Item -ItemType Directory -Force -Path $modsDir, $oracleExeDir, $selfExeDir, 
 
 $env:TEMP = $runDir
 $env:TMP = $runDir
-# Forward slashes: the form the oracle bakes in at build time, so the linker
-# command lines printed by both sides are identical.
-$env:IVYRT_LIB_PATH = ((Join-Path $repo "build\Release\ivyrt.lib") -replace '\\', '/')
+# Forward slashes: the form the oracle bakes in at build time.  H9.1: the
+# runtime is the object built from std/rt.ivy (CMake's `ivyrt` target writes
+# build/rt.obj).
+$ivyrt = Join-Path $repo "build\rt.obj"
+if (-not (Test-Path -LiteralPath $ivyrt)) {
+    Write-Output ("FAIL: runtime object not found: " + $ivyrt)
+    exit 1
+}
+$env:IVYRT_LIB_PATH = ($ivyrt -replace '\\', '/')
+
+# The oracle binary has the pre-H9.1 archive path baked in (CMake baked
+# `$<TARGET_FILE:ivyrt>`, i.e. `build/Release/ivyrt.lib`); the selfhost driver
+# quotes the H9.1 runtime object it reads from `IVYRT_LIB_PATH`.  The linker
+# command line is printed verbatim in link-failure diagnostics, so normalize
+# both spellings to `<RT>` before comparing (the exe paths get `<OUT>`).
+$rtSpellings = @(($repo.Replace('\', '/') + "/build/Release/ivyrt.lib"),
+                 ($ivyrt -replace '\\', '/'), $ivyrt)
+function Normalize-Rt([string]$text) {
+    foreach ($p in $rtSpellings) { $text = $text.Replace($p, "<RT>") }
+    return $text
+}
 
 function Quote-Arg([string]$s) {
     if ($s -match '[\s"]') { return '"' + ($s -replace '"', '\"') + '"' }
@@ -336,8 +354,8 @@ foreach ($suite in $linkSuites) {
         $sc = Invoke-Separate $Driver @($f.FullName, "-I", $dir, "-o", $sExe) $sOut $sErr
         $ok = ($oc -eq $sc)
         if ($ok) {
-            $a = (Read-Text $oErr).Replace($oracleExeDir, "<OUT>")
-            $b = (Read-Text $sErr).Replace($selfExeDir, "<OUT>")
+            $a = Normalize-Rt ((Read-Text $oErr).Replace($oracleExeDir, "<OUT>"))
+            $b = Normalize-Rt ((Read-Text $sErr).Replace($selfExeDir, "<OUT>"))
             if ($a -ne $b) { $ok = $false }
         }
         if ($ok -and $oc -eq 0) {

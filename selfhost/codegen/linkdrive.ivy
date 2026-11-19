@@ -4,14 +4,15 @@
 //   <path to LLVM IR text>
 //   <path of the executable to produce>
 //   <source path, used only to shape diagnostics like the oracle>
-//   <path to libivyrt (empty line = link without a runtime library)>
+//   <path to the Ivy runtime object (empty line = link without a runtime)>
 // Emits the object next to the executable (`<stem>__tmp.obj`) through
 // codegen::Linker (mirror of CodeGen::linkExecutable in
 // src/codegen/codegen.cpp:2810-3063), then runs the linker.
 //
 // Usage:
 //   ivy.exe selfhost\codegen\linkdrive.ivy -I selfhost\codegen -I std -c -o linkdrive.obj
-//   (then link linkdrive.obj + codegen.obj + lib/ivyrt.c with clang + LLVM libs)
+//   (then link linkdrive.obj + codegen.obj + rt.obj with clang + LLVM libs,
+//    where rt.obj is std/rt.ivy built with `ivy -c`)
 //   linkdrive.exe < paths.txt
 //
 // stdout stays empty on success (the executable is the only output);
@@ -64,9 +65,9 @@ long run() {
             }
         }
 
-        // Fourth line: runtime library path; an empty line (or EOF) means
-        // "link without libivyrt", matching the oracle's `IVYRT_LIB_PATH`
-        // fallback to an empty string.
+        // Fourth line: runtime object path; an empty line (or EOF) means
+        // "link without the Ivy runtime", matching the oracle's
+        // `IVYRT_LIB_PATH` fallback to an empty string.
         char* ivyrt_lib = io::read_line();
         if (ivyrt_lib == (char*) 0) {
             ivyrt_lib = (char*) __ivy_alloc(1);

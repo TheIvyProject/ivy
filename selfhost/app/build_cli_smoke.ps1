@@ -197,15 +197,15 @@ $cliIvm = Join-Path $runDir "cli.ivm"
 if (-not (Test-Path -LiteralPath $cliIvm)) { Fail ("module interface missing: " + $cliIvm) }
 
 # ---------------------------------------------------------------------------
-# [2/6] Build the Ivy runtime.
+# [2/6] Build the Ivy runtime (std/rt.ivy -> rt.obj).
 # ---------------------------------------------------------------------------
 Write-Output "[2/6] building runtime ..."
-$rtObj = Join-Path $runDir "ivyrt.obj"
-$code = Invoke-Separate $clang @("-c", (Join-Path $libDir "ivyrt.c"),
-                                 "-I", $libDir, "-o", $rtObj) "" `
+$rtObj = Join-Path $runDir "rt.obj"
+$code = Invoke-Separate $ivy @("-c", (Join-Path $repo "std\rt.ivy"),
+                               "-I", (Join-Path $repo "std"), "-o", $rtObj) "" `
              (Join-Path $runDir "build_rt.out") (Join-Path $runDir "build_rt.err")
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $rtObj)) {
-    Write-Output ("BUILD FAILED (ivyrt, exit " + $code + ")")
+    Write-Output ("BUILD FAILED (rt, exit " + $code + ")")
     Write-Output (Show-Text (Read-Bytes (Join-Path $runDir "build_rt.err")))
     exit 1
 }

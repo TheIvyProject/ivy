@@ -230,12 +230,12 @@ Build-Mod (Join-Path $parseDir "module_io.ivy") $moduleObj $incs
 Build-Mod (Join-Path $parseDir "ivmdrive.ivy") $driveObj $incs
 
 Write-Output "[2/5] building runtime and linking the driver ..."
-$rtObj = Join-Path $runDir "ivyrt.obj"
-$code = Invoke-Separate $clang @("-c", (Join-Path $libDir "ivyrt.c"),
-                                 "-I", $libDir, "-o", $rtObj) "" `
+$rtObj = Join-Path $runDir "rt.obj"
+$code = Invoke-Separate $ivy @("-c", (Join-Path $repo "std\rt.ivy"),
+                               "-I", (Join-Path $repo "std"), "-o", $rtObj) "" `
              (Join-Path $runDir "build_rt.out") (Join-Path $runDir "build_rt.err")
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $rtObj)) {
-    Write-Output ("BUILD FAILED (ivyrt, exit " + $code + ")")
+    Write-Output ("BUILD FAILED (rt, exit " + $code + ")")
     Write-Output (Show-Text (Read-Bytes (Join-Path $runDir "build_rt.err")))
     exit 1
 }

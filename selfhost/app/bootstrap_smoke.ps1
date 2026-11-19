@@ -2,12 +2,15 @@
 #
 # Stage 0 is the C++-built oracle (`build/Release/ivy.exe`).  It compiles every
 # selfhost module plus `selfhost/app/main.ivy` into a fresh TEMP directory and
-# the resulting objects are linked (clang + LLVM libraries + libivyrt) into the
+# the resulting objects are linked (clang + LLVM libraries + the H9.1 runtime
+# `rt.obj`, built from std/rt.ivy) into the
 # **stage 1** compiler.  Stage 1 then compiles the very same sources into a
 # second directory (**stage 2**).  F2 holds when
 #
 #   * every stage 2 object is byte-identical to the stage 1 object,
-#   * every stage 2 `.ivm` is byte-identical to the stage 1 `.ivm`, and
+#   * every stage 2 `.ivm` is byte-identical to the stage 1 `.ivm`,
+#   * the runtime object stage 1 builds from `std/rt.ivy` is byte-identical to
+#     the one the oracle built at the top of this script (H9.1), and
 #   * the stage 2 executable is byte-identical to the stage 1 executable.
 #
 # The selfhost compiler cannot link an executable by itself (that needs the LLVM
@@ -48,8 +51,6 @@ function Fail([string]$msg) {
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $ivy = Join-Path $repo "build\Release\ivy.exe"
 if (-not (Test-Path -LiteralPath $ivy)) { Fail ("oracle not found: " + $ivy) }
-$ivyrt = Join-Path $repo "build\Release\ivyrt.lib"
-if (-not (Test-Path -LiteralPath $ivyrt)) { Fail ("runtime library not found: " + $ivyrt) }
 
 # Locate the LLVM installation: -LlvmRoot first, then $env:LLVM_ROOT, then the
 # historical D:\Cpp\Clang, then whatever `llvm-config` is on PATH.  The gate in
@@ -101,9 +102,6 @@ New-Item -ItemType Directory -Force -Path $stage1, $stage2 | Out-Null
 # captured IR to a scratch file there).
 $env:TEMP = $runDir
 $env:TMP = $runDir
-# Forward slashes: this is the form the oracle bakes in at build time, so the
-# linker command line matches the oracle's verbatim.
-$env:IVYRT_LIB_PATH = ($ivyrt -replace '\\', '/')
 
 function Quote-Arg([string]$s) {
     if ($s -match '[\s"]') { return '"' + ($s -replace '"', '\"') + '"' }
@@ -153,6 +151,22 @@ function Test-BytesEqual([string]$a, [string]$b) {
 }
 
 # --- the compiler's own sources ------------------------------------------------
+
+# H9.1: build the Ivy runtime (std/rt.ivy -> rt.obj) with the oracle.  The
+# object is linked into both stages and is also what the stage 1 driver uses
+# for `-o` (via IVYRT_LIB_PATH, set right below).
+$ivyrt = Join-Path $runDir "rt.obj"
+$rtOut = Join-Path $runDir "build_rt.out"
+$rtErr = Join-Path $runDir "build_rt.err"
+$rtArgs = @("-c", (Join-Path $repo "std\rt.ivy"),
+            "-I", (Join-Path $repo "std"), "-o", $ivyrt)
+$rtCode = Invoke-Separate $ivy $rtArgs $rtOut $rtErr
+if ($rtCode -ne 0 -or -not (Test-Path -LiteralPath $ivyrt)) {
+    Fail ("runtime build failed (exit " + $rtCode + "); see " + $rtErr)
+}
+# Forward slashes: this is the form the oracle bakes in at build time, so the
+# linker command line matches the oracle's verbatim.
+$env:IVYRT_LIB_PATH = ($ivyrt -replace '\\', '/')
 $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
                 "selfhost\codegen", "selfhost\app", "std")
 $modules = @(
@@ -308,6 +322,24 @@ foreach ($name in $names) {
     }
 }
 if ($fail -ne 0) { Fail "stage 1 and stage 2 disagree" }
+
+# --- 2b. the runtime object, rebuilt by the Ivy compiler ----------------------
+# H9.1: `$ivyrt` was produced by the oracle at the top of this script.  The
+# runtime is ordinary Ivy source now, so stage 1 must reproduce that object
+# byte for byte.
+$rtSelf = Join-Path $stage2 "rt.obj"
+$rtCode = Invoke-Separate $stage1Exe `
+              (@((Join-Path $repo "std\rt.ivy"), "-I", (Join-Path $repo "std"),
+                 "-c", "-o", $rtSelf)) `
+              (Join-Path $stage2 "b_rt.out") (Join-Path $stage2 "b_rt.err")
+if ($rtCode -ne 0 -or -not (Test-Path -LiteralPath $rtSelf)) {
+    Write-Output ("BUILD FAILED (rt, exit " + $rtCode + ")")
+    Get-Content (Join-Path $stage2 "b_rt.err") | Select-Object -First 10
+    exit 1
+}
+$same = Test-BytesEqual $rtSelf $ivyrt
+Write-Output ("      RT  " + "rt.obj".PadRight(14) + $(if ($same) { "identical" } else { "DIFFERENT" }))
+if (-not $same) { Fail "stage 1 rt.obj differs from the oracle rt.obj" }
 
 # --- 3. stage 2 executable ----------------------------------------------------
 Write-Output "[3/3] linking stage 2 ..."

@@ -10,7 +10,8 @@
 //
 // Usage:
 //   ivy.exe selfhost\codegen\objdrive.ivy -I selfhost\codegen -I std -c -o objdrive.obj
-//   (then link objdrive.obj + codegen.obj + lib/ivyrt.c with clang + LLVM libs)
+//   (then link objdrive.obj + codegen.obj + rt.obj with clang + LLVM libs,
+//    where rt.obj is std/rt.ivy built with `ivy -c`)
 //   objdrive.exe < paths.txt
 //
 // stdout stays empty on success (the object file is the only output);

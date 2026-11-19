@@ -66,11 +66,21 @@ $clang = Join-Path $LlvmRoot "bin\clang.exe"
 $llvmConfig = Join-Path $LlvmRoot "bin\llvm-config.exe"
 $llvmLib = Join-Path $LlvmRoot "lib"
 
-# The oracle bakes IVYRT_LIB_PATH at CMake configure time; on this checkout the
-# value is the forward-slash spelling below. `linkdrive` receives the same
-# string so the failure diagnostics are byte-identical.
+# The oracle bakes IVYRT_LIB_PATH at CMake configure time (the pre-H9.1
+# archive `build/Release/ivyrt.lib`); `linkdrive` receives the H9.1 runtime
+# object.  H9.1: the runtime is std/rt.ivy built to build/rt.obj.
 if ($IvyrtLib -eq "") {
-    $IvyrtLib = $repo.Replace('\', '/') + "/build/Release/ivyrt.lib"
+    $IvyrtLib = $repo.Replace('\', '/') + "/build/rt.obj"
+}
+
+# Link-failure diagnostics print the linker command line verbatim, including
+# the runtime path.  The two binaries were built with different runtime
+# spellings, so normalize both to `<RT>` before comparing the bytes.
+$rtSpellings = @(($repo.Replace('\', '/') + "/build/Release/ivyrt.lib"),
+                 ($IvyrtLib -replace '\\', '/'), $IvyrtLib)
+function Normalize-Rt([string]$text) {
+    foreach ($p in $rtSpellings) { $text = $text.Replace($p, "<RT>") }
+    return $text
 }
 
 function Fail([string]$message) {
@@ -81,7 +91,7 @@ function Fail([string]$message) {
 if (-not (Test-Path -LiteralPath $ivy)) { Fail ("oracle not found: " + $ivy) }
 if (-not (Test-Path -LiteralPath $clang)) { Fail ("clang not found: " + $clang) }
 if (-not (Test-Path -LiteralPath $llvmConfig)) { Fail ("llvm-config not found: " + $llvmConfig) }
-if (-not (Test-Path -LiteralPath $IvyrtLib)) { Fail ("runtime archive not found: " + $IvyrtLib) }
+if (-not (Test-Path -LiteralPath $IvyrtLib)) { Fail ("runtime object not found: " + $IvyrtLib) }
 
 $tempBase = $TempRoot
 if ($tempBase -eq "") { $tempBase = [System.IO.Path]::GetTempPath() }
@@ -294,17 +304,17 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $linkdriveObj)) {
 }
 
 # ---------------------------------------------------------------------------
-# [3/6] Compile lib/ivyrt.c and link linkdrive.exe.
+# [3/6] Build the Ivy runtime (std/rt.ivy -> rt.obj) and link linkdrive.exe.
 # ---------------------------------------------------------------------------
 Write-Output "[3/6] linking linker driver ..."
-$ivyrtObj = Join-Path $runDir "ivyrt.obj"
-$rOut = Join-Path $runDir "build_ivyrt.out"
-$rErr = Join-Path $runDir "build_ivyrt.err"
-$rArgs = @("-c", (Join-Path $repo "lib\ivyrt.c"), "-I", (Join-Path $repo "lib"),
+$ivyrtObj = Join-Path $runDir "rt.obj"
+$rOut = Join-Path $runDir "build_rt.out"
+$rErr = Join-Path $runDir "build_rt.err"
+$rArgs = @("-c", (Join-Path $repo "std\rt.ivy"), "-I", (Join-Path $repo "std"),
            "-o", $ivyrtObj)
-$code = Invoke-Separate $clang $rArgs "" $rOut $rErr
+$code = Invoke-Separate $ivy $rArgs "" $rOut $rErr
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $ivyrtObj)) {
-    Write-Output ("BUILD FAILED (ivyrt, exit " + $code + ")")
+    Write-Output ("BUILD FAILED (rt, exit " + $code + ")")
     if (Test-Path -LiteralPath $rErr) { Write-Output ([System.IO.File]::ReadAllText($rErr)) }
     exit 1
 }
@@ -474,8 +484,11 @@ if (Test-Path -LiteralPath $negSrc) {
     $sNegTmp = Test-Path -LiteralPath $negObj
     Remove-Item Env:\IVY_LINKER -ErrorAction SilentlyContinue
 
-    $diagOk = Test-BytesEqual ([System.IO.File]::ReadAllBytes($oNegErr)) `
-                              ([System.IO.File]::ReadAllBytes($sNegErr))
+    $oNegText = Normalize-Rt ([System.Text.Encoding]::GetEncoding(28591).GetString(
+        [System.IO.File]::ReadAllBytes($oNegErr)))
+    $sNegText = Normalize-Rt ([System.Text.Encoding]::GetEncoding(28591).GetString(
+        [System.IO.File]::ReadAllBytes($sNegErr)))
+    $diagOk = ($oNegText -eq $sNegText)
     if ($negCg -eq 0 -and $oNegCode -eq 1 -and $sNegCode -eq 1 -and
         $oNegTmp -and $sNegTmp -and $diagOk) {
         Write-Output ("PASS link-failure diagnostics (" + $NegativeFile +
@@ -486,11 +499,8 @@ if (Test-Path -LiteralPath $negSrc) {
                       " oracle=" + $oNegCode + " self=" + $sNegCode +
                       " oracle_tmp=" + $oNegTmp + " self_tmp=" + $sNegTmp + ")")
         if (-not $diagOk) {
-            Write-Output ("     stderr diff at byte " +
-                (First-Diff ([System.IO.File]::ReadAllBytes($oNegErr)) `
-                            ([System.IO.File]::ReadAllBytes($sNegErr))))
-            Write-Output ("     oracle stderr: " + (Show-Bytes ([System.IO.File]::ReadAllBytes($oNegErr))))
-            Write-Output ("     self stderr:   " + (Show-Bytes ([System.IO.File]::ReadAllBytes($sNegErr))))
+            Write-Output ("     oracle stderr: " + $oNegText)
+            Write-Output ("     self stderr:   " + $sNegText)
         }
         $negFail = $negFail + 1
     }

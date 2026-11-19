@@ -5,7 +5,7 @@
 #
 #   source -> selfhost frontend/emitter (cgdrive) -> IR text
 #          -> selfhost ObjEmit (objdrive)          -> COFF object
-#          -> clang + lib/ivyrt.c                  -> native executable
+#          -> clang + std/rt.ivy (rt.obj)          -> native executable
 #          -> run                                  -> stdout/exit status
 #
 # For every fixture in -Dir the harness also runs the oracle twice
@@ -16,7 +16,8 @@
 # text and configure the host TargetMachine with the same settings.
 #
 # Then, for the files listed in -SmokeFiles, the harness links the selfhost
-# object with lib/ivyrt.c, runs it, and compares stdout/stderr/exit status
+# object with the H9.1 runtime (`rt.obj`, built from std/rt.ivy), runs it, and
+# compares stdout/stderr/exit status
 # against the oracle-built executable (`ivy -o`). This is the "link smoke".
 #
 # Every artefact (.obj/.ivm/.exe) is written under a fresh per-run directory
@@ -282,17 +283,17 @@ if ($code -ne 0 -or -not (Test-Path -LiteralPath $objdriveObj)) {
 }
 
 # ---------------------------------------------------------------------------
-# [3/6] Compile lib/ivyrt.c and link objdrive.exe.
+# [3/6] Build the Ivy runtime (std/rt.ivy -> rt.obj) and link objdrive.exe.
 # ---------------------------------------------------------------------------
 Write-Output "[3/6] linking object-emission driver ..."
-$ivyrtObj = Join-Path $runDir "ivyrt.obj"
-$rOut = Join-Path $runDir "build_ivyrt.out"
-$rErr = Join-Path $runDir "build_ivyrt.err"
-$rArgs = @("-c", (Join-Path $repo "lib\ivyrt.c"), "-I", (Join-Path $repo "lib"),
+$ivyrtObj = Join-Path $runDir "rt.obj"
+$rOut = Join-Path $runDir "build_rt.out"
+$rErr = Join-Path $runDir "build_rt.err"
+$rArgs = @("-c", (Join-Path $repo "std\rt.ivy"), "-I", (Join-Path $repo "std"),
            "-o", $ivyrtObj)
-$code = Invoke-Separate $clang $rArgs "" $rOut $rErr
+$code = Invoke-Separate $ivy $rArgs "" $rOut $rErr
 if ($code -ne 0 -or -not (Test-Path -LiteralPath $ivyrtObj)) {
-    Write-Output ("BUILD FAILED (ivyrt, exit " + $code + ")")
+    Write-Output ("BUILD FAILED (rt, exit " + $code + ")")
     if (Test-Path -LiteralPath $rErr) { Write-Output ([System.IO.File]::ReadAllText($rErr)) }
     exit 1
 }
@@ -450,7 +451,7 @@ foreach ($f in $files) {
 }
 
 # ---------------------------------------------------------------------------
-# [6/6] Link smoke: selfhost object + libivyrt -> exe, run, compare with the
+# [6/6] Link smoke: selfhost object + rt.obj -> exe, run, compare with the
 # oracle-built executable (`ivy -o`).
 # ---------------------------------------------------------------------------
 Write-Output "[6/6] link smoke ..."
