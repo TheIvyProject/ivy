@@ -136,3 +136,126 @@ doan van so byte-exact.
   yet", exit 3) cung da bi H8.1 thay the. H9.1 chi sua buoc build runtime
   trong 3 file do (`ivy -c std/rt.ivy` thay `clang lib/ivyrt.c`) de khong con
   tham chieu file se bi xoa o H9.9; re-base (hoac xoa) chung thuoc H9.3/H9.6.
+
+# H9.2 - Driver: noi cac mode dump va interpreter
+
+## 1. Pham vi
+
+`selfhost/app/main.ivy` truoc H9.2 tra `3` (kem chan doan "dispatch is not
+ported yet") cho `--lex`, `--tokens`, `-o *.i|*.ii`, `--ast`, `--hir`,
+`--mir` va `--run`. H9.2 noi tat ca vao driver that, dung **thu tu stage cua
+oracle** (`src/app/main.cpp`):
+
+| Thu tu | Stage | Mode | Nguon in |
+|---|---|---|---|
+| 1 | lexer | `--lex` | `TokenPrinter` tren `Lexer.tokens()` |
+| 2 | preprocessor | `-o *.i\|*.ii` | `Preprocessor.reconstruct_source()` |
+| 3 | preprocessor | `--tokens` | `TokenPrinter` tren `Preprocessor.output()` |
+| 4 | import scan + parser + merge + splice + `.ivm` | | |
+| 5 | (truoc HIR) | `--ast` | `AstDumper` (`ast.ivy`) |
+| 6 | HIR | | |
+| 7 | (truoc MIR) | `--hir` | `HirDumper` (`hir.ivy`) |
+| 8 | MIR | | |
+| 9 | (sau MIR) | `--mir`, `--run` | `MirDumper` (`mir.ivy`), `InterpRunner` (`interpreter.ivy`) |
+
+Diem quan trong: `--ast` phai in **truoc** khi build HIR, `--hir` truoc khi
+build MIR; neu tang sau co chan doan thi dump cua tang truoc **van phai in
+roi moi** `exit 1`. `Cg.compile()` cu return 1 ngay sau chan doan HIR/MIR nen
+khong tai hien duoc thu tu nay - vi vay H9.2 tach no thanh tung stage.
+
+## 2. Khong tao module moi
+
+Bon printer va runner duoc dat ngay trong module model tuong ung
+(`ast.ivy`, `hir.ivy`, `mir.ivy`, `preprocessor.ivy`, `interpreter.ivy`) thay
+vi module moi, de:
+
+- khong phai sua danh sach module cua 7 harness;
+- khong nhan doi code: cac `*drive.ivy` gio chi con phan doc file roi goi
+  cung struct ma driver that dung.
+
+Moi printer la `export struct` vi subset **cam raw pointer o tham so/return
+cua free function co body**, nhung **method cua struct duoc phep**; cac field
+giu con tro toi pool cua parser/HIR/MIR.
+
+## 3. Thay doi theo file
+
+| File | Thay doi |
+|---|---|
+| `parsing/ast.ivy` | `export struct AstDumper` (nguyen van `struct Dumper` cua `astdrive.ivy`) |
+| `hir/hir.ivy` | `export struct HirDumper` (nguyen van `HDumper`) |
+| `mir/mir.ivy` | `export struct MirDumper` (nguyen van `MirDumper`) |
+| `parsing/preprocessor.ivy` | `reconstruct_source()` + `export struct TokenPrinter` (thay `Printer`/`kind_is_eof` cua `ppdrive`) |
+| `mir/interpreter.ivy` | `export struct InterpRunner` (`exec(MUnit, char*)` -> exit code, `setup_failed`) |
+| `app/pipeline.ivy` | `Cg.lex_stage/pp_stage/parse_stage/hir_stage/mir_stage`; `compile()` = chuoi stage (giu chu ky cho `cgdrive`); `dump_lex/dump_tokens/dump_ast/dump_hir/dump_mir/write_preprocessed`; field `content_` |
+| `app/main.ivy` | dispatch theo bang o muc 1; bo hai stub `exit 3` |
+| `parsing/ppdrive.ivy` | dung `TokenPrinter`, them `println` sau moi file (xem 4.3) |
+| `parsing/astdrive.ivy`, `hir/hirdrive.ivy`, `mir/mirdrive.ivy`, `mir/interpdrive.ivy` | xoa struct da chuyen, doi ten, goi struct cua module |
+| `app/bootstrap_smoke.ps1`, `app/driver_smoke.ps1` | them `interpreter` vao danh sach module (`main.ivy` import no) |
+
+## 4. Chi tiet can luu y
+
+1. **`--lex` khong chay preprocessor**; `--tokens` va `-o *.i|*.ii` chay
+   preprocessor nhung **khong** import scan/parse; `-o *.i` dung truoc
+   `--tokens` (oracle `main.cpp:894-913`).
+2. **eof khong co newline**: oracle in `line:col<TAB>eof` roi `break` truoc
+   `newline`. `TokenPrinter.show()` vi vay `return` ngay tai eof. Ban cu
+   (`Lexer.emit_eof`/`Printer`) in them `\n`; difftest so theo dong nen khong
+   bat, nhung `ivy --lex`/`--tokens` that phai khong co newline (da kiem
+   chung byte-exact).
+3. **`ppdrive` can newline giua cac file**: khi chay nhieu file qua stdin,
+   `ppdrive` in them `io::println("")` sau `show()` de khong dinh dong cua
+   file sau vao `eof` cua file truoc; CLI that khong in them.
+4. **`-o *.i|*.ii` la CRLF**: oracle ghi bang `std::ofstream` o text mode,
+   Windows doi moi `\n` thanh `\r\n`. `reconstruct_source()` tra LF (giong
+   chuoi oracle), `Cg.write_preprocessed()` doi sang CRLF truoc
+   `io::write_file`. `reconstruct_source()` chen `\n` toi `t.line`, mot space
+   giua token cung dong, va mot `\n` cuoi.
+5. **`--run`**: `InterpRunner.exec()` sao chep `MUnit` len heap 256 byte
+   (`&mu` bi tu choi) roi `call_by_name(muptr, "main", -1, 0)`, in
+   stdout/stderr cua chuong trinh, in chan doan runtime (`fname:line:col:
+   error: ...`), roi tra `r.status` / `1` / `read_int` / `0` nhu
+   `main.cpp:1325-1338`. `setup()` that bai khong co trong oracle: driver in
+   `ivy: error: cannot initialize the interpreter` va tra 1 (`setup_failed`).
+6. **Thu tu in cua `--run`**: oracle in stdout/stderr ngay khi chuong trinh
+   chay, chan doan sau khi ket thuc; ban port buffer roi in theo dung thu tu
+   do (stdout, stderr, chan doan).
+
+## 5. Harness
+
+- `selfhost/difftest.ps1`:
+  - `-DriverExe <path>`: bo buoc build module/driver, chay **chinh**
+    `ivy_selfhost.exe` moi file mot process (cung cach thu voi oracle) va so
+    **ca exit code**;
+  - `-Recurse`: lay fixture ca trong thu muc con (corpus duoc chia nhom);
+  - `-TempRoot`: thu muc scratch (module `.obj`/`.ivm` build vao day, khong
+    con ghi vao repo);
+  - `-Kinds all` giu nguyen nghia "so toan bo dong".
+- `selfhost/interpdiff.ps1`: `-DriverExe <path>` chay `--run <file>` moi
+  fixture, khong build `interpdrive`.
+- `selfhost/dogfood.ps1`: `-Dumps` them buoc 3/3 chay 5 lan `difftest
+  -DriverExe` (lexer/pp/parser/hir/mir) va `interpdiff -DriverExe`.
+- Bug harness da gap: PowerShell **khong phan biet hoa/thuong** ten bien, nen
+  `$DriverExe` (param) va `$driverExe` (duong dan interpdrive) la **cung mot
+  bien**; doi bien cuc bo thanh `$port`.
+
+## 6. Ket qua
+
+| Kiem tra | Ket qua |
+|---|---|
+| `difftest -DriverExe --lex` (46 fixture lexer) | PASS 46/46, stdout+stderr+exit byte-exact |
+| `difftest -DriverExe --tokens` (105 fixture pp) | PASS 105/105 |
+| `-o *.i` tren 105 fixture pp | PASS 105/105 file byte-identical (ke ca CRLF); `.ii` kiem tra rieng: identical |
+| `difftest -DriverExe --ast` (111 fixture parser) | PASS 111/111 |
+| `difftest -DriverExe --hir` (425 fixture hir) | PASS 425/425 |
+| `difftest -DriverExe --mir` (93 fixture mir) | PASS 93/93 |
+| `interpdiff -DriverExe` (23 fixture interp) | PASS 23/23 (stdout/stderr/exit byte-exact) |
+| 6 feature driver cu (lexdrive/ppdrive/astdrive/hirdrive/mirdrive/interpdrive) | build lai OK; chay lai harness goc: 10/10 pp, 13/13 ast, 124/124 hir, 75/75 mir, 10/10 lex, interpdiff 23/23 |
+| `selfhost/dogfood.ps1 -Dumps` | **DOGFOOD PASS**: F2 19/19 object + 18/18 `.ivm` + `rt.obj` + EXE identical (them module `interpreter`); `--llvm` 1052/1052, `-c` 1052/1052, link+run 249/249; dump/interp: 46/46 + 105/105 + 111/111 + 425/425 + 93/93 + 23/23 |
+
+## 7. Con lai
+
+- `--run` setup failure la **deviation** (oracle khong co duong nay); ghi o
+  day, khong phai bug-compat.
+- `difftest`/`interpdiff` van can oracle cho che do so truc tiep; H9.3 thay
+  bang `selfhost/golden/` de gate khong can `build/Release/ivy.exe`.
+- Cac harness H7.x da hong tu H8.1 (xem H9.1 muc 8) van chua duoc re-base.

@@ -15,6 +15,10 @@
 #   powershell -NoProfile -File selfhost/interpdiff.ps1
 #   powershell -NoProfile -File selfhost/interpdiff.ps1 -Dir selfhost/corpus/interp
 #   powershell -NoProfile -File selfhost/interpdiff.ps1 -TempRoot C:\scratch\h54
+#   powershell -NoProfile -File selfhost/interpdiff.ps1 -DriverExe <path>\ivy_selfhost.exe
+#
+# H9.2: -DriverExe runs the real CLI driver (`selfhost/app/main.ivy`) with
+# `--run <file>` per fixture instead of building interpdrive.
 #
 # -TempRoot is the PARENT directory for a per-run scratch directory; when it is
 # empty the platform temp directory is used. The run directory becomes the
@@ -24,7 +28,10 @@
 
 param(
     [string]$Dir = "selfhost/corpus/interp",
-    [string]$TempRoot = ""
+    [string]$TempRoot = "",
+    # H9.2: run the real CLI driver (`selfhost/app/main.ivy`) per fixture with
+    # `--run`; the modules and interpdrive are then NOT built.
+    [string]$DriverExe = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -115,51 +122,57 @@ function Show-Bytes([byte[]]$b) {
     return [BitConverter]::ToString($b)
 }
 
-# 1. Build the selfhost modules + driver in the fresh run directory.
-Write-Output "[1/4] building selfhost interpreter driver ..."
-$moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir", "std")
-$inc = @("-I", $runDir)
-foreach ($md in $moduleDirs) { $inc += @("-I", (Join-Path $repo $md)) }
+# 1. Build the selfhost modules + driver in the fresh run directory (skipped
+# when -DriverExe supplies the real CLI driver).
+if ($DriverExe -ne "") {
+    $port = (Resolve-Path -LiteralPath $DriverExe).Path
+    Write-Output ("[1/4] using prebuilt driver: " + $port)
+} else {
+    Write-Output "[1/4] building selfhost interpreter driver ..."
+    $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir", "std")
+    $inc = @("-I", $runDir)
+    foreach ($md in $moduleDirs) { $inc += @("-I", (Join-Path $repo $md)) }
 
-$modules = @(
-    @("std", "io"),
-    @("selfhost\common", "diagnostic"),
-    @("selfhost\parsing", "token"),
-    @("selfhost\parsing", "lexer"),
-    @("selfhost\parsing", "preprocessor"),
-    @("selfhost\parsing", "ast"),
-    @("selfhost\parsing", "parser"),
-    @("selfhost\hir", "hir"),
-    @("selfhost\hir", "hir_builder"),
-    @("selfhost\mir", "mir"),
-    @("selfhost\mir", "mir_builder"),
-    @("selfhost\mir", "interpreter")
-)
+    $modules = @(
+        @("std", "io"),
+        @("selfhost\common", "diagnostic"),
+        @("selfhost\parsing", "token"),
+        @("selfhost\parsing", "lexer"),
+        @("selfhost\parsing", "preprocessor"),
+        @("selfhost\parsing", "ast"),
+        @("selfhost\parsing", "parser"),
+        @("selfhost\hir", "hir"),
+        @("selfhost\hir", "hir_builder"),
+        @("selfhost\mir", "mir"),
+        @("selfhost\mir", "mir_builder"),
+        @("selfhost\mir", "interpreter")
+    )
 
-foreach ($m in $modules) {
-    $name = $m[1]
-    $src = Join-Path $repo (Join-Path $m[0] ($name + ".ivy"))
-    $obj = Join-Path $runDir ($name + ".obj")
-    $bOut = Join-Path $runDir ("build_" + $name + ".out")
-    $bErr = Join-Path $runDir ("build_" + $name + ".err")
-    $bArgs = @($src) + $inc + @("-c", "-o", $obj)
-    $code = Invoke-Separate $ivy $bArgs "" $bOut $bErr
-    if ($code -ne 0) {
-        Write-Output ("BUILD FAILED (" + $name + ", exit " + $code + ")")
-        if (Test-Path -LiteralPath $bErr) { Write-Output ([System.IO.File]::ReadAllText($bErr)) }
+    foreach ($m in $modules) {
+        $name = $m[1]
+        $src = Join-Path $repo (Join-Path $m[0] ($name + ".ivy"))
+        $obj = Join-Path $runDir ($name + ".obj")
+        $bOut = Join-Path $runDir ("build_" + $name + ".out")
+        $bErr = Join-Path $runDir ("build_" + $name + ".err")
+        $bArgs = @($src) + $inc + @("-c", "-o", $obj)
+        $code = Invoke-Separate $ivy $bArgs "" $bOut $bErr
+        if ($code -ne 0) {
+            Write-Output ("BUILD FAILED (" + $name + ", exit " + $code + ")")
+            if (Test-Path -LiteralPath $bErr) { Write-Output ([System.IO.File]::ReadAllText($bErr)) }
+            exit 1
+        }
+    }
+
+    $port = Join-Path $runDir "interpdrive.exe"
+    $dOut = Join-Path $runDir "build_interpdrive.out"
+    $dErr = Join-Path $runDir "build_interpdrive.err"
+    $dArgs = @((Join-Path $repo "selfhost\mir\interpdrive.ivy")) + $inc + @("-o", $port)
+    $dCode = Invoke-Separate $ivy $dArgs "" $dOut $dErr
+    if ($dCode -ne 0) {
+        Write-Output ("BUILD FAILED (interpdrive, exit " + $dCode + ")")
+        if (Test-Path -LiteralPath $dErr) { Write-Output ([System.IO.File]::ReadAllText($dErr)) }
         exit 1
     }
-}
-
-$driverExe = Join-Path $runDir "interpdrive.exe"
-$dOut = Join-Path $runDir "build_interpdrive.out"
-$dErr = Join-Path $runDir "build_interpdrive.err"
-$dArgs = @((Join-Path $repo "selfhost\mir\interpdrive.ivy")) + $inc + @("-o", $driverExe)
-$dCode = Invoke-Separate $ivy $dArgs "" $dOut $dErr
-if ($dCode -ne 0) {
-    Write-Output ("BUILD FAILED (interpdrive, exit " + $dCode + ")")
-    if (Test-Path -LiteralPath $dErr) { Write-Output ([System.IO.File]::ReadAllText($dErr)) }
-    exit 1
 }
 Write-Output ("      scratch: " + $runDir)
 
@@ -205,10 +218,15 @@ foreach ($f in $files) {
     $oArgs = @("--run", $arg)
     $oracleCode = Invoke-Separate $ivy $oArgs "" $oracleOut $oracleErr
 
-    [System.IO.File]::WriteAllText($driverIn, ($arg + "`n"),
-        (New-Object System.Text.UTF8Encoding($false)))
-    $drvArgs = @()
-    $driverCode = Invoke-Separate $driverExe $drvArgs $driverIn $driverOut $driverErr
+    if ($DriverExe -ne "") {
+        $drvArgs = @("--run", $arg)
+        $driverCode = Invoke-Separate $port $drvArgs "" $driverOut $driverErr
+    } else {
+        [System.IO.File]::WriteAllText($driverIn, ($arg + "`n"),
+            (New-Object System.Text.UTF8Encoding($false)))
+        $drvArgs = @()
+        $driverCode = Invoke-Separate $port $drvArgs $driverIn $driverOut $driverErr
+    }
 
     $obO = [System.IO.File]::ReadAllBytes($oracleOut)
     $obE = [System.IO.File]::ReadAllBytes($oracleErr)

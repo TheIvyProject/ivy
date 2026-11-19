@@ -24,6 +24,13 @@
 #   powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/trivia -Kinds all
 #   powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer/err -Kinds all
 #
+# H9.2: -DriverExe <path>\ivy_selfhost.exe replaces the feature driver with the
+# real CLI (`selfhost/app/main.ivy`): nothing is built, every file runs in its
+# own process with the same capture as the oracle, and the exit status is
+# compared too.  The module list is then irrelevant:
+#   powershell -File selfhost/difftest.ps1 -Dir selfhost/corpus/lexer -Kinds all `
+#     -Oracle --lex -DriverExe <path>\ivy_selfhost.exe
+#
 # Preprocessor features use the post-processing oracle (`--tokens`) and the
 # pp driver:
 #   H2.1 (object-like #define): -Dir selfhost/corpus/pp/define_obj -Kinds all
@@ -159,7 +166,16 @@ param(
     [string]$Modules   = "token,lexer",
     [string]$ModuleDirs = "",
     [string]$DriverDir  = "",
-    [string]$Driver     = "lexdrive"
+    [string]$Driver     = "lexdrive",
+    # H9.2: run the real CLI driver (`selfhost/app/main.ivy`) per file instead
+    # of building a feature driver.  The modules and the driver are then NOT
+    # built; the exit status is compared as well.
+    [string]$DriverExe  = "",
+    # H9.2: also collect fixtures from subdirectories of -Dir.
+    [switch]$Recurse,
+    # H9.2: parent directory for the per-run scratch directory (empty = the
+    # platform temp dir).
+    [string]$TempRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -167,7 +183,12 @@ $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 
 $ivy = Join-Path $repo "build\Release\ivy.exe"
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) "ivydiff_selfhost"
+$tempBase = $TempRoot
+if ($tempBase -eq "") { $tempBase = [System.IO.Path]::GetTempPath() }
+$tmp = Join-Path $tempBase "ivydiff_selfhost"
+# Fresh scratch each run: the module `.ivm` files built here must never be
+# stale leftovers from a previous invocation.
+Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 $port     = Join-Path $tmp "$Driver.exe"
 $list     = Join-Path $tmp "files.txt"
@@ -189,31 +210,40 @@ if (-not (@($Modules.Split(",") | ForEach-Object { $_.Trim() }) -contains "diagn
     $Modules = "diagnostic," + $Modules
 }
 $inc = (($mds | ForEach-Object { "-I `"$_`"" }) -join " ")
+# H9.2: the modules are built into the scratch directory (their `.ivm` lands
+# next to the object), so nothing is written into the repository; the scratch
+# directory is searched first.
+$inc = "-I `"$tmp`" " + $inc
 
 # 1. Build the port modules + driver with the C++ compiler (freshness).
 # Modules are compiled in the listed order so each dependency's .ivm exists
 # before its dependents.
-Write-Output "[1/4] building selfhost modules ..."
-foreach ($m in $Modules.Split(",")) {
-    $m = $m.Trim()
-    if ($m -eq "") { continue }
-    $src = $null
-    foreach ($md in $mds) {
-        $cand = Join-Path $md "$m.ivy"
-        if (Test-Path $cand) { $src = $cand; break }
+if ($DriverExe -ne "") {
+    $port = (Resolve-Path -LiteralPath $DriverExe).Path
+    Write-Output ("[1/4] using prebuilt driver: " + $port)
+} else {
+    Write-Output "[1/4] building selfhost modules ..."
+    foreach ($m in $Modules.Split(",")) {
+        $m = $m.Trim()
+        if ($m -eq "") { continue }
+        $src = $null
+        foreach ($md in $mds) {
+            $cand = Join-Path $md "$m.ivy"
+            if (Test-Path $cand) { $src = $cand; break }
+        }
+        if ($src -eq $null) { Write-Output "BUILD FAILED (${m}: source not found)"; exit 1 }
+        $obj = Join-Path $tmp "$m.obj"
+        cmd /c "`"$ivy`" $inc `"$src`" -c -o `"$obj`" > NUL 2>&1"
+        if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($m)"; exit 1 }
     }
-    if ($src -eq $null) { Write-Output "BUILD FAILED (${m}: source not found)"; exit 1 }
-    $obj = [System.IO.Path]::ChangeExtension($src, ".obj")
-    cmd /c "`"$ivy`" $inc `"$src`" -c -o `"$obj`" > NUL 2>&1"
-    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($m)"; exit 1 }
+    $dsrc = Join-Path $DriverDir "$Driver.ivy"
+    cmd /c "`"$ivy`" $inc `"$dsrc`" -o `"$port`" > NUL 2>&1"
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($Driver)"; exit 1 }
 }
-$dsrc = Join-Path $DriverDir "$Driver.ivy"
-cmd /c "`"$ivy`" $inc `"$dsrc`" -o `"$port`" > NUL 2>&1"
-if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAILED ($Driver)"; exit 1 }
 
 # 2. Corpus file list (relative, forward slashes, sorted).
 Write-Output "[2/4] collecting corpus ..."
-$files = @(Get-ChildItem "$Dir/*.ivy" |
+$files = @(Get-ChildItem "$Dir/*.ivy" -File -Recurse:$Recurse |
     ForEach-Object { $_.FullName.Substring($repo.Length + 1) -replace "\\", "/" } |
     Sort-Object -Unique)
 if ($files.Count -eq 0) { Write-Output "no corpus files in $Dir"; exit 1 }
@@ -291,8 +321,10 @@ function Join-ByteLines($lines) {
 # avoids the next marker gluing onto it.)
 Write-Output "[3/4] running C++ oracle + Ivy port ..."
 $exp = New-Object System.Collections.Generic.List[byte[]]
+$expExits = New-Object System.Collections.Generic.List[string]
 foreach ($f in $files) {
     cmd /c "`"$ivy`" $inc $Oracle `"$f`" > `"$one`" 2>&1"
+    $expExits.Add("$f exit=$LASTEXITCODE")
     $exp.Add([System.Text.Encoding]::ASCII.GetBytes("=== $f ==="))
     foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($one)))) {
         if (Test-KeepBytes $ln $kindSet $allKinds) { $exp.Add($ln) }
@@ -301,11 +333,25 @@ foreach ($f in $files) {
 $expBytes = Join-ByteLines $exp
 [System.IO.File]::WriteAllBytes($expected, $expBytes)
 
-# 3b. Actual: port over stdin (one file per line).
-cmd /c "(type `"$list`" | `"$port`") > `"$actRaw`" 2>&1"
+# 3b. Actual: the port.  With -DriverExe the real CLI driver runs once per
+# file (same capture as the oracle side); otherwise the port reads one path per
+# line from stdin.
 $act = New-Object System.Collections.Generic.List[byte[]]
-foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($actRaw)))) {
-    if (Test-KeepBytes $ln $kindSet $allKinds) { $act.Add($ln) }
+$actExits = New-Object System.Collections.Generic.List[string]
+if ($DriverExe -ne "") {
+    foreach ($f in $files) {
+        cmd /c "`"$port`" $inc $Oracle `"$f`" > `"$one`" 2>&1"
+        $actExits.Add("$f exit=$LASTEXITCODE")
+        $act.Add([System.Text.Encoding]::ASCII.GetBytes("=== $f ==="))
+        foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($one)))) {
+            if (Test-KeepBytes $ln $kindSet $allKinds) { $act.Add($ln) }
+        }
+    }
+} else {
+    cmd /c "(type `"$list`" | `"$port`") > `"$actRaw`" 2>&1"
+    foreach ($ln in (Get-ByteLines ([System.IO.File]::ReadAllBytes($actRaw)))) {
+        if (Test-KeepBytes $ln $kindSet $allKinds) { $act.Add($ln) }
+    }
 }
 $actBytes = Join-ByteLines $act
 [System.IO.File]::WriteAllBytes($actual, $actBytes)
@@ -318,11 +364,24 @@ if ($same) {
         if ($expBytes[$i] -ne $actBytes[$i]) { $same = $false; break }
     }
 }
-if ($same) {
+$exitsSame = $true
+if ($DriverExe -ne "") {
+    if ($expExits.Count -ne $actExits.Count) {
+        $exitsSame = $false
+    } else {
+        for ($i = 0; $i -lt $expExits.Count; $i++) {
+            if ($expExits[$i] -ne $actExits[$i]) {
+                $exitsSame = $false
+                Write-Output ("exit diff: expected " + $expExits[$i] + ", actual " + $actExits[$i])
+            }
+        }
+    }
+}
+if ($same -and $exitsSame) {
     Write-Output ("PASS: identical (filtered) output on " + $files.Count + " files")
     exit 0
 }
-Write-Output "FAIL: outputs differ"
+if (-not $same) { Write-Output "FAIL: outputs differ" } else { Write-Output "FAIL: exit statuses differ" }
 $e = [System.Text.Encoding]::UTF8.GetString($expBytes)
 $a = [System.Text.Encoding]::UTF8.GetString($actBytes)
 $expLines = $e -split "`n"

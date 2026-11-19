@@ -63,6 +63,9 @@ export struct Cg {
     // The diagnostic file name `compile()` settled on (`#line` remapping, or
     // the source path), exposed for the backends' diagnostics.
     char* fname_;
+    // H9.2: the source buffer, needed by the `--lex` dump (the lexer's token
+    // offsets index it).
+    char* content_;
 
     // --- small string helpers ----------------------------------------------
 
@@ -773,37 +776,43 @@ export struct Cg {
         }
     }
 
-    // --- H8.1: the whole frontend -----------------------------------------
+    // --- H8.1/H9.2: the frontend stages ------------------------------------
+    //
+    // The real driver runs these stages in the oracle's order and prints a
+    // dump between them (`--ast` before the HIR build, `--hir` before the MIR
+    // build, ...), so `compile()` below is just the full chain used by the
+    // backends and cgdrive.
 
-    // Runs lexer -> preprocessor -> import pre-scan -> parser -> merge ->
-    // splice -> `.ivm` -> HIR -> MIR. Returns 0 on success and 1 when a
-    // diagnostic was printed. The stage state stays alive until `release()`
-    // so the backends can read the `MUnit` returned by `unit()`.
-    long compile(char* path, char* content, long len, CliPath* includes,
-                 char* out_path) {
-        long result = 1;
+    // 1. Lexer. Diagnostics go to stderr with the quoted path, exactly like
+    // `main.cpp:842-845`.
+    long lex_stage(char* path, char* content, long len) {
+        this.content_ = content;
+        this.lx_.setup(content, len, path);
+        this.lx_.lex_all(len + 16);
+        if (this.lx_.had_error()) {
+            this.lx_.print_diags();
+            return 1;
+        }
+        return 0;
+    }
+
+    // 2. Preprocessor (requires a clean `lex_stage`). Prints its diagnostics
+    // and returns 1 when a non-warning one was reported (`main.cpp:874-892`).
+    long pp_stage(char* path, long len) {
+        long pp_failed = 0;
         unsafe {
-            this.lx_.setup(content, len, path);
-            this.lx_.lex_all(len + 16);
-            if (this.lx_.had_error()) {
-                this.lx_.print_diags();
-                return 1;
-            }
-
             char* fname = path;
-            this.fname_ = path;
             long in_n = this.lx_.token_count();
             long out_cap = in_n * 8 + 256;
-            this.pp_.setup(this.lx_.tokens(), in_n, content, len, path,
+            this.pp_.setup(this.lx_.tokens(), in_n, this.content_, len, path,
                            this.slen(path), out_cap, 1024);
             this.pp_.run();
             if (this.pp_.has_line_file() != 0) {
                 fname = this.pp_.line_file();
-                this.fname_ = fname;
             }
+            this.fname_ = fname;
             long dc = this.pp_.diag_count();
             long di = 0;
-            long pp_failed = 0;
             while (di < dc) {
                 long w = this.pp_.diag_warn(di);
                 if (w == 0) { pp_failed = 1; }
@@ -820,10 +829,15 @@ export struct Cg {
                 io::eprintln("{}", this.pp_.diag_msg(di));
                 di = di + 1;
             }
-            if (pp_failed != 0) {
-                return 1;
-            }
+        }
+        return pp_failed;
+    }
 
+    // 3. Import pre-scan, parser, merge, splice and the `.ivm` write
+    // (`main.cpp:915-1301`). Returns 1 when a diagnostic was printed.
+    long parse_stage(char* path, long len, CliPath* includes, char* out_path) {
+        long result = 1;
+        unsafe {
             this.pa.setup(this.pp_.output(), this.pp_.output_count(),
                           this.pp_.arena(), len);
             this.pa.set_cnumber(this.pp_.cnumber_enabled());
@@ -858,7 +872,7 @@ export struct Cg {
                     long nd = this.pa.diag_count();
                     long k = 0;
                     while (k < nd) {
-                        io::eprint(fname);
+                        io::eprint(this.fname_);
                         io::eprint(":");
                         io::eprint("{}", this.pa.diag_line(k));
                         io::eprint(":");
@@ -880,43 +894,178 @@ export struct Cg {
                     this.pa.is_module_export() != 0) {
                     this.write_ivm(path, out_path);
                 }
-
-                this.hb_.setup(this.pa, this.pp_.output_count());
-                this.hb_.build();
-                long hd = this.hb_.diag_count();
-                long k = 0;
-                while (k < hd) {
-                    io::eprint(fname);
-                    io::eprint(":");
-                    io::eprint("{}", this.hb_.diag_line(k));
-                    io::eprint(":");
-                    io::eprint("{}", this.hb_.diag_col(k));
-                    io::eprintln(": error: {}", this.hb_.diag_msg(k));
-                    k = k + 1;
-                }
-                if (hd == 0) {
-                    HUnit u = this.hb_.unit();
-                    this.mb_.setup(u);
-                    this.mb_.build();
-                    this.has_mb_ = 1;
-                    long md = this.mb_.diag_count();
-                    k = 0;
-                    while (k < md) {
-                        io::eprint(fname);
-                        io::eprint(":");
-                        io::eprint("{}", this.mb_.diag_line(k));
-                        io::eprint(":");
-                        io::eprint("{}", this.mb_.diag_col(k));
-                        io::eprintln(": error: {}", this.mb_.diag_msg(k));
-                        k = k + 1;
-                    }
-                    if (md == 0) {
-                        result = 0;
-                    }
-                }
+                result = 0;
             }
         }
         return result;
+    }
+
+    // 4. HIR build (`main.cpp:1305-1311`).
+    long hir_stage() {
+        long result = 1;
+        unsafe {
+            this.hb_.setup(this.pa, this.pp_.output_count());
+            this.hb_.build();
+            long hd = this.hb_.diag_count();
+            long k = 0;
+            while (k < hd) {
+                io::eprint(this.fname_);
+                io::eprint(":");
+                io::eprint("{}", this.hb_.diag_line(k));
+                io::eprint(":");
+                io::eprint("{}", this.hb_.diag_col(k));
+                io::eprintln(": error: {}", this.hb_.diag_msg(k));
+                k = k + 1;
+            }
+            if (hd == 0) {
+                result = 0;
+            }
+        }
+        return result;
+    }
+
+    // 5. MIR build (`main.cpp:1315-1321`).
+    long mir_stage() {
+        long result = 1;
+        unsafe {
+            HUnit u = this.hb_.unit();
+            this.mb_.setup(u);
+            this.mb_.build();
+            this.has_mb_ = 1;
+            long md = this.mb_.diag_count();
+            long k = 0;
+            while (k < md) {
+                io::eprint(this.fname_);
+                io::eprint(":");
+                io::eprint("{}", this.mb_.diag_line(k));
+                io::eprint(":");
+                io::eprint("{}", this.mb_.diag_col(k));
+                io::eprintln(": error: {}", this.mb_.diag_msg(k));
+                k = k + 1;
+            }
+            if (md == 0) {
+                result = 0;
+            }
+        }
+        return result;
+    }
+
+    // Runs lexer -> preprocessor -> import pre-scan -> parser -> merge ->
+    // splice -> `.ivm` -> HIR -> MIR. Returns 0 on success and 1 when a
+    // diagnostic was printed. The stage state stays alive until `release()`
+    // so the backends can read the `MUnit` returned by `unit()`.
+    long compile(char* path, char* content, long len, CliPath* includes,
+                 char* out_path) {
+        if (this.lex_stage(path, content, len) != 0) { return 1; }
+        if (this.pp_stage(path, len) != 0) { return 1; }
+        if (this.parse_stage(path, len, includes, out_path) != 0) { return 1; }
+        if (this.hir_stage() != 0) { return 1; }
+        if (this.mir_stage() != 0) { return 1; }
+        return 0;
+    }
+
+    // --- H9.2: dumps shared with the differential drivers ------------------
+
+    // `--lex`: the pre-preprocessor token stream (directives visible), with
+    // the lexer's own eof position.
+    void dump_lex() {
+        TokenPrinter tp;
+        tp.out = this.lx_.tokens();
+        tp.n = this.lx_.token_count();
+        tp.src = this.content_;
+        tp.show();
+    }
+
+    // `--tokens`: the post-preprocessor token stream.
+    void dump_tokens() {
+        TokenPrinter tp;
+        tp.out = this.pp_.output();
+        tp.n = this.pp_.output_count();
+        tp.src = this.pp_.arena();
+        tp.show();
+    }
+
+    // `-o *.i|*.ii`: write the reconstructed preprocessed source. Returns 0
+    // on success (the oracle's `std::ofstream` failure path returns 2).
+    long write_preprocessed(char* out_path) {
+        long rc = 1;
+        unsafe {
+            char* text = this.pp_.reconstruct_source();
+            long n = this.slen(text);
+            // The oracle writes the text through a `std::ofstream` in text
+            // mode, which expands every '\n' to CRLF on Windows.
+            long crlf = 0;
+            long i = 0;
+            while (i < n) {
+                if (text[i] == 10) { crlf = crlf + 1; }
+                i = i + 1;
+            }
+            char* out = (char*) __ivy_alloc((unsigned long long) (n + crlf) + 1);
+            long o = 0;
+            i = 0;
+            while (i < n) {
+                char c = text[i];
+                if (c == 10) {
+                    out[o] = 13;
+                    o = o + 1;
+                }
+                out[o] = c;
+                o = o + 1;
+                i = i + 1;
+            }
+            out[o] = 0;
+            int w = io::write_file(out_path, out, o);
+            rc = (long) w;
+            __ivy_free((void*) out);
+            __ivy_free((void*) text);
+        }
+        return rc;
+    }
+
+    // `--ast`: the parser's function pool in declaration order.
+    void dump_ast() {
+        AstDumper d;
+        d.ep = this.pa.exprs();
+        d.sp = this.pa.stmts();
+        d.ca = this.pa.call_args();
+        d.cp = this.pa.cases();
+        d.sbnm = this.pa.sbnms();
+        long n = this.pa.fn_count();
+        long i = 0;
+        while (i < n) {
+            d.emit(this.pa.get_fn(i));
+            i = i + 1;
+        }
+    }
+
+    // `--hir`: the HIR unit's function pool in order.
+    void dump_hir() {
+        HUnit u = this.hb_.unit();
+        HirDumper d;
+        d.fp = u.fns;
+        d.ep = u.exprs;
+        d.sp = u.stmts;
+        d.pp = u.params;
+        d.cp = u.cases;
+        d.ap = u.args;
+        d.ltn = u.ltnames;
+        long i = 0;
+        while (i < u.fn_n) {
+            HFunction f;
+            unsafe {
+                f = d.fp[i];
+            }
+            d.emit(f);
+            i = i + 1;
+        }
+    }
+
+    // `--mir`: the MIR unit's functions in order.
+    void dump_mir() {
+        MUnit mu = this.unit();
+        MirDumper d;
+        d.mu = mu;
+        d.dump_unit();
     }
 
     // The MIR unit built by `compile()`; valid until `release()`.

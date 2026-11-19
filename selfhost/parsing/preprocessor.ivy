@@ -2730,4 +2730,124 @@ export struct Preprocessor {
         }
         this.out_push_raw("eof", 0, 0, 0, 0);
     }
+
+    // H9.2: `-o *.i|*.ii` output, mirroring Preprocessor::reconstructSource()
+    // (src/parsing/preprocessor.cpp:1742-1759): tokens are separated by one
+    // space, a token on a later source line starts a new line, and the text
+    // ends with a final newline.  The caller owns the returned buffer.
+    char* reconstruct_source() {
+        long total = 0;
+        uint32 line = 1;
+        bool at_line_start = true;
+        long i = 0;
+        unsafe {
+            while (i < this.out_n_) {
+                Token t = this.out_[i];
+                if (this.kind_eq(t, "eof")) {
+                    break;
+                }
+                while (line < (uint32) t.line) {
+                    total = total + 1;
+                    line = line + 1;
+                    at_line_start = true;
+                }
+                if (!at_line_start) {
+                    total = total + 1;
+                }
+                total = total + t.len;
+                at_line_start = false;
+                i = i + 1;
+            }
+            total = total + 1;  // the final newline
+            char* r = (char*) __ivy_alloc((unsigned long long) total + 1);
+            long o = 0;
+            line = 1;
+            at_line_start = true;
+            i = 0;
+            while (i < this.out_n_) {
+                Token t = this.out_[i];
+                if (this.kind_eq(t, "eof")) {
+                    break;
+                }
+                while (line < (uint32) t.line) {
+                    r[o] = 10;
+                    o = o + 1;
+                    line = line + 1;
+                    at_line_start = true;
+                }
+                if (!at_line_start) {
+                    r[o] = 32;
+                    o = o + 1;
+                }
+                long k = 0;
+                while (k < t.len) {
+                    r[o] = this.src_[t.off + k];
+                    o = o + 1;
+                    k = k + 1;
+                }
+                at_line_start = false;
+                i = i + 1;
+            }
+            r[o] = 10;
+            o = o + 1;
+            r[o] = 0;
+            return r;
+        }
+        unsafe { return (char*) 0; }
+    }
+};
+
+// --- H9.2: the `--tokens` printer ------------------------------------------
+//
+// Moved from ppdrive.ivy so the real driver (app/main.ivy) and the
+// differential driver share one implementation.  Prints the post-preprocessor
+// token stream exactly like `ivy --tokens`:
+//
+//     line:col<TAB>kind<TAB>'lexeme'
+//
+// The eof token has no lexeme and no trailing newline (the oracle breaks out
+// of its print loop before the newline).
+export struct TokenPrinter {
+    Token* out;
+    long n;
+    char* src;
+
+    bool is_eof(Token t) {
+        unsafe {
+            char* k = t.kind;
+            if (k[0] != 'e') { return false; }
+            if (k[1] != 'o') { return false; }
+            if (k[2] != 'f') { return false; }
+            return k[3] == 0;
+        }
+        return false;
+    }
+
+    void show() {
+        long i = 0;
+        while (i < this.n) {
+            Token t;
+            unsafe {
+                t = this.out[i];
+            }
+            io::print("{}:{}\t", t.line, t.col);
+            io::print(t.kind);
+            if (this.is_eof(t)) {
+                return;
+            }
+            if (t.len > 0) {
+                unsafe {
+                    char* buf = (char*) __ivy_alloc(t.len + 1);
+                    __ivy_memcpy(buf, this.src + t.off, t.len);
+                    buf[t.len] = 0;
+                    io::print("\t'");
+                    io::print("{}", buf);
+                    io::print("'");
+                    __ivy_free(buf);
+                }
+            }
+            io::println("");
+            i = i + 1;
+        }
+    }
 };

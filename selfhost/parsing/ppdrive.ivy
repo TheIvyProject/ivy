@@ -19,53 +19,8 @@ extern "C" void  __ivy_free(void* p);
 extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
 extern "C" unsigned long long __ivy_strlen(const char* s);
 
-bool kind_is_eof(Token t) {
-    unsafe {
-        char* k = t.kind;
-        if (k[0] != 'e') return false;
-        if (k[1] != 'o') return false;
-        if (k[2] != 'f') return false;
-        return k[3] == 0;
-    }
-    return false;
-}
-
-// Free functions cannot take raw-pointer parameters, so the printer is a
-// struct whose fields hold them.
-struct Printer {
-    Token* out;
-    long n;
-    char* src;
-
-    void show() {
-        long i = 0;
-        while (i < this.n) {
-            Token t;
-            unsafe {
-                t = this.out[i];
-            }
-            io::print("{}:{}\t", t.line, t.col);
-            io::print(t.kind);
-            if (kind_is_eof(t)) {
-                io::println("");
-                return;
-            }
-            if (t.len > 0) {
-                io::print("\t'");
-                unsafe {
-                    char* buf = (char*)__ivy_alloc(t.len + 1);
-                    __ivy_memcpy(buf, this.src + t.off, t.len);
-                    buf[t.len] = 0;
-                    io::print(buf);
-                    __ivy_free(buf);
-                }
-                io::print("'");
-            }
-            io::println("");
-            i = i + 1;
-        }
-    }
-};
+// H9.2: the `--tokens` printer is shared with the real driver
+// (`preprocessor.TokenPrinter`), so this driver only feeds it.
 
 void run() {
     while (true) {
@@ -111,11 +66,15 @@ void run() {
                         failed = true;
                     }
                     if (!failed) {
-                        Printer pr;
+                        TokenPrinter pr;
                         pr.out = pp.output();
                         pr.n = pp.output_count();
                         pr.src = pp.arena();
                         pr.show();
+                        // The printer ends at the `eof` token without a newline
+                        // (like `ivy --tokens`); separate the files of a
+                        // multi-file stdin run.
+                        io::println("");
                     }
                     pp.release();
                 }

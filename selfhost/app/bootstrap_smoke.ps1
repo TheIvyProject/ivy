@@ -184,6 +184,7 @@ $modules = @(
     @("selfhost\hir", "hir_builder"),
     @("selfhost\mir", "mir"),
     @("selfhost\mir", "mir_builder"),
+    @("selfhost\mir", "interpreter"),
     @("selfhost\codegen", "emitter"),
     @("selfhost\codegen", "codegen"),
     @("selfhost\app", "pipeline")

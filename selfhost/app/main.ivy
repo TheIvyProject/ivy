@@ -41,9 +41,13 @@
 // is not supported by the HIR builder, so `ObjEmit`/`Linker` are passed by
 // value to the reporting helpers.
 //
-// Still stubbed (exit 3 with an explicit diagnostic): `--lex`, `--tokens`,
-// `-o *.i|*.ii`, `--ast`, `--hir`, `--mir` and `--run`.  None of them is needed
-// to self-host the compiler; the dumps and the interpreter are later tiers.
+// H9.2: the dump/interpreter modes now dispatch through the shared library
+// code (`AstDumper`/`HirDumper`/`MirDumper` in ast/hir/mir, `TokenPrinter`
+// and `reconstruct_source` in preprocessor, `InterpRunner` in interpreter),
+// in the oracle's stage order:
+//   `--lex` (after the lexer), `-o *.i|*.ii` and `--tokens` (after the
+//   preprocessor), `--ast` (before HIR), `--hir` (before MIR), `--mir` and
+//   `--run` (after MIR).
 // `IVY_CLI_DUMP=1` / `IVY_IMPORT_DUMP=1` keep the H7 debug dumps.
 
 #pragma ivy cnumber
@@ -64,6 +68,7 @@ import hir;
 import hir_builder;
 import mir;
 import mir_builder;
+import interpreter;
 import pipeline;
 import emitter;
 import codegen;
@@ -481,13 +486,6 @@ struct Driver {
                 return 0;
             }
 
-            // Modes handled before the import scan that are not ported yet.
-            if (args.show_lex != 0 || args.out_preprocessed() != 0 ||
-                args.show_tokens != 0) {
-                io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H8.1: --lex/--tokens/-o *.i|*.ii)");
-                return 3;
-            }
-
             // run(): open the source (`main.cpp:831-835`).
             char* path = args.file;
             char* content = io::read_file(path);
@@ -498,27 +496,103 @@ struct Driver {
                 return 2;
             }
 
-            // H8.1: lexer -> preprocessor -> imports -> parser -> `.ivm` ->
-            // HIR -> MIR, all in the shared pipeline (`cgdrive` uses the same).
+            long len = (long) __ivy_strlen(content);
             Cg cg;
-            long crc = cg.compile(path, content, (long) __ivy_strlen(content),
-                                  args.includes, args.out_path);
-            if (crc != 0) {
+
+            // main.cpp:838-846: the lexer runs first; its diagnostics abort.
+            if (cg.lex_stage(path, content, len) != 0) {
                 cg.release();
                 __ivy_free(content);
                 return 1;
             }
 
+            // main.cpp:848-860: `--lex` dumps the raw token stream (directives
+            // visible, the lexer's own eof position) and stops.
+            if (args.show_lex != 0) {
+                cg.dump_lex();
+                cg.release();
+                __ivy_free(content);
+                return 0;
+            }
+
+            // main.cpp:869-892: the preprocessor always runs next.
+            if (cg.pp_stage(path, len) != 0) {
+                cg.release();
+                __ivy_free(content);
+                return 1;
+            }
+
+            // main.cpp:894-903: `-o *.i|*.ii` writes the reconstructed source.
+            if (args.out_preprocessed() != 0) {
+                long wrc = cg.write_preprocessed(args.out_path);
+                cg.release();
+                __ivy_free(content);
+                if (wrc != 0) {
+                    io::eprintln("ivy: error: cannot open output file '{}'",
+                                 args.out_path);
+                    return 2;
+                }
+                return 0;
+            }
+
+            // main.cpp:905-913: `--tokens` dumps the post-pp stream.
+            if (args.show_tokens != 0) {
+                cg.dump_tokens();
+                cg.release();
+                __ivy_free(content);
+                return 0;
+            }
+
+            // main.cpp:915-1301: imports, parse, merge, splice, `.ivm`.
+            if (cg.parse_stage(path, len, args.includes, args.out_path) != 0) {
+                cg.release();
+                __ivy_free(content);
+                return 1;
+            }
+
+            // main.cpp:1303: `--ast` is printed before the HIR build.
+            if (args.show_ast != 0) {
+                cg.dump_ast();
+            }
+
+            // main.cpp:1305-1311.
+            if (cg.hir_stage() != 0) {
+                cg.release();
+                __ivy_free(content);
+                return 1;
+            }
+
+            // main.cpp:1313: `--hir` is printed before the MIR build.
+            if (args.show_hir != 0) {
+                cg.dump_hir();
+            }
+
+            // main.cpp:1315-1321.
+            if (cg.mir_stage() != 0) {
+                cg.release();
+                __ivy_free(content);
+                return 1;
+            }
+
+            // main.cpp:1323.
+            if (args.show_mir != 0) {
+                cg.dump_mir();
+            }
+
             MUnit mu = cg.unit();
             char* fname = cg.diag_file();
 
-            // Dumps that are not ported yet (they would run right after MIR).
-            if (args.show_ast != 0 || args.show_hir != 0 || args.show_mir != 0 ||
-                args.do_run != 0) {
-                io::eprintln("ivy: error: selfhost driver dispatch is not ported yet (H8.1: --ast/--hir/--mir/--run)");
+            // main.cpp:1325-1338: `--run` interprets the MIR directly.
+            if (args.do_run != 0) {
+                InterpRunner ir;
+                long rrc = ir.exec(mu, fname);
                 cg.release();
                 __ivy_free(content);
-                return 3;
+                if (ir.setup_failed != 0) {
+                    io::eprintln("ivy: error: cannot initialize the interpreter");
+                    return 1;
+                }
+                return rrc;
             }
 
             if (args.compile_only != 0) {

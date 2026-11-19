@@ -11,8 +11,10 @@
 #      corpus: `--llvm` and `-c` on every fixture (1052 today) and link+run on
 #      the codegen corpus.
 #
-# Only the modes the selfhost driver has ported are compared; the `--lex`,
-# `--ast`, `--hir`, `--mir` and `--run` dumps are not part of the gate yet.
+# Only the modes the selfhost driver has ported are compared; `-Dumps` adds the
+# `--lex`, `--tokens`, `--ast`, `--hir`, `--mir` and `--run` modes (H9.2), which
+# run the real driver against the oracle through `difftest.ps1` and
+# `interpdiff.ps1` (`-DriverExe`).
 #
 # Nothing is written into the repository: every object, `.ivm`, executable and
 # scratch file lives in a per-run directory under -TempRoot (or the platform
@@ -33,6 +35,8 @@ param(
     [string]$LlvmRoot = "",
     [string]$Stage1 = "",
     [switch]$SkipBootstrap,
+    # H9.2: also check the dump and interpreter modes against the oracle.
+    [switch]$Dumps,
     [int]$TimeoutSec = 60
 )
 
@@ -64,15 +68,16 @@ $bootstrap = Join-Path $appDir "bootstrap_smoke.ps1"
 $driverSmoke = Join-Path $appDir "driver_smoke.ps1"
 if (-not (Test-Path -LiteralPath $bootstrap)) { Fail ("missing " + $bootstrap) }
 if (-not (Test-Path -LiteralPath $driverSmoke)) { Fail ("missing " + $driverSmoke) }
+$total = 3
 
 # --- 1. stage 0 builds stage 1 and F2 holds -----------------------------------
 if ($SkipBootstrap) {
     if ($Stage1 -eq "") { Fail "-SkipBootstrap needs -Stage1 <ivy_selfhost.exe>" }
     if (-not (Test-Path -LiteralPath $Stage1)) { Fail ("stage 1 not found: " + $Stage1) }
     $stage1 = (Resolve-Path -LiteralPath $Stage1).Path
-    Write-Output "[1/2] bootstrap: skipped (-SkipBootstrap)"
+    Write-Output "[1/$total] bootstrap: skipped (-SkipBootstrap)"
 } else {
-    Write-Output "[1/2] bootstrap: the oracle builds stage 1, stage 1 rebuilds itself (F2) ..."
+    Write-Output "[1/$total] bootstrap: the oracle builds stage 1, stage 1 rebuilds itself (F2) ..."
     $stage1File = Join-Path $runDir "stage1.txt"
     $bsArgs = @("-NoProfile", "-File", $bootstrap, "-TempRoot", $runDir,
                 "-Stage1File", $stage1File)
@@ -85,12 +90,42 @@ if ($SkipBootstrap) {
 }
 
 # --- 2. the Ivy-built compiler over the whole corpus --------------------------
-Write-Output "[2/2] the Ivy-built compiler vs the oracle over the corpus ..."
+Write-Output "[2/$total] the Ivy-built compiler vs the oracle over the corpus ..."
 $dsArgs = @("-NoProfile", "-File", $driverSmoke, "-Driver", $stage1,
             "-TempRoot", $runDir, "-SkipOwn", "-FullCorpus",
             "-TimeoutSec", "$TimeoutSec")
 & powershell @dsArgs
 if ($LASTEXITCODE -ne 0) { Fail ("dogfood parity broken (exit " + $LASTEXITCODE + ")") }
+
+# --- 3. the dump and interpreter modes (H9.2) --------------------------------
+if (-not $Dumps) {
+    Write-Output "[3/$total] dump/interpreter modes: skipped (pass -Dumps)"
+} else {
+    Write-Output "[3/$total] the dump and interpreter modes vs the oracle ..."
+    $difftest = Join-Path $PSScriptRoot "difftest.ps1"
+    $interpdiff = Join-Path $PSScriptRoot "interpdiff.ps1"
+    # Corpus root, oracle flag, extra -ModuleDirs (the module corpus imports
+    # its siblings).
+    $dumpCases = @(
+        @("selfhost/corpus/lexer",  "--lex",    ""),
+        @("selfhost/corpus/pp",     "--tokens", ""),
+        @("selfhost/corpus/parser", "--ast",    "selfhost/parsing,selfhost/corpus/parser/module"),
+        @("selfhost/corpus/hir",    "--hir",    ""),
+        @("selfhost/corpus/mir",    "--mir",    "")
+    )
+    foreach ($c in $dumpCases) {
+        $dtArgs = @("-NoProfile", "-File", $difftest, "-Dir", $c[0], "-Kinds", "all",
+                    "-Oracle", $c[1], "-Recurse", "-DriverExe", $stage1,
+                    "-TempRoot", $runDir)
+        if ($c[2] -ne "") { $dtArgs += @("-ModuleDirs", $c[2]) }
+        & powershell @dtArgs
+        if ($LASTEXITCODE -ne 0) { Fail ("dump parity broken (" + $c[1] + ", exit " + $LASTEXITCODE + ")") }
+    }
+    $ipArgs = @("-NoProfile", "-File", $interpdiff, "-TempRoot", $runDir,
+                "-DriverExe", $stage1)
+    & powershell @ipArgs
+    if ($LASTEXITCODE -ne 0) { Fail ("interpreter parity broken (exit " + $LASTEXITCODE + ")") }
+}
 
 Write-Output "--- DOGFOOD PASS ---"
 exit 0
