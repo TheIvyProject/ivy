@@ -2023,6 +2023,12 @@ export struct MirBuilder {
         // The `move()` builtin: the result borrows the lifetime of its
         // argument.  Every other call gets the Unknown lifetime (the
         // oracle sets it unconditionally, mir_builder.cpp:603).
+        //
+        // Oracle quirk: mir_builder.cpp assigns `out->lifetime` from the
+        // argument *after* `std::move`-ing it into `call.args`, so the
+        // moved-from unique_ptr is null and the assignment never runs.
+        // The `move()` call therefore keeps the default (None) lifetime,
+        // which is why the MIR dump prints `call : T*` with no `[lt: ...]`.
         this.lt_kind_ = 4;
         this.lt_name_ = "";
         bool is_move = false;
@@ -2030,6 +2036,8 @@ export struct MirBuilder {
             is_move = this.seq(this.ep[idx].sval, "move") && an == 1;
         }
         if (is_move) {
+            // Bug-compat: the call keeps the None lifetime (see above).
+            this.lt_kind_ = 0;
             long ai = -1;
             unsafe {
                 ai = this.mu.args[argstart];
@@ -2062,21 +2070,17 @@ export struct MirBuilder {
                         this.mark_moved_out(reinterpret_cast<const char*>(anm));
                     }
                 }
-                unsafe {
-                    this.lt_kind_ = this.mu.exprs[ai].lt;
-                    if (this.lt_kind_ == 1) {
-                        this.lt_name_ = this.mu.exprs[ai].ltname;
-                    }
-                }
             }
         }
         long i = this.add_expr(11);
         unsafe {
             this.mu.exprs[i].sval = this.ep[idx].sval;
             this.mu.exprs[i].type = this.ep[idx].type;
-            // H6.2y: the virtual-dispatch flag and the vtable slot.
+            // H6.2y: the virtual-dispatch flag, the vtable slot and the
+            // bare method name of a virtual call.
             this.mu.exprs[i].flag = this.ep[idx].flag;
             this.mu.exprs[i].ival = this.ep[idx].ival;
+            this.mu.exprs[i].sval2 = this.ep[idx].msval;
             this.mu.exprs[i].astart = argstart;
             this.mu.exprs[i].an = an;
             this.mu.exprs[i].lt = this.lt_kind_;
@@ -3265,6 +3269,9 @@ export struct MirBuilder {
         unsafe {
             this.mu.fns[fi].lt_start = ltfirst;
             this.mu.fns[fi].lt_n = ltn;
+            // `fn.returnLifetime = hf.returnLifetime` lives in buildFunction in
+            // the oracle, so bodyless functions do not get it.
+            this.mu.fns[fi].return_lifetime = this.hu.fns[fi].return_lifetime;
         }
         // The lifetimes of the parameters: a declared lifetime, else an
         // unknown lifetime for a raw pointer, else none.
@@ -3679,7 +3686,10 @@ export struct MirBuilder {
                 this.mu.fns[fi].name = reinterpret_cast<const char*>(name);
                 this.mu.fns[fi].ret = this.hu.fns[i].ret;
                 this.mu.fns[fi].is_extern_c = externc;
-                this.mu.fns[fi].return_lifetime = reinterpret_cast<const char*>(retlt);
+                // The oracle copies `returnLifetime` in buildFunction, so a
+                // function without a body keeps the empty string (the MIR
+                // dump then omits the `return lifetime:` line).
+                this.mu.fns[fi].return_lifetime = "";
                 this.mu.fns[fi].has_body = body >= 0 ? 1 : 0;
                 this.mu.fns[fi].is_consteval = this.hu.fns[i].is_consteval;
                 this.mu.fns[fi].pstart = this.mu.pa_n;

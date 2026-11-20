@@ -1,0 +1,7 @@
+# mode|fixture|reason - oracle crash records (no reference output).
+hir|selfhost/corpus/codegen/156_struct_partial_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash
+hir|selfhost/corpus/codegen/157_struct_empty_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash
+hir|selfhost/corpus/codegen/160_struct_designated_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash
+mir|selfhost/corpus/codegen/156_struct_partial_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash
+mir|selfhost/corpus/codegen/157_struct_empty_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash
+mir|selfhost/corpus/codegen/160_struct_designated_init.ivy|oracle crash -1073741819 (0xC0000005); port must not crash

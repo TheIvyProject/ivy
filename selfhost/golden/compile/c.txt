@@ -1,0 +1,2446 @@
+@@ selfhost/corpus/codegen/01_return_const.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/02_int_ops.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/03_assign.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/04_if.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/05_while.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/06_for.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/07_ops.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/08_unary_cmp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/09_cast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/10_void.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/100_struct_array_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/101_struct_array_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/102_bool_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/103_print_ref.ivy 209 1
+selfhost/corpus/codegen/103_print_ref.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:19: error: '%tmp.1' defined with type 'i32' but expected 'ptr'
+%tmp.2 = sext ptr %tmp.1 to i64
+                  ^
+
+@@ selfhost/corpus/codegen/104_print_ref_float.ivy 223 1
+selfhost/corpus/codegen/104_print_ref_float.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:20: error: '%tmp.1' defined with type 'double' but expected 'ptr'
+%tmp.2 = fpext ptr %tmp.1 to double
+                   ^
+
+@@ selfhost/corpus/codegen/105_print_ref_char.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/106_enum_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/107_enum_param_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/108_enum_scoped.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/109_enum_scoped_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/11_two_functions.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/110_enum_underlying_i8.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/111_enum_underlying_u16.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/112_enum_underlying_u8.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/113_enum_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/114_enum_struct_field.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/115_enum_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/116_enum_explicit_values.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/117_enum_multi_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/118_enum_in_struct_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/119_enum_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/12_recursion.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/120_enum_scoped_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/121_enum_struct_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/122_enum_scoped_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/123_enum_struct_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/124_enum_param_i8.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/125_enum_unused.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/126_enum_arith.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/127_enum_sizeof.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/128_enum_index.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/129_enum_scoped_underlying.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/13_void_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/130_enum_scoped_underlying_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/131_enum_nested_struct_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/132_enum_two_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/133_enum_float_field.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/134_enum_expr_values.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/135_new_scalar.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/136_new_no_paren.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/137_new_struct.ivy 195 1
+selfhost/corpus/codegen/137_new_struct.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
+store %struct.P 5, ptr %tmp.0
+                ^
+
+@@ selfhost/corpus/codegen/138_new_struct_noparen.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/139_new_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/14_extern_c.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/140_new_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/141_new_float32.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/142_new_expr_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/143_new_multiarg.ivy 197 1
+selfhost/corpus/codegen/143_new_multiarg.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
+store %struct.P 1, ptr %tmp.0
+                ^
+
+@@ selfhost/corpus/codegen/144_delete_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/145_new_in_expr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/146_new_loop.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/147_deref_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/148_addr_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/149_double_deref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/15_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/150_new_single_stmt.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/151_new_struct_pad.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 198 1
+selfhost/corpus/codegen/152_new_struct_i8.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
+store %struct.Q 3, ptr %tmp.0
+                ^
+
+@@ selfhost/corpus/codegen/153_new_nested_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/154_struct_brace_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/155_struct_eq_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/158_struct_float_field_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/159_struct_assign_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/16_nested_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/161_struct_enum_field_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/162_struct_i8_field_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/163_struct_desig_then_pos.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/164_printf_basic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/165_printf_multi.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/166_puts.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/167_extern_ptr_decl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/168_ptr_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/169_ptr_cmp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/17_print_str.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/170_ptr_ret_void.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/171_variadic_zero.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/172_ptr_arith.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/173_decl_only_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/174_overload_count_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/175_cstyle_numeric.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/176_cstyle_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/177_static_cast_numeric.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/178_static_cast_enum_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/179_reinterpret_cast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/18_println_mix.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/180_const_cast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/181_cstyle_precedence.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/182_cstyle_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/183_cstyle_control_flow.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/184_cstyle_unsigned.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 203 1
+selfhost/corpus/codegen/186_ivy_print_explicit.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:17:11: error: use of undefined value '@ivy__print_char'
+call void @ivy__print_char(i8 65)
+          ^
+
+@@ selfhost/corpus/codegen/187_io_read_line.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/188_io_write_file.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/189_io_read_file.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/19_print_int_var.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 203 1
+selfhost/corpus/codegen/190_ivy_print_decl_order.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:16:11: error: use of undefined value '@ivy__print_int'
+call void @ivy__print_int(i32 1)
+          ^
+
+@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/193_ctor_overload.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/194_ctor_agg_bypass.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/195_raii_break.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/196_raii_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/197_dtor_return_temp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/198_dtor_nrvo.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/199_operator_binary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/20_print_format.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/200_operator_unary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/201_operator_index.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/202_operator_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/203_operator_call_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/204_operator_call_multi.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/205_operator_index_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/206_operator_call_result.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/207_template_struct_basic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/208_template_struct_two_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/209_template_struct_method_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/21_eprint.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/210_template_struct_int64.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/211_template_struct_agg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/212_template_struct_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/213_template_struct_assign.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/214_template_struct_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/215_variadic_sizeof.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/217_variadic_fold_sum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/218_variadic_fold_logic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/219_variadic_comma.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/22_string_escape.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/220_variadic_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/221_variadic_empty.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/222_variadic_binary_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/223_structured_binding_two.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/224_structured_binding_three.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/225_structured_binding_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/226_structured_binding_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/227_structured_binding_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/228_range_for_value.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/229_range_for_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/23_array_rw.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/230_range_for_break_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/231_range_for_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/232_range_for_struct_range.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/234_range_for_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/236_inherit_pure_virtual.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/237_inherit_extra_slot.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/238_inherit_virtual_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/239_inherit_multiple.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/24_array_var_index.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/240_inherit_base_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/241_move_scalar.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/242_move_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/243_move_call_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/244_move_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/245_move_pointer.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/246_move_cond.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/247_std_math.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/249_std_vector.ivy 215 1
+selfhost/corpus/codegen/249_std_vector.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:80:20: error: '%tmp.27' defined with type 'i32' but expected 'ptr'
+%tmp.28 = sext ptr %tmp.27 to i64
+                   ^
+
+@@ selfhost/corpus/codegen/25_array_loop.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/26_array_unsafe.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/27_array_compound.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/28_array_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/29_struct_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/30_struct_copy.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/31_struct_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/32_struct_fields.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/33_struct_member_copy.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/34_struct_multi.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/35_struct_inner_block.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/36_struct_copy_write.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/37_struct_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/38_struct_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/39_struct_param_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/40_struct_nested_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/41_struct_arrow_nullptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/42_struct_arrow_read.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/43_struct_arrow_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/44_ref_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/45_ref_swap.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/46_ref_forward.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/47_struct_ref_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/48_ref_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/49_ref_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/50_ref_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/51_ref_local_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/52_ref_call_lhs.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/53_ref_call_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/54_ref_pick.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/55_struct_ref_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/56_ref_call_binary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/57_float_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/58_float_ops.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/59_float_cmp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/60_float_cast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/61_float_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/62_float32.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/63_float_unary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/64_float_literals.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/65_float32_sig.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/66_float_ret.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/67_float_mixed_cmp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/68_struct_float_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/69_struct_float_ret.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/70_float_cond.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/71_float_mangle.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/72_float_compound.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/73_float32_print.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/74_ternary_basic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/75_ternary_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/76_ternary_and.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/77_shortcircuit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/78_shortcircuit_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/79_or_ternary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/80_or_chain.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/81_ternary_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/82_ternary_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/83_ternary_ret.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/84_ternary_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/85_shortcircuit_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/86_switch_basic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/87_switch_expr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/88_switch_nodefault.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/89_switch_default_first.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/90_switch_i8.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/91_switch_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/92_dowhile.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/93_loop_break_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/94_and_if.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/95_float_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/96_float32_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/97_float_array_loop.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/98_struct_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/99_struct_array_copy.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/01_param_lt_leading_form.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/01_param_lt_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/01_param_lt_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/01_param_lt_shared.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/02_lt_list_empty.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/02_lt_list_multiple.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/02_lt_list_single.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/02_lt_list_used_by_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/03_ret_lt_by_value.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/03_ret_lt_leading_form.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/03_ret_lt_ptr_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/03_ret_lt_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/04_legacy_all_forms.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/04_legacy_lt_def.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/04_legacy_lt_def_multi.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/04_legacy_lt_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/04_legacy_lt_ret.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/05_prec_declared_list_native_first.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/05_prec_dup_native_and_legacy.ivy 96 1
+selfhost/corpus/hir/borrow/05_prec_dup_native_and_legacy.ivy:2:1: error: duplicate lifetime 'a'
+@@ selfhost/corpus/hir/borrow/05_prec_empty_list_and_legacy.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/05_prec_param_native_wins.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/05_prec_return_legacy_wins.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/06_dump_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/06_dump_extern_c.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/06_dump_fn_lifetimes_and_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/06_dump_method_param_lt.ivy 115 1
+selfhost/corpus/hir/borrow/06_dump_method_param_lt.ivy:4:15: error: lifetime '$a' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/06_dump_prototype_only.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/06_dump_template_fn.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/borrow/e_01_lt_list_empty_with_param.ivy 120 1
+selfhost/corpus/hir/borrow/e_01_lt_list_empty_with_param.ivy:2:6: error: lifetime '$a' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_01_undeclared_param_lt.ivy 115 1
+selfhost/corpus/hir/borrow/e_01_undeclared_param_lt.ivy:2:6: error: lifetime '$b' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt.ivy 120 1
+selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt.ivy:2:1: error: return lifetime '$b' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt_no_list.ivy 128 1
+selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt_no_list.ivy:1:1: error: return lifetime '$b' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_03_lt_on_byvalue_param.ivy 130 1
+selfhost/corpus/hir/borrow/e_03_lt_on_byvalue_param.ivy:2:6: error: lifetime annotation requires a reference or pointer parameter
+@@ selfhost/corpus/hir/borrow/e_04_legacy_undeclared.ivy 137 1
+selfhost/corpus/hir/borrow/e_04_legacy_undeclared.ivy:2:21: error: [[ivy::lt(b)]]: lifetime 'b' is not declared via [[ivy::lt_def(...)]]
+@@ selfhost/corpus/hir/borrow/e_05_legacy_lt_arity0.ivy 116 1
+selfhost/corpus/hir/borrow/e_05_legacy_lt_arity0.ivy:2:21: error: [[ivy::lt]] expects exactly one lifetime argument
+@@ selfhost/corpus/hir/borrow/e_05_legacy_lt_arity2.ivy 116 1
+selfhost/corpus/hir/borrow/e_05_legacy_lt_arity2.ivy:2:21: error: [[ivy::lt]] expects exactly one lifetime argument
+@@ selfhost/corpus/hir/borrow/e_06_legacy_lt_ret_arity0.ivy 123 1
+selfhost/corpus/hir/borrow/e_06_legacy_lt_ret_arity0.ivy:2:1: error: [[ivy::lt_ret]] expects exactly one lifetime argument
+@@ selfhost/corpus/hir/borrow/e_06_legacy_lt_ret_arity2.ivy 123 1
+selfhost/corpus/hir/borrow/e_06_legacy_lt_ret_arity2.ivy:2:1: error: [[ivy::lt_ret]] expects exactly one lifetime argument
+@@ selfhost/corpus/hir/borrow/e_07_legacy_lt_on_byvalue_param.ivy 130 1
+selfhost/corpus/hir/borrow/e_07_legacy_lt_on_byvalue_param.ivy:2:14: error: [[ivy::lt]] requires a reference or pointer parameter
+@@ selfhost/corpus/hir/borrow/e_08_duplicate_legacy_ltdef.ivy 94 1
+selfhost/corpus/hir/borrow/e_08_duplicate_legacy_ltdef.ivy:2:1: error: duplicate lifetime 'a'
+@@ selfhost/corpus/hir/borrow/e_09_duplicate_native.ivy 90 1
+selfhost/corpus/hir/borrow/e_09_duplicate_native.ivy:1:16: error: duplicate lifetime '$a'
+@@ selfhost/corpus/hir/borrow/e_10_ptr_ret_no_lt.ivy 291 1
+selfhost/corpus/hir/borrow/e_10_ptr_ret_no_lt.ivy:1:1: error: raw pointer return type requires an unsafe block
+selfhost/corpus/hir/borrow/e_10_ptr_ret_no_lt.ivy:1:1: error: function 'f' returns a pointer but has no return lifetime — use `lifetime<$a>` and annotate the return type with $a
+@@ selfhost/corpus/hir/borrow/e_11_diag_order.ivy 341 1
+selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:1: error: return lifetime '$c' is not declared in lifetime<...>
+selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:8: error: lifetime annotation requires a reference or pointer parameter
+selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:20: error: lifetime '$b' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_12_tpl_param_lt_order.ivy 244 1
+selfhost/corpus/hir/borrow/e_12_tpl_param_lt_order.ivy:3:6: error: lifetime annotation requires a reference or pointer parameter
+selfhost/corpus/hir/borrow/e_12_tpl_param_lt_order.ivy:3:23: error: lifetime '$b' is not declared in lifetime<...>
+@@ selfhost/corpus/hir/borrow/e_13_lifetime_then_template.ivy 340 1
+selfhost/corpus/hir/borrow/e_13_lifetime_then_template.ivy:2:10: error: expected '<' to start template parameter list
+selfhost/corpus/hir/borrow/e_13_lifetime_then_template.ivy:2:20: error: expected template parameter name
+selfhost/corpus/hir/borrow/e_13_lifetime_then_template.ivy:5:1: error: expected '>' to close template parameter list
+@@ selfhost/corpus/hir/constexpr/01_sizeof_primitives.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/02_sizeof_ivy_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/03_alignof_primitives.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/04_sizeof_pointer_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/05_sizeof_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/06_sizeof_struct_base.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/07_sizeof_struct_virtual.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/08_sizeof_nested_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/09_sizeof_alias.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/10_sizeof_in_expr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/11_sizeof_empty_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/12_sizeof_struct_alignment.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/13_sizeof_struct_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/14_sizeof_struct_two_bases.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/15_sizeof_struct_virtual_base.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/16_float_literal_rendering.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/17_enum_value_binary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/20_constexpr_call_int.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/21_constexpr_call_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/22_constexpr_call_float.ivy 210 1
+selfhost/corpus/hir/constexpr/22_constexpr_call_float.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:14: error: invalid operand type for instruction
+%tmp.2 = mul double %tmp.1, 0.500000
+             ^
+
+@@ selfhost/corpus/hir/constexpr/22b_constexpr_call_float_values.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/23_constexpr_call_no_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/24_constexpr_call_nonconst_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/25_constexpr_call_before_def.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/26_constexpr_call_body_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/27_constexpr_call_local_decl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/28_constexpr_call_if.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/29_constexpr_call_ternary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/30_consteval_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/31_constexpr_call_enum_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/32_constexpr_call_char_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/33_constexpr_call_bool_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/34_constexpr_call_nested_expr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/35_constexpr_call_unary.ivy 220 1
+selfhost/corpus/hir/constexpr/35_constexpr_call_unary.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:28:17: error: '%tmp.1' defined with type 'i32' but expected 'i1'
+%tmp.0 = xor i1 %tmp.1, true
+                ^
+
+@@ selfhost/corpus/hir/constexpr/36_constexpr_call_logical.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/37_constexpr_call_div_zero.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/38_constexpr_call_loop.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/39_constexpr_call_stmts.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/40_if_constexpr_true.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/41_if_constexpr_false.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/42_if_constexpr_false_no_else.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/43_if_constexpr_nonconst.ivy 218 1
+selfhost/corpus/hir/constexpr/43_if_constexpr_nonconst.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb3
+      ^
+
+@@ selfhost/corpus/hir/constexpr/44_if_constexpr_discarded_branch.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/45_if_constexpr_enum_cond.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/46_if_constexpr_float_cond.ivy 211 1
+selfhost/corpus/hir/constexpr/46_if_constexpr_float_cond.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:7:7: error: floating point constant invalid for type
+br i1 1.500000, label %bb2, label %bb1
+      ^
+
+@@ selfhost/corpus/hir/constexpr/47_if_constexpr_nullptr_cond.ivy 196 1
+selfhost/corpus/hir/constexpr/47_if_constexpr_nullptr_cond.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:6:7: error: null must be a pointer type
+br i1 null, label %bb1, label %bb2
+      ^
+
+@@ selfhost/corpus/hir/constexpr/48_if_constexpr_char_cond.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/49_if_constexpr_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/50_if_constexpr_expr_cond.ivy 218 1
+selfhost/corpus/hir/constexpr/50_if_constexpr_expr_cond.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb1
+      ^
+
+@@ selfhost/corpus/hir/constexpr/51_const_var_not_folded.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/52_constexpr_var_not_folded.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/53_constexpr_call_sizeof.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/54_constexpr_call_if_else.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/55_constexpr_call_const_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/56_constexpr_call_if_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/57_if_constexpr_call_cond.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/58_constexpr_call_negative_zero.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/59_switch_cases.ivy 172 1
+selfhost/corpus/hir/constexpr/59_switch_cases.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:5: error: duplicate case value in switch
+    i32 1, label %bb3
+    ^
+
+@@ selfhost/corpus/hir/constexpr/60_switch_constexpr_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/61_constexpr_float_many.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/constexpr/62_constexpr_call_float_not.ivy 226 1
+selfhost/corpus/hir/constexpr/62_constexpr_call_float_not.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:17: error: '%tmp.1' defined with type 'double' but expected 'i1'
+%tmp.0 = xor i1 %tmp.1, true
+                ^
+
+@@ selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy 257 1
+selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:3:13: error: array size must be an integer constant (variable-length arrays are not supported)
+selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:4:1: error: expected ']' after array size
+@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 238 1
+selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:4:22: error: expected type after 'sizeof(' (sizeof(expression) is not supported)
+selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:5:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy 197 1
+selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:3:23: error: expected type after 'alignof('
+selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:4:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_05_enum_value_not_const.ivy 123 1
+selfhost/corpus/hir/constexpr/e_05_enum_value_not_const.ivy:3:5: error: enumerator 'A' value must be a constant expression
+@@ selfhost/corpus/hir/constexpr/e_06_enum_value_undefined.ivy 130 1
+selfhost/corpus/hir/constexpr/e_06_enum_value_undefined.ivy:2:17: error: enumerator 'B' references undefined constant 'UNDEFINED'
+@@ selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy 752 1
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:3:19: error: expected '(' after function name 'a'
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:3:21: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:3:21: error: expected ',' between parameters
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:3:22: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:3:22: error: expected ',' between parameters
+selfhost/corpus/hir/constexpr/e_07_constexpr_global_var.ivy:4:7: error: expected ',' between parameters
+@@ selfhost/corpus/hir/constexpr/e_08_switch_non_integral.ivy 113 1
+selfhost/corpus/hir/constexpr/e_08_switch_non_integral.ivy:3:5: error: switch condition must be an integral type
+@@ selfhost/corpus/hir/constexpr/e_09_switch_duplicate_default.ivy 116 1
+selfhost/corpus/hir/constexpr/e_09_switch_duplicate_default.ivy:3:5: error: switch has more than one 'default' case
+@@ selfhost/corpus/hir/constexpr/e_10_switch_fallthrough.ivy 160 1
+selfhost/corpus/hir/constexpr/e_10_switch_fallthrough.ivy:3:5: error: Ivy forbids implicit fallthrough: case must end with break, return, continue, or nextcase
+@@ selfhost/corpus/hir/move/01_move_local_read.ivy 91 1
+selfhost/corpus/hir/move/01_move_local_read.ivy:5:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/02_move_in_call_arg.ivy 91 1
+selfhost/corpus/hir/move/02_move_in_call_arg.ivy:7:7: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/03_move_in_return.ivy 90 1
+selfhost/corpus/hir/move/03_move_in_return.ivy:5:12: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/04_move_in_ternary.ivy 91 1
+selfhost/corpus/hir/move/04_move_in_ternary.ivy:5:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/05_move_in_while_cond.ivy 94 1
+selfhost/corpus/hir/move/05_move_in_while_cond.ivy:5:12: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/06_move_in_prefix_inc.ivy 93 1
+selfhost/corpus/hir/move/06_move_in_prefix_inc.ivy:5:5: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/07_move_in_addr_of.ivy 91 1
+selfhost/corpus/hir/move/07_move_in_addr_of.ivy:6:21: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/08_move_in_assign_rhs.ivy 93 1
+selfhost/corpus/hir/move/08_move_in_assign_rhs.ivy:6:9: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/09_move_twice.ivy 166 1
+selfhost/corpus/hir/move/09_move_twice.ivy:5:10: error: use of moved-out variable 'x'
+selfhost/corpus/hir/move/09_move_twice.ivy:5:9: error: 'x' is already moved-out
+@@ selfhost/corpus/hir/move/10_reassign_reinitializes.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/11_compound_assign_no_reinit.ivy 101 1
+selfhost/corpus/hir/move/11_compound_assign_no_reinit.ivy:6:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/12_reinit_then_move_again.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/13_param_reassign_reinitializes.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/14_assign_lhs_bypass.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/15_assign_lhs_bypass_index.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/16_assign_lhs_bypass_member.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/17_assign_lhs_bypass_nested_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/18_assign_rhs_is_checked.ivy 189 1
+selfhost/corpus/hir/move/18_assign_rhs_is_checked.ivy:6:14: error: use of moved-out variable 'x'
+selfhost/corpus/hir/move/18_assign_rhs_is_checked.ivy:6:13: error: 'x' is already moved-out
+@@ selfhost/corpus/hir/move/19_move_zero_args.ivy 88 1
+selfhost/corpus/hir/move/19_move_zero_args.ivy:3:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/20_move_two_args.ivy 87 1
+selfhost/corpus/hir/move/20_move_two_args.ivy:5:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/21_move_qualified.ivy 99 1
+selfhost/corpus/hir/move/21_move_qualified.ivy:4:8: error: call to undeclared function 'ivy::move'
+@@ selfhost/corpus/hir/move/22_move_literal.ivy 86 1
+selfhost/corpus/hir/move/22_move_literal.ivy:3:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/23_move_call_result.ivy 90 1
+selfhost/corpus/hir/move/23_move_call_result.ivy:6:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/24_move_field.ivy 84 1
+selfhost/corpus/hir/move/24_move_field.ivy:7:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/25_move_index.ivy 84 1
+selfhost/corpus/hir/move/25_move_index.ivy:4:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/26_move_nested_move.ivy 90 1
+selfhost/corpus/hir/move/26_move_nested_move.ivy:4:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/27_move_enum_const.ivy 89 1
+selfhost/corpus/hir/move/27_move_enum_const.ivy:7:5: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/28_move_function_name.ivy 126 1
+selfhost/corpus/hir/move/28_move_function_name.ivy:6:10: error: function 'g' cannot be used as a value (no function pointers)
+@@ selfhost/corpus/hir/move/29_move_this.ivy 83 1
+selfhost/corpus/hir/move/29_move_this.ivy:5:9: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/30_builtin_beats_user_function.ivy 103 1
+selfhost/corpus/hir/move/30_builtin_beats_user_function.ivy:7:15: error: use of moved-out variable 'y'
+@@ selfhost/corpus/hir/move/31_user_function_used_for_literal.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy 109 1
+selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy:5:15: error: use of moved-out variable 'move'
+@@ selfhost/corpus/hir/move/33_template_named_move.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/34_move_in_nested_block.ivy 96 1
+selfhost/corpus/hir/move/34_move_in_nested_block.ivy:6:19: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/35_move_after_nested_block.ivy 99 1
+selfhost/corpus/hir/move/35_move_after_nested_block.ivy:7:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/36_shadow_inner.ivy 88 1
+selfhost/corpus/hir/move/36_shadow_inner.ivy:7:19: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/37_shadow_param_by_local.ivy 97 1
+selfhost/corpus/hir/move/37_shadow_param_by_local.ivy:5:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/38_move_before_decl.ivy 88 1
+selfhost/corpus/hir/move/38_move_before_decl.ivy:3:10: error: undeclared identifier 'x'
+@@ selfhost/corpus/hir/move/39_for_var_out_of_scope.ivy 92 1
+selfhost/corpus/hir/move/39_for_var_out_of_scope.ivy:6:15: error: undeclared identifier 'i'
+@@ selfhost/corpus/hir/move/40_move_param.ivy 86 1
+selfhost/corpus/hir/move/40_move_param.ivy:4:15: error: use of moved-out variable 'p'
+@@ selfhost/corpus/hir/move/41_move_const_param.ivy 92 1
+selfhost/corpus/hir/move/41_move_const_param.ivy:4:15: error: use of moved-out variable 'p'
+@@ selfhost/corpus/hir/move/42_move_ref_param.ivy 90 1
+selfhost/corpus/hir/move/42_move_ref_param.ivy:4:15: error: use of moved-out variable 'r'
+@@ selfhost/corpus/hir/move/43_move_const_local.ivy 92 1
+selfhost/corpus/hir/move/43_move_const_local.ivy:5:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/44_move_struct_value.ivy 93 1
+selfhost/corpus/hir/move/44_move_struct_value.ivy:8:15: error: use of moved-out variable 's'
+@@ selfhost/corpus/hir/move/45_unsafe_no_bypass.ivy 92 1
+selfhost/corpus/hir/move/45_unsafe_no_bypass.ivy:6:19: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/46_unsafe_no_bypass_then_read.ivy 102 1
+selfhost/corpus/hir/move/46_unsafe_no_bypass_then_read.ivy:7:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/47_unsafe_assign_reinitializes.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/48_move_in_if_branch.ivy 93 1
+selfhost/corpus/hir/move/48_move_in_if_branch.ivy:7:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/49_move_in_for_body.ivy 92 1
+selfhost/corpus/hir/move/49_move_in_for_body.ivy:7:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/50_move_in_while_body.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/51_move_in_switch_case.ivy 96 1
+selfhost/corpus/hir/move/51_move_in_switch_case.ivy:11:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/52_move_for_var_in_body.ivy 96 1
+selfhost/corpus/hir/move/52_move_for_var_in_body.ivy:5:19: error: use of moved-out variable 'i'
+@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 358 1
+selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
+selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
+selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
+@@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/55_constexpr_call_arg.ivy 94 1
+selfhost/corpus/hir/move/55_constexpr_call_arg.ivy:8:17: error: use of moved-out variable 'y'
+@@ selfhost/corpus/hir/move/56_constexpr_body_move.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/57_move_local_in_method.ivy 96 1
+selfhost/corpus/hir/move/57_move_local_in_method.ivy:7:16: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/move/58_move_this_then_read_field.ivy 99 1
+selfhost/corpus/hir/move/58_move_this_then_read_field.ivy:5:9: error: undeclared identifier 'move'
+@@ selfhost/corpus/hir/move/59_move_dump_baseline.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/move/60_move_as_call_argument.ivy 97 1
+selfhost/corpus/hir/move/60_move_as_call_argument.ivy:8:15: error: use of moved-out variable 'x'
+@@ selfhost/corpus/hir/name/01_locals.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/02_shadow.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/03_calls.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/04_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/05_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/06_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/07_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/08_enum_class.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/09_alias.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/10_ops.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/11_builtins.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/name/e_arrow.ivy 94 1
+selfhost/corpus/hir/name/e_arrow.ivy:7:16: error: '->' requires a pointer to struct (got 'P')
+@@ selfhost/corpus/hir/name/e_call.ivy 162 1
+selfhost/corpus/hir/name/e_call.ivy:2:15: error: undeclared identifier 'nope'
+selfhost/corpus/hir/name/e_call.ivy:2:15: error: call to undeclared function 'nope'
+@@ selfhost/corpus/hir/name/e_callevar.ivy 84 1
+selfhost/corpus/hir/name/e_callevar.ivy:3:5: error: call to undeclared function 'x'
+@@ selfhost/corpus/hir/name/e_enum.ivy 80 1
+selfhost/corpus/hir/name/e_enum.ivy:7:16: error: enum 'E' has no enumerator 'C'
+@@ selfhost/corpus/hir/name/e_fnvalue.ivy 115 1
+selfhost/corpus/hir/name/e_fnvalue.ivy:6:15: error: function 'id' cannot be used as a value (no function pointers)
+@@ selfhost/corpus/hir/name/e_member.ivy 80 1
+selfhost/corpus/hir/name/e_member.ivy:7:16: error: struct 'P' has no member 'z'
+@@ selfhost/corpus/hir/name/e_method.ivy 83 1
+selfhost/corpus/hir/name/e_method.ivy:7:11: error: struct 'P' has no method 'nope'
+@@ selfhost/corpus/hir/name/e_methodarrow.ivy 89 1
+selfhost/corpus/hir/name/e_methodarrow.ivy:11:21: error: '->' requires a pointer operand
+@@ selfhost/corpus/hir/name/e_methodns.ivy 114 1
+selfhost/corpus/hir/name/e_methodns.ivy:3:11: error: 'int32_t' is not a struct type — cannot call method 'nope'
+@@ selfhost/corpus/hir/name/e_methodorder.ivy 270 1
+selfhost/corpus/hir/name/e_methodorder.ivy:7:22: error: undeclared identifier 'missing'
+selfhost/corpus/hir/name/e_methodorder.ivy:7:22: error: call to undeclared function 'missing'
+selfhost/corpus/hir/name/e_methodorder.ivy:7:21: error: struct 'P' has no method 'nope'
+@@ selfhost/corpus/hir/name/e_multidecl.ivy 158 1
+selfhost/corpus/hir/name/e_multidecl.ivy:3:5: error: undeclared identifier 'a'
+selfhost/corpus/hir/name/e_multidecl.ivy:3:9: error: undeclared identifier 'b'
+@@ selfhost/corpus/hir/name/e_not_struct.ivy 115 1
+selfhost/corpus/hir/name/e_not_struct.ivy:3:16: error: 'int32_t' is not a struct type — cannot access member 'x'
+@@ selfhost/corpus/hir/name/e_ptrparam.ivy 104 1
+selfhost/corpus/hir/name/e_ptrparam.ivy:1:9: error: raw pointer parameter type requires an unsafe block
+@@ selfhost/corpus/hir/name/e_redef.ivy 78 1
+selfhost/corpus/hir/name/e_redef.ivy:3:5: error: redefinition of variable 'a'
+@@ selfhost/corpus/hir/name/e_this.ivy 196 1
+selfhost/corpus/hir/name/e_this.ivy:2:15: error: 'this' is only valid inside a method body
+selfhost/corpus/hir/name/e_this.ivy:2:19: error: 'int' is not a struct type — cannot access member 'x'
+@@ selfhost/corpus/hir/name/e_undecl.ivy 77 1
+selfhost/corpus/hir/name/e_undecl.ivy:2:15: error: undeclared identifier 'b'
+@@ selfhost/corpus/hir/template/01_body_error_never_instantiated.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_const_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_array.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_char.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 129 1
+selfhost/corpus/hir/template/01_deduce_const_ref.ivy:4:25: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
+@@ selfhost/corpus/hir/template/01_deduce_double.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_pointer.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_string.ivy 135 1
+selfhost/corpus/hir/template/01_deduce_string.ivy:5:31: error: argument 1 of 'identity<char const*>' expects 'char', got 'const char*'
+@@ selfhost/corpus/hir/template/01_deduce_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_deduce_variable.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_never_instantiated.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/01_type_param_explicit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/02_no_arguments.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/02_too_few_args.ivy 116 1
+selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/03_empty_pack_deduced.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/03_mixed_pack.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 98 1
+selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
+@@ selfhost/corpus/hir/template/03_pack_expansion.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_call_before_declaration.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_constexpr_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_export_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_if_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_nested_instantiation.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_order_and_dedup.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_overload_wins.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_prototype_never_instantiated.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_prototype_only.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_recursive.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 146 1
+selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
+@@ selfhost/corpus/hir/template/04_template_calls_function.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_template_in_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/04_two_specializations.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_alias.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_base_ctor_not_inherited.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_base_dropped.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 109 1
+selfhost/corpus/hir/template/05_base_field_lost.ivy:4:77: error: struct 'Derived<int32_t>' has no member 'x'
+@@ selfhost/corpus/hir/template/05_class_ctor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_dedup.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_explicit_too_few_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_field_in_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_local_type_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_method_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_nested_specialization.ivy 208 1
+selfhost/corpus/hir/template/05_nested_specialization.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:5:1: error: identified structure type 'struct.Box_Box_' is recursive
+define void @"?f@@YXX@Z"() {
+^
+
+@@ selfhost/corpus/hir/template/05_nontype_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_order.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_overloaded_methods.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_own_type_field.ivy 205 1
+selfhost/corpus/hir/template/05_own_type_field.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:4:1: error: identified structure type 'struct.Box_int32_t_' is recursive
+define void @"?f@@YXX@Z"() {
+^
+
+@@ selfhost/corpus/hir/template/05_param_type.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_param_type_order.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_pass_specialization.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_return_type.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 233 1
+selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:19: error: use of undefined value '@?TCall@@YHX@Z'
+%tmp.0 = call i32 @"?TCall@@YHX@Z"(i32 1)
+                  ^
+
+@@ selfhost/corpus/hir/template/05_struct_calls_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_struct_field.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_struct_methods.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy 243 1
+selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:19: error: use of undefined value '@?TDup@@YHX@Z'
+%tmp.0 = call i32 @"?TDup@@YHX@Z"(i32 1)
+                  ^
+
+@@ selfhost/corpus/hir/template/05_template_and_plain_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_template_id_on_plain_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_template_redefinition.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_variadic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_equality.ivy 372 1
+selfhost/corpus/hir/template/06_concept_equality.ivy:5:25: error: concept 'Eq' not satisfied: type 'P' does not support operator '=='
+selfhost/corpus/hir/template/06_concept_equality.ivy:5:25: error: failed to instantiate template 'id'
+selfhost/corpus/hir/template/06_concept_equality.ivy:5:17: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
+@@ selfhost/corpus/hir/template/06_concept_in_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_member_unchecked.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_satisfied.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_sizeof_unchecked.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_concept_two_requirements.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_struct_concept_ok.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/e_alias_template_argument.ivy 417 1
+selfhost/corpus/hir/template/e_alias_template_argument.ivy:4:35: error: cannot return value of type 'int32_t' from function returning 'MyInt'
+selfhost/corpus/hir/template/e_alias_template_argument.ivy:5:32: error: argument 1 of 'id<MyInt>' expects 'MyInt', got 'int'
+selfhost/corpus/hir/template/e_alias_template_argument.ivy:5:12: error: cannot initialize variable 'a' of type 'int32_t' with a value of type 'MyInt'
+@@ selfhost/corpus/hir/template/e_argument_type_mismatch.ivy 136 1
+selfhost/corpus/hir/template/e_argument_type_mismatch.ivy:4:32: error: argument 1 of 'id<int32_t>' expects 'int32_t', got 'const char*'
+@@ selfhost/corpus/hir/template/e_arity_mismatch.ivy 114 1
+selfhost/corpus/hir/template/e_arity_mismatch.ivy:4:24: error: call to 'id<int32_t>' expects 1 argument(s), got 2
+@@ selfhost/corpus/hir/template/e_body_error_in_instantiated.ivy 114 1
+selfhost/corpus/hir/template/e_body_error_in_instantiated.ivy:3:46: error: undeclared identifier 'undefined_name'
+@@ selfhost/corpus/hir/template/e_cannot_deduce.ivy 104 1
+selfhost/corpus/hir/template/e_cannot_deduce.ivy:4:24: error: cannot deduce template arguments for 'id'
+@@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy 392 1
+selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
+selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: failed to deduce template arguments for 'add'
+selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
+@@ selfhost/corpus/hir/template/e_deduce_conflict.ivy 107 1
+selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
+@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
+selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
+@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 108 1
+selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:4:33: error: unexpected token in expression
+@@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
+selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
+selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
+@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 302 1
+selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:34: error: cannot initialize variable 'y' of type 'T' with a value of type 'int32_t'
+selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:43: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_long_diagnostic_message.ivy 898 1
+selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:15: error: undeclared identifier 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001'
+selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:144: error: 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001' is not a template
+selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:7:15: error: undeclared identifier 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000002'
+selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:7:144: error: 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000002' is not a template
+@@ selfhost/corpus/hir/template/e_missing_return.ivy 133 1
+selfhost/corpus/hir/template/e_missing_return.ivy:5:27: error: function 'noret<int32_t>' may reach the end without returning a value
+@@ selfhost/corpus/hir/template/e_nontype_param_deduce.ivy 112 1
+selfhost/corpus/hir/template/e_nontype_param_deduce.ivy:4:25: error: cannot deduce template arguments for 'val'
+@@ selfhost/corpus/hir/template/e_not_a_template.ivy 89 1
+selfhost/corpus/hir/template/e_not_a_template.ivy:3:27: error: 'plain' is not a template
+@@ selfhost/corpus/hir/template/e_struct_concept_fail.ivy 283 1
+selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
+selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
+@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 391 1
+selfhost/corpus/hir/template/e_template_calls_template.ivy:4:35: error: cannot return value of type 'T' from function returning 'T'
+selfhost/corpus/hir/template/e_template_calls_template.ivy:5:51: error: argument 1 of 'id<T>' expects 'T', got 'int32_t'
+selfhost/corpus/hir/template/e_template_calls_template.ivy:5:38: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_undeclared_identifier.ivy 198 1
+selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:22: error: undeclared identifier 'nosuch'
+selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:28: error: 'nosuch' is not a template
+@@ selfhost/corpus/hir/template/e_unsatisfied_concept.ivy 383 1
+selfhost/corpus/hir/template/e_unsatisfied_concept.ivy:6:31: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
+selfhost/corpus/hir/template/e_unsatisfied_concept.ivy:6:31: error: failed to instantiate template 'add'
+selfhost/corpus/hir/template/e_unsatisfied_concept.ivy:6:22: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
+@@ selfhost/corpus/hir/type/01_lit_int.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/02_lit_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/03_lit_char.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/04_lit_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/05_lit_string.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/06_lit_nullptr.ivy 170 1
+selfhost/corpus/hir/type/06_lit_nullptr.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:6:10: error: null must be a pointer type
+store i8 null, ptr %a.0
+         ^
+
+@@ selfhost/corpus/hir/type/07_lit_nullopt.ivy 170 1
+selfhost/corpus/hir/type/07_lit_nullopt.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:6:10: error: null must be a pointer type
+store i8 null, ptr %a.0
+         ^
+
+@@ selfhost/corpus/hir/type/08_types_primitives.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/09_types_qualifiers.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/10_types_cnumber.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/11_promote_same.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/12_promote_width.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/13_promote_signedness.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/14_promote_float.ivy 197 1
+selfhost/corpus/hir/type/14_promote_float.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:19:14: error: invalid operand type for instruction
+%tmp.4 = add double %tmp.3, %tmp.2
+             ^
+
+@@ selfhost/corpus/hir/type/15_promote_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/16_promote_size.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/17_promote_bitwise.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/18_promote_shift.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/19_compare_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/20_compare_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/21_unary_arith.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/22_unary_not.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/23_unary_incdec.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/24_unary_deref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/25_unary_addr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/26_unary_ref_strip.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/27_assign_same.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/28_assign_int_to_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/29_assign_float_to_int.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/30_init_int_to_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/31_compound_assign.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/32_auto_deduction.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/33_auto_pointer.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/34_call_return_type.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/35_call_arg_convert.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/36_call_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/37_call_enum_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/38_call_pointer_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/39_call_void_result.ivy 191 1
+selfhost/corpus/hir/type/39_call_void_result.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:15: error: void type only allowed for function results
+%a.0 = alloca void
+              ^
+
+@@ selfhost/corpus/hir/type/40_if_numeric.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/41_if_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/42_dowhile.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/43_for.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/44_ternary.ivy 242 1
+selfhost/corpus/hir/type/44_ternary.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:28:23: error: '%tmp.1' defined with type 'i32' but expected 'double'
+%tmp.3 = phi double [ %tmp.1, %bb.i3 ], [ %tmp.2, %bb.i4 ]
+                      ^
+
+@@ selfhost/corpus/hir/type/45_cond_pointer.ivy 203 1
+selfhost/corpus/hir/type/45_cond_pointer.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:7: error: '%tmp.0' defined with type 'ptr' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb1
+      ^
+
+@@ selfhost/corpus/hir/type/46_return_ok.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/47_return_convert.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/48_return_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/49_return_scoped_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/50_ptr_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/51_ptr_arith.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/52_ptr_add_numeric.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/53_ptr_compare.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/54_ptr_null_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/55_array_index.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/56_struct_field_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/57_class_field_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/58_enum_const_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/59_alias_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/60_inherit_field.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/61_inherit_upcast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/62_static_cast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/63_static_cast_pointer_to_int.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/64_overload_resolution.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/65_ptr_void.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 119 1
+selfhost/corpus/hir/type/66_ref_rvalue.ivy:3:16: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
+@@ selfhost/corpus/hir/type/67_default_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/68_optional_wrap.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/69_operator_overload.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/70_inherited_members.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/type/e_01_unary_not_enum.ivy 103 1
+selfhost/corpus/hir/type/e_01_unary_not_enum.ivy:8:14: error: '!' expects a numeric or pointer operand
+@@ selfhost/corpus/hir/type/e_02_unary_notof_float.ivy 96 1
+selfhost/corpus/hir/type/e_02_unary_notof_float.ivy:3:14: error: '~' expects an integer operand
+@@ selfhost/corpus/hir/type/e_03_unary_neg_string.ivy 100 1
+selfhost/corpus/hir/type/e_03_unary_neg_string.ivy:4:18: error: unary '-' expects a numeric operand
+@@ selfhost/corpus/hir/type/e_04_unary_deref_int.ivy 93 1
+selfhost/corpus/hir/type/e_04_unary_deref_int.ivy:4:14: error: '*' expects a pointer operand
+@@ selfhost/corpus/hir/type/e_05_unary_addr_expr.ivy 116 1
+selfhost/corpus/hir/type/e_05_unary_addr_expr.ivy:5:18: error: '&' is only supported on variables in the Ivy subset
+@@ selfhost/corpus/hir/type/e_06_binary_eq_mismatch.ivy 98 1
+selfhost/corpus/hir/type/e_06_binary_eq_mismatch.ivy:4:20: error: '==' between incompatible types
+@@ selfhost/corpus/hir/type/e_07_binary_lt_pointer.ivy 101 1
+selfhost/corpus/hir/type/e_07_binary_lt_pointer.ivy:5:20: error: '<' between pointer and non-pointer
+@@ selfhost/corpus/hir/type/e_08_binary_logical_struct.ivy 110 1
+selfhost/corpus/hir/type/e_08_binary_logical_struct.ivy:8:16: error: '&&' expects numeric or pointer operands
+@@ selfhost/corpus/hir/type/e_09_binary_shift_string.ivy 97 1
+selfhost/corpus/hir/type/e_09_binary_shift_string.ivy:4:25: error: '<<' expects integer operands
+@@ selfhost/corpus/hir/type/e_10_binary_mod_float.ivy 93 1
+selfhost/corpus/hir/type/e_10_binary_mod_float.ivy:3:18: error: '%' expects integer operands
+@@ selfhost/corpus/hir/type/e_11_binary_ptr_sub.ivy 117 1
+selfhost/corpus/hir/type/e_11_binary_ptr_sub.ivy:7:20: error: pointer subtraction is not supported in the Ivy subset
+@@ selfhost/corpus/hir/type/e_12_binary_ptr_add_struct.ivy 111 1
+selfhost/corpus/hir/type/e_12_binary_ptr_add_struct.ivy:10:20: error: '+' with pointer and non-numeric operand
+@@ selfhost/corpus/hir/type/e_13_assign_const.ivy 91 1
+selfhost/corpus/hir/type/e_13_assign_const.ivy:4:5: error: cannot assign to const variable
+@@ selfhost/corpus/hir/type/e_14_assign_string_to_int.ivy 122 1
+selfhost/corpus/hir/type/e_14_assign_string_to_int.ivy:5:9: error: cannot assign value of type 'const char*' to 'int32_t'
+@@ selfhost/corpus/hir/type/e_15_assign_lhs_not_assignable.ivy 119 1
+selfhost/corpus/hir/type/e_15_assign_lhs_not_assignable.ivy:3:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/hir/type/e_16_compound_assign_struct.ivy 119 1
+selfhost/corpus/hir/type/e_16_compound_assign_struct.ivy:8:5: error: compound assignment '+=' expects numeric operands
+@@ selfhost/corpus/hir/type/e_17_init_uninitialized.ivy 140 1
+selfhost/corpus/hir/type/e_17_init_uninitialized.ivy:3:5: error: variable 'a' must be initialized (uninitialized variables are not allowed)
+@@ selfhost/corpus/hir/type/e_18_init_void.ivy 222 1
+selfhost/corpus/hir/type/e_18_init_void.ivy:3:5: error: variable 'a' cannot have type void
+selfhost/corpus/hir/type/e_18_init_void.ivy:3:5: error: variable 'a' must be initialized (uninitialized variables are not allowed)
+@@ selfhost/corpus/hir/type/e_19_init_string_to_int.ivy 149 1
+selfhost/corpus/hir/type/e_19_init_string_to_int.ivy:4:9: error: cannot initialize variable 'a' of type 'int32_t' with a value of type 'const char*'
+@@ selfhost/corpus/hir/type/e_20_init_struct_mismatch.ivy 136 1
+selfhost/corpus/hir/type/e_20_init_struct_mismatch.ivy:12:5: error: cannot initialize variable 'b' of type 'B' with a value of type 'A'
+@@ selfhost/corpus/hir/type/e_21_call_arity_many.ivy 104 1
+selfhost/corpus/hir/type/e_21_call_arity_many.ivy:7:15: error: call to 'f' expects 1 argument(s), got 2
+@@ selfhost/corpus/hir/type/e_22_call_arity_few.ivy 130 1
+selfhost/corpus/hir/type/e_22_call_arity_few.ivy:7:15: error: call to 'f' missing argument 2 (parameter 'b' has no default value)
+@@ selfhost/corpus/hir/type/e_23_call_arg_pointer.ivy 117 1
+selfhost/corpus/hir/type/e_23_call_arg_pointer.ivy:10:20: error: argument 1 of 'f' expects 'int32_t', got 'int32_t*'
+@@ selfhost/corpus/hir/type/e_24_call_arg_string.ivy 118 1
+selfhost/corpus/hir/type/e_24_call_arg_string.ivy:8:20: error: argument 1 of 'f' expects 'int32_t', got 'const char*'
+@@ selfhost/corpus/hir/type/e_25_call_arg_void.ivy 110 1
+selfhost/corpus/hir/type/e_25_call_arg_void.ivy:10:17: error: argument 1 of 'f' expects 'int32_t', got 'void'
+@@ selfhost/corpus/hir/type/e_26_call_method_missing.ivy 147 1
+selfhost/corpus/hir/type/e_26_call_method_missing.ivy:12:19: error: call to 'Counter::get' missing argument 2 (parameter 'n' has no default value)
+@@ selfhost/corpus/hir/type/e_27_cond_struct.ivy 121 1
+selfhost/corpus/hir/type/e_27_cond_struct.ivy:8:9: error: condition must be numeric, a pointer, or nullptr (got 'Point')
+@@ selfhost/corpus/hir/type/e_28_cond_enum.ivy 119 1
+selfhost/corpus/hir/type/e_28_cond_enum.ivy:8:13: error: condition must be numeric, a pointer, or nullptr (got 'Mode')
+@@ selfhost/corpus/hir/type/e_29_return_mismatch.ivy 138 1
+selfhost/corpus/hir/type/e_29_return_mismatch.ivy:3:5: error: cannot return value of type 'const char*' from function returning 'int32_t'
+@@ selfhost/corpus/hir/type/e_30_return_void_value.ivy 100 1
+selfhost/corpus/hir/type/e_30_return_void_value.ivy:3:5: error: void function cannot return a value
+@@ selfhost/corpus/hir/type/e_31_return_no_value.ivy 113 1
+selfhost/corpus/hir/type/e_31_return_no_value.ivy:3:5: error: function 'f' must return a value of type 'int32_t'
+@@ selfhost/corpus/hir/type/e_32_return_no_return.ivy 120 1
+selfhost/corpus/hir/type/e_32_return_no_return.ivy:2:1: error: function 'f' may reach the end without returning a value
+@@ selfhost/corpus/hir/type/e_33_index_not_array.ivy 105 1
+selfhost/corpus/hir/type/e_33_index_not_array.ivy:4:15: error: '[]' requires an array or pointer operand
+@@ selfhost/corpus/hir/type/e_34_index_not_numeric.ivy 98 1
+selfhost/corpus/hir/type/e_34_index_not_numeric.ivy:6:20: error: index expression must be numeric
+@@ selfhost/corpus/hir/type/e_35_ptr_init_int.ivy 139 1
+selfhost/corpus/hir/type/e_35_ptr_init_int.ivy:4:9: error: cannot initialize variable 'a' of type 'int32_t' with a value of type 'nullptr'
+@@ selfhost/corpus/hir/type/e_36_inherit_upcast_value.ivy 145 1
+selfhost/corpus/hir/type/e_36_inherit_upcast_value.ivy:12:5: error: cannot initialize variable 'b' of type 'Base' with a value of type 'Derived'
+@@ selfhost/corpus/hir/type/e_37_assign_const_ptr.ivy 151 1
+selfhost/corpus/hir/type/e_37_assign_const_ptr.ivy:6:9: error: cannot initialize variable 'q' of type 'int32_t*' with a value of type 'const int32_t*'
+@@ selfhost/corpus/hir/type/e_38_call_no_overload.ivy 105 1
+selfhost/corpus/hir/type/e_38_call_no_overload.ivy:12:19: error: no matching overload for argument types
+@@ selfhost/corpus/hir/type/e_39_call_ambiguous.ivy 101 1
+selfhost/corpus/hir/type/e_39_call_ambiguous.ivy:11:15: error: ambiguous call to overloaded function
+@@ selfhost/corpus/hir/type/e_40_ptr_decl_unsafe.ivy 226 1
+selfhost/corpus/hir/type/e_40_ptr_decl_unsafe.ivy:3:5: error: raw pointer variable declaration requires an unsafe block
+selfhost/corpus/hir/type/e_40_ptr_decl_unsafe.ivy:3:16: error: 'nullptr' literal requires an unsafe block
+@@ selfhost/corpus/hir/type/e_41_ptr_deref_unsafe.ivy 224 1
+selfhost/corpus/hir/type/e_41_ptr_deref_unsafe.ivy:2:9: error: raw pointer parameter type requires an unsafe block
+selfhost/corpus/hir/type/e_41_ptr_deref_unsafe.ivy:3:12: error: pointer dereference requires an unsafe block
+@@ selfhost/corpus/hir/type/e_42_ptr_addr_unsafe.ivy 251 1
+selfhost/corpus/hir/type/e_42_ptr_addr_unsafe.ivy:4:14: error: address-of operator '&' taking raw pointer requires an unsafe block
+selfhost/corpus/hir/type/e_42_ptr_addr_unsafe.ivy:4:5: error: raw pointer variable declaration requires an unsafe block
+@@ selfhost/corpus/hir/type/e_43_nullptr_unsafe.ivy 105 1
+selfhost/corpus/hir/type/e_43_nullptr_unsafe.ivy:3:14: error: 'nullptr' literal requires an unsafe block
+@@ selfhost/corpus/hir/type/e_44_multi_diagnostics.ivy 406 1
+selfhost/corpus/hir/type/e_44_multi_diagnostics.ivy:4:5: error: cannot assign value of type 'const char*' to 'int32_t'
+selfhost/corpus/hir/type/e_44_multi_diagnostics.ivy:5:5: error: cannot initialize variable 'y' of type 'int32_t' with a value of type 'const char*'
+selfhost/corpus/hir/type/e_44_multi_diagnostics.ivy:6:5: error: variable 'z' must be initialized (uninitialized variables are not allowed)
+@@ selfhost/corpus/hir/type/e_45_inherit_upcast_indirect.ivy 119 1
+selfhost/corpus/hir/type/e_45_inherit_upcast_indirect.ivy:20:7: error: argument 1 of 'g' expects 'Base', got 'Derived'
+@@ selfhost/corpus/hir/type/e_46_redef_struct.ivy 90 1
+selfhost/corpus/hir/type/e_46_redef_struct.ivy:6:1: error: redefinition of struct 'Point'
+@@ selfhost/corpus/hir/type/e_47_redef_enum.ivy 85 1
+selfhost/corpus/hir/type/e_47_redef_enum.ivy:6:1: error: redefinition of enum 'Mode'
+@@ selfhost/corpus/hir/type/e_48_redef_enumerator.ivy 96 1
+selfhost/corpus/hir/type/e_48_redef_enumerator.ivy:5:5: error: redefinition of enumerator 'Off'
+@@ selfhost/corpus/hir/type/e_49_enum_undefined_const.ivy 122 1
+selfhost/corpus/hir/type/e_49_enum_undefined_const.ivy:3:5: error: enumerator 'Off' references undefined constant 'Later'
+@@ selfhost/corpus/hir/type/e_50_enum_not_constant.ivy 117 1
+selfhost/corpus/hir/type/e_50_enum_not_constant.ivy:3:5: error: enumerator 'Off' value must be a constant expression
+@@ selfhost/corpus/hir/type/e_51_assign_member_nonstruct.ivy 247 1
+selfhost/corpus/hir/type/e_51_assign_member_nonstruct.ivy:5:6: error: 'int32_t' is not a struct type — cannot access member 'y'
+selfhost/corpus/hir/type/e_51_assign_member_nonstruct.ivy:5:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/hir/type/e_52_assign_arrow_nonpointer.ivy 237 1
+selfhost/corpus/hir/type/e_52_assign_arrow_nonpointer.ivy:5:6: error: '->' requires a pointer to struct (got 'int32_t')
+selfhost/corpus/hir/type/e_52_assign_arrow_nonpointer.ivy:5:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/hir/type/e_53_assign_unknown_member.ivy 216 1
+selfhost/corpus/hir/type/e_53_assign_unknown_member.ivy:9:6: error: struct 'Point' has no member 'w'
+selfhost/corpus/hir/type/e_53_assign_unknown_member.ivy:9:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy 758 1
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:10:6: error: 'int32_t' is not a struct type — cannot access member 'y'
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:10:5: error: left-hand side of assignment is not assignable
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:11:6: error: '->' requires a pointer to struct (got 'int32_t')
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:11:5: error: left-hand side of assignment is not assignable
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:13:6: error: struct 'Point' has no member 'w'
+selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:13:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/interp/01_int_ops.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/02_assign_unary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/03_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/04_short_circuit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/05_strings.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/06_refs.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/07_pointers.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/08_arrays.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/09_calls.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/10_recursion.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/11_cfg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/12_switch.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/13_call_order.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/14_io_streams.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/15_io_format.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/16_c_output.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/17_alloc_cell.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/18_div_zero.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/20_array_bounds.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/21_int_status.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/22_nonint_status.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/23_expr_misc.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/24_exit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/lexer/err/block_unterm.ivy 84 1
+"selfhost/corpus/lexer/err/block_unterm.ivy":1:8: error: unterminated block comment
+@@ selfhost/corpus/lexer/err/char_unterm.ivy 174 1
+"selfhost/corpus/lexer/err/char_unterm.ivy":1:1: error: unterminated character literal
+"selfhost/corpus/lexer/err/char_unterm.ivy":2:1: error: unterminated character literal
+@@ selfhost/corpus/lexer/err/hex_bad.ivy 556 1
+"selfhost/corpus/lexer/err/hex_bad.ivy":1:1: error: invalid hexadecimal literal: expected hex digits after '0x'
+"selfhost/corpus/lexer/err/hex_bad.ivy":2:1: error: invalid binary literal: expected binary digits after '0b'
+"selfhost/corpus/lexer/err/hex_bad.ivy":3:1: error: invalid hexadecimal literal: expected hex digits after '0x'
+"selfhost/corpus/lexer/err/hex_bad.ivy":3:5: error: invalid binary literal: expected binary digits after '0b'
+"selfhost/corpus/lexer/err/hex_bad.ivy":3:9: error: invalid hexadecimal literal: expected hex digits after '0x'
+@@ selfhost/corpus/lexer/err/many.ivy 332 1
+"selfhost/corpus/lexer/err/many.ivy":1:3: error: unexpected character
+"selfhost/corpus/lexer/err/many.ivy":2:1: error: unterminated string literal
+"selfhost/corpus/lexer/err/many.ivy":3:1: error: invalid hexadecimal literal: expected hex digits after '0x'
+"selfhost/corpus/lexer/err/many.ivy":4:1: error: unterminated block comment
+@@ selfhost/corpus/lexer/err/raw_missing_paren.ivy 282 1
+"selfhost/corpus/lexer/err/raw_missing_paren.ivy":1:1: error: unterminated raw string literal
+"selfhost/corpus/lexer/err/raw_missing_paren.ivy":2:1: error: unterminated raw string literal
+"selfhost/corpus/lexer/err/raw_missing_paren.ivy":3:1: error: unterminated raw string literal
+@@ selfhost/corpus/lexer/err/raw_unclosed.ivy 89 1
+"selfhost/corpus/lexer/err/raw_unclosed.ivy":1:4: error: unterminated raw string literal
+@@ selfhost/corpus/lexer/err/str_eof.ivy 80 1
+"selfhost/corpus/lexer/err/str_eof.ivy":1:4: error: unterminated string literal
+@@ selfhost/corpus/lexer/err/str_unterm.ivy 166 1
+"selfhost/corpus/lexer/err/str_unterm.ivy":1:1: error: unterminated string literal
+"selfhost/corpus/lexer/err/str_unterm.ivy":2:1: error: unterminated string literal
+@@ selfhost/corpus/lexer/err/unexpected.ivy 304 1
+"selfhost/corpus/lexer/err/unexpected.ivy":1:3: error: unexpected character
+"selfhost/corpus/lexer/err/unexpected.ivy":2:3: error: unexpected character
+"selfhost/corpus/lexer/err/unexpected.ivy":3:3: error: unexpected character
+"selfhost/corpus/lexer/err/unexpected.ivy":4:3: error: unexpected character
+@@ selfhost/corpus/lexer/ident/adjacency.ivy 2040 1
+selfhost/corpus/lexer/ident/adjacency.ivy:1:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/lexer/ident/adjacency.ivy:2:1: error: expected '(' after function name 'foo'
+selfhost/corpus/lexer/ident/adjacency.ivy:2:5: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/lexer/ident/adjacency.ivy:3:1: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:3:8: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:3:8: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:4:1: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:4:4: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:4:4: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:4:7: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:4:7: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:4:12: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:4:12: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:5:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:5:8: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/adjacency.ivy:5:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/adjacency.ivy:5:19: error: expected ',' between parameters
+@@ selfhost/corpus/lexer/ident/basic.ivy 141 1
+selfhost/corpus/lexer/ident/basic.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/keywords.ivy 144 1
+selfhost/corpus/lexer/ident/keywords.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/lifetimes.ivy 145 1
+selfhost/corpus/lexer/ident/lifetimes.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/numbers_skips.ivy 149 1
+selfhost/corpus/lexer/ident/numbers_skips.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/positions.ivy 145 1
+selfhost/corpus/lexer/ident/positions.ivy:3:2: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/prefixes.ivy 144 1
+selfhost/corpus/lexer/ident/prefixes.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/punct_skips.ivy 1176 1
+selfhost/corpus/lexer/ident/punct_skips.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:2:8: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:3:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:5:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:5:7: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/punct_skips.ivy:5:9: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/ident/types.ivy 1372 1
+selfhost/corpus/lexer/ident/types.ivy:1:11: error: expected '(' after function name 'foo'
+selfhost/corpus/lexer/ident/types.ivy:2:12: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:4:1: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:4:12: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:5:1: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:5:11: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:6:1: error: C-style type 'double' requires #pragma ivy cnumber; use float64
+selfhost/corpus/lexer/ident/types.ivy:6:16: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:7:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/types.ivy:7:10: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:7:17: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/types.ivy:8:1: error: expected ',' between parameters
+selfhost/corpus/lexer/ident/types.ivy:8:9: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/ident/types.ivy:8:17: error: expected ',' between parameters
+@@ selfhost/corpus/lexer/ident/underscore_digits.ivy 153 1
+selfhost/corpus/lexer/ident/underscore_digits.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/adjacency.ivy 143 1
+selfhost/corpus/lexer/num/adjacency.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/bin.ivy 137 1
+selfhost/corpus/lexer/num/bin.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/dec.ivy 137 1
+selfhost/corpus/lexer/num/dec.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/float.ivy 139 1
+selfhost/corpus/lexer/num/float.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/hex.ivy 137 1
+selfhost/corpus/lexer/num/hex.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/oct.ivy 137 1
+selfhost/corpus/lexer/num/oct.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/sep.ivy 137 1
+selfhost/corpus/lexer/num/sep.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/num/suffix.ivy 140 1
+selfhost/corpus/lexer/num/suffix.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/op/edge.ivy 137 1
+selfhost/corpus/lexer/op/edge.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/op/multi.ivy 138 1
+selfhost/corpus/lexer/op/multi.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/op/punct.ivy 1319 1
+selfhost/corpus/lexer/op/punct.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:1:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:1:15: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:1:21: error: expected attribute name
+selfhost/corpus/lexer/op/punct.ivy:1:25: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:1:27: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:1:29: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:2:4: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:2:5: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/punct.ivy:3:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/op/seq.ivy 136 1
+selfhost/corpus/lexer/op/seq.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/op/single.ivy 559 1
+selfhost/corpus/lexer/op/single.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/single.ivy:1:33: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/single.ivy:1:41: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/op/single.ivy:1:43: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/adj.ivy 137 1
+selfhost/corpus/lexer/str/adj.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/char.ivy 138 1
+selfhost/corpus/lexer/str/char.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/escape.ivy 140 1
+selfhost/corpus/lexer/str/escape.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/plain.ivy 139 1
+selfhost/corpus/lexer/str/plain.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/prefix.ivy 140 1
+selfhost/corpus/lexer/str/prefix.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/raw.ivy 137 1
+selfhost/corpus/lexer/str/raw.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/str/raw_edge.ivy 142 1
+selfhost/corpus/lexer/str/raw_edge.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/block.ivy 143 1
+selfhost/corpus/lexer/trivia/block.ivy:1:16: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/div.ivy 140 1
+selfhost/corpus/lexer/trivia/div.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/eof_comment.ivy 148 1
+selfhost/corpus/lexer/trivia/eof_comment.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/line.ivy 141 1
+selfhost/corpus/lexer/trivia/line.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/mixed.ivy 1988 1
+selfhost/corpus/lexer/trivia/mixed.ivy:1:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/lexer/trivia/mixed.ivy:1:7: error: expected '(' after function name 'x'
+selfhost/corpus/lexer/trivia/mixed.ivy:1:9: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:1:9: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:1:11: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:2:9: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/lexer/trivia/mixed.ivy:2:28: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:3:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:3:9: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:3:17: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:4:1: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:4:26: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:4:26: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:5:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:5:1: error: expected ',' between parameters
+selfhost/corpus/lexer/trivia/mixed.ivy:5:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/lexer/trivia/mixed.ivy:5:13: error: expected ',' between parameters
+@@ selfhost/corpus/lexer/trivia/vt_ff.ivy 142 1
+selfhost/corpus/lexer/trivia/vt_ff.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/lexer/trivia/ws.ivy 139 1
+selfhost/corpus/lexer/trivia/ws.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/mir/cfg/01_bodyless_declaration.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_constant_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_constexpr_function.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_empty_function.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_extern_c_declaration.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_multi_function_order.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_return_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_return_local.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_return_struct_by_value.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/01_void_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_decl_multiple_names.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_auto.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_bool.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_char.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_local_shadowed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_locals_several.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_param_by_reference.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_param_by_value.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_param_const.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/02_param_pointer.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_arith_mixed_widths.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_bool_logic_short_circuit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_cast_const.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_cast_reinterpret.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_cast_static.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_comparisons.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_literal_nullptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_literal_string_escapes.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_sizeof_alignof_types.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_ternary_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_unary_incdec.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/03_unary_operators.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_as_argument.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_builtin.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_in_condition.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_many_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_method_local_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_method_this.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_last.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_pos1.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_two_levels.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_no_args.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_one_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_recursive.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/04_call_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_assign_array_element.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_assign_compound.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_assign_field.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_assign_through_pointer.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_break_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_do_while.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_else_if_chain.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_for_full.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_if_else.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_nested_blocks.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_switch_fallthrough_nextcase.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_switch_with_default.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/05_while.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_call_unknown.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_deref_propagates.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_legacy_attributes.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_local_address.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_move_argument.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_native_syntax.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_static_string.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_store_updates.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/06_lt_ternary_merge.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/07_deep_nesting.ivy 151 1
+selfhost/corpus/mir/cfg/07_deep_nesting.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:56:10: error: expected value token
+br label %
+         ^
+
+@@ selfhost/corpus/mir/cfg/07_long_function.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/07_many_locals_and_calls.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/07_many_parameters.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/07_many_switch_cases.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/cfg/07_nested_switches.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/29_borrow_mut_mut.ivy 149 1
+selfhost/corpus/mir/lifetime/29_borrow_mut_mut.ivy:5:5: error: cannot create a second mutable reference to 'x' — only one mutable borrow at a time
+@@ selfhost/corpus/mir/lifetime/30_borrow_mut_shared.ivy 145 1
+selfhost/corpus/mir/lifetime/30_borrow_mut_shared.ivy:5:5: error: cannot create an immutable reference to 'x' — it is already borrowed mutably
+@@ selfhost/corpus/mir/lifetime/30b_mut_shared_mut.ivy 293 1
+selfhost/corpus/mir/lifetime/30b_mut_shared_mut.ivy:4:5: error: cannot create an immutable reference to 'x' — it is already borrowed mutably
+selfhost/corpus/mir/lifetime/30b_mut_shared_mut.ivy:5:5: error: cannot create a second mutable reference to 'x' — only one mutable borrow at a time
+@@ selfhost/corpus/mir/lifetime/30c_param_mut_mut.ivy 149 1
+selfhost/corpus/mir/lifetime/30c_param_mut_mut.ivy:3:5: error: cannot create a second mutable reference to 'p' — only one mutable borrow at a time
+@@ selfhost/corpus/mir/lifetime/32_dangling_return.ivy 127 1
+selfhost/corpus/mir/lifetime/32_dangling_return.ivy:4:5: error: returning a reference to a local variable (dangling reference)
+@@ selfhost/corpus/mir/lifetime/32b_dangling_two.ivy 250 1
+selfhost/corpus/mir/lifetime/32b_dangling_two.ivy:3:5: error: returning a reference to a local variable (dangling reference)
+selfhost/corpus/mir/lifetime/32b_dangling_two.ivy:8:5: error: returning a reference to a local variable (dangling reference)
+@@ selfhost/corpus/mir/lifetime/61_nextcase_label.ivy 123 1
+selfhost/corpus/mir/lifetime/61_nextcase_label.ivy:5:13: error: nextcase target 'outer' is not a case label in this switch
+@@ selfhost/corpus/mir/lifetime/61b_nextcase_in_loop.ivy 124 1
+selfhost/corpus/mir/lifetime/61b_nextcase_in_loop.ivy:6:17: error: nextcase target 'one' is not a case label in this switch
+@@ selfhost/corpus/mir/lifetime/61c_nextcase_to_default.ivy 127 1
+selfhost/corpus/mir/lifetime/61c_nextcase_to_default.ivy:6:13: error: nextcase target 'two' is not a case label in this switch
+@@ selfhost/corpus/mir/lifetime/80_lt_mismatch.ivy 137 1
+selfhost/corpus/mir/lifetime/80_lt_mismatch.ivy:4:5: error: returned reference has lifetime '$a' but the function declares lifetime '$b'
+@@ selfhost/corpus/mir/lifetime/80b_lt_match_ok.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/80c_unknown_ret_plain.ivy 182 1
+selfhost/corpus/mir/lifetime/80c_unknown_ret_plain.ivy:4:5: error: returned reference has unknown lifetime; annotate the function with lifetime<$a> and tie the return to a parameter
+@@ selfhost/corpus/mir/lifetime/80d_unknown_ret_annotated.ivy 159 1
+selfhost/corpus/mir/lifetime/80d_unknown_ret_annotated.ivy:5:5: error: returned reference has unknown lifetime; tie it to a parameter with lifetime annotation
+@@ selfhost/corpus/mir/lifetime/87_borrow_mut_after_shared.ivy 150 1
+selfhost/corpus/mir/lifetime/87_borrow_mut_after_shared.ivy:5:5: error: cannot create a mutable reference to 'x' — it is already borrowed immutably
+@@ selfhost/corpus/mir/lifetime/90_borrow_scope_release.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/90b_two_shared_ok.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/90c_unsafe_borrow.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/90d_unsafe_return.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/01_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/02_method.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/03_ctor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/04_dtor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/05_enum.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/06_enum_val.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/07_enum_class.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/08_class.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/09_user_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/10_user_ptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/11_using.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/12_base.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/13_virtual.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/aggregate/14_field_init.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/01_def_block.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/02_multiple.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/03_proto.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/04_extern_c.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/05_extern_c_block.ivy 258 1
+"selfhost/corpus/parser/decl/05_extern_c_block.ivy":1:13: error: unexpected character
+"selfhost/corpus/parser/decl/05_extern_c_block.ivy":1:28: error: unexpected character
+"selfhost/corpus/parser/decl/05_extern_c_block.ivy":1:50: error: unexpected character
+@@ selfhost/corpus/parser/decl/06_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/07_fn_trailing.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/08_variadic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/09_unnamed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/10_cnumber.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/11_lifetime.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/12_ptr_ret.ivy 120 1
+selfhost/corpus/parser/decl/12_ptr_ret.ivy:2:7: error: C-style type 'char' requires #pragma ivy cnumber; use int8/uint8
+@@ selfhost/corpus/parser/decl/13_unsigned.ivy 117 1
+selfhost/corpus/parser/decl/13_unsigned.ivy:2:26: error: C-style type 'long' requires #pragma ivy cnumber; use int64
+@@ selfhost/corpus/parser/decl/14_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/decl/16_ws_comment.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/err/e2_attr_other.ivy 106 1
+selfhost/corpus/parser/err/e2_attr_other.ivy:2:3: error: unknown Ivy attribute 'ivy::lt' in this position
+@@ selfhost/corpus/parser/err/e2_bare.ivy 211 1
+selfhost/corpus/parser/err/e2_bare.ivy:2:3: error: [[ivy::unsafe]] is removed — use 'unsafe { }' instead
+selfhost/corpus/parser/err/e2_bare.ivy:2:3: error: unknown Ivy attribute 'ivy::unsafe' in this position
+@@ selfhost/corpus/parser/err/e2_fn_attr.ivy 106 1
+selfhost/corpus/parser/err/e2_fn_attr.ivy:1:1: error: unknown Ivy attribute 'ivy::bogus' in this position
+@@ selfhost/corpus/parser/err/e2_param_attr.ivy 110 1
+selfhost/corpus/parser/err/e2_param_attr.ivy:1:16: error: unknown Ivy attribute 'ivy::bogus' in this position
+@@ selfhost/corpus/parser/err/e2_toplevel.ivy 108 1
+selfhost/corpus/parser/err/e2_toplevel.ivy:1:1: error: unknown Ivy attribute 'ivy::unsafe' in this position
+@@ selfhost/corpus/parser/err/e2_two.ivy 419 1
+selfhost/corpus/parser/err/e2_two.ivy:2:3: error: [[ivy::unsafe]] is removed — use 'unsafe { }' instead
+selfhost/corpus/parser/err/e2_two.ivy:2:3: error: [[ivy::unsafe]] is removed — use 'unsafe { }' instead
+selfhost/corpus/parser/err/e2_two.ivy:2:3: error: unknown Ivy attribute 'ivy::unsafe' in this position
+selfhost/corpus/parser/err/e2_two.ivy:2:19: error: unknown Ivy attribute 'ivy::unsafe' in this position
+@@ selfhost/corpus/parser/err/e2_unknown_ns.ivy 146 1
+selfhost/corpus/parser/err/e2_unknown_ns.ivy:2:3: error: unknown attribute namespace 'foo': only ivy:: attributes are supported in the Ivy subset
+@@ selfhost/corpus/parser/err/e2_unsafe.ivy 215 1
+selfhost/corpus/parser/err/e2_unsafe.ivy:2:3: error: [[ivy::unsafe]] is removed — use 'unsafe { }' instead
+selfhost/corpus/parser/err/e2_unsafe.ivy:2:3: error: unknown Ivy attribute 'ivy::unsafe' in this position
+@@ selfhost/corpus/parser/err/e2_unsafe_after.ivy 227 1
+selfhost/corpus/parser/err/e2_unsafe_after.ivy:3:3: error: [[ivy::unsafe]] is removed — use 'unsafe { }' instead
+selfhost/corpus/parser/err/e2_unsafe_after.ivy:3:3: error: unknown Ivy attribute 'ivy::unsafe' in this position
+@@ selfhost/corpus/parser/err/e3_fn_ret.ivy 261 1
+selfhost/corpus/parser/err/e3_fn_ret.ivy:1:11: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+selfhost/corpus/parser/err/e3_fn_ret.ivy:1:21: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/parser/err/e3_int128.ivy 144 1
+selfhost/corpus/parser/err/e3_int128.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/parser/err/e3_multi.ivy 226 1
+selfhost/corpus/parser/err/e3_multi.ivy:1:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+selfhost/corpus/parser/err/e3_multi.ivy:2:1: error: _t-suffixed type 'size_t' is removed — use 'size' instead
+@@ selfhost/corpus/parser/err/e3_param.ivy 342 1
+selfhost/corpus/parser/err/e3_param.ivy:1:8: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+selfhost/corpus/parser/err/e3_param.ivy:1:8: error: expected ',' between parameters
+selfhost/corpus/parser/err/e3_param.ivy:1:16: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/parser/err/e3_ptrdiff.ivy 117 1
+selfhost/corpus/parser/err/e3_ptrdiff.ivy:1:1: error: _t-suffixed type 'ptrdiff_t' is removed — use 'iptr' instead
+@@ selfhost/corpus/parser/err/e3_size.ivy 111 1
+selfhost/corpus/parser/err/e3_size.ivy:1:1: error: _t-suffixed type 'size_t' is removed — use 'size' instead
+@@ selfhost/corpus/parser/err/e3_struct_field.ivy 212 1
+selfhost/corpus/parser/err/e3_struct_field.ivy:2:3: error: _t-suffixed type 'uint64_t' is removed — use 'uint64' instead
+selfhost/corpus/parser/err/e3_struct_field.ivy:2:3: error: expected field or method name
+@@ selfhost/corpus/parser/err/e3_top.ivy 112 1
+selfhost/corpus/parser/err/e3_top.ivy:1:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/parser/err/e3_uptr.ivy 142 1
+selfhost/corpus/parser/err/e3_uptr.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/parser/err/e4_include.ivy 180 1
+selfhost/corpus/parser/err/e4_include.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/parser/expr/01_add.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/02_exprstmt.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/03_prec.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/06_neg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/07_not.ivy 200 1
+selfhost/corpus/parser/expr/07_not.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:17: error: '%tmp.1' defined with type 'i32' but expected 'i1'
+%tmp.0 = xor i1 %tmp.1, true
+                ^
+
+@@ selfhost/corpus/parser/expr/08_ternary.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/09_paren.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/10_sizeof.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/11_staticcast.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/12_cmp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/13_shift.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/14_bitor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/expr/15_postfix.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/01_module_impl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/02_module_only.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/03_export_module.ivy 80 0
+ivy: module interface written to '<OUT>\out.ivm'
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/04_export_fn.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/05_export_fn_trailing.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/06_export_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/07_export_aggregates.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/08_export_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/09_import_cpp_angle.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/10_import_cpp_string.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/11_import_cpp_system.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/12_import_c.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/13_import_module_bare.ivy 74 1
+ivy: error: module 'ast' not found (searched .ivm files in include paths)
+@@ selfhost/corpus/parser/module/14_import_module_string.ivy 74 1
+ivy: error: module 'ast' not found (searched .ivm files in include paths)
+@@ selfhost/corpus/parser/module/15_mixed.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/module/16_export_module_import.ivy 80 0
+ivy: module interface written to '<OUT>\out.ivm'
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/01_if.ivy 196 1
+selfhost/corpus/parser/stmt/01_if.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb1
+      ^
+
+@@ selfhost/corpus/parser/stmt/02_ifelse.ivy 200 1
+selfhost/corpus/parser/stmt/02_ifelse.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb3
+      ^
+
+@@ selfhost/corpus/parser/stmt/03_while.ivy 200 1
+selfhost/corpus/parser/stmt/03_while.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb2, label %bb3
+      ^
+
+@@ selfhost/corpus/parser/stmt/04_dowhile.ivy 202 1
+selfhost/corpus/parser/stmt/04_dowhile.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:13:7: error: '%tmp.0' defined with type 'i32' but expected 'i1'
+br i1 %tmp.0, label %bb1, label %bb3
+      ^
+
+@@ selfhost/corpus/parser/stmt/05_for.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/06_for_empty.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/07_break.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/08_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/09_switch.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/10_nextcase.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/11_unsafe.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/12_decl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/13_multidecl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/14_nested.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/15_ifconstexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/16_directinit_call_pos1.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/17_directinit_call_last.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/stmt/18_directinit_nested_call.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/01_fn_typename.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/02_fn_class.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/03_fn_two_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/04_fn_non_type.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/05_variadic.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/06_concept_only.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/07_concept_multi_req.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/08_constrained_fn.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/09_struct_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/10_struct_two_params.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/11_class_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/12_fn_trailing.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/13_fn_constexpr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/14_fn_const.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/15_two_params_constraint.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/parser/template/16_template_no_lt.ivy 325 1
+selfhost/corpus/parser/template/16_template_no_lt.ivy:1:10: error: expected '<' to start template parameter list
+selfhost/corpus/parser/template/16_template_no_lt.ivy:1:14: error: expected template parameter name
+selfhost/corpus/parser/template/16_template_no_lt.ivy:3:1: error: expected '>' to close template parameter list
+@@ selfhost/corpus/pp/cond/arith.ivy 768 1
+selfhost/corpus/pp/cond/arith.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/arith.ivy:2:7: error: expected '(' after function name 'ok'
+selfhost/corpus/pp/cond/arith.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/arith.ivy:5:8: error: expected ',' between parameters
+selfhost/corpus/pp/cond/arith.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/arith.ivy:8:8: error: expected ',' between parameters
+selfhost/corpus/pp/cond/arith.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/arith.ivy:11:8: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/bitwise.ivy 979 1
+selfhost/corpus/pp/cond/bitwise.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/bitwise.ivy:2:6: error: expected '(' after function name 's'
+selfhost/corpus/pp/cond/bitwise.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/bitwise.ivy:5:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/bitwise.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/bitwise.ivy:8:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/bitwise.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/bitwise.ivy:11:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/bitwise.ivy:14:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/bitwise.ivy:14:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/compare.ivy 783 1
+selfhost/corpus/pp/cond/compare.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/compare.ivy:2:6: error: expected '(' after function name 'c'
+selfhost/corpus/pp/cond/compare.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/compare.ivy:5:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/compare.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/compare.ivy:8:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/compare.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/compare.ivy:11:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/defined.ivy 589 1
+selfhost/corpus/pp/cond/defined.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/defined.ivy:3:6: error: expected '(' after function name 'a'
+selfhost/corpus/pp/cond/defined.ivy:9:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/defined.ivy:9:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/defined.ivy:13:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/defined.ivy:13:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/elif.ivy 193 1
+selfhost/corpus/pp/cond/elif.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/elif.ivy:5:6: error: expected '(' after function name 'b'
+@@ selfhost/corpus/pp/cond/elif_chain.ivy 407 1
+selfhost/corpus/pp/cond/elif_chain.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/elif_chain.ivy:8:6: error: expected '(' after function name 'w'
+selfhost/corpus/pp/cond/elif_chain.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/elif_chain.ivy:11:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/else.ivy 388 1
+selfhost/corpus/pp/cond/else.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/else.ivy:3:10: error: expected '(' after function name 'taken'
+selfhost/corpus/pp/cond/else.ivy:10:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/else.ivy:10:9: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/expr_zero.ivy 404 1
+selfhost/corpus/pp/cond/expr_zero.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/expr_zero.ivy:2:9: error: expected '(' after function name 'zero'
+selfhost/corpus/pp/cond/expr_zero.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/expr_zero.ivy:8:8: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/ifdef_skipped.ivy 216 1
+selfhost/corpus/pp/cond/ifdef_skipped.ivy:4:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ifdef_skipped.ivy:4:10: error: expected '(' after function name 'after'
+@@ selfhost/corpus/pp/cond/ifdef_taken.ivy 409 1
+selfhost/corpus/pp/cond/ifdef_taken.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ifdef_taken.ivy:3:6: error: expected '(' after function name 'a'
+selfhost/corpus/pp/cond/ifdef_taken.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ifdef_taken.ivy:5:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/ifndef.ivy 199 1
+selfhost/corpus/pp/cond/ifndef.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ifndef.ivy:2:8: error: expected '(' after function name 'yes'
+@@ selfhost/corpus/pp/cond/intbase.ivy 783 1
+selfhost/corpus/pp/cond/intbase.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/intbase.ivy:2:6: error: expected '(' after function name 'h'
+selfhost/corpus/pp/cond/intbase.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/intbase.ivy:5:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/intbase.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/intbase.ivy:8:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/intbase.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/intbase.ivy:11:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/macro_in_if.ivy 411 1
+selfhost/corpus/pp/cond/macro_in_if.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/macro_in_if.ivy:3:8: error: expected '(' after function name 'big'
+selfhost/corpus/pp/cond/macro_in_if.ivy:9:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/macro_in_if.ivy:9:8: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/nested.ivy 779 1
+selfhost/corpus/pp/cond/nested.ivy:6:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/nested.ivy:6:8: error: expected '(' after function name 'mid'
+selfhost/corpus/pp/cond/nested.ivy:9:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/nested.ivy:9:9: error: expected ',' between parameters
+selfhost/corpus/pp/cond/nested.ivy:11:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/nested.ivy:11:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/nested.ivy:15:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/nested.ivy:15:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/cond/skip_tokens.ivy 144 1
+selfhost/corpus/pp/cond/skip_tokens.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/cond/ternary.ivy 587 1
+selfhost/corpus/pp/cond/ternary.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ternary.ivy:2:6: error: expected '(' after function name 't'
+selfhost/corpus/pp/cond/ternary.ivy:5:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ternary.ivy:5:6: error: expected ',' between parameters
+selfhost/corpus/pp/cond/ternary.ivy:8:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/cond/ternary.ivy:8:6: error: expected ',' between parameters
+@@ selfhost/corpus/pp/define_fn/arg_expand.ivy 148 1
+selfhost/corpus/pp/define_fn/arg_expand.ivy:2:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/basic.ivy 143 1
+selfhost/corpus/pp/define_fn/basic.ivy:1:15: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/multi.ivy 142 1
+selfhost/corpus/pp/define_fn/multi.ivy:2:5: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/nested.ivy 144 1
+selfhost/corpus/pp/define_fn/nested.ivy:1:19: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/noname.ivy 143 1
+selfhost/corpus/pp/define_fn/noname.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/paren_commas.ivy 149 1
+selfhost/corpus/pp/define_fn/paren_commas.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/recursive.ivy 147 1
+selfhost/corpus/pp/define_fn/recursive.ivy:1:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/variadic.ivy 145 1
+selfhost/corpus/pp/define_fn/variadic.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/variadic_empty.ivy 151 1
+selfhost/corpus/pp/define_fn/variadic_empty.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/variadic_only.ivy 151 1
+selfhost/corpus/pp/define_fn/variadic_only.ivy:1:18: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/whitespace_call.ivy 152 1
+selfhost/corpus/pp/define_fn/whitespace_call.ivy:2:4: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_fn/zero.ivy 142 1
+selfhost/corpus/pp/define_fn/zero.ivy:1:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/adjacency.ivy 147 1
+selfhost/corpus/pp/define_obj/adjacency.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/basic.ivy 1352 1
+selfhost/corpus/pp/define_obj/basic.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/define_obj/basic.ivy:3:7: error: expected '(' after function name 'x'
+selfhost/corpus/pp/define_obj/basic.ivy:1:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/basic.ivy:1:13: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/basic.ivy:3:12: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/basic.ivy:3:12: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/basic.ivy:1:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/basic.ivy:1:13: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/basic.ivy:2:17: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/basic.ivy:2:17: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/basic.ivy:2:19: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/basic.ivy:2:19: error: expected ',' between parameters
+@@ selfhost/corpus/pp/define_obj/comment.ivy 1376 1
+selfhost/corpus/pp/define_obj/comment.ivy:3:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/define_obj/comment.ivy:3:7: error: expected '(' after function name 'z'
+selfhost/corpus/pp/define_obj/comment.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/comment.ivy:1:11: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/comment.ivy:3:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/comment.ivy:3:11: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/comment.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/comment.ivy:1:11: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/comment.ivy:2:12: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/comment.ivy:2:13: error: expected ',' between parameters
+selfhost/corpus/pp/define_obj/comment.ivy:3:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+selfhost/corpus/pp/define_obj/comment.ivy:3:14: error: expected ',' between parameters
+@@ selfhost/corpus/pp/define_obj/empty.ivy 143 1
+selfhost/corpus/pp/define_obj/empty.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/forward.ivy 146 1
+selfhost/corpus/pp/define_obj/forward.ivy:2:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/keyword.ivy 198 1
+selfhost/corpus/pp/define_obj/keyword.ivy:2:1: error: C-style type 'int' requires #pragma ivy cnumber; use int32/uint32
+selfhost/corpus/pp/define_obj/keyword.ivy:1:12: error: expected function name
+@@ selfhost/corpus/pp/define_obj/nested.ivy 145 1
+selfhost/corpus/pp/define_obj/nested.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/parens.ivy 145 1
+selfhost/corpus/pp/define_obj/parens.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/redefine.ivy 147 1
+selfhost/corpus/pp/define_obj/redefine.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/define_obj/selfref.ivy 146 1
+selfhost/corpus/pp/define_obj/selfref.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/fn_paste.ivy 142 1
+selfhost/corpus/pp/expand/fn_paste.ivy:2:5: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/fn_paste_nospace.ivy 150 1
+selfhost/corpus/pp/expand/fn_paste_nospace.ivy:2:6: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/hash_not_param.ivy 93 1
+selfhost/corpus/pp/expand/hash_not_param.ivy:1:15: error: unsupported preprocessor directive
+@@ selfhost/corpus/pp/expand/obj_hash.ivy 87 1
+selfhost/corpus/pp/expand/obj_hash.ivy:1:13: error: unsupported preprocessor directive
+@@ selfhost/corpus/pp/expand/obj_paste.ivy 144 1
+selfhost/corpus/pp/expand/obj_paste.ivy:1:12: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_chain.ivy 145 1
+selfhost/corpus/pp/expand/paste_chain.ivy:2:5: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_empty_right.ivy 151 1
+selfhost/corpus/pp/expand/paste_empty_right.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_end.ivy 143 1
+selfhost/corpus/pp/expand/paste_end.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_num.ivy 144 1
+selfhost/corpus/pp/expand/paste_num.ivy:1:16: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_op.ivy 142 1
+selfhost/corpus/pp/expand/paste_op.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_rescan.ivy 147 1
+selfhost/corpus/pp/expand/paste_rescan.ivy:1:13: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/paste_word.ivy 144 1
+selfhost/corpus/pp/expand/paste_word.ivy:2:3: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/stringify.ivy 144 1
+selfhost/corpus/pp/expand/stringify.ivy:1:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/stringify_escape.ivy 151 1
+selfhost/corpus/pp/expand/stringify_escape.ivy:1:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/stringify_expr.ivy 149 1
+selfhost/corpus/pp/expand/stringify_expr.ivy:1:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/expand/stringify_raw.ivy 148 1
+selfhost/corpus/pp/expand/stringify_raw.ivy:2:14: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/error_basic.ivy 65 1
+selfhost/corpus/pp/line/error_basic.ivy:1:1: error: #error: boom
+@@ selfhost/corpus/pp/line/error_empty.ivy 61 1
+selfhost/corpus/pp/line/error_empty.ivy:1:1: error: #error: 
+@@ selfhost/corpus/pp/line/error_inactive.ivy 146 1
+selfhost/corpus/pp/line/error_inactive.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/error_quoted.ivy 76 1
+selfhost/corpus/pp/line/error_quoted.ivy:1:1: error: #error: bad thing here
+@@ selfhost/corpus/pp/line/error_tokens.ivy 67 1
+selfhost/corpus/pp/line/error_tokens.ivy:1:1: error: #error: a + b
+@@ selfhost/corpus/pp/line/line_basic.ivy 144 1
+selfhost/corpus/pp/line/line_basic.ivy:100:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_def.ivy 141 1
+selfhost/corpus/pp/line/line_def.ivy:2:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_expected.ivy 82 1
+selfhost/corpus/pp/line/line_expected.ivy:1:1: error: #line: expected line number
+@@ selfhost/corpus/pp/line/line_extra.ivy 144 1
+selfhost/corpus/pp/line/line_extra.ivy:100:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_file.ivy 111 1
+foo.c:100:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_inactive.ivy 145 1
+selfhost/corpus/pp/line/line_inactive.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_neg.ivy 85 1
+selfhost/corpus/pp/line/line_neg.ivy:1:1: error: #line: expected integer line number
+@@ selfhost/corpus/pp/line/line_notint.ivy 88 1
+selfhost/corpus/pp/line/line_notint.ivy:1:1: error: #line: expected integer line number
+@@ selfhost/corpus/pp/line/line_offset.ivy 143 1
+selfhost/corpus/pp/line/line_offset.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_string_only.ivy 93 1
+selfhost/corpus/pp/line/line_string_only.ivy:1:1: error: #line: expected integer line number
+@@ selfhost/corpus/pp/line/line_then_error.ivy 31 1
+foo.c:2:1: error: #error: boom
+@@ selfhost/corpus/pp/line/line_two_files.ivy 61 0
+y.c:3:1: warning: #warning: w
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/pp/line/line_undef.ivy 142 1
+selfhost/corpus/pp/line/line_undef.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/line_zero.ivy 86 1
+selfhost/corpus/pp/line/line_zero.ivy:1:1: error: #line: line number must be positive
+@@ selfhost/corpus/pp/line/warning_basic.ivy 223 1
+selfhost/corpus/pp/line/warning_basic.ivy:1:1: warning: #warning: hello world
+selfhost/corpus/pp/line/warning_basic.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/warning_inactive.ivy 148 1
+selfhost/corpus/pp/line/warning_inactive.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/line/warning_quoted.ivy 224 1
+selfhost/corpus/pp/line/warning_quoted.ivy:1:1: warning: #warning: quoted msg
+selfhost/corpus/pp/line/warning_quoted.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/no_include/active_branch.ivy 186 1
+selfhost/corpus/pp/no_include/active_branch.ivy:2:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/angle.ivy 178 1
+selfhost/corpus/pp/no_include/angle.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/arg.ivy 176 1
+selfhost/corpus/pp/no_include/arg.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/bare.ivy 177 1
+selfhost/corpus/pp/no_include/bare.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/inactive.ivy 146 1
+selfhost/corpus/pp/no_include/inactive.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/no_include/quoted.ivy 179 1
+selfhost/corpus/pp/no_include/quoted.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/trailing.ivy 181 1
+selfhost/corpus/pp/no_include/trailing.ivy:2:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/two.ivy 352 1
+selfhost/corpus/pp/no_include/two.ivy:1:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+selfhost/corpus/pp/no_include/two.ivy:2:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/no_include/with_macro.ivy 183 1
+selfhost/corpus/pp/no_include/with_macro.ivy:2:1: error: #include is removed in .ivy files — use 'import <module>;' instead (or 'import cpp ...' / 'import c ...' for C/C++ headers)
+@@ selfhost/corpus/pp/predef/cplusplus.ivy 143 1
+selfhost/corpus/pp/predef/cplusplus.ivy:0:0: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/defined_pre.ivy 145 1
+selfhost/corpus/pp/predef/defined_pre.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/file.ivy 138 1
+selfhost/corpus/pp/predef/file.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/if_predef_cmp.ivy 147 1
+selfhost/corpus/pp/predef/if_predef_cmp.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/ifdef_pre.ivy 143 1
+selfhost/corpus/pp/predef/ifdef_pre.ivy:2:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/ifndef_pre.ivy 144 1
+selfhost/corpus/pp/predef/ifndef_pre.ivy:4:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/ivy.ivy 137 1
+selfhost/corpus/pp/predef/ivy.ivy:0:0: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/line.ivy 138 1
+selfhost/corpus/pp/predef/line.ivy:1:1: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/line_in_define.ivy 149 1
+selfhost/corpus/pp/predef/line_in_define.ivy:1:11: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/obj_predef.ivy 144 1
+selfhost/corpus/pp/predef/obj_predef.ivy:0:0: error: expected a type (void, bool, int8, int16, int32, int64, uint8, ..., float32, float64, ...)
+@@ selfhost/corpus/pp/predef/pragma_bare.ivy 72 1
+selfhost/corpus/pp/predef/pragma_bare.ivy:1:1: error: unknown #pragma: 
+@@ selfhost/corpus/pp/predef/pragma_cnumber.ivy 94 1
+selfhost/corpus/pp/predef/pragma_cnumber.ivy:2:7: error: expected '(' after function name 'x'
+@@ selfhost/corpus/pp/predef/pragma_ivy_only.ivy 79 1
+selfhost/corpus/pp/predef/pragma_ivy_only.ivy:1:1: error: unknown #pragma: ivy
+@@ selfhost/corpus/pp/predef/pragma_mixed.ivy 149 1
+selfhost/corpus/pp/predef/pragma_mixed.ivy:2:1: error: unknown #pragma: ivy
+selfhost/corpus/pp/predef/pragma_mixed.ivy:3:1: error: unknown #pragma: 
+@@ selfhost/corpus/pp/predef/pragma_unknown.ivy 78 1
+selfhost/corpus/pp/predef/pragma_unknown.ivy:1:1: error: unknown #pragma: foo
+@@ selfhost/corpus/pp/predef/pragma_unknown_in_if.ivy 84 1
+selfhost/corpus/pp/predef/pragma_unknown_in_if.ivy:2:1: error: unknown #pragma: foo
+@@ selfhost/corpus/pp/predef/redef_cplusplus.ivy 104 1
+selfhost/corpus/pp/predef/redef_cplusplus.ivy:1:9: error: cannot redefine predefined macro: __cplusplus
+@@ selfhost/corpus/pp/predef/redef_line.ivy 96 1
+selfhost/corpus/pp/predef/redef_line.ivy:1:9: error: cannot redefine predefined macro: __LINE__
+@@ selfhost/corpus/pp/predef/undef_ivy.ivy 92 1
+selfhost/corpus/pp/predef/undef_ivy.ivy:1:8: error: cannot #undef predefined macro: __ivy__
+@@ selfhost/corpus/pp/predef/undef_line.ivy 94 1
+selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined macro: __LINE__

@@ -1,0 +1,2 @@
+selfhost/corpus/codegen/138_new_struct_noparen.ivy
+selfhost/corpus/codegen/226_structured_binding_mixed.ivy

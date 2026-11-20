@@ -259,3 +259,114 @@ giu con tro toi pool cua parser/HIR/MIR.
 - `difftest`/`interpdiff` van can oracle cho che do so truc tiep; H9.3 thay
   bang `selfhost/golden/` de gate khong can `build/Release/ivy.exe`.
 - Cac harness H7.x da hong tu H8.1 (xem H9.1 muc 8) van chua duoc re-base.
+
+---
+
+# H9.3 - Dong bang baseline + golden (`selfhost/golden/`)
+
+## 1. Pham vi
+
+H9.2 chung minh driver khop oracle khi **chay oracle cung luc**. H9.3 dong bang
+hanh vi do thanh du lieu co the commit, de tu day cac gate chay **khong can**
+`build/Release/ivy.exe`. Tag `0.5-baseline` (H0.2) la moc cuoi cua `src/**`;
+golden duoc sinh tu chinh `build/Release/ivy.exe` cua moc do.
+
+Hai script:
+
+| Script | Vai tro |
+|---|---|
+| `selfhost/freeze_golden.ps1` | chay oracle tren toan corpus, ghi `selfhost/golden/` |
+| `selfhost/check_golden.ps1` | chay `ivy_selfhost.exe`, so voi golden, **khong** goi oracle |
+
+## 2. Layout golden
+
+20 file, 3 974 260 byte (2026-11-21):
+
+| File | Noi dung |
+|---|---|
+| `corpus.txt` | danh sach 1052 fixture (repo-relative, `/`) |
+| `manifest.txt` | `format=1`, so fixture, modes, SHA-256/size oracle + `rt.obj` |
+| `dump/{lex,tokens,ast,hir,mir,llvm}.txt` | 6 mode dump, moi fixture mot record |
+| `compile/c.txt`, `compile/objects.tsv` | `-c`: output + SHA-256/size `.obj` va `.ivm` |
+| `compile/o.txt`, `compile/preproc.tsv` | `-o *.i`: output + SHA-256/size file |
+| `interp/{stdout,stderr}.txt` | `--run` 23 fixture interp (byte-exact) |
+| `link/{diag,stdout,stderr,sideeffects}.txt` | 249 fixture link + executable |
+| `link/nondet.txt` | 2 fixture UB chi so link (`138`, `226`) |
+| `exceptions.txt` | record oracle **crash** (H27), xem muc 6 |
+
+Record co do dai tuong minh vi `--lex`/`--tokens` ket thuc bang `eof` **khong**
+newline:
+
+```
+@@ <path> <nbytes> <exit>\n<dung nbytes byte tho>
+```
+
+Khong nen: dump text ~2.8 MB, object chi luu hash.
+
+## 3. Chuan hoa
+
+- 6 mode dump + output `-c`/`-o`/link: CRLF -> LF, dung **mot** newline cuoi
+  (giong `difftest.ps1`); `--run`, stdout/stderr executable, object va `.i` la
+  **byte-exact**.
+- `<OUT>`: thu muc scratch (ca hai kieu slash) trong diagnostics.
+- `<RT>`: `build/Release/ivyrt.lib` (oracle bake) va `build/rt.obj` (selfhost
+  doc qua `IVYRT_LIB_PATH`) duoc thay bang cung mot token.
+- Lenh moi fixture dung `-I <thu muc fixture>` (repo-relative, `/`) giong
+  `driver_smoke.ps1`.
+
+## 4. Cach dung
+
+```
+powershell -NoProfile -File selfhost/freeze_golden.ps1
+powershell -NoProfile -File selfhost/check_golden.ps1 -Driver <stage1>\ivy_selfhost.exe
+powershell -NoProfile -File selfhost/check_golden.ps1 -Driver ... -Modes ast,hir,mir
+powershell -NoProfile -File selfhost/check_golden.ps1 -Driver ... -Filter 135_*
+```
+
+`check_golden.ps1` tu set `IVYRT_LIB_PATH=build/rt.obj` neu chua co va canh bao
+neu SHA-256 cua `rt.obj` khac manifest. Moi lan chay dung TEMP/TMP rieng.
+
+## 5. Parity gap ma gate mo rong bat duoc
+
+Lan chay dau voi stage1: **74 failure / 12337 check**. Day la **loi that cua
+port** (truoc do H9.2 chi chay `--ast` tren `parser/`, `--hir` tren `hir/`,
+`--mir` tren `mir/` nen bo sot `codegen/` va `hir/borrow`, `hir/move`):
+
+| File | Gap | Fix |
+|---|---|---|
+| `parsing/ast.ivy` | thieu kind 21 `new`, 22 `delete`/`delete[]`, 23 `init-list`, 24 `sizeof...`, 25 `fold` | them vao `AstDumper.dump_expr` dung `src/app/main.cpp:145-197` |
+| `hir/hir.ivy` | thieu kind 20 `new : T*`, 21 `delete` | them vao `HirDumper.dump_expr` dung `main.cpp:428-437` |
+| `mir/mir.ivy` + `mir_builder.ivy` | `virtual_call ''` mat ten method | copy `HExpr.msval` vao `MExpr.sval2` |
+| `mir_builder.ivy` | `return lifetime:` in ca tren function **khong co body** | oracle copy trong `buildFunction`; port chi copy khi co body |
+| `mir_builder.ivy` | `move(x)` in `[lt: ...]` sai | bug-compat H28: oracle gan `out->lifetime` **sau** `std::move(arg)` nen `arg` null -> call giu `None`; port bo copy lifetime (xem `ORACLE_BUGS.md`) |
+
+Quirk AST giu nguyen: leaf node **khong** co newline (vi vay
+`new int32_t` + `int 5` dinh vao dong ke tiep) va `<zero-init>`/`<null lhs>` dung
+`pad(depth)` chu khong phai `pad(depth+1)`.
+
+## 6. Ngoai le oracle crash (H27)
+
+`--hir` va `--mir` cua oracle crash `0xC0000005` (`exit -1073741819`) tren
+`156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init`
+(init-list co `<zero-init>`). `freeze_golden.ps1` tu ghi `exceptions.txt` cho
+moi record dump co exit am; `check_golden.ps1` bo so byte cho 6 record nay
+nhung **bat buoc port exit 0** (khong tai hien crash).
+
+## 7. Ket qua
+
+| Kiem tra | Ket qua |
+|---|---|
+| `bootstrap_smoke.ps1` (F2) | **PASS**: 19 object + 18 `.ivm` + `rt.obj` + EXE identical |
+| `check_golden.ps1 -Driver <stage1>` (ca 10 mode) | **PASS 12337 check, 0 failure** (1052 fixture) |
+| `check_golden.ps1 -Modes ast,hir,mir` | PASS 3156/3156 |
+| Gate khi **khong co** `build/Release/ivy.exe` | dung golden, khong goi oracle |
+
+Luu y: gate golden **thay the** nhu cau chay `difftest`/`interpdiff` truc tiep
+trong CI tu H9.3; hai script cu van giu de debug khi con oracle.
+
+## 8. Con lai
+
+- Tag `0.5-baseline` **chua tao** (cho phep cua user).
+- `exceptions.txt` la du lieu duy nhat do nguoi viet them; neu freeze lai ma
+  oracle het crash thi file se rong va gate lai so byte binh thuong.
+- 3 harness H7.x van hong (re-base o H9.6).

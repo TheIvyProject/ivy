@@ -1,0 +1,46 @@
+@@ selfhost/corpus/interp/01_int_ops.ivy 72 2
+ivy: error: cannot open file '"selfhost/corpus/interp/01_int_ops.ivy"'
+@@ selfhost/corpus/interp/02_assign_unary.ivy 77 2
+ivy: error: cannot open file '"selfhost/corpus/interp/02_assign_unary.ivy"'
+@@ selfhost/corpus/interp/03_float.ivy 70 2
+ivy: error: cannot open file '"selfhost/corpus/interp/03_float.ivy"'
+@@ selfhost/corpus/interp/04_short_circuit.ivy 78 2
+ivy: error: cannot open file '"selfhost/corpus/interp/04_short_circuit.ivy"'
+@@ selfhost/corpus/interp/05_strings.ivy 72 2
+ivy: error: cannot open file '"selfhost/corpus/interp/05_strings.ivy"'
+@@ selfhost/corpus/interp/06_refs.ivy 69 2
+ivy: error: cannot open file '"selfhost/corpus/interp/06_refs.ivy"'
+@@ selfhost/corpus/interp/07_pointers.ivy 73 2
+ivy: error: cannot open file '"selfhost/corpus/interp/07_pointers.ivy"'
+@@ selfhost/corpus/interp/08_arrays.ivy 71 2
+ivy: error: cannot open file '"selfhost/corpus/interp/08_arrays.ivy"'
+@@ selfhost/corpus/interp/09_calls.ivy 70 2
+ivy: error: cannot open file '"selfhost/corpus/interp/09_calls.ivy"'
+@@ selfhost/corpus/interp/10_recursion.ivy 74 2
+ivy: error: cannot open file '"selfhost/corpus/interp/10_recursion.ivy"'
+@@ selfhost/corpus/interp/11_cfg.ivy 68 2
+ivy: error: cannot open file '"selfhost/corpus/interp/11_cfg.ivy"'
+@@ selfhost/corpus/interp/12_switch.ivy 71 2
+ivy: error: cannot open file '"selfhost/corpus/interp/12_switch.ivy"'
+@@ selfhost/corpus/interp/13_call_order.ivy 75 2
+ivy: error: cannot open file '"selfhost/corpus/interp/13_call_order.ivy"'
+@@ selfhost/corpus/interp/14_io_streams.ivy 75 2
+ivy: error: cannot open file '"selfhost/corpus/interp/14_io_streams.ivy"'
+@@ selfhost/corpus/interp/15_io_format.ivy 74 2
+ivy: error: cannot open file '"selfhost/corpus/interp/15_io_format.ivy"'
+@@ selfhost/corpus/interp/16_c_output.ivy 73 2
+ivy: error: cannot open file '"selfhost/corpus/interp/16_c_output.ivy"'
+@@ selfhost/corpus/interp/17_alloc_cell.ivy 75 2
+ivy: error: cannot open file '"selfhost/corpus/interp/17_alloc_cell.ivy"'
+@@ selfhost/corpus/interp/18_div_zero.ivy 73 2
+ivy: error: cannot open file '"selfhost/corpus/interp/18_div_zero.ivy"'
+@@ selfhost/corpus/interp/20_array_bounds.ivy 77 2
+ivy: error: cannot open file '"selfhost/corpus/interp/20_array_bounds.ivy"'
+@@ selfhost/corpus/interp/21_int_status.ivy 75 2
+ivy: error: cannot open file '"selfhost/corpus/interp/21_int_status.ivy"'
+@@ selfhost/corpus/interp/22_nonint_status.ivy 78 2
+ivy: error: cannot open file '"selfhost/corpus/interp/22_nonint_status.ivy"'
+@@ selfhost/corpus/interp/23_expr_misc.ivy 74 2
+ivy: error: cannot open file '"selfhost/corpus/interp/23_expr_misc.ivy"'
+@@ selfhost/corpus/interp/24_exit.ivy 69 2
+ivy: error: cannot open file '"selfhost/corpus/interp/24_exit.ivy"'

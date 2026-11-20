@@ -1,0 +1,330 @@
+@@ selfhost/corpus/codegen/01_return_const.ivy 0 42
+@@ selfhost/corpus/codegen/02_int_ops.ivy 0 7
+@@ selfhost/corpus/codegen/03_assign.ivy 0 3
+@@ selfhost/corpus/codegen/04_if.ivy 0 2
+@@ selfhost/corpus/codegen/05_while.ivy 0 3
+@@ selfhost/corpus/codegen/06_for.ivy 0 3
+@@ selfhost/corpus/codegen/07_ops.ivy 0 3
+@@ selfhost/corpus/codegen/08_unary_cmp.ivy 0 -5
+@@ selfhost/corpus/codegen/09_cast.ivy 0 7
+@@ selfhost/corpus/codegen/10_void.ivy 0 0
+@@ selfhost/corpus/codegen/100_struct_array_nested.ivy 0 3
+@@ selfhost/corpus/codegen/101_struct_array_float.ivy 4 0
+0.
+@@ selfhost/corpus/codegen/102_bool_array.ivy 0 1
+@@ selfhost/corpus/codegen/105_print_ref_char.ivy 3 0
+A
+@@ selfhost/corpus/codegen/106_enum_local.ivy 0 1
+@@ selfhost/corpus/codegen/107_enum_param_return.ivy 0 2
+@@ selfhost/corpus/codegen/108_enum_scoped.ivy 0 1
+@@ selfhost/corpus/codegen/109_enum_scoped_param.ivy 0 0
+@@ selfhost/corpus/codegen/11_two_functions.ivy 0 5
+@@ selfhost/corpus/codegen/110_enum_underlying_i8.ivy 0 1
+@@ selfhost/corpus/codegen/111_enum_underlying_u16.ivy 0 4
+@@ selfhost/corpus/codegen/112_enum_underlying_u8.ivy 0 -55
+@@ selfhost/corpus/codegen/113_enum_array.ivy 0 2
+@@ selfhost/corpus/codegen/114_enum_struct_field.ivy 0 1
+@@ selfhost/corpus/codegen/115_enum_print.ivy 3 0
+2
+@@ selfhost/corpus/codegen/116_enum_explicit_values.ivy 0 3
+@@ selfhost/corpus/codegen/117_enum_multi_param.ivy 0 1
+@@ selfhost/corpus/codegen/118_enum_in_struct_param.ivy 0 1
+@@ selfhost/corpus/codegen/119_enum_return.ivy 0 2
+@@ selfhost/corpus/codegen/12_recursion.ivy 0 55
+@@ selfhost/corpus/codegen/120_enum_scoped_array.ivy 0 2
+@@ selfhost/corpus/codegen/121_enum_struct_print.ivy 5 0
+1 4
+@@ selfhost/corpus/codegen/122_enum_scoped_print.ivy 3 0
+1
+@@ selfhost/corpus/codegen/123_enum_struct_return.ivy 0 2
+@@ selfhost/corpus/codegen/124_enum_param_i8.ivy 0 1
+@@ selfhost/corpus/codegen/125_enum_unused.ivy 0 1
+@@ selfhost/corpus/codegen/126_enum_arith.ivy 0 2
+@@ selfhost/corpus/codegen/127_enum_sizeof.ivy 0 4
+@@ selfhost/corpus/codegen/128_enum_index.ivy 0 0
+@@ selfhost/corpus/codegen/129_enum_scoped_underlying.ivy 0 2
+@@ selfhost/corpus/codegen/13_void_call.ivy 0 0
+@@ selfhost/corpus/codegen/130_enum_scoped_underlying_print.ivy 3 0
+2
+@@ selfhost/corpus/codegen/131_enum_nested_struct_array.ivy 0 2
+@@ selfhost/corpus/codegen/132_enum_two_params.ivy 0 1
+@@ selfhost/corpus/codegen/133_enum_float_field.ivy 7 0
+2 1.5
+@@ selfhost/corpus/codegen/134_enum_expr_values.ivy 0 6
+@@ selfhost/corpus/codegen/135_new_scalar.ivy 0 5
+@@ selfhost/corpus/codegen/136_new_no_paren.ivy 0 7
+@@ selfhost/corpus/codegen/139_new_enum.ivy 0 2
+@@ selfhost/corpus/codegen/14_extern_c.ivy 0 7
+@@ selfhost/corpus/codegen/140_new_float.ivy 5 0
+1.5
+@@ selfhost/corpus/codegen/141_new_float32.ivy 6 0
+2.25
+@@ selfhost/corpus/codegen/142_new_expr_arg.ivy 0 7
+@@ selfhost/corpus/codegen/144_delete_array.ivy 0 0
+@@ selfhost/corpus/codegen/145_new_in_expr.ivy 0 9
+@@ selfhost/corpus/codegen/146_new_loop.ivy 0 3
+@@ selfhost/corpus/codegen/147_deref_struct.ivy 0 4
+@@ selfhost/corpus/codegen/148_addr_local.ivy 0 10
+@@ selfhost/corpus/codegen/149_double_deref.ivy 0 7
+@@ selfhost/corpus/codegen/15_params.ivy 0 9
+@@ selfhost/corpus/codegen/150_new_single_stmt.ivy 0 8
+@@ selfhost/corpus/codegen/151_new_struct_pad.ivy 0 9
+@@ selfhost/corpus/codegen/153_new_nested_struct.ivy 0 5
+@@ selfhost/corpus/codegen/154_struct_brace_init.ivy 0 3
+@@ selfhost/corpus/codegen/155_struct_eq_init.ivy 0 1
+@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 0 0
+@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 0 0
+@@ selfhost/corpus/codegen/158_struct_float_field_init.ivy 7 0
+3 1.5
+@@ selfhost/corpus/codegen/159_struct_assign_init.ivy 0 2
+@@ selfhost/corpus/codegen/16_nested_call.ivy 0 5
+@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 0 5
+@@ selfhost/corpus/codegen/161_struct_enum_field_init.ivy 0 3
+@@ selfhost/corpus/codegen/162_struct_i8_field_init.ivy 0 5
+@@ selfhost/corpus/codegen/163_struct_desig_then_pos.ivy 0 8
+@@ selfhost/corpus/codegen/164_printf_basic.ivy 8 0
+n = 42
+@@ selfhost/corpus/codegen/165_printf_multi.ivy 15 0
+3 hi 0.000000
+@@ selfhost/corpus/codegen/166_puts.ivy 7 0
+hello
+@@ selfhost/corpus/codegen/167_extern_ptr_decl.ivy 0 0
+@@ selfhost/corpus/codegen/169_ptr_cmp.ivy 0 1
+@@ selfhost/corpus/codegen/17_print_str.ivy 2 0
+hi@@ selfhost/corpus/codegen/170_ptr_ret_void.ivy 0 0
+@@ selfhost/corpus/codegen/172_ptr_arith.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/173_decl_only_ptr.ivy 0 0
+@@ selfhost/corpus/codegen/174_overload_count_call.ivy 0 9
+@@ selfhost/corpus/codegen/175_cstyle_numeric.ivy 0 0
+@@ selfhost/corpus/codegen/176_cstyle_ptr.ivy 0 0
+@@ selfhost/corpus/codegen/177_static_cast_numeric.ivy 0 126
+@@ selfhost/corpus/codegen/178_static_cast_enum_ptr.ivy 0 20
+@@ selfhost/corpus/codegen/179_reinterpret_cast.ivy 0 0
+@@ selfhost/corpus/codegen/18_println_mix.ivy 6 0
+hi
+42@@ selfhost/corpus/codegen/180_const_cast.ivy 0 0
+@@ selfhost/corpus/codegen/181_cstyle_precedence.ivy 0 23
+@@ selfhost/corpus/codegen/182_cstyle_nested.ivy 0 10
+@@ selfhost/corpus/codegen/183_cstyle_control_flow.ivy 0 3
+@@ selfhost/corpus/codegen/184_cstyle_unsigned.ivy 0 0
+@@ selfhost/corpus/codegen/187_io_read_line.ivy 0 0
+@@ selfhost/corpus/codegen/188_io_write_file.ivy 0 0
+@@ selfhost/corpus/codegen/189_io_read_file.ivy 0 0
+@@ selfhost/corpus/codegen/19_print_int_var.ivy 4 0
+42
+@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 32 0
+ctor 1
+ctor 2
+dtor 2
+dtor 1
+@@ selfhost/corpus/codegen/193_ctor_overload.ivy 0 4
+@@ selfhost/corpus/codegen/194_ctor_agg_bypass.ivy 0 15
+@@ selfhost/corpus/codegen/195_raii_break.ivy 16 3
+dtor 0
+dtor 1
+@@ selfhost/corpus/codegen/196_raii_continue.ivy 24 5
+dtor 0
+dtor 2
+dtor 3
+@@ selfhost/corpus/codegen/197_dtor_return_temp.ivy 0 6
+@@ selfhost/corpus/codegen/198_dtor_nrvo.ivy 0 0
+@@ selfhost/corpus/codegen/199_operator_binary.ivy 47 0
+c = (4, 6)
+d = (8, 12)
+a == b? 0
+a == a? 1
+@@ selfhost/corpus/codegen/20_print_format.ivy 9 0
+x=1 y=2
+@@ selfhost/corpus/codegen/200_operator_unary.ivy 15 0
+-a = (-5, -7)
+@@ selfhost/corpus/codegen/201_operator_index.ivy 31 0
+a[0]=10 a[1]=20 a[2]=30
+s=40
+@@ selfhost/corpus/codegen/202_operator_call.ivy 12 0
+|a|^2 = 14
+@@ selfhost/corpus/codegen/203_operator_call_arg.ivy 11 0
+s(6) = 42
+@@ selfhost/corpus/codegen/204_operator_call_multi.ivy 17 0
+f(10, 20) = 130
+@@ selfhost/corpus/codegen/205_operator_index_ref.ivy 14 0
+42 43
+42 43
+@@ selfhost/corpus/codegen/206_operator_call_result.ivy 31 0
+c = (11, 22)
+(b + c)[1] = 24
+@@ selfhost/corpus/codegen/207_template_struct_basic.ivy 21 0
+a.value=7 a.get()=7
+@@ selfhost/corpus/codegen/208_template_struct_two_params.ivy 24 0
+p.sum()=42 p.swap()=31
+@@ selfhost/corpus/codegen/209_template_struct_method_call.ivy 20 0
+a=21 b=42 twice=84
+@@ selfhost/corpus/codegen/21_eprint.ivy 0 0
+@@ selfhost/corpus/codegen/210_template_struct_int64.ivy 13 0
+a=705032704
+@@ selfhost/corpus/codegen/211_template_struct_agg.ivy 21 0
+a.value=5 a.get()=5
+@@ selfhost/corpus/codegen/212_template_struct_nested.ivy 35 0
+w.inner.value=9 w.outer().value=9
+@@ selfhost/corpus/codegen/213_template_struct_assign.ivy 9 0
+a=3 b=3
+@@ selfhost/corpus/codegen/214_template_struct_param.ivy 6 0
+b=13
+@@ selfhost/corpus/codegen/215_variadic_sizeof.ivy 7 0
+0 1 3
+@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 7 0
+0 1 2
+@@ selfhost/corpus/codegen/217_variadic_fold_sum.ivy 12 0
+10
+10
+16
+@@ selfhost/corpus/codegen/218_variadic_fold_logic.ivy 10 0
+1 0
+1 0
+@@ selfhost/corpus/codegen/219_variadic_comma.ivy 12 0
+11
+22
+33
+@@ selfhost/corpus/codegen/22_string_escape.ivy 14 0
+a
+b	"q"\endA@@ selfhost/corpus/codegen/220_variadic_mixed.ivy 3 0
+6
+@@ selfhost/corpus/codegen/221_variadic_empty.ivy 8 0
+0
+1 0
+@@ selfhost/corpus/codegen/222_variadic_binary_init.ivy 11 0
+0
+11
+16
+@@ selfhost/corpus/codegen/223_structured_binding_two.ivy 16 30
+x = 10, y = 20
+@@ selfhost/corpus/codegen/224_structured_binding_three.ivy 49 0
+r = 255, g = 128, b = 0
+r2 = 1, g2 = 2, b2 = 3
+@@ selfhost/corpus/codegen/225_structured_binding_call.ivy 14 7
+a = 3, b = 4
+@@ selfhost/corpus/codegen/227_structured_binding_nested.ivy 30 3
+in.a = 1, in.b = 2, tail = 3
+@@ selfhost/corpus/codegen/228_range_for_value.ivy 10 18
+sum = 18
+@@ selfhost/corpus/codegen/229_range_for_ref.ivy 10 60
+10 20 30
+@@ selfhost/corpus/codegen/23_array_rw.ivy 0 14
+@@ selfhost/corpus/codegen/230_range_for_break_continue.ivy 0 7
+@@ selfhost/corpus/codegen/231_range_for_nested.ivy 0 36
+@@ selfhost/corpus/codegen/232_range_for_struct_range.ivy 6 34
+8 10
+@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/234_range_for_float.ivy 0 1
+@@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 25 0
+base dtor
+derived dtor
+@@ selfhost/corpus/codegen/237_inherit_extra_slot.ivy 18 0
+extra
+base only
+@@ selfhost/corpus/codegen/238_inherit_virtual_args.ivy 4 0
+22
+@@ selfhost/corpus/codegen/239_inherit_multiple.ivy 14 0
+C::fa
+C::fa
+@@ selfhost/corpus/codegen/24_array_var_index.ivy 0 7
+@@ selfhost/corpus/codegen/240_inherit_base_method.ivy 11 0
+shared 11
+@@ selfhost/corpus/codegen/241_move_scalar.ivy 12 0
+10 20 7 37
+@@ selfhost/corpus/codegen/242_move_struct.ivy 5 0
+3 4
+@@ selfhost/corpus/codegen/243_move_call_arg.ivy 4 0
+10
+@@ selfhost/corpus/codegen/244_move_return.ivy 3 0
+7
+@@ selfhost/corpus/codegen/245_move_pointer.ivy 3 0
+9
+@@ selfhost/corpus/codegen/246_move_cond.ivy 5 0
+1 2
+@@ selfhost/corpus/codegen/247_std_math.ivy 8 0
+7 9 3.
+@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 15 0
+unique_ptr ok
+@@ selfhost/corpus/codegen/25_array_loop.ivy 0 12
+@@ selfhost/corpus/codegen/26_array_unsafe.ivy 0 0
+@@ selfhost/corpus/codegen/27_array_compound.ivy 0 6
+@@ selfhost/corpus/codegen/28_array_types.ivy 0 16
+@@ selfhost/corpus/codegen/29_struct_local.ivy 0 3
+@@ selfhost/corpus/codegen/30_struct_copy.ivy 0 3
+@@ selfhost/corpus/codegen/31_struct_nested.ivy 0 3
+@@ selfhost/corpus/codegen/32_struct_fields.ivy 0 1
+@@ selfhost/corpus/codegen/33_struct_member_copy.ivy 0 3
+@@ selfhost/corpus/codegen/34_struct_multi.ivy 0 1
+@@ selfhost/corpus/codegen/35_struct_inner_block.ivy 0 3
+@@ selfhost/corpus/codegen/36_struct_copy_write.ivy 0 12
+@@ selfhost/corpus/codegen/37_struct_param.ivy 0 3
+@@ selfhost/corpus/codegen/38_struct_return.ivy 0 1
+@@ selfhost/corpus/codegen/39_struct_param_return.ivy 0 4
+@@ selfhost/corpus/codegen/40_struct_nested_param.ivy 0 3
+@@ selfhost/corpus/codegen/41_struct_arrow_nullptr.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/42_struct_arrow_read.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/43_struct_arrow_nested.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/44_ref_param.ivy 0 2
+@@ selfhost/corpus/codegen/45_ref_swap.ivy 0 21
+@@ selfhost/corpus/codegen/46_ref_forward.ivy 0 3
+@@ selfhost/corpus/codegen/47_struct_ref_param.ivy 0 3
+@@ selfhost/corpus/codegen/48_ref_local.ivy 0 6
+@@ selfhost/corpus/codegen/49_ref_mixed.ivy 0 9
+@@ selfhost/corpus/codegen/50_ref_return.ivy 0 1
+@@ selfhost/corpus/codegen/51_ref_local_call.ivy 0 2
+@@ selfhost/corpus/codegen/52_ref_call_lhs.ivy 0 5
+@@ selfhost/corpus/codegen/53_ref_call_arg.ivy 0 2
+@@ selfhost/corpus/codegen/54_ref_pick.ivy 0 11
+@@ selfhost/corpus/codegen/55_struct_ref_return.ivy 0 1
+@@ selfhost/corpus/codegen/56_ref_call_binary.ivy 0 5
+@@ selfhost/corpus/codegen/57_float_local.ivy 0 0
+@@ selfhost/corpus/codegen/58_float_ops.ivy 0 0
+@@ selfhost/corpus/codegen/59_float_cmp.ivy 0 0
+@@ selfhost/corpus/codegen/60_float_cast.ivy 0 3
+@@ selfhost/corpus/codegen/61_float_print.ivy 10 0
+1.5
+1.5
+@@ selfhost/corpus/codegen/62_float32.ivy 0 0
+@@ selfhost/corpus/codegen/63_float_unary.ivy 0 0
+@@ selfhost/corpus/codegen/64_float_literals.ivy 0 0
+@@ selfhost/corpus/codegen/65_float32_sig.ivy 0 0
+@@ selfhost/corpus/codegen/66_float_ret.ivy 5 0
+2.5
+@@ selfhost/corpus/codegen/67_float_mixed_cmp.ivy 0 0
+@@ selfhost/corpus/codegen/68_struct_float_param.ivy 6 0
+3.75
+@@ selfhost/corpus/codegen/69_struct_float_ret.ivy 5 0
+1.5
+@@ selfhost/corpus/codegen/70_float_cond.ivy 0 1
+@@ selfhost/corpus/codegen/71_float_mangle.ivy 0 0
+@@ selfhost/corpus/codegen/72_float_compound.ivy 0 0
+@@ selfhost/corpus/codegen/73_float32_print.ivy 5 0
+1.5
+@@ selfhost/corpus/codegen/74_ternary_basic.ivy 0 10
+@@ selfhost/corpus/codegen/75_ternary_nested.ivy 0 20
+@@ selfhost/corpus/codegen/76_ternary_and.ivy 0 20
+@@ selfhost/corpus/codegen/77_shortcircuit.ivy 0 0
+@@ selfhost/corpus/codegen/78_shortcircuit_nested.ivy 0 0
+@@ selfhost/corpus/codegen/79_or_ternary.ivy 0 0
+@@ selfhost/corpus/codegen/80_or_chain.ivy 0 1
+@@ selfhost/corpus/codegen/81_ternary_float.ivy 0 0
+@@ selfhost/corpus/codegen/82_ternary_arg.ivy 0 15
+@@ selfhost/corpus/codegen/83_ternary_ret.ivy 0 2
+@@ selfhost/corpus/codegen/84_ternary_call.ivy 0 11
+@@ selfhost/corpus/codegen/85_shortcircuit_call.ivy 0 0
+@@ selfhost/corpus/codegen/86_switch_basic.ivy 0 20
+@@ selfhost/corpus/codegen/87_switch_expr.ivy 0 30
+@@ selfhost/corpus/codegen/88_switch_nodefault.ivy 0 0
+@@ selfhost/corpus/codegen/89_switch_default_first.ivy 0 20
+@@ selfhost/corpus/codegen/90_switch_i8.ivy 0 2
+@@ selfhost/corpus/codegen/91_switch_nested.ivy 0 12
+@@ selfhost/corpus/codegen/92_dowhile.ivy 0 3
+@@ selfhost/corpus/codegen/93_loop_break_continue.ivy 0 8
+@@ selfhost/corpus/codegen/94_and_if.ivy 0 1
+@@ selfhost/corpus/codegen/95_float_array.ivy 4 0
+0.
+@@ selfhost/corpus/codegen/96_float32_array.ivy 5 0
+1.5
+@@ selfhost/corpus/codegen/97_float_array_loop.ivy 0 0
+@@ selfhost/corpus/codegen/98_struct_array.ivy 0 1
+@@ selfhost/corpus/codegen/99_struct_array_copy.ivy 0 1

@@ -90,6 +90,8 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **H24** | A | `move(x)` chỉ là pass-through khi callee **không** có MIR entry; overload `move` do người dùng định nghĩa vẫn là call thật | `codegen.cpp:1539` | `emitter.ivy` (`lower_call`) | `H82_NOTES.md` §2 |
 | **H25** | A | `sizeof(<biểu thức>)` và `switch` trên `enum` bị oracle **từ chối** (không phải parse error mà là lỗi tầng sau) | `src/hir/**` | `selfhost/hir/hir_builder.ivy` | `PLAN.md` H5.1 (L720-721) |
 | **H26** | A | `T x = {...}` (aggregate init) **bypass** constructor nhưng **vẫn** record destructor | `hir_builder.cpp` (`buildVarDecl`) | `hir_builder.ivy` (`record_dtor_var`) | `H62_NOTES.md` (RAII, L2516) |
+| **H27** | C | `--hir`/`--mir` **crash** `0xC0000005` (`exit -1073741819`) trên init-list có phần tử `<zero-init>` do HIR builder sinh ra: oracle lưu `nullptr` trong `elements` rồi `dumpHirExpr`/`buildExpr` dereference | `src/app/main.cpp` (`dumpHirExpr` InitList), `src/mir/mir_builder.cpp` (`buildExpr` InitList) | `selfhost/hir/hir.ivy`, `selfhost/mir/mir.ivy` (in `<zero-init>` / bỏ qua, **không** crash) | `selfhost/golden/exceptions.txt` (`156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init`); port phải exit 0 |
+| **H28** | A | `move(x)` giữ lifetime `None`: `out->lifetime = arg->lifetime` chạy **sau** `call.args.push_back(std::move(arg))`, nên `if (arg)` false và call không có `[lt: ...]` trong `--mir` | `src/mir/mir_builder.cpp:578-583` | `selfhost/mir/mir_builder.ivy` (`ex_call`): `move` để `lt_kind_ = 0`, không copy lifetime của operand | `codegen/245_move_pointer`, `hir/move/54_lifetime_param_moved` |
 
 ### 1.4 Codegen / IR
 
@@ -269,6 +271,12 @@ output rỗng + exit code khác 1, phá differ. **Tuyệt đối không** đưa 
 Nested `constexpr` call trong binary expression **không** crash trong probe
 (p66, p84) nhưng **coi là không an toàn**. Nguồn:
 `TEMPLATE_NOTES.md` §10.1, `MIR_NOTES.md` §11.7.
+
+> **Ngoại lệ H9.3.** `selfhost/corpus/codegen/{156_struct_partial_init,157_struct_empty_init,160_struct_designated_init}.ivy`
+> vẫn nằm trong corpus vì **chỉ** `--hir`/`--mir` crash; `--ast`, `--lex`,
+> `--tokens`, `--llvm`, `-c`, `-o` và link đều bình thường. Ba fixture này
+> được ghi ở `selfhost/golden/exceptions.txt` (H27): gate bỏ so byte nhưng
+> **bắt buộc** port exit 0.
 
 > Ghi chú: §8.11 của `LIFETIME_NOTES.md` kết luận **không** tìm được input
 > lifetime nào làm crash oracle; mọi input malformed đều cho diagnostic sạch.

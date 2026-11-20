@@ -418,6 +418,30 @@ export struct HirDumper {
             }
             return;
         }
+        if (e.kind == 20) {
+            io::print("new : ");
+            this.dump_type(e.type);
+            io::println("");
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.ap[e.astart + j];
+                }
+                this.dump_expr(ai, depth + 1);
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 21) {
+            if (e.flag != 0) {
+                io::println("delete[]");
+            } else {
+                io::println("delete");
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
     }
 
     void dump_compound(long idx, long depth) {

@@ -557,6 +557,72 @@ export struct AstDumper {
             io::println(")");
             return;
         }
+        if (e.kind == 21) {
+            io::print("new ");
+            this.dump_type(e.type);
+            io::println("");
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.ca[e.astart + j];
+                }
+                this.dump_expr(ai, depth + 1);
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 22) {
+            if (e.flag != 0) {
+                io::println("delete[]");
+            } else {
+                io::println("delete");
+            }
+            this.dump_expr(e.a, depth + 1);
+            return;
+        }
+        if (e.kind == 23) {
+            io::println("init-list ({})", e.an);
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.ca[e.astart + j];
+                }
+                if (ai >= 0) {
+                    this.dump_expr(ai, depth + 1);
+                } else {
+                    this.pad(depth);
+                    io::println("  <zero-init>");
+                }
+                j = j + 1;
+            }
+            return;
+        }
+        if (e.kind == 24) {
+            io::println("sizeof...({})", e.sval);
+            return;
+        }
+        if (e.kind == 25) {
+            if (e.flag != 0) {
+                io::println("fold op='{}' isLeftPack=true", e.sval);
+            } else {
+                io::println("fold op='{}' isLeftPack=false", e.sval);
+            }
+            if (e.a >= 0) {
+                this.dump_expr(e.a, depth + 1);
+            } else {
+                this.pad(depth);
+                io::println("  <null lhs>");
+            }
+            if (e.b >= 0) {
+                this.dump_expr(e.b, depth + 1);
+            } else {
+                this.pad(depth);
+                io::println("  <null rhs>");
+            }
+            return;
+        }
     }
 
     void dump_compound(long idx, long depth) {

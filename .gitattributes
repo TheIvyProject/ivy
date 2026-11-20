@@ -1,0 +1,4 @@
+# Golden records are length-prefixed byte blobs: the 4-byte length in each
+# record header and the byte-exact dump/object hashes make any CRLF conversion
+# corrupt the baseline.  Keep them byte-for-byte on checkout and commit.
+selfhost/golden/** -text

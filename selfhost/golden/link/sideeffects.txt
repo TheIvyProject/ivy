@@ -1,0 +1,2 @@
+@@ selfhost/corpus/codegen/188_io_write_file.ivy|a.txt 1 0
+x@@ selfhost/corpus/codegen/188_io_write_file.ivy|b.txt 0 0
