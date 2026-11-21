@@ -2,3 +2,6 @@
 # record header and the byte-exact dump/object hashes make any CRLF conversion
 # corrupt the baseline.  Keep them byte-for-byte on checkout and commit.
 selfhost/golden/** -text
+
+# H9.5: the bootstrap seed is a binary artifact; never normalise its bytes.
+selfhost/bootstrap/ivy-stage0.exe -text

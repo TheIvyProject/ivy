@@ -29,6 +29,9 @@ out/
 # Build logs
 build_log*.txt
 
+# H9.5: the bootstrap seed is a checked-in artifact, not a build output.
+!selfhost/bootstrap/ivy-stage0.exe
+
 # opencode
 .opencode/
 

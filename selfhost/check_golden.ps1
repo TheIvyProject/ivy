@@ -31,6 +31,10 @@ param(
     [Parameter(Mandatory=$true)][string]$Driver,
     [string]$Golden = "selfhost/golden",
     [string]$TempRoot = "",
+    # Runtime object the driver links with.  Defaults to $env:IVYRT_LIB_PATH,
+    # then `build\rt.obj`.  Its path is normalised to `<RT>` in the `link`
+    # diagnostics so the baseline does not depend on where the object lives.
+    [string]$Runtime = "",
     [int]$TimeoutSec = 120,
     [string]$Modes = "lex,tokens,ast,hir,mir,llvm,c,o,run,link",
     [string]$Filter = "",
@@ -88,17 +92,21 @@ if (Test-Path -LiteralPath $exceptionsPath) {
 }
 
 # The link section needs the runtime object.  The oracle has its archive path
-# baked in; the self-host driver reads IVYRT_LIB_PATH (H9.1), so point it at the
-# object the golden baseline was frozen with unless the caller already did.
-$ivyrt = Join-Path $repo "build\rt.obj"
-if (-not $env:IVYRT_LIB_PATH -and (Test-Path -LiteralPath $ivyrt)) {
-    $env:IVYRT_LIB_PATH = $ivyrt
-}
-if ($manifest["runtime_sha256"] -ne "-" -and (Test-Path -LiteralPath $ivyrt)) {
-    $rtSha = (Get-FileHash -LiteralPath $ivyrt -Algorithm SHA256).Hash
+# baked in; the self-host driver reads IVYRT_LIB_PATH (H9.1).  `-Runtime` wins,
+# then the caller's environment, then the historical `build\rt.obj` (the path
+# the baseline was frozen with, and the only one that exists while `src/**` is
+# still around).
+$defaultRt = Join-Path $repo "build\rt.obj"
+$rtUsed = $Runtime
+if (-not $rtUsed) { $rtUsed = $env:IVYRT_LIB_PATH }
+if (-not $rtUsed -and (Test-Path -LiteralPath $defaultRt)) { $rtUsed = $defaultRt }
+if ($rtUsed) { $env:IVYRT_LIB_PATH = $rtUsed }
+if ($manifest["runtime_sha256"] -ne "-" -and $rtUsed -and
+    (Test-Path -LiteralPath $rtUsed)) {
+    $rtSha = (Get-FileHash -LiteralPath $rtUsed -Algorithm SHA256).Hash
     if ($rtSha -ne $manifest["runtime_sha256"]) {
-        Write-Output ("warning: build/rt.obj differs from the frozen runtime (" + $rtSha + " vs " +
-                      $manifest["runtime_sha256"] + ")")
+        Write-Output ("warning: runtime differs from the frozen one (" + $rtSha + " vs " +
+                      $manifest["runtime_sha256"] + "): " + $rtUsed)
     }
 }
 
@@ -119,6 +127,12 @@ $script:RtPaths = @(
     (Join-Path $repo "build\rt.obj"),
     ((Join-Path $repo "build\rt.obj") -replace '\\', '/')
 )
+# H9.5: an Ivy-only bootstrap links with `rt.obj` in a per-run temp directory,
+# so normalise whatever runtime the driver actually uses to `<RT>` as well.
+if ($rtUsed) {
+    $script:RtPaths += $rtUsed
+    $script:RtPaths += ($rtUsed -replace '\\', '/')
+}
 
 function Normalize-Paths([byte[]]$bytes, [string]$root) {
     $s = $script:Latin1.GetString($bytes)

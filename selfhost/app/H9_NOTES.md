@@ -454,13 +454,101 @@ va **nguyen command line** de debug.
 | Kiem tra | Ket qua |
 |---|---|
 | `bootstrap_smoke.ps1 -SelfLink` | **PASS**: 18/18 object + 17/17 `.ivm` + `rt.obj` + stage1/stage2 EXE identical |
-| Buoc `[self-link]` | **EXE self-link identical** (27 130 880 byte) |
+| Buoc `[self-link]` | **EXE self-link identical** (27 130 368 byte) |
 | `check_golden.ps1 -Driver <stage1>` | **PASS 12337 check, 0 failure** |
 
 ## 7. Con lai
 
-- Stage0 / bootstrap khong can oracle: H9.5 (dung binary Ivy build san thay
-  `build\Release\ivy.exe`).
+- Stage0 / bootstrap khong can oracle: da xong o H9.5 (muc duoi).
 - `import cpp` parity (H9.8) van chua port; `--self-link` khong dung den.
 - Bug H29 chi duoc **ne**, chua fix: sua `lowerLValue` (dung `llvmType` nhu
   duong doc) o H10, kem freeze lai golden.
+
+---
+
+# H9.5 - Bootstrap khong can oracle (`selfhost/build.ps1`)
+
+## 1. Pham vi
+
+H8.1/H9.4 chung minh compiler Ivy tu build + tu link duoc, nhung stage 0 van la
+oracle C++ (`build\Release\ivy.exe`). H9.5 thay stage 0 bang mot binary Ivy
+**dong bang** trong repo, nen mot checkout chi can LLVM + MSVC CRT/SDK la build
+duoc, khong doc `src/**`, khong CMake, khong oracle.
+
+Chuoi moi:
+
+```
+selfhost/bootstrap/ivy-stage0.exe  ->  stage1  ->  stage2
+                                         |            |
+                                         +-- F2: OBJ/IVM/rt.obj/EXE byte-identical
+```
+
+## 2. Stage 0 (seed)
+
+| | |
+|---|---|
+| file | `selfhost/bootstrap/ivy-stage0.exe` |
+| size | 27 130 368 byte |
+| SHA-256 | `C5DF31991234D0AD4C9637DA882D8C4DEB9C35ECCBD961307056EAA89EF46008` |
+| sinh tu | commit `d8252ba` (H9.4), stage 1 do oracle build |
+| kiem tra | `ivy-stage0.sha256` (dinh dang `sha256sum`), verify truoc khi dung |
+
+`selfhost/bootstrap/README.md` ghi nguon goc, ly do commit binary, va cach tai
+sinh. `.gitignore` co `*.exe` nen them ngoai le `!selfhost/bootstrap/ivy-stage0.exe`;
+`.gitattributes` them `-text` de git khong doi byte.
+
+Seed **khong** phai build output: no chi can doi khi compiler khong con build
+duoc source hien tai (feature moi dung truoc khi seed biet) hoac khi mot fix
+phai co mat o the he dau.
+
+## 3. `selfhost/build.ps1`
+
+Tham so: `-TempRoot`, `-LlvmRoot`, `-Stage0`, `-Stage1File`, `-SelfLink`,
+`-Golden`, `-SkipHashCheck`.
+
+1. verify SHA-256 cua seed (bo qua voi `-SkipHashCheck`, va voi `-Stage0`
+   duong dan tuy y);
+2. do LLVM nhu cac harness (`-LlvmRoot` -> `LLVM_ROOT` -> `D:\Cpp\Clang` ->
+   `llvm-config` PATH); moi run co `TEMP`/`TMP` rieng;
+3. stage 0 build `rt.obj` tu `std/rt.ivy`, dat `IVYRT_LIB_PATH`;
+4. stage 0 build 18 module + `main.ivy` -> stage 1, harness link (`$linkOrder`
+   nhu H9.4);
+5. stage 1 build lai tat ca -> stage 2; so **19 object + 18 `.ivm`** byte-exact;
+6. stage 1 build lai `rt.obj`, so voi ban cua stage 0;
+7. link stage 2, so EXE stage1/stage2;
+8. `-SelfLink`: stage 1 tu link stage 2 bang `--self-link`, so voi harness;
+9. `-Golden`: chay `check_golden.ps1 -Driver stage1 -Runtime <rt.obj>`.
+
+Tat ca file trung gian nam trong `-TempRoot`; repo khong bi ghi.
+
+## 4. `check_golden.ps1 -Runtime`
+
+Gate cu chi chuan hoa `<RT>` cho `build\Release\ivyrt.lib` va `build\rt.obj`.
+Khi `build.ps1` link bang `rt.obj` trong TEMP (dung, va la duong **bat buoc**
+sau khi xoa `src/**`), 5 fixture `link` hong vi stderr con duong dan that. Them
+tham so `-Runtime` (mac dinh `$env:IVYRT_LIB_PATH`, roi `build\rt.obj`) va
+chuan hoa `<RT>` theo runtime **dang dung**. Chi doi cach in chan doan, khong
+doi byte output cua compiler.
+
+## 5. Ket qua (2026-11-21)
+
+| Kiem tra | Ket qua |
+|---|---|
+| `build.ps1 -SelfLink -Golden` | **PASS**: seed hash dung, F2 19 OBJ + 18 IVM + `rt.obj`, EXE stage1/stage2 identical, EXE self-link identical |
+| golden (khong oracle) | **PASS 12337 check, 0 failure** |
+| **copy repo khong co `build/`** roi chay `build.ps1 -SelfLink -Golden` | **PASS y het** — khong oracle, khong `build\rt.obj`, khong `src/**` |
+| `check_golden.ps1 -Modes link` kieu cu (`build\rt.obj`) | PASS 719/719 |
+| oracle `build\Release\ivy.exe` | khong bi doc/ghi: size 27 031 552, SHA-256 `FFB376CF…313E` khong doi |
+
+Bang chung truc tiep cho tieu chi H9.5: mot cay chi co source + seed + golden
+van build va kiem duoc. Chi con thieu buoc "khong co `src/**`" (H9.9) va CI
+dung seed (H9.6).
+
+## 6. Con lai
+
+- CI chi dung Ivy: H9.6 (thay oracle + CMake trong workflow bang seed +
+  `build.ps1 -Golden`).
+- Reproducible build (`/Brepro` cho moi link, khong duong dan tuyet doi, 2 thu
+  muc khac nhau ra cung exe): H9.7.
+- Seed hien duoc build tren may nay (duong dan LLVM nam trong PE neu co); H9.7
+  moi cam ket reproducible.
