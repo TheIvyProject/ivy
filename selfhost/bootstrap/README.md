@@ -36,6 +36,32 @@ Because the build is deterministic (`/Brepro`), rebuilding the same sources
 with the same seed reproduces the same bytes; that is what `F2` in
 `selfhost/build.ps1` asserts for generations 1 and 2.
 
+## Version stamp and reproducibility (H9.7)
+
+`selfhost/build.ps1` generates a `buildinfo` module before compiling the
+stages, so the rebuilt compiler answers:
+
+```powershell
+> .\ivy.exe --version
+ivy 0.5.0 (<short git hash>)
+```
+
+The checked-in `selfhost/app/buildinfo.ivy` is the fallback (`unknown`), used
+by the development harnesses.  Pass `-GitHash <hash>` when building an
+archive/export that has no `.git`.
+
+Every link in the bootstrap passes `-Wl,/Brepro`, and the driver now passes it
+for user programs too, so PE timestamps and PDB paths never leak into the
+bytes.  LLVM records no absolute source path in these objects (the stages are
+emitted without debug info), so two checkouts at different locations produce
+identical files.  `selfhost/check_repro.ps1` bootstraps two such copies and
+compares every `.obj`, `.ivm` and `.exe`; `.github/workflows/selfhost-repro.yml`
+runs it weekly and on demand.
+
+`build.ps1` prints the SHA-256 and size of the stage 1/2 and self-linked
+executables, so a CI log or a release note can publish them next to the seed
+digest above.
+
 ## Why an executable, not a source seed
 
 An Ivy-only bootstrap needs *some* compiler to start from.  Committing the

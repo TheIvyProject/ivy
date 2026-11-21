@@ -636,3 +636,97 @@ dir>`. Byte interface do stage 1 sinh == ban oracle sinh == ban tung nam trong
 | CI run `44926968286` (truoc fix) | **do**: 23 failure, dung 2 loai loi o muc 5 va 6 |
 | CI run `44931247724` (commit `be7fdce`) | **xanh 7m53s**: Install LLVM 97s (cache cold), Bootstrap 339s, Post Cache 24s; baseline oracle cu 6m10s |
 | CI run `44932030326` (cache am) | **xanh 6m21s**: Cache LLVM 45s, Install LLVM 1s, Bootstrap 323s; baseline 6m10s (+11s) |
+
+# H9.7 - Reproducible build + versioning
+
+## 1. Pham vi
+
+Bon yeu cau, ca bon deu do duoc:
+
+1. **Moi link deu `/Brepro`** - link harness (stage 1/2), link `--self-link`,
+   va link thuong cua driver (chuong trinh nguoi dung).
+2. **Object khong chua duong dan tuyet doi** - build o hai thu muc khac nhau
+   cho ra `.obj`/`.ivm`/`.exe` giong het tung byte.
+3. **`ivy --version`** - oracle khong co flag nay; in version + git hash.
+4. **Cong bo SHA-256** - `build.ps1` in hash/kich thuoc stage 1/2 va self-link.
+
+## 2. `/Brepro` cho moi link
+
+- Harness (`selfhost/build.ps1`, `bootstrap_smoke.ps1`) da truyen
+  `-Wl,/Brepro` tu H8/H9.4; `--self-link` cung da co trong
+  `Linker.collect_self_link()`.
+- `selfhost/codegen/codegen.ivy`: nhanh link thuong chen `-Wl,/Brepro` ngay
+  truoc `-o`. Truoc khi sua, hai lan link cung input nhung cach nhau 3 giay
+  khac nhau o offset 248 (PE `TimeDateStamp`) va 89396 (PDB path); sau khi
+  sua, hai exe giong het.
+- Oracle khong co flag nay, nen 5 fixture link-fail (`168`/`171`/`185`/`191`/
+  `236`) se in them ` -Wl,/Brepro` trong command line. `check_golden.ps1` va
+  `freeze_golden.ps1` bo chuoi nay trong `Normalize-Paths` (ca hai phia; golden
+  khong doi byte), `driver_smoke.ps1` lam tuong tu trong `Normalize-Rt`.
+
+## 3. Object khong chua duong dan
+
+Stage 1/2 duoc emit khong co debug info, nen LLVM khong nhung duong dan source
+vao object. Vi vay hai checkout o hai do sau khac nhau (do dai duong dan khac
+nhau) van cho ra cung `.obj`, `.ivm`, `.exe`. Gate moi
+`selfhost/check_repro.ps1`:
+
+- copy working tree hai lan bang `robocopy` (bo `.git` va `build/`) vao
+  `a\repo` va `b\much\deeper\source\tree\repo`;
+- chay `build.ps1 -SelfLink -GitHash <hash>` trong tung ban (khong oracle,
+  khong CMake, khong `build/`);
+- so SHA-256 cua moi `.obj`/`.ivm`/`.exe` theo duong dan tuong doi trong run
+  dir. `-GitHash` giu stamp `--version` giong nhau vi ban copy khong co `.git`.
+
+Chuoi tuyet doi duy nhat con trong binary la hang fallback `D:\Cpp\Clang` cua
+`find_llvm_root`/`collect_self_link` (probe runtime khi khong co `LLVM_ROOT`),
+khong phai duong dan source/build; no giong nhau o ca hai cay nen khong anh
+huong phep so byte.
+
+Workflow rieng `.github/workflows/selfhost-repro.yml` chay gate nay hang tuan
+va bang `workflow_dispatch` (hai bootstrap day du ~10-12 phut); CI push van chi
+chay dogfood nhanh.
+
+## 4. `ivy --version`
+
+- Module moi `selfhost/app/buildinfo.ivy`: `struct BuildInfo` voi
+  `version()` va `git_hash()` (method cua struct vi free function khong duoc
+  tra raw pointer). Ban checked-in tra `0.5.0` / `unknown` cho cac harness dev.
+- `build.ps1` sinh `$runDir\buildinfo.ivy` voi version + `git rev-parse
+  --short=12 HEAD` (hoac `-GitHash`, hoac `unknown` khi khong co `.git`), them
+  vao `$modules` dau tien va vao cuoi `$linkOrder` (khop thu tu `import` cua
+  `main.ivy`). `Build-Stage` ho tro duong dan source tuyet doi.
+- `main.ivy`: quet argv truoc `CliArgs.parse()`; gap `--version` thi in
+  `ivy <version> (<hash>)` ra stdout va exit 0 (flag moi, khong co trong
+  oracle). `cli.ivy` them dong `--version` vao usage text.
+- Kiem tra: stage1 in `ivy 0.5.0 (0001071755ee)` (hash cua HEAD luc build),
+  exit 0; `--help` co dong moi. `build.ps1` cung chay `stage1 --version` va doi
+  dung chuoi `ivy <version> (<hash>)`, nen CI bat loi stamp ngay trong gate.
+
+## 5. SHA-256
+
+`build.ps1` in them:
+
+```
+SHA stage1/2      <sha256>
+SIZE stage1/2     <bytes>
+SHA self-link     <sha256>
+```
+
+Voi HEAD `0001071`: `7DCC7282AF100477A1C6D18AB7860CC0EAEBF10F810D7E2A6F7E9730EC9ED4C9`,
+27 130 880 B (seed 27 130 368 B; +512 B do them module `buildinfo`). Stage 1,
+stage 2 va self-link deu cung hash.
+
+Seed `ivy-stage0.exe` da co hash rieng trong `bootstrap/README.md`; CI log
+va release note co the cong bo ca ba cung luc.
+
+## 6. Ket qua (2026-11-22)
+
+| Kiem tra | Ket qua |
+|---|---|
+| `build.ps1 -SelfLink -Golden` (stage1, HEAD `0001071`) | **PASS**: F2 20 OBJ + 19 IVM + `rt.obj`, EXE identical, self-link identical, golden **12337 check / 0 failure** |
+| `ivy --version` (stage1) | `ivy 0.5.0 (0001071755ee)`, exit 0 |
+| link thuong 2 lan cach 3s (truoc fix) | khac nhau o offset 248 + 89396 |
+| link thuong 2 lan cach 3s (sau fix) | **giong het** |
+| `check_repro.ps1` (2 cay khac do sau) | **PASS** - 83 artifact giong het (42 `.obj`, 38 `.ivm`, 3 `.exe`); stage1 SHA-256 `7DCC7282…9ED4C9`, 27 130 880 B |
+| oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |

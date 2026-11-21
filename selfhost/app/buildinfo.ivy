@@ -1,0 +1,26 @@
+// selfhost/app/buildinfo.ivy - version stamp for `ivy --version` (H9.7).
+//
+// This checked-in module is the fallback: the development harnesses compile
+// it as-is, so a locally built driver reports `unknown` for the commit.
+//
+// `selfhost/build.ps1` writes a module with the same name into the run
+// directory right before compiling the stages.  That generated copy carries
+// the short git hash of the checkout and a `-I <run>` entry puts it ahead of
+// this file, so the bootstrap binaries report the commit they came from.
+//
+// The accessors live on a struct because a free function may not return a raw
+// pointer without a lifetime annotation (see the note in main.ivy).
+#pragma ivy cnumber
+export module buildinfo;
+
+export struct BuildInfo {
+    // Semantic version of this compiler line.
+    const char* version() {
+        return "0.5.0";
+    }
+
+    // Short git commit of the sources the binary was built from.
+    const char* git_hash() {
+        return "unknown";
+    }
+};

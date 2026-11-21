@@ -1,0 +1,106 @@
+name: selfhost reproducible build
+
+# H9.7: two independent bootstraps of the same sources, in directories with
+# different depths, must produce byte-identical `.obj`, `.ivm` and `.exe`
+# files (`selfhost/check_repro.ps1`).  This needs two full builds (~10-12 min),
+# so it does not run on every push: the push workflow stays the fast dogfood
+# gate.  Run it weekly and on demand before a release.
+#
+# The LLVM install block mirrors `selfhost-dogfood.yml`.  It uses the same
+# cache key, so after a dogfood run the cache is already warm.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: selfhost-repro
+  cancel-in-progress: false
+
+jobs:
+  repro:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache LLVM
+        uses: actions/cache@v4
+        with:
+          path: C:\LLVM
+          key: llvm-21.1.6-full-${{ runner.os }}-v1
+
+      - name: Install LLVM
+        run: |
+          $ver = "21.1.6"
+          $root = "C:\LLVM"
+          $name = "clang+llvm-$ver-x86_64-pc-windows-msvc"
+          $prefix = Join-Path $root $name
+          function Test-FullLlvm([string]$p) {
+            if (-not $p) { return $false }
+            return (Test-Path "$p\bin\clang.exe") -and
+                   (Test-Path "$p\bin\clang++.exe") -and
+                   (Test-Path "$p\bin\llvm-config.exe") -and
+                   (Test-Path "$p\lib\cmake\llvm\LLVMConfig.cmake")
+          }
+          if (-not (Test-FullLlvm $prefix)) {
+            $archive = Join-Path $env:RUNNER_TEMP "$name.tar.xz"
+            curl.exe -L --fail --retry 3 -o $archive `
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$ver/$name.tar.xz"
+            if ($LASTEXITCODE -ne 0) { throw "LLVM download failed" }
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            tar.exe -xf $archive -C $root
+            if ($LASTEXITCODE -ne 0) { throw "LLVM extraction failed" }
+          }
+          if (-not (Test-FullLlvm $prefix)) {
+            throw "full LLVM is not usable at $prefix"
+          }
+          $exports = Join-Path $prefix "lib\cmake\llvm\LLVMExports.cmake"
+          $text = Get-Content -LiteralPath $exports -Raw
+          if ($text -match 'DIA SDK/lib/amd64/diaguids\.lib') {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+            $dia = $null
+            foreach ($inst in (& $vswhere -all -products * -property installationPath)) {
+              $candidate = Join-Path $inst.Trim() "DIA SDK\lib\amd64\diaguids.lib"
+              if (Test-Path -LiteralPath $candidate) { $dia = $candidate; break }
+            }
+            if (-not $dia) { throw "DIA SDK (diaguids.lib) not found" }
+            $dia = $dia -replace '\\', '/'
+            $patched = [regex]::Replace($text,
+              '(?i)[A-Z]:/[^";]*?DIA SDK/lib/amd64/diaguids\.lib', $dia)
+            if ($patched -ne $text) {
+              Set-Content -LiteralPath $exports -Value $patched -NoNewline
+              "patched DIA SDK path: $dia"
+            } else {
+              "DIA SDK path already points at $dia"
+            }
+          } else {
+            "LLVMExports.cmake has no DIA SDK reference"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value "$prefix\bin"
+          "LLVM_ROOT=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "IVY_LINKER=$prefix\bin\clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$prefix\bin\llvm-config.exe" --version
+
+      - name: Two trees, byte-identical artifacts
+        run: |
+          pwsh -NoProfile -File selfhost\check_repro.ps1 `
+            -LlvmRoot "$env:LLVM_ROOT" `
+            -TempRoot "$env:RUNNER_TEMP\h97"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-logs
+          path: |
+            ${{ runner.temp }}/h97/**/build.log
+            ${{ runner.temp }}/h97/**/*.err
+            ${{ runner.temp }}/h97/**/*.out
+          if-no-files-found: ignore

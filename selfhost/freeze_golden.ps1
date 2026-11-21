@@ -152,6 +152,9 @@ function Normalize-Paths([byte[]]$bytes, [string]$root) {
     $s = $s.Replace(($root -replace '\\', '/'), "<OUT>")
     foreach ($p in $script:RtPaths) { $s = $s.Replace($p, "<RT>") }
     foreach ($p in $script:ClangPaths) { $s = $s.Replace($p, "<CLANG>") }
+    # H9.7: see check_golden.ps1 - the port links with `/Brepro`, the oracle
+    # did not; the flag is a build detail and is dropped from diagnostics.
+    $s = $s.Replace(" -Wl,/Brepro", "")
     return Normalize-Lines ($script:Latin1.GetBytes($s))
 }
 

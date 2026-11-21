@@ -1322,6 +1322,12 @@ export struct Linker {
                 cmd.add(" -o ");
                 cmd.add_quoted(exe_path);
             } else {
+                // H9.7: every link is reproducible.  `/Brepro` makes lld use a
+                // hash of the contents instead of the current time for the PE
+                // header, so the same object files always produce the same
+                // executable (the oracle leaves the timestamp in).  The flag
+                // sits before `-o`, like the self-link extras above.
+                cmd.add(" -Wl,/Brepro");
                 cmd.add(" -o ");
                 cmd.add_quoted(exe_path);
                 if (rt != (char*) 0 && rt[0] != 0) {

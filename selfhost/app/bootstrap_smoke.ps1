@@ -171,6 +171,7 @@ $env:IVYRT_LIB_PATH = ($ivyrt -replace '\\', '/')
 $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
                 "selfhost\codegen", "selfhost\app", "std")
 $modules = @(
+    @("selfhost\app", "buildinfo"),
     @("std", "io"),
     @("selfhost\common", "diagnostic"),
     @("selfhost\parsing", "token"),
@@ -200,7 +201,7 @@ $mainSrc = Join-Path $repo "selfhost\app\main.ivy"
 $linkOrder = @("diagnostic", "token", "lexer", "preprocessor", "ast", "parser",
                "module_io", "imports", "cli", "hir", "hir_builder", "mir",
                "mir_builder", "interpreter", "pipeline", "emitter", "codegen",
-               "io")
+               "io", "buildinfo")
 
 # Include path: the run directory first (the `.ivm` files written there), then
 # the source directories.

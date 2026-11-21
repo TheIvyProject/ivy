@@ -267,6 +267,7 @@ export struct CliArgs {
         __ivy_write_str(fd, "               .o/.obj -> native object file (implies -c)\n");
         __ivy_write_str(fd, "               .exe (Windows) / no extension (POSIX) -> link executable\n");
         __ivy_write_str(fd, "  -I <dir>   add <dir> to the #include <...> search path (repeatable)\n");
+        __ivy_write_str(fd, "  --version  print the compiler version and exit\n");
         __ivy_write_str(fd, "  -h, --help show this help\n");
     }
 

@@ -19,6 +19,11 @@
 # `selfhost/check_golden.ps1 -Driver <stage 1> -IvmDir <that dir>`, the
 # oracle-free parity gate over the frozen baseline in `selfhost/golden/`.
 #
+# H9.7: the driver gets a generated `buildinfo` module before compilation, so
+# `ivy --version` reports `0.5.0 (<short git hash>)`.  Pass -GitHash when the
+# sources are not in a git checkout (e.g. a source archive); -Version overrides
+# the semantic version.  `selfhost/check_repro.ps1` relies on both.
+#
 # Nothing is written into the repository: every object, `.ivm`, executable and
 # scratch file lives in a per-run directory under -TempRoot (or the platform
 # temp dir), which is also the children's TEMP/TMP.
@@ -32,6 +37,7 @@
 # $env:LLVM_ROOT, then D:\Cpp\Clang, then `llvm-config` on PATH.
 # -Stage0File writes the path of the freshly built stage 1 compiler there.
 # -SkipHashCheck accepts the seed without comparing it to its pinned SHA-256.
+# -Version/-GitHash override the `--version` stamp (defaults: 0.5.0, HEAD).
 #
 # Exit 0 iff the bootstrap chain (and the optional gates) pass.
 
@@ -40,6 +46,11 @@ param(
     [string]$LlvmRoot = "",
     [string]$Stage0 = "",
     [string]$Stage1File = "",
+    # Version stamp baked into the driver by `ivy --version` (H9.7).  The git
+    # hash defaults to the checkout's HEAD; the generated `buildinfo.ivy` only
+    # accepts a hex hash, anything else falls back to `unknown`.
+    [string]$Version = "0.5.0",
+    [string]$GitHash = "",
     [switch]$SelfLink = $false,
     [switch]$Golden = $false,
     [switch]$SkipHashCheck = $false
@@ -128,6 +139,35 @@ $stage2 = Join-Path $runDir "stage2"
 New-Item -ItemType Directory -Force -Path $stage1, $stage2 | Out-Null
 Write-Output ("run directory: " + $runDir)
 
+# --- version stamp (H9.7) -----------------------------------------------------
+# Generate the `buildinfo` module here so the stages report the commit they
+# were built from.  It is written next to the sources' `.ivm` outputs and
+# compiled first; nothing is added to the repository.  A source archive (no
+# `.git`) gets `unknown` unless the caller passes -GitHash, which is what
+# `check_repro.ps1` does so both comparison trees carry the same stamp.
+if ($GitHash -eq "") {
+    $GitHash = "unknown"
+    try {
+        $h = & git -C $repo rev-parse --short=12 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $h) { $GitHash = ([string]$h).Trim() }
+    } catch { }
+}
+if ($GitHash -notmatch '^[0-9a-fA-F]{7,40}$') { $GitHash = "unknown" }
+if ($Version -notmatch '^[0-9A-Za-z.+-]+$') { Fail ("bad -Version: " + $Version) }
+$buildInfoSrc = Join-Path $runDir "buildinfo.ivy"
+$buildInfoText = @"
+#pragma ivy cnumber
+export module buildinfo;
+
+export struct BuildInfo {
+    const char* version() { return "$Version"; }
+    const char* git_hash() { return "$GitHash"; }
+};
+"@
+[System.IO.File]::WriteAllText($buildInfoSrc, $buildInfoText.Replace("`r`n", "`n"),
+                               (New-Object System.Text.UTF8Encoding($false)))
+Write-Output ("      version: " + $Version + " (" + $GitHash + ")")
+
 # Every compiler process inherits this isolated TEMP/TMP (the driver writes its
 # captured IR to a scratch file there).
 $env:TEMP = $runDir
@@ -201,6 +241,7 @@ $env:IVYRT_LIB_PATH = ($ivyrt -replace '\\', '/')
 $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
                 "selfhost\codegen", "selfhost\app", "std")
 $modules = @(
+    @($runDir, "buildinfo"),
     @("std", "io"),
     @("selfhost\common", "diagnostic"),
     @("selfhost\parsing", "token"),
@@ -230,7 +271,7 @@ $mainSrc = Join-Path $repo "selfhost\app\main.ivy"
 $linkOrder = @("diagnostic", "token", "lexer", "preprocessor", "ast", "parser",
                "module_io", "imports", "cli", "hir", "hir_builder", "mir",
                "mir_builder", "interpreter", "pipeline", "emitter", "codegen",
-               "io")
+               "io", "buildinfo")
 
 # Include path: the run directory first (the `.ivm` files written there), then
 # the source directories.
@@ -305,7 +346,11 @@ function Build-Stage([string]$compiler, [string]$outDir) {
     $inc = Include-Args $outDir
     foreach ($m in $modules) {
         $name = $m[1]
-        $src = Join-Path $repo (Join-Path $m[0] ($name + ".ivy"))
+        if ([System.IO.Path]::IsPathRooted($m[0])) {
+            $src = Join-Path $m[0] ($name + ".ivy")
+        } else {
+            $src = Join-Path $repo (Join-Path $m[0] ($name + ".ivy"))
+        }
         $obj = Join-Path $outDir ($name + ".obj")
         $code = Invoke-Separate $compiler (@($src) + $inc + @("-c", "-o", $obj)) `
                                  (Join-Path $outDir ("b_" + $name + ".out")) `
@@ -338,6 +383,21 @@ Write-Output ("      seed: " + $seedFile)
 Build-Stage $seedFile $stage1
 $stage1Exe = Link-Stage $stage1
 Write-Output ("      " + $stage1Exe)
+
+# H9.7: the rebuilt compiler must carry the stamp `build.ps1` generated.
+$verWant = "ivy " + $Version + " (" + $GitHash + ")"
+$verCode = Invoke-Separate $stage1Exe @("--version") `
+           (Join-Path $stage1 "version.out") (Join-Path $stage1 "version.err")
+$verHave = ""
+if (Test-Path -LiteralPath (Join-Path $stage1 "version.out")) {
+    $verHave = (Get-Content -LiteralPath (Join-Path $stage1 "version.out") -Raw).Trim()
+}
+if ($verCode -ne 0 -or $verHave -ne $verWant) {
+    Write-Output ("VERSION FAILED (exit " + $verCode + "): expected '" + $verWant + "', got '" + $verHave + "'")
+    Get-Content (Join-Path $stage1 "version.err") -ErrorAction SilentlyContinue | Select-Object -First 5
+    exit 1
+}
+Write-Output ("      version: " + $verHave)
 # H8.2/H9.6: a caller (dogfood, CI, the golden gate) can reuse this compiler
 # instead of building a second one.
 if ($Stage1File -ne "") {
@@ -391,6 +451,9 @@ $stage2Exe = Link-Stage $stage2
 $same = Test-BytesEqual $stage1Exe $stage2Exe
 Write-Output ("      EXE " + "stage1/stage2".PadRight(14) + $(if ($same) { "identical" } else { "DIFFERENT" }))
 if (-not $same) { Fail "stage 1 and stage 2 executables differ" }
+# H9.7: publish the digest of the reproducible compiler (stage 1 == stage 2).
+Write-Output ("      SHA " + "stage1/2".PadRight(14) + (Get-FileHash -LiteralPath $stage1Exe -Algorithm SHA256).Hash)
+Write-Output ("      SIZE " + "stage1/2".PadRight(14) + (Get-Item -LiteralPath $stage1Exe).Length + " bytes")
 
 # --- 4. self-link: stage 1 links stage 2 by itself (H9.4) --------------------
 if ($SelfLink) {
@@ -408,6 +471,7 @@ if ($SelfLink) {
     $same = Test-BytesEqual $selfExe $stage2Exe
     Write-Output ("      EXE " + "self-link".PadRight(14) + $(if ($same) { "identical" } else { "DIFFERENT" }))
     if (-not $same) { Fail "self-linked executable differs from the harness link" }
+    Write-Output ("      SHA " + "self-link".PadRight(14) + (Get-FileHash -LiteralPath $selfExe -Algorithm SHA256).Hash)
 }
 
 # --- 5. golden parity (oracle-free) ------------------------------------------

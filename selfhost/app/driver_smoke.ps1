@@ -103,7 +103,9 @@ $rtSpellings = @(($repo.Replace('\', '/') + "/build/Release/ivyrt.lib"),
                  ($ivyrt -replace '\\', '/'), $ivyrt)
 function Normalize-Rt([string]$text) {
     foreach ($p in $rtSpellings) { $text = $text.Replace($p, "<RT>") }
-    return $text
+    # H9.7: the port's links carry `-Wl,/Brepro`; the oracle's do not.  Drop it
+    # from both sides in failure diagnostics (successful links print nothing).
+    return $text.Replace(" -Wl,/Brepro", "")
 }
 
 function Quote-Arg([string]$s) {
@@ -173,6 +175,7 @@ function Read-Text([string]$path) {
 $moduleDirs = @("selfhost\common", "selfhost\parsing", "selfhost\hir", "selfhost\mir",
                 "selfhost\codegen", "selfhost\app", "std")
 $modules = @(
+    @("selfhost\app", "buildinfo"),
     @("std", "io"),
     @("selfhost\common", "diagnostic"),
     @("selfhost\parsing", "token"),

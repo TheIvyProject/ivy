@@ -49,6 +49,12 @@
 //   preprocessor), `--ast` (before HIR), `--hir` (before MIR), `--mir` and
 //   `--run` (after MIR).
 // `IVY_CLI_DUMP=1` / `IVY_IMPORT_DUMP=1` keep the H7 debug dumps.
+//
+// H9.7: `--version` prints `ivy <version> (<git hash>)` and exits 0.  The
+// oracle has no such flag, so it is handled here before `CliArgs::parse()`
+// (it wins over every other argument, like `--help` does in the oracle).
+// `buildinfo.ivy` provides the fallback stamp; `selfhost/build.ps1` compiles a
+// generated copy carrying the short git hash of the checkout instead.
 
 #pragma ivy cnumber
 // H7.4: direct imports so the oracle's linker pulls in the objects of every
@@ -73,6 +79,7 @@ import pipeline;
 import emitter;
 import codegen;
 import io;
+import buildinfo;
 
 extern "C" int*   __p___argc();
 extern "C" char*** __p___argv();
@@ -464,11 +471,37 @@ struct Driver {
 
     // --- run ---------------------------------------------------------------
 
+    // H9.7: exact match of one argument against `flag`, used by the
+    // `--version` pre-scan (the oracle's `parse()` has no version option).
+    bool has_arg(long argc, char** argv, const char* flag) {
+        unsafe {
+            long i = 1;
+            while (i < argc) {
+                char* a = argv[i];
+                long k = 0;
+                bool eq = true;
+                while (flag[k] != 0) {
+                    if (a[k] != flag[k]) { eq = false; break; }
+                    k = k + 1;
+                }
+                if (eq && a[k] == 0) { return true; }
+                i = i + 1;
+            }
+        }
+        return false;
+    }
+
     long run(char* argv0) {
         unsafe {
             int* argc_p = __p___argc();
             char** argv = *__p___argv();
             long argc = (long) *argc_p;
+
+            if (this.has_arg(argc, argv, "--version")) {
+                BuildInfo bi;
+                io::println("ivy {} ({})", bi.version(), bi.git_hash());
+                return 0;
+            }
 
             CliArgs args;
             args.init();

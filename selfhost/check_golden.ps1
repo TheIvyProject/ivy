@@ -167,6 +167,10 @@ function Normalize-Paths([byte[]]$bytes, [string]$root) {
     $s = $s.Replace(($root -replace '\\', '/'), "<OUT>")
     foreach ($p in $script:RtPaths) { $s = $s.Replace($p, "<RT>") }
     foreach ($p in $script:ClangPaths) { $s = $s.Replace($p, "<CLANG>") }
+    # H9.7: the driver now links with `-Wl,/Brepro`; the oracle did not, so the
+    # five failing-link fixtures print one more flag.  It is a build detail of
+    # the port, not fixture output, so both sides drop it before comparing.
+    $s = $s.Replace(" -Wl,/Brepro", "")
     return Normalize-Lines ($script:Latin1.GetBytes($s))
 }
 
