@@ -370,3 +370,97 @@ trong CI tu H9.3; hai script cu van giu de debug khi con oracle.
 - `exceptions.txt` la du lieu duy nhat do nguoi viet them; neu freeze lai ma
   oracle het crash thi file se rong va gate lai so byte binh thuong.
 - 3 harness H7.x van hong (re-base o H9.6).
+
+---
+
+# H9.4 - Self-link (compiler tu link chinh no)
+
+## 1. Pham vi
+
+Truoc H9.4 `Linker::link_text` chi biet `"<linker>" "<obj>" -o "<exe>"
+["ivyrt"]`, nen selfhost chi link duoc chuong trinh nguoi dung (khong import
+LLVM). H9.4 cho `ivy_selfhost.exe` tu link **chinh no**: cung mot command line
+ma `selfhost/app/bootstrap_smoke.ps1` dung (`clang++` + toan bo module object +
+`rt.obj` + `LLVM*.lib` + system libs + `/Brepro`).
+
+Day la feature **moi cua selfhost**, khong phai parity: oracle `src/**` khong
+co `--self-link` va usage cua oracle khong doi.
+
+## 2. Thiet ke
+
+`selfhost/codegen/codegen.ivy` - `Linker`:
+
+| Thanh phan | Vai tro |
+|---|---|
+| `self_link_` + `set_self_link()` | bat nhanh command line kieu harness |
+| `extra_`/`nextra_`/`capextra_` + `add_extra()` | hang doi fragment **da render**: path thi quote san, flag (`-lfoo`, `-Wl,/Brepro`) de tran |
+| `collect_self_link()` | do `LLVM_ROOT` -> `D:\Cpp\Clang` -> `llvm-config` tren PATH; chay `llvm-config --libs x86` va `--system-libs` |
+| `link_text()` | nhanh self-link: `<objs> <rt.obj> <llvm libs> <system libs> -Wl,/Brepro -o <exe>` (khac nhanh thuong: `-o` dung truoc `rt.obj`) |
+
+Loc system libs y het `bootstrap_smoke.ps1`: ten khong nam trong `$sdkLibs` bi
+bo (thuc te `libxml2s`), ten SDK doi thanh `-l<name>`. `llvm-config --libs x86`
+tra full path tung `.lib`, duoc quote.
+
+`selfhost/app/cli.ivy`: co `self_link` (init 0), nhan `--self-link` va ep
+`link_mode = 1`. `selfhost/app/main.ivy`:
+`link_executable(..., long self_link)` goi `set_self_link(1)` +
+`collect_self_link()` **truoc** khi them module object (thu tu fragment tren
+command line la co dinh).
+
+## 3. Thu tu object quyet dinh byte cua PE
+
+`bootstrap_smoke.ps1` dung hai danh sach khac nhau:
+
+- `$modules` - thu tu **build** (`io` dau tien vi cac module khac import no);
+- `$linkOrder` - thu tu **`import`** cua `main.ivy` (diagnostic, token, lexer,
+  preprocessor, ast, parser, module_io, imports, cli, hir, hir_builder, mir,
+  mir_builder, interpreter, pipeline, emitter, codegen, io).
+
+Link phai dung `$linkOrder`, neu khong PE khac byte du object giong het. Ten
+file object khong anh huong, chi thu tu. `--self-link` tai hien dung thu tu nay
+tu `Cg::module_object(i)` (pipeline duyet theo import cua `main.ivy`).
+
+## 4. Bug oracle H29 (workaround bat buoc)
+
+Ghi qua phan tu `T**` (`p[i] = x`) emit `getelementptr i8` **khong scale**,
+trong khi doc `p[i]` emit `getelementptr ptr` dung. `Linker` giu `char** mods_`
+/ `char** extra_` dung pattern nay, nen `add_module_object()`/`add_extra()`
+**khong** duoc viet `this.mods_[i] = p`; phai copy 8 byte bang `__ivy_memcpy`:
+
+```ivy
+char* v = p;
+__ivy_memcpy((void*) ((char*) this.mods_ + (this.nmod_ * 8)), (void*) &v, 8);
+```
+
+Chi tiet + repro: `selfhost/ORACLE_BUGS.md` muc 1.3 (H29) va 2.6.
+
+## 5. Cach chay
+
+```powershell
+# gate day du, gom buoc [self-link]
+powershell -NoProfile -File selfhost\app\bootstrap_smoke.ps1 `
+    -TempRoot "$env:TEMP\h94" -SelfLink
+
+# chi build stage1 tu stage0, roi tu link bang chinh no
+& .\ivy_selfhost.exe --self-link -I std -I selfhost\app ... selfhost\app\main.ivy
+```
+
+`--self-link` can `LLVM_ROOT` (hoac `D:\Cpp\Clang`) + `IVYRT_LIB_PATH` tro
+`rt.obj`; thieu linker thi exit 1 kem diagnostic `linker failed (exit code 1)`
+va **nguyen command line** de debug.
+
+## 6. Ket qua (2026-11-21)
+
+| Kiem tra | Ket qua |
+|---|---|
+| `bootstrap_smoke.ps1 -SelfLink` | **PASS**: 18/18 object + 17/17 `.ivm` + `rt.obj` + stage1/stage2 EXE identical |
+| Buoc `[self-link]` | **EXE self-link identical** (27 130 880 byte) |
+| `check_golden.ps1 -Driver <stage1>` | **PASS 12337 check, 0 failure** |
+
+## 7. Con lai
+
+- Stage0 / bootstrap khong can oracle: H9.5 (dung binary Ivy build san thay
+  `build\Release\ivy.exe`).
+- `import cpp` parity (H9.8) van chua port; `--self-link` khong dung den.
+- Bug H29 chi duoc **ne**, chua fix: sua `lowerLValue` (dung `llvmType` nhu
+  duong doc) o H10, kem freeze lai golden.

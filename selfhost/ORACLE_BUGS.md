@@ -92,6 +92,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **H26** | A | `T x = {...}` (aggregate init) **bypass** constructor nhưng **vẫn** record destructor | `hir_builder.cpp` (`buildVarDecl`) | `hir_builder.ivy` (`record_dtor_var`) | `H62_NOTES.md` (RAII, L2516) |
 | **H27** | C | `--hir`/`--mir` **crash** `0xC0000005` (`exit -1073741819`) trên init-list có phần tử `<zero-init>` do HIR builder sinh ra: oracle lưu `nullptr` trong `elements` rồi `dumpHirExpr`/`buildExpr` dereference | `src/app/main.cpp` (`dumpHirExpr` InitList), `src/mir/mir_builder.cpp` (`buildExpr` InitList) | `selfhost/hir/hir.ivy`, `selfhost/mir/mir.ivy` (in `<zero-init>` / bỏ qua, **không** crash) | `selfhost/golden/exceptions.txt` (`156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init`); port phải exit 0 |
 | **H28** | A | `move(x)` giữ lifetime `None`: `out->lifetime = arg->lifetime` chạy **sau** `call.args.push_back(std::move(arg))`, nên `if (arg)` false và call không có `[lt: ...]` trong `--mir` | `src/mir/mir_builder.cpp:578-583` | `selfhost/mir/mir_builder.ivy` (`ex_call`): `move` để `lt_kind_ = 0`, không copy lifetime của operand | `codegen/245_move_pointer`, `hir/move/54_lifetime_param_moved` |
+| **H29** | A | Ghi qua **phần tử con trỏ** (`p[i] = x` với `p` là `T**`) emit GEP **không scale**: `getelementptr i8, ptr %p, iN k` (dùng `llvmElemType`) trong khi đọc `p[i]` emit `getelementptr ptr` (dùng `llvmType`) → offset `k` thay vì `k*8`. **Sai bộ nhớ ở machine-code**, không lộ ra trong dump IR so sánh được | `codegen.cpp:1046-1063` (`lowerLValue` Index, `llvmElemType` tại `:255-260`); đọc đúng ở `:1742-1765` | `selfhost/codegen/emitter.ivy` **tái hiện**; workaround bắt buộc trong `selfhost/codegen/codegen.ivy` (`add_module_object`/`add_extra` dùng `__ivy_memcpy` 8 byte) | `H9_NOTES.md` §H9.4; repro bên dưới §2.6 |
 
 ### 1.4 Codegen / IR
 
@@ -138,7 +139,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 |---|---|---|---|---|---|
 | **M1** | A | `.ivm`: return type của **free function** ghi **không escape**, trong khi `type()` escape cả tên gốc → `long long` thành `long\slong` | `module_io.cpp:132` | `selfhost/parsing/module_io.ivy` `type_raw()` ≈L235-247 | `H81_NOTES.md` §6 |
 | **M2** | A | `serializeType` escape **cả chuỗi type** (kể cả tên gốc), nên type C-style có dấu cách bị escape (`long\slong`) | `module_io.cpp` (`escape(serializeType(...))`) | `module_io.ivy` `type()` (`type_x(t, 1)`) | `H81_NOTES.md` §6 |
-| **M3** | D | `Linker::link_text` **không** passthrough `-l`/`-L`/`-Wl,` → không thể tự link chính compiler | `codegen.cpp:2830-2860` | `selfhost/codegen/codegen.ivy` ≈L890 | `PLAN.md` H9.4 (sửa ở H9.4, **không** phải bug-compat) |
+| **M3** | D | `Linker::link_text` **không** passthrough `-l`/`-L`/`-Wl,` → không thể tự link chính compiler | `codegen.cpp:2830-2860` | `selfhost/codegen/codegen.ivy` `Linker` (`set_self_link`/`collect_self_link`, H9.4) | `PLAN.md` H9.4 — **đã sửa** bằng cờ `--self-link`, không phải bug-compat |
 
 ---
 
@@ -237,6 +238,45 @@ Nhưng **return type của free function** lại ghi `serializeType(f.returnType
 
 Bug này chỉ lộ ra ở `codegen.ivy` (module duy nhất dùng `long long`), nên các
 module khác khớp trước đó. Nguồn: `H81_NOTES.md` §6.
+
+### 2.6 H29 — ghi qua phần tử `T**` không scale
+
+`lowerLValue` xử lý `M::Index` bằng `llvmElemType(e.type)` (`codegen.cpp:1060`):
+`llvmElemType` **bỏ một `pointerDepth`**, nên với `p[i]` mà `p` là `int8**`
+(type phần tử `int8*`) nó trả `i8`, và GEP thành
+`getelementptr i8, ptr %p, i64 i` — địa chỉ `p + i` byte thay vì `p + 8*i`.
+Đường **đọc** (`codegen.cpp:1747`) dùng `llvmType(e.type)` = `ptr` nên scale
+đúng 8. Hai đường lệch nhau ⇒ mọi `p[i] = x` ghi vào **sai ô** (thường là ô 0
+với `i < 8`, ghi đè con trỏ đầu tiên).
+
+Repro (`--llvm`, cả oracle lẫn port):
+
+```ivy
+#pragma ivy cnumber
+extern "C" void* __ivy_alloc(unsigned long long n);
+
+fn main() -> int32 {
+    unsafe {
+        long n = 3;
+        int8** p = (int8**) __ivy_alloc(8 * n);
+        p[0] = (int8*) 0;
+        p[1] = (int8*) 0;
+        int8* x = p[1];
+    }
+    return 0;
+}
+```
+
+→ `%tmp.5 = getelementptr i8, ptr %tmp.6, i32 0` / `... i32 1` cho store,
+nhưng `%tmp.11 = getelementptr ptr, ptr %tmp.12, i32 1` cho load.
+
+Không nằm trong golden vì golden so **text IR** (bug nằm ở nghĩa của IR, không
+phải spelling) và corpus H5.1 không có mẫu `p[i] = x` với `T**`. Nhưng **code
+self-host phải tránh**: `Linker` giữ `char** mods_`/`extra_` chính là pattern
+này, nên `add_module_object`/`add_extra` (`selfhost/codegen/codegen.ivy`
+≈L786-812, ≈L830-855) ghi từng phần tử bằng `__ivy_memcpy(..., 8)` thay vì
+`this.mods_[i] = p`. Fix đúng (dùng `llvmType` như đường đọc) để **H10** —
+sửa xong phải freeze lại golden.
 
 ---
 
@@ -347,9 +387,9 @@ Quy tắc:
 | `selfhost/hir/hir_builder.ivy` | T1–T13, H15–H19, H21, H23, H25, H26, C4 |
 | `selfhost/mir/mir_builder.ivy` | H14 |
 | `selfhost/mir/interpreter.ivy` | I1 |
-| `selfhost/codegen/emitter.ivy` | C1–C20, H23, H24 |
+| `selfhost/codegen/emitter.ivy` | C1–C20, H23, H24, H29 |
 | `selfhost/codegen/objdrive.ivy` | C7 |
-| `selfhost/codegen/codegen.ivy` | M3 |
+| `selfhost/codegen/codegen.ivy` | M3, H29 |
 | `lib/ivyrt.c` (→ `std/rt.ivy` ở H9.1) | R1–R3 |
 
 ---

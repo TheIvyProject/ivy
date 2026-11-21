@@ -38,7 +38,8 @@
 param(
     [string]$TempRoot = "",
     [string]$LlvmRoot = "",
-    [string]$Stage1File = ""
+    [string]$Stage1File = "",
+    [switch]$SelfLink = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -191,6 +192,16 @@ $modules = @(
 )
 $mainSrc = Join-Path $repo "selfhost\app\main.ivy"
 
+# H9.4: the order in which the module objects are handed to the linker.  It
+# mirrors the `import` statements of `main.ivy` (which is also the order
+# `--self-link` walks `cg.import_count()`), because the MSVC/lld layout of the
+# PE depends on the input order.  `$modules` stays the *build* order: `io` is
+# built first so every other module can read `io.ivm`.
+$linkOrder = @("diagnostic", "token", "lexer", "preprocessor", "ast", "parser",
+               "module_io", "imports", "cli", "hir", "hir_builder", "mir",
+               "mir_builder", "interpreter", "pipeline", "emitter", "codegen",
+               "io")
+
 # Include path: the run directory first (the `.ivm` files written there), then
 # the source directories.
 function Include-Args([string]$outDir) {
@@ -241,7 +252,7 @@ foreach ($n in @((& $llvmConfig --system-libs) -split '\s+' | Where-Object { $_ 
 # Link `$outDir`'s objects into `$outDir\ivy_selfhost.exe`.
 function Link-Stage([string]$outDir) {
     $objs = @((Join-Path $outDir "main.obj"))
-    foreach ($m in $modules) { $objs += (Join-Path $outDir ($m[1] + ".obj")) }
+    foreach ($name in $linkOrder) { $objs += (Join-Path $outDir ($name + ".obj")) }
     $exe = Join-Path $outDir "ivy_selfhost.exe"
     $largs = $objs + @($ivyrt) + $llvmLibs + $systemArgs + @("-Wl,/Brepro", "-o", $exe)
     $code = Invoke-Separate $clang $largs (Join-Path $outDir "link.out") (Join-Path $outDir "link.err")
@@ -348,6 +359,27 @@ $stage2Exe = Link-Stage $stage2
 $same = Test-BytesEqual $stage1Exe $stage2Exe
 Write-Output ("      EXE " + "stage1/stage2".PadRight(14) + $(if ($same) { "identical" } else { "DIFFERENT" }))
 if (-not $same) { Fail "stage 1 and stage 2 executables differ" }
+
+# --- 4. self-link: stage 1 links stage 2 by itself ----------------------------
+# H9.4: `--self-link` makes the compiler collect the LLVM/system libraries
+# itself (the same filtering as above) and link the very same objects.  The
+# result must be byte-identical to the harness link.
+if ($SelfLink) {
+    Write-Output "[self-link] stage 1 links stage 2 by itself ..."
+    $env:LLVM_ROOT = $LlvmRoot
+    $selfExe = Join-Path $stage2 "ivy_selflink.exe"
+    $inc = Include-Args $stage2
+    $code = Invoke-Separate $stage1Exe (@($mainSrc) + $inc + @("--self-link", "-o", $selfExe)) `
+             (Join-Path $stage2 "selflink.out") (Join-Path $stage2 "selflink.err")
+    if ($code -ne 0) {
+        Write-Output ("SELF-LINK FAILED (exit " + $code + ")")
+        Get-Content (Join-Path $stage2 "selflink.err") | Select-Object -First 20
+        exit 1
+    }
+    $same = Test-BytesEqual $selfExe $stage2Exe
+    Write-Output ("      EXE " + "self-link".PadRight(14) + $(if ($same) { "identical" } else { "DIFFERENT" }))
+    if (-not $same) { Fail "self-linked executable differs from the harness link" }
+}
 
 Write-Output "--- F2 PASS ---"
 exit 0

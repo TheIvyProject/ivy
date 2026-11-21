@@ -47,6 +47,9 @@ extern "C" char* fgets(char* s, int n, void* stream);
 extern "C" int   _pclose(void* stream);
 extern "C" int   system(const char* command);
 extern "C" int   remove(const char* path);
+// H9.4: `--self-link` probes `<LLVM_ROOT>\lib\<name>` and the `LIB` search
+// directories when filtering `llvm-config --system-libs`.
+extern "C" int   _access(const char* path, int mode);
 
 // ---------------------------------------------------------------------------
 // Context and module lifetime
@@ -772,6 +775,12 @@ export struct Linker {
     char** mods_;
     long nmod_;
     long capmod_;
+    // H9.4: `--self-link` extras (rendered fragments: paths keep their quotes,
+    // flags stay bare), appended after the runtime in harness order.
+    long self_link_;
+    char** extra_;
+    long nextra_;
+    long capextra_;
 
     // `CodeGen::setModuleObjects` / `moduleObjPaths_.push_back` (D1).
     void add_module_object(const char* p) {
@@ -782,7 +791,12 @@ export struct Linker {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.nmod_) {
-                    nb[k] = this.mods_[k];
+                    // H9.4 workaround (oracle bug H29): an assignment through a
+                    // `char**` element is emitted as an unscaled `i8` GEP,
+                    // while the read is a correct `ptr` GEP.  Copy the pointer
+                    // with __ivy_memcpy to avoid the buggy store path.
+                    char* v = this.mods_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
                     k = k + 1;
                 }
                 if (this.mods_ != (char**) 0) {
@@ -791,8 +805,358 @@ export struct Linker {
                 this.mods_ = nb;
                 this.capmod_ = ncap;
             }
-            this.mods_[this.nmod_] = (char*) p;
+            char* pv = (char*) p;
+            __ivy_memcpy((void*) ((char*) this.mods_ + (this.nmod_ * 8)), (void*) &pv, 8);
             this.nmod_ = this.nmod_ + 1;
+        }
+    }
+
+    // --- H9.4: self-link support -------------------------------------------
+    //
+    // `--self-link` makes the compiler link its own executable.  The oracle's
+    // `linkExecutable` cannot do that: it appends only the program object(s)
+    // and the Ivy runtime, while the compiler also needs the static LLVM
+    // libraries and the Windows system libraries.  The driver collects those
+    // with `llvm-config` (the same filtering as
+    // `selfhost/app/bootstrap_smoke.ps1`) and hands the rendered fragments to
+    // `add_extra`; when `self_link_` is set, `link_text` appends them after the
+    // runtime and moves `-o` to the end, matching the harness link line.
+
+    void set_self_link(long on) {
+        this.self_link_ = on;
+    }
+
+    // Append one already-rendered fragment (paths include their quotes, flags
+    // do not).  Never freed: the driver links once and exits.
+    void add_extra(const char* frag) {
+        unsafe {
+            if (this.nextra_ >= this.capextra_) {
+                long ncap = this.capextra_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.nextra_) {
+                    // H9.4 workaround (oracle bug H29), same as
+                    // `add_module_object`.
+                    char* v = this.extra_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    k = k + 1;
+                }
+                if (this.extra_ != (char**) 0) {
+                    __ivy_free((void*) this.extra_);
+                }
+                this.extra_ = nb;
+                this.capextra_ = ncap;
+            }
+            char* fv = (char*) frag;
+            __ivy_memcpy((void*) ((char*) this.extra_ + (this.nextra_ * 8)), (void*) &fv, 8);
+            this.nextra_ = this.nextra_ + 1;
+        }
+    }
+
+    bool file_exists(const char* p) {
+        return _access(p, 0) == 0;
+    }
+
+    // `<dir>\<name>`; LLVM on Windows keeps `bin\` and `lib\` under one root.
+    char* join2(const char* dir, const char* name) {
+        unsafe {
+            long dl = (long) __ivy_strlen(dir);
+            long nl = (long) __ivy_strlen(name);
+            char* r = (char*) __ivy_alloc((unsigned long long) (dl + nl + 2));
+            long k = 0;
+            while (k < dl) { r[k] = dir[k]; k = k + 1; }
+            r[dl] = 92;
+            k = 0;
+            while (k < nl) { r[dl + 1 + k] = name[k]; k = k + 1; }
+            r[dl + 1 + nl] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `"<exe>" <arg>` for `_popen`.
+    char* quote_join(const char* exe, const char* arg) {
+        unsafe {
+            StrBuf sb;
+            sb.setup((unsigned long long) (__ivy_strlen(exe) + __ivy_strlen(arg) + 4));
+            sb.add_char(34);
+            sb.add(exe);
+            sb.add_char(34);
+            sb.add_char(32);
+            sb.add(arg);
+            char* out = __ivy_strdup(sb.str());
+            sb.release();
+            return out;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // Run `command`, return its stdout as an owned NUL-terminated buffer.
+    char* capture_cmd(const char* command) {
+        unsafe {
+            void* pipe = _popen(command, "r");
+            if (pipe == (void*) 0) {
+                char* empty = (char*) __ivy_alloc(1);
+                empty[0] = 0;
+                return empty;
+            }
+            StrBuf sb;
+            sb.setup(4096);
+            char* line = (char*) __ivy_alloc(8192);
+            char* got = fgets(line, 8192, pipe);
+            while (got != (char*) 0) {
+                sb.add(line);
+                got = fgets(line, 8192, pipe);
+            }
+            __ivy_free(line);
+            _pclose(pipe);
+            char* out = __ivy_strdup(sb.str());
+            sb.release();
+            return out;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    bool is_space(char c) {
+        return c == 32 || c == 9 || c == 10 || c == 13;
+    }
+
+    // Trim trailing CR/LF/space/tab in place.
+    void trim_end(char* s) {
+        unsafe {
+            long n = (long) __ivy_strlen(s);
+            while (n > 0) {
+                char c = s[n - 1];
+                if (c == 10 || c == 13 || c == 32 || c == 9) {
+                    n = n - 1;
+                } else {
+                    break;
+                }
+            }
+            s[n] = 0;
+        }
+    }
+
+    // LLVM root: `$LLVM_ROOT`, then the historical `D:\Cpp\Clang`, then
+    // `llvm-config --prefix`.  Returns an owned string (possibly empty).
+    char* llvm_root(const char* cfg) {
+        unsafe {
+            char* env = getenv("LLVM_ROOT");
+            if (env != (char*) 0 && env[0] != 0) {
+                return __ivy_strdup(env);
+            }
+            char* probe = this.join2((char*) "D:\\Cpp\\Clang", "bin\\llvm-config.exe");
+            bool ok = this.file_exists(probe);
+            __ivy_free(probe);
+            if (ok) {
+                return __ivy_strdup("D:\\Cpp\\Clang");
+            }
+            char* cmd = this.quote_join(cfg, "--prefix");
+            char* out = this.capture_cmd(cmd);
+            __ivy_free(cmd);
+            this.trim_end(out);
+            return out;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // Lowercase `s` into a fresh buffer (the SDK list is lowercase).
+    char* lower_dup(const char* s) {
+        unsafe {
+            long n = (long) __ivy_strlen(s);
+            char* r = (char*) __ivy_alloc((unsigned long long) (n + 1));
+            long k = 0;
+            while (k < n) {
+                int c = (int) s[k];
+                if (c >= 65 && c <= 90) { c = c + 32; }
+                r[k] = (char) c;
+                k = k + 1;
+            }
+            r[n] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `list` is a space-separated lowercase list; exact token match.
+    bool in_list(const char* list, const char* name) {
+        unsafe {
+            long nl = (long) __ivy_strlen(name);
+            long i = 0;
+            while (list[i] != 0) {
+                while (list[i] == 32) { i = i + 1; }
+                long start = i;
+                while (list[i] != 0 && list[i] != 32) { i = i + 1; }
+                if (i - start == nl) {
+                    bool same = true;
+                    long k = 0;
+                    while (k < nl) {
+                        if (list[start + k] != name[k]) { same = false; break; }
+                        k = k + 1;
+                    }
+                    if (same) { return true; }
+                }
+            }
+        }
+        return false;
+    }
+
+    // Case-insensitive `.lib` suffix (PowerShell's `-match` is insensitive).
+    bool ends_with_lib(const char* s) {
+        unsafe {
+            long n = (long) __ivy_strlen(s);
+            if (n < 4) { return false; }
+            int a = (int) s[n - 4];
+            int b = (int) s[n - 3];
+            int c = (int) s[n - 2];
+            int d = (int) s[n - 1];
+            if (a >= 65 && a <= 90) { a = a + 32; }
+            if (b >= 65 && b <= 90) { b = b + 32; }
+            if (c >= 65 && c <= 90) { c = c + 32; }
+            if (d >= 65 && d <= 90) { d = d + 32; }
+            return a == 46 && b == 108 && c == 105 && d == 98;
+        }
+        return false;
+    }
+
+    // One `llvm-config --system-libs` token: SDK libraries become `-l<base>`;
+    // a non-SDK `.lib` that is not installed anywhere is dropped, exactly like
+    // `bootstrap_smoke.ps1`.
+    void collect_system_lib(const char* tok, const char* libdir) {
+        unsafe {
+            if (!this.ends_with_lib(tok)) {
+                this.add_extra(__ivy_strdup(tok));
+                return;
+            }
+            long n = (long) __ivy_strlen(tok);
+            long bl = n - 4;
+            char* base = (char*) __ivy_alloc((unsigned long long) (bl + 1));
+            long k = 0;
+            while (k < bl) { base[k] = tok[k]; k = k + 1; }
+            base[bl] = 0;
+
+            bool installed = false;
+            char* cand = this.join2(libdir, tok);
+            if (this.file_exists(cand)) { installed = true; }
+            __ivy_free(cand);
+            if (!installed) {
+                char* env = getenv("LIB");
+                if (env != (char*) 0 && env[0] != 0) {
+                    long i = 0;
+                    while (env[i] != 0 && !installed) {
+                        while (env[i] == 59) { i = i + 1; }  // ';'
+                        long start = i;
+                        while (env[i] != 0 && env[i] != 59) { i = i + 1; }
+                        if (i > start) {
+                            char* dir = (char*) __ivy_alloc((unsigned long long) (i - start + 1));
+                            long m = start;
+                            long o = 0;
+                            while (m < i) { dir[o] = env[m]; o = o + 1; m = m + 1; }
+                            dir[o] = 0;
+                            char* c2 = this.join2(dir, tok);
+                            if (this.file_exists(c2)) { installed = true; }
+                            __ivy_free(c2);
+                            __ivy_free(dir);
+                        }
+                    }
+                }
+            }
+
+            char* low = this.lower_dup(base);
+            char* sdk = (char*) "advapi32 bcrypt comdlg32 crypt32 dbghelp gdi32 imm32 iphlpapi kernel32 mpr mfuuid netapi32 ntdll ole32 oleacc oleaut32 powrprof psapi secur32 setupapi shell32 shlwapi user32 uuid version wbemuuid winhttp winmm ws2_32 wsock32";
+            if (!installed && !this.in_list(sdk, low)) {
+                __ivy_free(low);
+                __ivy_free(base);
+                return;
+            }
+            __ivy_free(low);
+
+            char* frag = (char*) __ivy_alloc((unsigned long long) (bl + 3));
+            frag[0] = 45;   // '-'
+            frag[1] = 108;  // 'l'
+            k = 0;
+            while (k < bl) { frag[2 + k] = base[k]; k = k + 1; }
+            frag[bl + 2] = 0;
+            this.add_extra(frag);
+            __ivy_free(base);
+        }
+    }
+
+    void add_quoted_extra(const char* p) {
+        unsafe {
+            StrBuf sb;
+            sb.setup((unsigned long long) (__ivy_strlen(p) + 4));
+            sb.add_char(34);
+            sb.add(p);
+            sb.add_char(34);
+            this.add_extra(__ivy_strdup(sb.str()));
+            sb.release();
+        }
+    }
+
+    // Split `llvm-config` output on whitespace.  `system == 0`: `--libs x86`
+    // (full library paths, always kept and quoted); `system != 0`:
+    // `--system-libs` (filtered by `collect_system_lib`).
+    void collect_libs(const char* text, const char* libdir, long system) {
+        unsafe {
+            long n = (long) __ivy_strlen(text);
+            long i = 0;
+            while (i < n) {
+                while (i < n && this.is_space(text[i])) { i = i + 1; }
+                long start = i;
+                while (i < n && !this.is_space(text[i])) { i = i + 1; }
+                if (i > start) {
+                    long len = i - start;
+                    char* tok = (char*) __ivy_alloc((unsigned long long) (len + 1));
+                    long k = 0;
+                    while (k < len) { tok[k] = text[start + k]; k = k + 1; }
+                    tok[len] = 0;
+                    if (system != 0) {
+                        this.collect_system_lib(tok, libdir);
+                    } else {
+                        this.add_quoted_extra(tok);
+                    }
+                    __ivy_free(tok);
+                }
+            }
+        }
+    }
+
+    // Mirror `bootstrap_smoke.ps1`'s link line: `llvm-config --libs x86`
+    // (full paths), `llvm-config --system-libs` (SDK names become `-l<name>`,
+    // missing non-SDK libraries are dropped), then `-Wl,/Brepro`.
+    void collect_self_link() {
+        unsafe {
+            char* cfg = (char*)0;
+            char* env = getenv("LLVM_ROOT");
+            if (env != (char*) 0 && env[0] != 0) {
+                char* cand = this.join2(env, "bin\\llvm-config.exe");
+                if (this.file_exists(cand)) { cfg = cand; } else { __ivy_free(cand); }
+            }
+            if (cfg == (char*) 0) {
+                char* cand = this.join2((char*) "D:\\Cpp\\Clang", "bin\\llvm-config.exe");
+                if (this.file_exists(cand)) { cfg = cand; } else { __ivy_free(cand); }
+            }
+            if (cfg == (char*) 0) {
+                cfg = __ivy_strdup("llvm-config");
+            }
+            char* root = this.llvm_root(cfg);
+            char* libdir = this.join2(root, "lib");
+            char* cmd = this.quote_join(cfg, "--libs x86");
+            char* out = this.capture_cmd(cmd);
+            this.collect_libs(out, libdir, 0);
+            __ivy_free(out);
+            __ivy_free(cmd);
+            cmd = this.quote_join(cfg, "--system-libs");
+            out = this.capture_cmd(cmd);
+            this.collect_libs(out, libdir, 1);
+            __ivy_free(out);
+            __ivy_free(cmd);
+            this.add_extra(__ivy_strdup("-Wl,/Brepro"));
+            __ivy_free(libdir);
+            __ivy_free(root);
+            __ivy_free(cfg);
         }
     }
 
@@ -924,7 +1288,9 @@ export struct Linker {
                 return 2;
             }
 
-            // 4) Build the command line: "linker" "obj" -o "exe" ["ivyrt"].
+            // 4) Build the command line: "linker" "obj" ["mods"...] -o "exe"
+            //    ["ivyrt"], or with `--self-link` the harness spelling
+            //    "linker" "obj" ["mods"...] "ivyrt" [extras] -o "exe".
             StrBuf cmd;
             cmd.setup(256);
             cmd.add_quoted(linker);
@@ -937,12 +1303,31 @@ export struct Linker {
                 cmd.add_quoted(this.mods_[mo]);
                 mo = mo + 1;
             }
-            cmd.add(" -o ");
-            cmd.add_quoted(exe_path);
             char* rt = (char*) ivyrt_lib;
-            if (rt != (char*) 0 && rt[0] != 0) {
-                cmd.add_char(32);
-                cmd.add_quoted(ivyrt_lib);
+            if (this.self_link_ != 0) {
+                // H9.4: the harness link line is
+                //   <objs> <rt.obj> <llvm libs> <system libs> -Wl,/Brepro -o <exe>
+                // so `-o` moves to the end and the collected extras follow the
+                // runtime.
+                if (rt != (char*) 0 && rt[0] != 0) {
+                    cmd.add_char(32);
+                    cmd.add_quoted(ivyrt_lib);
+                }
+                long ex = 0;
+                while (ex < this.nextra_) {
+                    cmd.add_char(32);
+                    cmd.add(this.extra_[ex]);
+                    ex = ex + 1;
+                }
+                cmd.add(" -o ");
+                cmd.add_quoted(exe_path);
+            } else {
+                cmd.add(" -o ");
+                cmd.add_quoted(exe_path);
+                if (rt != (char*) 0 && rt[0] != 0) {
+                    cmd.add_char(32);
+                    cmd.add_quoted(ivyrt_lib);
+                }
             }
             // Keep the buffer (no release): `cmd()` must stay valid.
             this.cmd_own_ = (char*) cmd.str();

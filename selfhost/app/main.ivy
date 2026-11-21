@@ -386,7 +386,8 @@ struct Driver {
     }
 
     // Link `exe_path` from the captured IR text plus the D1 module objects.
-    long link_executable(Cg cg, MUnit mu, char* fname, char* exe_path, char* argv0) {
+    long link_executable(Cg cg, MUnit mu, char* fname, char* exe_path, char* argv0,
+                         long self_link) {
         long result = 1;
         unsafe {
             char* scratch = this.temp_ir_path();
@@ -401,6 +402,10 @@ struct Driver {
                     long len = this.slen(ir);
                     char* ivyrt = this.find_ivyrt(argv0);
                     Linker lk;
+                    if (self_link != 0) {
+                        lk.set_self_link(1);
+                        lk.collect_self_link();
+                    }
                     long i = 0;
                     while (i < cg.import_count()) {
                         char* obj = cg.module_object(i);
@@ -633,7 +638,8 @@ struct Driver {
                     owned = this.with_ext(path, ".exe");
                     exe_path = owned;
                 }
-                long r = this.link_executable(cg, mu, fname, exe_path, argv0);
+                long r = this.link_executable(cg, mu, fname, exe_path, argv0,
+                                              (long) args.self_link);
                 if (owned != (char*)0) { __ivy_free(owned); }
                 cg.release();
                 __ivy_free(content);

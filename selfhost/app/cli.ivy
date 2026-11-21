@@ -67,6 +67,8 @@ export struct CliArgs {
     int32 compile_only;
     int32 crt_static;
     int32 link_mode;
+    // H9.4: `--self-link` (selfhost-only extension; not in the oracle usage).
+    int32 self_link;
     int32 target;        // 0 = unset, 1 = itanium, 2 = msvc
 
     void init() {
@@ -87,6 +89,7 @@ export struct CliArgs {
         this.compile_only = 0;
         this.crt_static = 0;
         this.link_mode = 0;
+        this.self_link = 0;
         this.target = 0;
     }
 
@@ -352,6 +355,9 @@ export struct CliArgs {
                     this.compile_only = 1;
                 } else if (this.streq(arg, "--crt-static")) {
                     this.crt_static = 1;
+                } else if (this.streq(arg, "--self-link")) {
+                    // H9.4: link the compiler itself (LLVM + system libraries).
+                    this.self_link = 1;
                 } else if (this.streq(arg, "--target")) {
                     if (i + 1 >= argc) {
                         io::eprintln("ivy: error: option '--target' requires an ABI name");
@@ -444,6 +450,10 @@ export struct CliArgs {
                        !this.ext_eq(this.out_path, "ii")) {
                 this.link_mode = 1;
             }
+        }
+        // H9.4: `--self-link` is always a link action.
+        if (this.self_link != 0) {
+            this.link_mode = 1;
         }
         return -1;
     }
