@@ -634,3 +634,4 @@ dir>`. Byte interface do stage 1 sinh == ban oracle sinh == ban tung nam trong
 | **checkout sach khong oracle** (`git archive` LF, khong `std/*.ivm`, khong `build/`) + `build.ps1 -Golden` | **PASS**: F2 19 OBJ + 18 IVM + `rt.obj`, EXE identical, **12337 check, 0 failure** |
 | junction `mklink /J` toi LLVM khac + prepend PATH (khong `IVY_LINKER`) | `-Modes link` PASS 719/719 nho `<CLANG>` |
 | CI run `44926968286` (truoc fix) | **do**: 23 failure, dung 2 loai loi o muc 5 va 6 |
+| CI run `44931247724` (commit `be7fdce`) | **xanh 7m53s**: Install LLVM 97s (cache cold), Bootstrap 339s, Post Cache 24s; baseline oracle cu 6m10s |
