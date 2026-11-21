@@ -51,6 +51,10 @@ param(
     [string]$OutDir = "selfhost/golden",
     [string]$TempRoot = "",
     [int]$TimeoutSec = 120,
+    # Linker whose path is folded to <CLANG> in the diagnostics.  Defaults to
+    # `$env:IVY_LINKER`, then the first `clang++` on PATH (what the compiler
+    # finds), so the baseline stays independent of the LLVM installation path.
+    [string]$Linker = "",
     # Development helpers: restrict the corpus / section.
     [string]$Filter = "",
     [string]$Modes = "lex,tokens,ast,hir,mir,llvm,c,o,run,link"
@@ -116,11 +120,33 @@ $script:RtPaths = @(
     ((Join-Path $repo "build\rt.obj") -replace '\\', '/')
 )
 
+# H9.6: the linker path is baked into the `linker failed (exit code ...)`
+# diagnostics.  Fold both spellings of the path to `<CLANG>` so the same
+# baseline is valid on any machine, including a CI runner whose LLVM lives
+# somewhere else.  `-Linker` wins, then IVY_LINKER (the compiler's own
+# override), then the first `clang++` on PATH.  The path is matched before the
+# file name (the compiler prints `"C:/.../clang++.exe"` in its command line and
+# `clang++: error: ...` for clang's own driver errors; the shorter `clang++`
+# stays as is).
+$linkerPath = $Linker
+if (-not $linkerPath) { $linkerPath = $env:IVY_LINKER }
+if (-not $linkerPath) {
+    $cmd = Get-Command "clang++" -CommandType Application -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+    if ($cmd) { $linkerPath = $cmd.Source }
+}
+$script:ClangPaths = @()
+if ($linkerPath) {
+    $script:ClangPaths += $linkerPath
+    $script:ClangPaths += ($linkerPath -replace '\\', '/')
+}
+
 function Normalize-Paths([byte[]]$bytes, [string]$root) {
     $s = $script:Latin1.GetString($bytes)
     $s = $s.Replace($root, "<OUT>")
     $s = $s.Replace(($root -replace '\\', '/'), "<OUT>")
     foreach ($p in $script:RtPaths) { $s = $s.Replace($p, "<RT>") }
+    foreach ($p in $script:ClangPaths) { $s = $s.Replace($p, "<CLANG>") }
     return Normalize-Lines ($script:Latin1.GetBytes($s))
 }
 

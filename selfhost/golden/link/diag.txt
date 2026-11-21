@@ -181,22 +181,22 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/167_extern_ptr_decl.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/168_ptr_arg.ivy 400 1
+@@ selfhost/corpus/codegen/168_ptr_arg.ivy 379 1
 app__tmp.obj : error LNK2019: unresolved external symbol use referenced in function ivy_main
 <OUT>\app.exe : fatal error LNK1120: 1 unresolved externals
 clang++: error: linker command failed with exit code 1120 (use -v to see invocation)
-selfhost/corpus/codegen/168_ptr_arg.ivy:0:0: error: linker failed (exit code 1120): "D:\Cpp\Clang\bin\clang++.exe" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
+selfhost/corpus/codegen/168_ptr_arg.ivy:0:0: error: linker failed (exit code 1120): "<CLANG>" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
 @@ selfhost/corpus/codegen/169_ptr_cmp.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/17_print_str.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/170_ptr_ret_void.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/171_variadic_zero.ivy 404 1
+@@ selfhost/corpus/codegen/171_variadic_zero.ivy 383 1
 app__tmp.obj : error LNK2019: unresolved external symbol f referenced in function ivy_main
 <OUT>\app.exe : fatal error LNK1120: 1 unresolved externals
 clang++: error: linker command failed with exit code 1120 (use -v to see invocation)
-selfhost/corpus/codegen/171_variadic_zero.ivy:0:0: error: linker failed (exit code 1120): "D:\Cpp\Clang\bin\clang++.exe" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
+selfhost/corpus/codegen/171_variadic_zero.ivy:0:0: error: linker failed (exit code 1120): "<CLANG>" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
 @@ selfhost/corpus/codegen/172_ptr_arith.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/173_decl_only_ptr.ivy 31 0
@@ -225,7 +225,7 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/184_cstyle_unsigned.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 841 1
+@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 820 1
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_println_int referenced in function ivy_main
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_print_int referenced in function ivy_main
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_println_float referenced in function ivy_main
@@ -233,7 +233,7 @@ app__tmp.obj : error LNK2019: unresolved external symbol ivy_println_char refere
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_println_str referenced in function ivy_main
 <OUT>\app.exe : fatal error LNK1120: 5 unresolved externals
 clang++: error: linker command failed with exit code 1120 (use -v to see invocation)
-selfhost/corpus/codegen/185_ivy_print_types.ivy:0:0: error: linker failed (exit code 1120): "D:\Cpp\Clang\bin\clang++.exe" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
+selfhost/corpus/codegen/185_ivy_print_types.ivy:0:0: error: linker failed (exit code 1120): "<CLANG>" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
 @@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 203 1
 selfhost/corpus/codegen/186_ivy_print_explicit.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:17:11: error: use of undefined value '@ivy__print_char'
 call void @ivy__print_char(i8 65)
@@ -252,12 +252,12 @@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy:0:0: error: LLVM IR parse e
 call void @ivy__print_int(i32 1)
           ^
 
-@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 522 1
+@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 501 1
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_println_int referenced in function ivy_main
 app__tmp.obj : error LNK2019: unresolved external symbol ivy_print_int referenced in function ivy_main
 <OUT>\app.exe : fatal error LNK1120: 2 unresolved externals
 clang++: error: linker command failed with exit code 1120 (use -v to see invocation)
-selfhost/corpus/codegen/191_ivy_print_enum.ivy:0:0: error: linker failed (exit code 1120): "D:\Cpp\Clang\bin\clang++.exe" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
+selfhost/corpus/codegen/191_ivy_print_enum.ivy:0:0: error: linker failed (exit code 1120): "<CLANG>" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
 @@ selfhost/corpus/codegen/192_ctor_dtor.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/193_ctor_overload.ivy 31 0
@@ -354,11 +354,11 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/236_inherit_pure_virtual.ivy 423 1
+@@ selfhost/corpus/codegen/236_inherit_pure_virtual.ivy 402 1
 app__tmp.obj : error LNK2001: unresolved external symbol "?area@Shape@@YHAAV@Z" (?area@Shape@@YHAAV@Z)
 <OUT>\app.exe : fatal error LNK1120: 1 unresolved externals
 clang++: error: linker command failed with exit code 1120 (use -v to see invocation)
-selfhost/corpus/codegen/236_inherit_pure_virtual.ivy:0:0: error: linker failed (exit code 1120): "D:\Cpp\Clang\bin\clang++.exe" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
+selfhost/corpus/codegen/236_inherit_pure_virtual.ivy:0:0: error: linker failed (exit code 1120): "<CLANG>" "<OUT>\app__tmp.obj" -o "<OUT>\app.exe" "<RT>"
 @@ selfhost/corpus/codegen/237_inherit_extra_slot.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/238_inherit_virtual_args.ivy 31 0

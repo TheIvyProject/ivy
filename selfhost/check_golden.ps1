@@ -35,6 +35,10 @@ param(
     # then `build\rt.obj`.  Its path is normalised to `<RT>` in the `link`
     # diagnostics so the baseline does not depend on where the object lives.
     [string]$Runtime = "",
+    # Linker the driver uses.  Defaults to $env:IVY_LINKER, then the first
+    # `clang++` on PATH; its path is normalised to `<CLANG>` (same rule as
+    # freeze_golden.ps1).
+    [string]$Linker = "",
     [int]$TimeoutSec = 120,
     [string]$Modes = "lex,tokens,ast,hir,mir,llvm,c,o,run,link",
     [string]$Filter = "",
@@ -134,11 +138,29 @@ if ($rtUsed) {
     $script:RtPaths += ($rtUsed -replace '\\', '/')
 }
 
+# H9.6: the linker path appears in the `linker failed (exit code ...)`
+# diagnostics.  Fold both spellings to `<CLANG>` (same rule as
+# freeze_golden.ps1) so the baseline does not depend on where LLVM is
+# installed.  `-Linker` wins, then IVY_LINKER, then the first `clang++` on PATH.
+$linkerPath = $Linker
+if (-not $linkerPath) { $linkerPath = $env:IVY_LINKER }
+if (-not $linkerPath) {
+    $cmd = Get-Command "clang++" -CommandType Application -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+    if ($cmd) { $linkerPath = $cmd.Source }
+}
+$script:ClangPaths = @()
+if ($linkerPath) {
+    $script:ClangPaths += $linkerPath
+    $script:ClangPaths += ($linkerPath -replace '\\', '/')
+}
+
 function Normalize-Paths([byte[]]$bytes, [string]$root) {
     $s = $script:Latin1.GetString($bytes)
     $s = $s.Replace($root, "<OUT>")
     $s = $s.Replace(($root -replace '\\', '/'), "<OUT>")
     foreach ($p in $script:RtPaths) { $s = $s.Replace($p, "<RT>") }
+    foreach ($p in $script:ClangPaths) { $s = $s.Replace($p, "<CLANG>") }
     return Normalize-Lines ($script:Latin1.GetBytes($s))
 }
 

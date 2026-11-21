@@ -103,6 +103,12 @@ if (-not (Test-LlvmRoot $LlvmRoot)) {
     }
     $LlvmRoot = $found
 }
+# Export it: the driver's `find_linker()` (`where clang++`) and the `--self-link`
+# library collection both run in child processes, and CI relies on this being
+# the authoritative installation.  `IVY_LINKER` (when set) pins the driver to
+# the same clang++ the harness links with.
+$env:LLVM_ROOT = $LlvmRoot
+if (-not $env:IVY_LINKER) { $env:IVY_LINKER = $clang }
 
 $clang = Join-Path $LlvmRoot "bin\clang.exe"
 $llvmConfig = Join-Path $LlvmRoot "bin\llvm-config.exe"
@@ -388,7 +394,6 @@ if (-not $same) { Fail "stage 1 and stage 2 executables differ" }
 if ($SelfLink) {
     $step++
     Write-Output ("[" + $step + "/" + $total + "] stage 1 links stage 2 by itself ...")
-    $env:LLVM_ROOT = $LlvmRoot
     $selfExe = Join-Path $stage2 "ivy_selflink.exe"
     $inc = Include-Args $stage2
     $code = Invoke-Separate $stage1Exe (@($mainSrc) + $inc + @("--self-link", "-o", $selfExe)) `

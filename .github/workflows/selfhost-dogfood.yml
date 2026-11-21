@@ -1,14 +1,19 @@
 name: selfhost dogfood
 
-# H8.2: the C++-built compiler (`build/Release/ivy.exe`) builds the Ivy port of
-# itself, and the resulting compiler (`ivy_selfhost.exe`) must reproduce the
-# C++-built one: stage1 -> stage2 must be byte-identical (F2) and the Ivy-built
-# compiler must match the oracle on the whole selfhost corpus.
+# H9.6: CI builds the compiler with itself, not with the C++ oracle.
 #
-# The oracle is not committed (build/ is ignored), so the job builds it from
-# source first: CMake + MSVC + the full LLVM distribution that CMakeLists.txt
-# requires (development libraries, headers, CMake package and `llvm-config`).
-# `clang++` must be on PATH because the oracle links executables with it.
+# Stage 0 is the checked-in seed (`selfhost/bootstrap/ivy-stage0.exe`), so the
+# job needs neither CMake nor `src/**`: it bootstraps seed -> stage1 -> stage2
+# (F2), has stage 1 link stage 2 by itself (`--self-link`, H9.4), and runs the
+# frozen golden gate (H9.3) — 1052 fixtures over all ten modes, no oracle.
+#
+# The C++ tree still exists until H9.9, but this workflow never builds or runs
+# it.  The oracle-dependent harnesses (`dogfood.ps1`, `difftest.ps1`,
+# `interpdiff.ps1`) stay for local use while `src/**` is around; the golden
+# baseline replaces them in CI.
+#
+# `clang++` must be on PATH: the self-host driver resolves its linker with
+# `where clang++`, and the harness links the stages with it.
 
 on:
   push:
@@ -28,14 +33,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The full LLVM distribution is a ~900 MB download; the extracted tree is
+      # much bigger, so caching it is what keeps the job from spending most of
+      # its time on the network.  Bump the `-v1` suffix when the archive layout
+      # or the DIA patch below changes.
+      - name: Cache LLVM
+        uses: actions/cache@v4
+        with:
+          path: C:\LLVM
+          key: llvm-21.1.6-full-${{ runner.os }}-v1
+
       - name: Install LLVM
         run: |
           # The LLVM preinstalled on windows-latest (the choco `llvm` package,
           # i.e. the official `LLVM-<ver>-win64.exe`) ships only the command
           # line tools: no headers, no libraries, no `llvm-config` and no CMake
           # package (actions/runner-images#12565).  The full distribution is the
-          # `clang+llvm` archive, which is what CMakeLists.txt and
-          # `bootstrap_smoke.ps1` (`llvm-config --libs x86 --system-libs`) need.
+          # `clang+llvm` archive, which is what `selfhost/build.ps1` links
+          # against (`llvm-config --libs x86 --system-libs`).
           # The version must match the LLVM the sources are written against
           # (`Module::setTargetTriple(Triple)` exists in 21.x, not in 20.x).
           $ver = "21.1.6"
@@ -63,9 +78,11 @@ jobs:
           }
           # LLVM's Windows package bakes the DIA SDK path of the machine that
           # built it (`.../Visual Studio/2019/Professional/DIA SDK/...`) into
-          # LLVMExports.cmake; the linker then fails with LNK1181.  Point it at
-          # this runner's DIA SDK (the same manual patch CMakeLists.txt
-          # documents for the development machine).
+          # LLVMExports.cmake.  This workflow does not use CMake any more, but
+          # the patch is cheap and keeps the cached tree usable by the
+          # oracle-era harnesses if `src/**` is still present locally.  It must
+          # be idempotent: on a cache hit the file already points at this
+          # runner's DIA SDK.
           $exports = Join-Path $prefix "lib\cmake\llvm\LLVMExports.cmake"
           $text = Get-Content -LiteralPath $exports -Raw
           if ($text -match 'DIA SDK/lib/amd64/diaguids\.lib') {
@@ -79,56 +96,44 @@ jobs:
             $dia = $dia -replace '\\', '/'
             $patched = [regex]::Replace($text,
               '(?i)[A-Z]:/[^";]*?DIA SDK/lib/amd64/diaguids\.lib', $dia)
-            if ($patched -eq $text) { throw "cannot patch the DIA SDK path in $exports" }
-            Set-Content -LiteralPath $exports -Value $patched -NoNewline
-            "patched DIA SDK path: $dia"
+            if ($patched -ne $text) {
+              Set-Content -LiteralPath $exports -Value $patched -NoNewline
+              "patched DIA SDK path: $dia"
+            } else {
+              "DIA SDK path already points at $dia"
+            }
           } else {
             "LLVMExports.cmake has no DIA SDK reference"
           }
-          # `clang++` (used by the oracle's linker) and the selfhost harnesses
-          # both rely on PATH; LLVM_ROOT is what `bootstrap_smoke.ps1`
-          # auto-detects.
+          # `clang++` (the driver's linker and the stage link) and `llvm-config`
+          # both rely on PATH; LLVM_ROOT is what the harnesses auto-detect.
+          # IVY_LINKER pins the driver to *this* LLVM: windows-latest also has
+          # the choco `llvm` on PATH and its clang++ must not link the stages
+          # against 21.1.6 libraries.  (The golden gate folds the path to
+          # `<CLANG>`, so the exact location is irrelevant.)
           Add-Content -Path $env:GITHUB_PATH -Value "$prefix\bin"
           "LLVM_ROOT=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "IVY_LINKER=$prefix\bin\clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           & "$prefix\bin\llvm-config.exe" --version
 
-      - name: Build the C++ oracle
+      - name: Bootstrap without the oracle (F2 + self-link + golden)
         run: |
-          # Do not hardcode a Visual Studio generator: windows-latest moved to
-          # VS 2026 (generator "Visual Studio 18 2026", CMake >= 4.2) in 2026,
-          # so let CMake pick its default generator for the installed VS.
-          #
-          # Pin the MSVC toolset to v143 (14.44): the runner's default v145
-          # toolset moved to 14.52 (2026-11-18) and that STL eagerly
-          # instantiates `Expr::Lambda`'s destructor in `interpreter.cpp`, which
-          # trips the `std::unique_ptr<Stmt>` incomplete-type static_assert in
-          # `src/parsing/ast.h` (14.51 and older defer it).  `src/**` is frozen
-          # until H9.9, so pin the toolset instead of touching the source.
-          cmake --version | Select-Object -First 1
-          cmake -S . -B build -A x64 -T v143 -DLLVM_DIR="$env:LLVM_ROOT\lib\cmake\llvm"
-          (Select-String -Path build\CMakeCache.txt -Pattern '^CMAKE_GENERATOR(_TOOLSET)?:').Line
-          # Print the resolved toolset so the next runner drift is obvious.
-          # (CMake 4.x keeps the compiler path in CMakeFiles/<ver>/, not the cache.)
-          (Select-String -Path build\CMakeFiles\*\CMakeCXXCompiler.cmake `
-            -Pattern '^set\(CMAKE_CXX_COMPILER(_VERSION)? ').Line
-          cmake --build build --config Release --parallel
-          if (-not (Test-Path "build\Release\ivy.exe")) {
-            throw "oracle was not built"
-          }
-          & "build\Release\ivy.exe" --help | Select-Object -First 1
-
-      - name: Dogfood (F2 + full-corpus parity)
-        run: |
-          pwsh -NoProfile -File selfhost\dogfood.ps1 -TempRoot "$env:RUNNER_TEMP\h82"
+          # Seed hash -> stage 1 -> stage 2 with byte-identical objects, `.ivm`,
+          # `rt.obj` and executables; then stage 1 links the same objects by
+          # itself; finally the golden gate over the frozen baseline.
+          pwsh -NoProfile -File selfhost\build.ps1 `
+            -LlvmRoot "$env:LLVM_ROOT" `
+            -TempRoot "$env:RUNNER_TEMP\h96" `
+            -SelfLink -Golden
 
       - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: dogfood-logs
-          # `*.err` holds stderr, `*.out` holds stdout (the MSVC linker writes its
-          # unresolved-symbol lines to stdout).
+          # `*.err` holds stderr, `*.out` holds stdout (the MSVC linker writes
+          # its unresolved-symbol lines to stdout).
           path: |
-            ${{ runner.temp }}/h82/**/*.err
-            ${{ runner.temp }}/h82/**/*.out
+            ${{ runner.temp }}/h96/**/*.err
+            ${{ runner.temp }}/h96/**/*.out
           if-no-files-found: ignore

@@ -311,6 +311,9 @@ Khong nen: dump text ~2.8 MB, object chi luu hash.
 - `<OUT>`: thu muc scratch (ca hai kieu slash) trong diagnostics.
 - `<RT>`: `build/Release/ivyrt.lib` (oracle bake) va `build/rt.obj` (selfhost
   doc qua `IVYRT_LIB_PATH`) duoc thay bang cung mot token.
+- `<CLANG>`: duong dan `clang++` ma driver in trong chan doan
+  `linker failed (...)`, thay bang mot token (them o H9.6) — neu khong, golden
+  chi dung tren may co LLVM o cung duong dan.
 - Lenh moi fixture dung `-I <thu muc fixture>` (repo-relative, `/`) giong
   `driver_smoke.ps1`.
 
@@ -552,3 +555,66 @@ dung seed (H9.6).
   muc khac nhau ra cung exe): H9.7.
 - Seed hien duoc build tren may nay (duong dan LLVM nam trong PE neu co); H9.7
   moi cam ket reproducible.
+
+---
+
+# H9.6 - CI chi dung Ivy
+
+## 1. Pham vi
+
+H9.5 chung minh mot cay chi co `selfhost/` + seed van build duoc, nhung CI van
+chay `dogfood.ps1` tren oracle C++ (`build\Release\ivy.exe`, CMake, `src/**`).
+H9.6 doi workflow sang seed:
+
+```
+actions/checkout -> LLVM 21.1.6 (cache) -> build.ps1 -SelfLink -Golden
+```
+
+Khong CMake, khong `src/**`, khong `build/Release`.
+
+## 2. Workflow `.github/workflows/selfhost-dogfood.yml`
+
+| Buoc | Noi dung |
+|---|---|
+| Checkout | `actions/checkout@v4` |
+| Cache LLVM | `C:\LLVM`, key `llvm-21.1.6-full-${{ runner.os }}-v1` (tang `-v1` khi layout archive/patch DIA doi) |
+| Install LLVM | tai `clang+llvm-21.1.6-x86_64-pc-windows-msvc.tar.xz` (~900 MB) khi cache miss; `Test-FullLlvm` doi hoi `clang.exe`, `clang++.exe`, `llvm-config.exe`, `LLVMConfig.cmake`; patch DIA SDK **idempotent** (chi khi file con duong dan cu); them `bin` vao `GITHUB_PATH`, `LLVM_ROOT` + `IVY_LINKER` vao `GITHUB_ENV` |
+| Bootstrap | `pwsh -File selfhost\build.ps1 -LlvmRoot $env:LLVM_ROOT -TempRoot $env:RUNNER_TEMP\h96 -SelfLink -Golden` |
+| Failure logs | upload `*.err`/`*.out` khi fail |
+
+LLVM cua runner: goi `llvm` cua chocolatey chi co command line tools (khong
+header/lib/`llvm-config`), phai dung ban full. `IVY_LINKER` ghim dung cay dang
+cache; `windows-latest` con co `clang++` khac tren PATH.
+
+## 3. `<CLANG>` trong golden
+
+5 fixture (`168`, `171`, `185`, `191`, `236`) in nguyen command line link vao
+chan doan `linker failed (exit code 1120)`, nen golden cu chua
+`D:\Cpp\Clang\bin\clang++.exe`. Tren runner LLVM nam o `C:\LLVM\...` nen
+baseline se truot. `freeze_golden.ps1` va `check_golden.ps1` them:
+
+- `-Linker <path>` (mac dinh `$env:IVY_LINKER`, roi `clang++` dau tien tren
+  PATH - dung thu tu driver tim linker);
+- chuan hoa ca 2 kieu slash thanh `<CLANG>` trong `Normalize-Paths`.
+
+Chi doi `link/diag.txt` (5 record, moi record ngan 21 byte). Ten `clang++`
+tran khong bi thay (tranh doi output cua fixture).
+
+## 4. Record tho bi thieu `\r`
+
+Khi freeze lai, 3 file `interp/stderr.txt`, `link/stdout.txt`,
+`link/stderr.txt` doi byte o moi dong output khong rong. Nguyen nhan: runtime
+ghi `\n` qua text mode cua UCRT thanh `\r\n` khi stdout/stderr la pipe, nhung
+ban golden dang commit bi luu thieu `\r` - header `@@ <path> <nbytes>` van dem
+4 byte trong khi than record chi con 3 (`ef\n`), nen `Read-Records` doc sai
+header ke tiep va **khong the parse**. Ban freeze moi ghi dung byte tho
+(`ef\r\n`); moi record khop `nbytes`, `link/diag.txt` khong doi ngoai
+`<CLANG>`.
+
+## 5. Ket qua (2026-11-21)
+
+| Kiem tra | Ket qua |
+|---|---|
+| `check_golden.ps1 -Modes interp,link` (stage1) | PASS 719 check, 0 failure |
+| `check_golden.ps1` (stage1, ca 10 mode) | PASS 12337 check, 0 failure |
+| junction `mklink /J` toi LLVM khac + prepend PATH (khong `IVY_LINKER`) | `-Modes link` PASS 719/719 nho `<CLANG>` |
