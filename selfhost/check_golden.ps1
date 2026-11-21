@@ -39,6 +39,12 @@ param(
     # `clang++` on PATH; its path is normalised to `<CLANG>` (same rule as
     # freeze_golden.ps1).
     [string]$Linker = "",
+    # Directory holding the prebuilt `.ivm` module interfaces the corpus
+    # imports (`math`, `unique_ptr`, `vector`).  It is appended to the fixture's
+    # own `-I`, so the gate no longer depends on whatever `std/*.ivm` a working
+    # tree happens to contain (a fresh checkout has none) while the resolved
+    # interface bytes stay the same as when the baseline was frozen.
+    [string]$IvmDir = "",
     [int]$TimeoutSec = 120,
     [string]$Modes = "lex,tokens,ast,hir,mir,llvm,c,o,run,link",
     [string]$Filter = "",
@@ -295,17 +301,19 @@ function Get-FixtureDir([string]$rel) {
 
 function Get-ModeArgs([string]$mode, [string]$rel, [string]$objPath, [string]$outFile) {
     $dir = Get-FixtureDir $rel
+    $inc = @("-I", $dir)
+    if ($IvmDir -ne "") { $inc += @("-I", $IvmDir) }
     switch ($mode) {
-        "lex"    { return @("--lex", $rel, "-I", $dir) }
-        "tokens" { return @("--tokens", $rel, "-I", $dir) }
-        "ast"    { return @("--ast", $rel, "-I", $dir) }
-        "hir"    { return @("--hir", $rel, "-I", $dir) }
-        "mir"    { return @("--mir", $rel, "-I", $dir) }
-        "llvm"   { return @("--llvm", $rel, "-I", $dir) }
-        "c"      { return @($rel, "-I", $dir, "-c", "-o", $objPath) }
-        "o"      { return @($rel, "-I", $dir, "-o", $outFile) }
+        "lex"    { return @("--lex", $rel) + $inc }
+        "tokens" { return @("--tokens", $rel) + $inc }
+        "ast"    { return @("--ast", $rel) + $inc }
+        "hir"    { return @("--hir", $rel) + $inc }
+        "mir"    { return @("--mir", $rel) + $inc }
+        "llvm"   { return @("--llvm", $rel) + $inc }
+        "c"      { return @($rel) + $inc + @("-c", "-o", $objPath) }
+        "o"      { return @($rel) + $inc + @("-o", $outFile) }
         "run"    { return @("--run", $rel) }
-        "link"   { return @($rel, "-I", $dir, "-o", $objPath) }
+        "link"   { return @($rel) + $inc + @("-o", $objPath) }
     }
     throw ("unknown mode " + $mode)
 }

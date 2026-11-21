@@ -5,3 +5,10 @@ selfhost/golden/** -text
 
 # H9.5: the bootstrap seed is a binary artifact; never normalise its bytes.
 selfhost/bootstrap/ivy-stage0.exe -text
+
+# H9.6: the golden baseline is frozen against LF fixture sources.  Some fixtures
+# print the bytes between two token positions (multi-line raw strings), so a
+# checkout that converted them to CRLF would change the expected output.  Pin
+# the corpus (and the std modules the corpus imports) to LF on every platform.
+selfhost/corpus/** text eol=lf
+std/** text eol=lf

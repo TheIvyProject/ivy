@@ -14,7 +14,9 @@
 # `rt.obj`) with `-Wl,/Brepro`, exactly like `bootstrap_smoke.ps1`; `-SelfLink`
 # additionally has stage 1 link stage 2 by itself (`--self-link`, H9.4).
 #
-# `-Golden` then runs `selfhost/check_golden.ps1 -Driver <stage 1>`, the
+# `-Golden` then prebuilds the three std module interfaces the corpus imports
+# (`math`, `unique_ptr`, `vector`) with stage 1, and runs
+# `selfhost/check_golden.ps1 -Driver <stage 1> -IvmDir <that dir>`, the
 # oracle-free parity gate over the frozen baseline in `selfhost/golden/`.
 #
 # Nothing is written into the repository: every object, `.ivm`, executable and
@@ -414,8 +416,31 @@ if ($Golden) {
     Write-Output ("[" + $step + "/" + $total + "] golden parity of stage 1 (no oracle) ...")
     $check = Join-Path $PSScriptRoot "check_golden.ps1"
     if (-not (Test-Path -LiteralPath $check)) { Fail ("missing " + $check) }
+    # The corpus imports three std module interfaces (`math`, `unique_ptr`,
+    # `vector`) instead of compiling `std/*.ivy`, exactly like the oracle's
+    # `<cwd>/std/<name>.ivm` lookup.  A fresh checkout does not contain any
+    # `std/*.ivm` (they are build products and ignored), so build them here with
+    # stage 1 and hand the gate this directory.  Same source -> same interface
+    # bytes, so the baseline stays valid.
+    $stdSrc = Join-Path $repo "std"
+    $ivmDir = Join-Path $runDir "std-ivm"
+    New-Item -ItemType Directory -Force -Path $ivmDir | Out-Null
+    foreach ($name in @("math", "unique_ptr", "vector")) {
+        $src = Join-Path $stdSrc ($name + ".ivy")
+        $code = Invoke-Separate $stage1Exe `
+                @($src, "-I", $ivmDir, "-I", $stdSrc, "-c", "-o", (Join-Path $ivmDir ($name + ".obj"))) `
+                (Join-Path $ivmDir ($name + ".out")) (Join-Path $ivmDir ($name + ".err"))
+        if ($code -ne 0) {
+            Write-Output ("STD INTERFACE FAILED (std/" + $name + ".ivy, exit " + $code + ")")
+            Get-Content (Join-Path $ivmDir ($name + ".err")) | Select-Object -First 10
+            exit 1
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $ivmDir ($name + ".ivm")))) {
+            Fail ("std/" + $name + ".ivy did not produce an .ivm interface")
+        }
+    }
     & powershell -NoProfile -File $check -Driver $stage1Exe `
-                 -Runtime $ivyrt -TempRoot (Join-Path $runDir "golden")
+                 -Runtime $ivyrt -IvmDir $ivmDir -TempRoot (Join-Path $runDir "golden")
     if ($LASTEXITCODE -ne 0) { Fail ("golden check failed (exit " + $LASTEXITCODE + ")") }
 }
 

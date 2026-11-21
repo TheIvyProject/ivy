@@ -55,6 +55,11 @@ param(
     # `$env:IVY_LINKER`, then the first `clang++` on PATH (what the compiler
     # finds), so the baseline stays independent of the LLVM installation path.
     [string]$Linker = "",
+    # Directory holding the prebuilt `.ivm` interfaces the corpus imports;
+    # appended to the fixture's own `-I` (see check_golden.ps1).  Pass the same
+    # directory to both scripts so a re-freeze and a check resolve the imports
+    # to identical bytes.
+    [string]$IvmDir = "",
     # Development helpers: restrict the corpus / section.
     [string]$Filter = "",
     [string]$Modes = "lex,tokens,ast,hir,mir,llvm,c,o,run,link"
@@ -268,17 +273,19 @@ function Get-FixtureDir([string]$rel) {
 
 function Get-ModeArgs([string]$mode, [string]$rel, [string]$objPath, [string]$outFile) {
     $dir = Get-FixtureDir $rel
+    $inc = @("-I", $dir)
+    if ($IvmDir -ne "") { $inc += @("-I", $IvmDir) }
     switch ($mode) {
-        "lex"    { return @("--lex", $rel, "-I", $dir) }
-        "tokens" { return @("--tokens", $rel, "-I", $dir) }
-        "ast"    { return @("--ast", $rel, "-I", $dir) }
-        "hir"    { return @("--hir", $rel, "-I", $dir) }
-        "mir"    { return @("--mir", $rel, "-I", $dir) }
-        "llvm"   { return @("--llvm", $rel, "-I", $dir) }
-        "c"      { return @($rel, "-I", $dir, "-c", "-o", $objPath) }
-        "o"      { return @($rel, "-I", $dir, "-o", $outFile) }
+        "lex"    { return @("--lex", $rel) + $inc }
+        "tokens" { return @("--tokens", $rel) + $inc }
+        "ast"    { return @("--ast", $rel) + $inc }
+        "hir"    { return @("--hir", $rel) + $inc }
+        "mir"    { return @("--mir", $rel) + $inc }
+        "llvm"   { return @("--llvm", $rel) + $inc }
+        "c"      { return @($rel) + $inc + @("-c", "-o", $objPath) }
+        "o"      { return @($rel) + $inc + @("-o", $outFile) }
         "run"    { return @("--run", $rel) }
-        "link"   { return @($rel, "-I", $dir, "-o", $objPath) }
+        "link"   { return @($rel) + $inc + @("-o", $objPath) }
     }
     throw ("unknown mode " + $mode)
 }

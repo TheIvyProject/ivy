@@ -590,31 +590,47 @@ cache; `windows-latest` con co `clang++` khac tren PATH.
 
 5 fixture (`168`, `171`, `185`, `191`, `236`) in nguyen command line link vao
 chan doan `linker failed (exit code 1120)`, nen golden cu chua
-`D:\Cpp\Clang\bin\clang++.exe`. Tren runner LLVM nam o `C:\LLVM\...` nen
-baseline se truot. `freeze_golden.ps1` va `check_golden.ps1` them:
+`D:\Cpp\Clang\bin\clang++.exe`. `freeze_golden.ps1` va `check_golden.ps1`
+them `-Linker` (mac dinh `$env:IVY_LINKER`, roi `clang++` tren PATH - dung thu
+tu driver tim linker) va chuan hoa ca 2 kieu slash thanh `<CLANG>` trong
+`Normalize-Paths`. Chi doi `link/diag.txt` (5 record, -21 B/record). Ten
+`clang++` tran khong bi thay (tranh doi output cua fixture).
 
-- `-Linker <path>` (mac dinh `$env:IVY_LINKER`, roi `clang++` dau tien tren
-  PATH - dung thu tu driver tim linker);
-- chuan hoa ca 2 kieu slash thanh `<CLANG>` trong `Normalize-Paths`.
+## 4. Record dai bi lech `nbytes`
 
-Chi doi `link/diag.txt` (5 record, moi record ngan 21 byte). Ten `clang++`
-tran khong bi thay (tranh doi output cua fixture).
+Ba file record tho (`interp/stderr.txt`, `link/stdout.txt`, `link/stderr.txt`)
+duoc commit tu H9.3 truoc khi `.gitattributes` co `-text`: luc `git add`,
+autocrlf bo `\r` khoi than record nhung header van giu `nbytes` cu, nen
+`Read-Records` doc sai header ke tiep (`ef\n` 3 B trong khi header ghi 4 B).
+Ban freeze moi ghi lai byte tho (`ef\r\n`); moi record khop `nbytes`.
 
-## 4. Record tho bi thieu `\r`
+## 5. Corpus phai la LF
 
-Khi freeze lai, 3 file `interp/stderr.txt`, `link/stdout.txt`,
-`link/stderr.txt` doi byte o moi dong output khong rong. Nguyen nhan: runtime
-ghi `\n` qua text mode cua UCRT thanh `\r\n` khi stdout/stderr la pipe, nhung
-ban golden dang commit bi luu thieu `\r` - header `@@ <path> <nbytes>` van dem
-4 byte trong khi than record chi con 3 (`ef\n`), nen `Read-Records` doc sai
-header ke tiep va **khong the parse**. Ban freeze moi ghi dung byte tho
-(`ef\r\n`); moi record khop `nbytes`, `link/diag.txt` khong doi ngoai
-`<CLANG>`.
+Runner checkout bang `core.autocrlf=true` nen fixture thanh CRLF, trong khi
+golden freeze tren cay LF. Chi `lexer/str/raw.ivy` lo ra: raw string cua no
+trai 3 dong, token text in nguyen byte xuong dong nen `--lex`/`--tokens` lech
++3 B va `-o` lech +3 B (CI: 23 failure). `.gitattributes` them
+`selfhost/corpus/** text eol=lf` va `std/** text eol=lf`; 155 fixture dang CRLF
+trong working tree (blob da LF tu truoc) duoc chuan hoa lai. Golden khong doi
+byte.
 
-## 5. Ket qua (2026-11-21)
+## 6. std `.ivm` phai co
+
+Fixture `247_std_math`, `248_std_unique_ptr`, `249_std_vector` dung
+`import math|unique_ptr|vector;`, va oracle chi tim `.ivm`
+(`<cwd>/std/<name>.ivm`), khong compile `std/*.ivy`. `std/*.ivm` la build
+product bi ignore nen checkout sach khong co -> CI bao `module 'vector' not
+found` (21 failure). `build.ps1 -Golden` prebuild 3 interface do bang stage 1
+vao `$runDir\std-ivm` va truyen `-IvmDir`; `check_golden.ps1`/
+`freeze_golden.ps1` nhan `-IvmDir` va noi them `-I <dir>` sau `-I <fixture
+dir>`. Byte interface do stage 1 sinh == ban oracle sinh == ban tung nam trong
+`std/` (da so hash), nen baseline khong doi.
+
+## 7. Ket qua (2026-11-22)
 
 | Kiem tra | Ket qua |
 |---|---|
-| `check_golden.ps1 -Modes interp,link` (stage1) | PASS 719 check, 0 failure |
-| `check_golden.ps1` (stage1, ca 10 mode) | PASS 12337 check, 0 failure |
+| freeze lai golden (oracle, `-IvmDir`) | 1052 fixture, 3 974 156 B - **giong het** ban dang commit |
+| **checkout sach khong oracle** (`git archive` LF, khong `std/*.ivm`, khong `build/`) + `build.ps1 -Golden` | **PASS**: F2 19 OBJ + 18 IVM + `rt.obj`, EXE identical, **12337 check, 0 failure** |
 | junction `mklink /J` toi LLVM khac + prepend PATH (khong `IVY_LINKER`) | `-Modes link` PASS 719/719 nho `<CLANG>` |
+| CI run `44926968286` (truoc fix) | **do**: 23 failure, dung 2 loai loi o muc 5 va 6 |
