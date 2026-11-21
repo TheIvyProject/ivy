@@ -19,8 +19,8 @@
 #   powershell -NoProfile -File selfhost/check_repro.ps1
 #   powershell -NoProfile -File selfhost/check_repro.ps1 -TempRoot C:\scratch\h97 -Keep
 #
-# This is a slow gate (two full bootstraps, ~10-12 min); the push CI runs the
-# fast dogfood gate only and `selfhost-repro.yml` runs this one weekly or on
+# This needs two bootstraps (~1-3 min, no golden gate); the push CI still runs
+# only the dogfood gate, and `selfhost-repro.yml` runs this one weekly or on
 # demand.
 
 param(

@@ -60,7 +60,9 @@ runs it weekly and on demand.
 
 `build.ps1` prints the SHA-256 and size of the stage 1/2 and self-linked
 executables, so a CI log or a release note can publish them next to the seed
-digest above.
+digest above.  The digest covers the source + toolchain (the CRT/SDK libraries
+are linked in), so quote it with the run ID or the LLVM/VS versions; within one
+toolchain it is fully deterministic.
 
 ## Why an executable, not a source seed
 

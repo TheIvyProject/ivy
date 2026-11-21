@@ -713,9 +713,16 @@ SIZE stage1/2     <bytes>
 SHA self-link     <sha256>
 ```
 
-Voi HEAD `0001071`: `7DCC7282AF100477A1C6D18AB7860CC0EAEBF10F810D7E2A6F7E9730EC9ED4C9`,
+Voi HEAD `0001071` (toolchain VS/SDK cua may local):
+`7DCC7282AF100477A1C6D18AB7860CC0EAEBF10F810D7E2A6F7E9730EC9ED4C9`,
 27 130 880 B (seed 27 130 368 B; +512 B do them module `buildinfo`). Stage 1,
 stage 2 va self-link deu cung hash.
+
+Hash phu thuoc toolchain (lib CRT/SDK tinh link vao exe), khong chi source:
+CI `windows-latest` voi LLVM 21.1.6 cho
+`7B3E82D995843E3BBBCBBF9DD3B1CC5BEB9B39619230A480805937BDA23172A5`,
+27 131 904 B. Moi toolchain van reproducible tuyet doi (hai cay = mot hash),
+nhung chi so cong bo phai ghi kem toolchain/run ID.
 
 Seed `ivy-stage0.exe` da co hash rieng trong `bootstrap/README.md`; CI log
 va release note co the cong bo ca ba cung luc.
@@ -729,4 +736,6 @@ va release note co the cong bo ca ba cung luc.
 | link thuong 2 lan cach 3s (truoc fix) | khac nhau o offset 248 + 89396 |
 | link thuong 2 lan cach 3s (sau fix) | **giong het** |
 | `check_repro.ps1` (2 cay khac do sau) | **PASS** - 83 artifact giong het (42 `.obj`, 38 `.ivm`, 3 `.exe`); stage1 SHA-256 `7DCC7282…9ED4C9`, 27 130 880 B |
+| CI `44937668286` (dogfood, `9436e27`) | **xanh 6m26s**; bootstrap 5m10s: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical, golden **12337/0**; `--version` = `ivy 0.5.0 (9436e27999d3)`; SHA `7B3E82D9…3172A5`, 27 131 904 B |
+| CI `44937692833` (repro, dispatch, `9436e27`) | **xanh 1m37s** (2 bootstrap ~37s): 83 artifact identical; SHA trung dogfood |
 | oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |

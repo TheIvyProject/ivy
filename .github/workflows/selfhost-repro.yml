@@ -2,9 +2,10 @@ name: selfhost reproducible build
 
 # H9.7: two independent bootstraps of the same sources, in directories with
 # different depths, must produce byte-identical `.obj`, `.ivm` and `.exe`
-# files (`selfhost/check_repro.ps1`).  This needs two full builds (~10-12 min),
-# so it does not run on every push: the push workflow stays the fast dogfood
-# gate.  Run it weekly and on demand before a release.
+# files (`selfhost/check_repro.ps1`).  It only bootstraps twice (no golden
+# gate, ~1-3 min), but the push workflow already spends most of its time on
+# the golden fixtures, so this stays a separate job.  Run it weekly and on
+# demand before a release.
 #
 # The LLVM install block mirrors `selfhost-dogfood.yml`.  It uses the same
 # cache key, so after a dogfood run the cache is already warm.
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   repro:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
