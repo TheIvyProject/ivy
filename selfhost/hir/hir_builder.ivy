@@ -46,6 +46,17 @@ export struct HirBuilder {
     long dsc_n_;
     long dsc_cap_;
     long dbase_;
+    // H10.2 (C4): the dtor-scope index a `break`/`continue`/`nextcase`
+    // destroys down to.  Every loop pushes the index of its body scope before
+    // building it, so a jump nested in an `if` still destroys the loop body's
+    // locals.  `nscope_` is the separate stack of switch scopes that
+    // `nextcase` exits (a `nextcase` inside a loop crosses the loop).
+    long* jscope_;
+    long js_n_;
+    long js_cap_;
+    long* nscope_;
+    long ns_n_;
+    long ns_cap_;
     // Names returned by value from the current function (NRVO: their dtor
     // must not run).  Mirror of the oracle's `returnedLocals_`.
     long* rsnm_;
@@ -383,6 +394,12 @@ export struct HirBuilder {
             this.dscope_ = (long*) __ivy_alloc(this.dsc_cap_ * 8);
             this.dsc_n_ = 0;
             this.dbase_ = 0;
+            this.js_cap_ = ntoks + 64;
+            this.jscope_ = (long*) __ivy_alloc(this.js_cap_ * 8);
+            this.js_n_ = 0;
+            this.ns_cap_ = ntoks + 64;
+            this.nscope_ = (long*) __ivy_alloc(this.ns_cap_ * 8);
+            this.ns_n_ = 0;
             this.rs_cap_ = ntoks + 64;
             this.rsnm_ = (long*) __ivy_alloc(this.rs_cap_ * 8);
             this.rs_n_ = 0;
@@ -614,6 +631,8 @@ export struct HirBuilder {
             __ivy_free(this.scope_);
             __ivy_free(this.dsnm_);
             __ivy_free(this.dscope_);
+            __ivy_free(this.jscope_);
+            __ivy_free(this.nscope_);
             __ivy_free(this.rsnm_);
             __ivy_free(this.ecnm_);
             __ivy_free(this.ecval_);
@@ -2625,19 +2644,61 @@ export struct HirBuilder {
         return this.push_stmt(st);
     }
 
+    // H10.2 (C4): the scope a jump destroys.  `break` leaves the innermost
+    // loop *or* switch (the deeper of the two recorded targets); `continue`
+    // leaves the innermost loop; `nextcase` leaves the innermost switch and
+    // therefore crosses an inner loop.  Without a matching construct the
+    // previous behaviour (innermost scope) is kept.
+    long jump_target(long kind) {
+        long fallback = this.dsc_n_ - 1;
+        if (kind == 10) {
+            if (this.ns_n_ > 0) {
+                unsafe {
+                    return this.nscope_[this.ns_n_ - 1];
+                }
+            }
+            return fallback;
+        }
+        if (this.js_n_ > 0) {
+            long loop_scope = 0;
+            unsafe {
+                loop_scope = this.jscope_[this.js_n_ - 1];
+            }
+            if (kind != 8) {
+                return loop_scope;
+            }
+            if (this.ns_n_ > 0) {
+                long sw_scope = 0;
+                unsafe {
+                    sw_scope = this.nscope_[this.ns_n_ - 1];
+                }
+                if (sw_scope > loop_scope) {
+                    return sw_scope;
+                }
+            }
+            return loop_scope;
+        }
+        if (kind == 8 && this.ns_n_ > 0) {
+            unsafe {
+                return this.nscope_[this.ns_n_ - 1];
+            }
+        }
+        return fallback;
+    }
+
     // H6.2s: RAII on a jump that leaves the current scope (`break`,
-    // `continue`, `nextcase`).  The oracle only destroys the locals of the
-    // INNERMOST scope: `dtorStacks_.back()` — an enclosing scope's locals are
-    // still alive, and a jump written inside a nested block does not destroy
-    // the loop body's locals (bug-compatible with the reference IR).
-    // `kind` is the terminator statement kind (8 break, 9 continue, 10
-    // nextcase); `sval` is its label (nextcase only).
+    // `continue`, `nextcase`).  H10.2 (C4): every scope between the jump and
+    // its target is destroyed, not just the innermost one, so a `break`
+    // inside an `if` still runs the loop body's destructors.  The dtor list
+    // itself is not truncated: the jump is one path through the block and the
+    // fall-through path still needs the enclosing scope's list.
     long wrap_scope_dtors(long kind, const char* sval, long line, long col) {
+        long target = this.jump_target(kind);
         long has = 0;
-        if (this.dsc_n_ > 0) {
+        if (target >= 0 && target < this.dsc_n_) {
             long lo = 0;
             unsafe {
-                lo = this.dscope_[this.dsc_n_ - 1];
+                lo = this.dscope_[target];
             }
             if (this.ds_n_ > lo) {
                 has = 1;
@@ -2648,11 +2709,8 @@ export struct HirBuilder {
             plain.sval = sval;
             return this.push_stmt(plain);
         }
-        long d = this.emit_dtor_calls(this.dsc_n_ - 1, line, col);
+        long d = this.emit_dtor_calls(target, line, col);
         long count = this.dtor_count_;
-        unsafe {
-            this.ds_n_ = this.dscope_[this.dsc_n_ - 1];
-        }
         HStmt t = this.new_stmt(kind, line, col);
         t.sval = sval;
         long ti = this.push_stmt(t);
@@ -3904,6 +3962,8 @@ export struct HirBuilder {
         long saved_dsn = this.ds_n_;
         long saved_dsc = this.dsc_n_;
         long saved_dbase = this.dbase_;
+        long saved_jsn = this.js_n_;
+        long saved_nsn = this.ns_n_;
         this.cur_fn_ = fnidx;
         this.has_return_ = 0;
         HFunction hf;
@@ -3984,6 +4044,8 @@ export struct HirBuilder {
         this.ds_n_ = saved_dsn;
         this.dsc_n_ = saved_dsc;
         this.dbase_ = saved_dbase;
+        this.js_n_ = saved_jsn;
+        this.ns_n_ = saved_nsn;
         this.cur_fn_ = saved_fn;
         this.cur_ret_ = saved_ret;
         this.has_return_ = saved_hasret;
@@ -4021,7 +4083,11 @@ export struct HirBuilder {
         }
         // H6.2s: RAII - destroy this scope's locals in reverse declaration
         // order before the scope is popped (buildCompound in hir_builder.cpp).
-        if (this.dsc_n_ > 0) {
+        // H10.2 (H17): when the last statement is a terminator (`return`,
+        // `break`, `continue`, `nextcase`) the fall-through path does not
+        // exist, so the block-end calls would only duplicate the ones the
+        // terminator already emitted for the outer scopes.
+        if (this.dsc_n_ > 0 && this.is_terminator(last) == 0) {
             long d = this.emit_dtor_calls(this.dsc_n_ - 1, a.line, a.col);
             if (d >= 0) {
                 if (first < 0) {
@@ -4672,6 +4738,7 @@ export struct HirBuilder {
         // A struct with a user-declared constructor is initialized by a
         // synthesized `T::T(&x, args...)` call right after the declaration.
         // An aggregate initializer (`T x = {a, b}`) bypasses the constructors.
+        long rec_dtor = 1;
         if (t.ptr_depth == 0 && t.is_ref == 0 && this.is_struct_name(t.base) != 0 &&
             this.struct_has_ctor(t.base) != 0) {
             long astart = this.u.a_n;
@@ -4683,7 +4750,7 @@ export struct HirBuilder {
                 unsafe {
                     ie = this.u.exprs[init];
                 }
-                if (ie.kind == 17) {
+                if (ie.kind == 19) {
                     is_agg = 1;
                 } else if (ie.kind == 12 &&
                            this.name_is_struct_ctor(ie.sval, t.base) != 0) {
@@ -4724,10 +4791,18 @@ export struct HirBuilder {
                     this.record_dtor_var(a.sval, t);
                     return wi;
                 }
+            } else {
+                // H10.2 (H26): the aggregate initializer bypassed the
+                // constructor, so the object was never constructed.  Do not
+                // record a destructor for it (the oracle destroyed an
+                // object whose constructor had not run).
+                rec_dtor = 0;
             }
         }
 
-        this.record_dtor_var(a.sval, t);
+        if (rec_dtor != 0) {
+            this.record_dtor_var(a.sval, t);
+        }
         HStmt s = this.new_stmt(2, a.line, a.col);
         s.type = t;
         s.sval = a.sval;
@@ -4858,13 +4933,13 @@ export struct HirBuilder {
                 this.u.stmts[temp_decl].next = dtor_first;
             }
         }
-        // The dtors have run; do not emit them again when the enclosing
-        // compound statement finishes.
-        if (this.dsc_n_ > 0) {
-            unsafe {
-                this.ds_n_ = this.dscope_[this.dsc_n_ - 1];
-            }
-        }
+        // H10.2 (H17/H18): the dtor list is lexical state, not execution
+        // state.  Each `return` emits its own calls but the list stays intact,
+        // so a later `return` in the same scope still sees the live locals and
+        // still gets its `__ret` temporary.  An enclosing compound suppresses
+        // its end-of-scope calls when its last statement is a terminator (see
+        // build_compound), which removes the duplicate call the oracle emitted
+        // for the outer scope.
         HStmt w = this.new_stmt(1, a.line, a.col);
         w.sstart = (temp_decl >= 0) ? temp_decl : dtor_first;
         w.sn = temp_count + dtor_count + 1;
@@ -4944,6 +5019,14 @@ export struct HirBuilder {
         // The head and the tail of the list of the clauses of this switch.
         long head = -1;
         long prev = -1;
+        // H10.2 (C4): `nextcase` destroys the locals of the case block(s) it
+        // leaves; `break` may leave this switch too.
+        if (this.ns_n_ < this.ns_cap_) {
+            unsafe {
+                this.nscope_[this.ns_n_] = this.dsc_n_;
+            }
+            this.ns_n_ = this.ns_n_ + 1;
+        }
         // The clauses of the AST are a linked list (a switch that is nested
         // in a case body pushes its own clauses into the same pool).
         long j = a.sstart;
@@ -5003,6 +5086,7 @@ export struct HirBuilder {
             }
             j = ac.next;
         }
+        if (this.ns_n_ > 0) { this.ns_n_ = this.ns_n_ - 1; }
         HStmt s = this.new_stmt(14, a.line, a.col);
         s.a = cond;
         s.sstart = head;
@@ -5058,14 +5142,28 @@ export struct HirBuilder {
         if (a.kind == 4) {
             long cond = this.build_expr(a.a);
             this.check_condition(cond);
+            if (this.js_n_ < this.js_cap_) {
+                unsafe {
+                    this.jscope_[this.js_n_] = this.dsc_n_;
+                }
+                this.js_n_ = this.js_n_ + 1;
+            }
             long body = this.build_stmt(a.b);
+            if (this.js_n_ > 0) { this.js_n_ = this.js_n_ - 1; }
             HStmt s = this.new_stmt(4, a.line, a.col);
             s.a = cond;
             s.b = body;
             return this.push_stmt(s);
         }
         if (a.kind == 5) {
+            if (this.js_n_ < this.js_cap_) {
+                unsafe {
+                    this.jscope_[this.js_n_] = this.dsc_n_;
+                }
+                this.js_n_ = this.js_n_ + 1;
+            }
             long body = this.build_stmt(a.a);
+            if (this.js_n_ > 0) { this.js_n_ = this.js_n_ - 1; }
             long cond = this.build_expr(a.b);
             this.check_condition(cond);
             HStmt s = this.new_stmt(5, a.line, a.col);
@@ -5084,7 +5182,14 @@ export struct HirBuilder {
             }
             long incr = -1;
             if (a.c >= 0) { incr = this.build_expr(a.c); }
+            if (this.js_n_ < this.js_cap_) {
+                unsafe {
+                    this.jscope_[this.js_n_] = this.dsc_n_;
+                }
+                this.js_n_ = this.js_n_ + 1;
+            }
             long body = this.build_stmt(a.sstart);
+            if (this.js_n_ > 0) { this.js_n_ = this.js_n_ - 1; }
             this.leave_scope();
             HStmt s = this.new_stmt(6, a.line, a.col);
             s.a = init;

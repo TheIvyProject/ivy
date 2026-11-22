@@ -1,0 +1,31 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Box {
+    int32 v;
+    Box(int32 x) : v(x) {}
+    ~Box() {
+        printf("box %d\n", this.v);
+    }
+};
+
+// H18: the first return in the function scope used to clear the scope's dtor
+// list, so the second return lost both the dtor and the __ret temporary.
+int32 pick(int32 a) {
+    Box b(7);
+    switch (a) {
+        case 1:
+            return b.v + 1;
+        default:
+            return b.v + 2;
+    }
+}
+
+int32 main() {
+    int32 a = pick(1);
+    int32 b = pick(2);
+    return a + b;
+}

@@ -544,3 +544,11 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 31 0
+ivy: '<OUT>\app.exe' generated

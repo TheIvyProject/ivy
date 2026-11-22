@@ -1,0 +1,34 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Res {
+    int32 v;
+    Res(int32 v_) : v(v_) {}
+    ~Res() {
+        printf("dtor %d\n", this.v);
+    }
+};
+
+// H17: a return in a nested block must destroy the function-scope local once,
+// not twice.
+int32 pick(int32 a) {
+    Res r(1);
+    {
+        int32 inner = a;
+        {
+            if (inner == 0) {
+                return 10;
+            }
+            return inner + 1;
+        }
+    }
+}
+
+int32 main() {
+    int32 a = pick(4);
+    int32 b = pick(0);
+    return a + b;
+}

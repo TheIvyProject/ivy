@@ -15634,3 +15634,119 @@ function
         return
           int 7    return
       int 15
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 696 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int32_t pick(int32_t a)
+  block
+    decl Res r =
+      call
+        ident Res        int 1    block
+      decl int32_t inner =
+        ident a      block
+        if
+          binary ==
+            ident inner            int 0          then
+          block
+            return
+              int 10        return
+          binary +
+            ident inner            int 1
+function 
+  return int32_t main()
+  block
+    decl int32_t a =
+      call
+        ident pick        int 4    decl int32_t b =
+      call
+        ident pick        int 0    return
+      binary +
+        ident a        ident b
+@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 669 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int32_t pick(int32_t a)
+  block
+    decl Box b =
+      call
+        ident Box        int 7    switch
+      ident a      case
+        int 1        return
+          binary +
+            member . v
+              ident b            int 1      default
+        return
+          binary +
+            member . v
+              ident b            int 2
+function 
+  return int32_t main()
+  block
+    decl int32_t a =
+      call
+        ident pick        int 1    decl int32_t b =
+      call
+        ident pick        int 2    return
+      binary +
+        ident a        ident b
+@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 862 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int32_t run()
+  block
+    decl int32_t n =
+      int 0    for
+      init
+      decl int32_t i =
+        int 0      cond
+      binary <
+        ident i        int 5      incr
+      prefix ++
+        ident i      body
+      block
+        decl G g =
+          call
+            ident G            ident i        if
+          binary ==
+            ident i            int 2          then
+          block
+            if
+              binary >=
+                ident n                int 0              then
+              block
+                break
+        expr
+          assign =
+            ident n            binary +
+              ident n              int 1    return
+      ident n
+function 
+  return int32_t main()
+  block
+    return
+      call
+        ident run
+@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 287 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int32_t main()
+  block
+    decl Pair p =
+      init-list (2)
+        int 7        int 8    return
+      binary +
+        member . a
+          ident p        member . b
+          ident p

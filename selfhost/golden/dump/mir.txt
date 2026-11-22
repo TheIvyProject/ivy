@@ -2319,7 +2319,7 @@ function main
         member .b : int32_t
           ident p
 
-@@ selfhost/corpus/codegen/195_raii_break.ivy 1152 0
+@@ selfhost/corpus/codegen/195_raii_break.ivy 1212 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block 0
@@ -2382,6 +2382,9 @@ function test
         ident loop
     jump
   block 6
+    eval
+      call : void [lt: unknown]
+        ident loop
     jump
     jump
 
@@ -2391,7 +2394,7 @@ function main
     ret
       call : int32_t [lt: unknown]
 
-@@ selfhost/corpus/codegen/196_raii_continue.ivy 1152 0
+@@ selfhost/corpus/codegen/196_raii_continue.ivy 1212 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block 0
@@ -2454,6 +2457,9 @@ function test
         ident loop
     jump
   block 6
+    eval
+      call : void [lt: unknown]
+        ident loop
     jump
     jump
 
@@ -18963,4 +18969,264 @@ function main
   block 14
     ret
       int 7
+
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1207 0
+function Res::Res
+  return void(Res& this, int32_t v_)
+  block 0
+    store
+      member .v : int32_t
+        this
+      ident v_
+
+function Res::~Res
+  return void(Res& this)
+  block 0
+    eval
+      call : int [lt: unknown]
+        string "dtor %d\n" [lt: static]
+        member .v : int32_t
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function pick
+  return int32_t(int32_t a)
+  block 0
+    alloca Res r
+    eval
+      call : void [lt: unknown]
+        ident r
+        int 1
+    alloca int32_t inner
+      ident a
+    condbranch
+      binary '==' : bool
+        ident inner
+        int 0
+  block 1
+    alloca int32_t __ret
+      binary '+' : int32_t
+        ident inner
+        int 1
+    eval
+      call : void [lt: unknown]
+        ident r
+    ret
+      ident __ret
+  block 2
+    alloca int __ret
+      int 10
+    eval
+      call : void [lt: unknown]
+        ident r
+    ret
+      ident __ret
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t a
+      call : int32_t [lt: unknown]
+        int 4
+    alloca int32_t b
+      call : int32_t [lt: unknown]
+        int 0
+    ret
+      binary '+' : int32_t
+        ident a [lt: unknown]
+        ident b [lt: unknown]
+
+@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 1264 0
+function Box::Box
+  return void(Box& this, int32_t x)
+  block 0
+    store
+      member .v : int32_t
+        this
+      ident x
+
+function Box::~Box
+  return void(Box& this)
+  block 0
+    eval
+      call : int [lt: unknown]
+        string "box %d\n" [lt: static]
+        member .v : int32_t
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function pick
+  return int32_t(int32_t a)
+  block 0
+    alloca Box b
+    eval
+      call : void [lt: unknown]
+        ident b
+        int 7
+  block 1
+    eval
+      call : void [lt: unknown]
+        ident b
+  block 2
+    alloca int32_t __ret
+      binary '+' : int32_t
+        member .v : int32_t
+          ident b
+        int 1
+    eval
+      call : void [lt: unknown]
+        ident b
+    ret
+      ident __ret
+  block 3
+    alloca int32_t __ret0
+      binary '+' : int32_t
+        member .v : int32_t
+          ident b
+        int 2
+    eval
+      call : void [lt: unknown]
+        ident b
+    ret
+      ident __ret0
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t a
+      call : int32_t [lt: unknown]
+        int 1
+    alloca int32_t b
+      call : int32_t [lt: unknown]
+        int 2
+    ret
+      binary '+' : int32_t
+        ident a [lt: unknown]
+        ident b [lt: unknown]
+
+@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 1252 0
+function G::G
+  return void(G& this, int32_t v)
+  block 0
+    store
+      member .id : int32_t
+        this
+      ident v
+
+function G::~G
+  return void(G& this)
+  block 0
+    eval
+      call : int [lt: unknown]
+        string "bye %d\n" [lt: static]
+        member .id : int32_t
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function run
+  return int32_t()
+  block 0
+    alloca int32_t n
+      int 0
+    alloca int32_t i
+      int 0
+    jump
+  block 1
+    condbranch
+      binary '<' : bool
+        ident i
+        int 5
+  block 2
+    alloca G g
+    eval
+      call : void [lt: unknown]
+        ident g
+        ident i
+    condbranch
+      binary '==' : bool
+        ident i
+        int 2
+  block 3
+    eval
+      prefix '++' : int32_t
+        ident i
+    jump
+  block 4
+    ret
+      ident n
+  block 5
+    store
+      ident n
+      binary '+' : int32_t
+        ident n
+        int 1
+    eval
+      call : void [lt: unknown]
+        ident g
+    jump
+  block 6
+    condbranch
+      binary '>=' : bool
+        ident n
+        int 0
+  block 7
+    jump
+  block 8
+    eval
+      call : void [lt: unknown]
+        ident g
+    jump
+    jump
+
+function main
+  return int32_t()
+  block 0
+    ret
+      call : int32_t [lt: unknown]
+
+@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 695 0
+function Pair::Pair
+  return void(Pair& this)
+  block 0
+    store
+      member .a : int32_t
+        this
+      int 1
+    store
+      member .b : int32_t
+        this
+      int 2
+    eval
+      call : int [lt: unknown]
+        string "ctor\n" [lt: static]
+
+function Pair::~Pair
+  return void(Pair& this)
+  block 0
+    eval
+      call : int [lt: unknown]
+        string "dtor\n" [lt: static]
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function main
+  return int32_t()
+  block 0
+    alloca Pair p
+      init-list : Pair (2)
+        int 7
+        int 8
+    ret
+      binary '+' : int32_t
+        member .a : int32_t
+          ident p
+        member .b : int32_t
+          ident p
 

@@ -1,0 +1,32 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct G {
+    int32 id;
+    G(int32 v) : id(v) {}
+    ~G() {
+        printf("bye %d\n", this.id);
+    }
+};
+
+// C4: `break` inside a nested if must still destroy the loop-body local.
+int32 run() {
+    int32 n = 0;
+    for (int32 i = 0; i < 5; ++i) {
+        G g(i);
+        if (i == 2) {
+            if (n >= 0) {
+                break;
+            }
+        }
+        n = n + 1;
+    }
+    return n;
+}
+
+int32 main() {
+    return run();
+}

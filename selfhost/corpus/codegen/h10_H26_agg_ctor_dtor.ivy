@@ -1,0 +1,23 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Pair {
+    int32 a;
+    int32 b;
+    Pair() : a(1), b(2) {
+        printf("ctor\n");
+    }
+    ~Pair() {
+        printf("dtor\n");
+    }
+};
+
+// H26: the aggregate initializer bypasses the constructor, so no destructor
+// may run for the never-constructed object.
+int32 main() {
+    Pair p = {7, 8};
+    return p.a + p.b;
+}

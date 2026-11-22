@@ -2434,7 +2434,7 @@ function main
         member . b
           ident p
 
-@@ selfhost/corpus/codegen/195_raii_break.ivy 1216 0
+@@ selfhost/corpus/codegen/195_raii_break.ivy 1330 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block
@@ -2488,7 +2488,11 @@ function test
             ident i
             int 2
           block
-            break
+            block
+              expr
+                call 'Logger::~Logger' : void
+                  ident loop
+              break
         expr
           call 'Logger::~Logger' : void
             ident loop
@@ -2501,7 +2505,7 @@ function main
     return
       call 'test' : int32_t
 
-@@ selfhost/corpus/codegen/196_raii_continue.ivy 1219 0
+@@ selfhost/corpus/codegen/196_raii_continue.ivy 1333 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block
@@ -2549,7 +2553,11 @@ function test
             ident i
             int 1
           block
-            continue
+            block
+              expr
+                call 'Logger::~Logger' : void
+                  ident loop
+              continue
         expr
           assign '=' : int32_t
             ident sum
@@ -19464,4 +19472,274 @@ function main
           int 7
     return
       int 15
+
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1380 0
+function Res::Res
+  return void(Res& this, int32_t v_)
+  block
+    expr
+      assign '=' : int32_t
+        member . v
+          this
+        ident v_
+
+function Res::~Res
+  return void(Res& this)
+  block
+    expr
+      call 'printf' : int
+        string "dtor %d\n"
+        member . v
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function pick
+  return int32_t(int32_t a)
+  block
+    block
+      decl Res r
+      expr
+        call 'Res::Res' : void
+          ident r
+          int 1
+    block
+      decl int32_t inner =
+        ident a
+      block
+        if
+          binary '==' : bool
+            ident inner
+            int 0
+          block
+            block
+              decl int __ret =
+                int 10
+              expr
+                call 'Res::~Res' : void
+                  ident r
+              return
+                ident __ret
+        block
+          decl int32_t __ret =
+            binary '+' : int32_t
+              ident inner
+              int 1
+          expr
+            call 'Res::~Res' : void
+              ident r
+          return
+            ident __ret
+
+function main
+  return int32_t()
+  block
+    decl int32_t a =
+      call 'pick' : int32_t
+        int 4
+    decl int32_t b =
+      call 'pick' : int32_t
+        int 0
+    return
+      binary '+' : int32_t
+        ident a
+        ident b
+
+@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 1413 0
+function Box::Box
+  return void(Box& this, int32_t x)
+  block
+    expr
+      assign '=' : int32_t
+        member . v
+          this
+        ident x
+
+function Box::~Box
+  return void(Box& this)
+  block
+    expr
+      call 'printf' : int
+        string "box %d\n"
+        member . v
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function pick
+  return int32_t(int32_t a)
+  block
+    block
+      decl Box b
+      expr
+        call 'Box::Box' : void
+          ident b
+          int 7
+    switch
+      ident a
+      case
+        int 1
+        block
+          decl int32_t __ret =
+            binary '+' : int32_t
+              member . v
+                ident b
+              int 1
+          expr
+            call 'Box::~Box' : void
+              ident b
+          return
+            ident __ret
+      default
+        block
+          decl int32_t __ret0 =
+            binary '+' : int32_t
+              member . v
+                ident b
+              int 2
+          expr
+            call 'Box::~Box' : void
+              ident b
+          return
+            ident __ret0
+    expr
+      call 'Box::~Box' : void
+        ident b
+
+function main
+  return int32_t()
+  block
+    decl int32_t a =
+      call 'pick' : int32_t
+        int 1
+    decl int32_t b =
+      call 'pick' : int32_t
+        int 2
+    return
+      binary '+' : int32_t
+        ident a
+        ident b
+
+@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 1374 0
+function G::G
+  return void(G& this, int32_t v)
+  block
+    expr
+      assign '=' : int32_t
+        member . id
+          this
+        ident v
+
+function G::~G
+  return void(G& this)
+  block
+    expr
+      call 'printf' : int
+        string "bye %d\n"
+        member . id
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function run
+  return int32_t()
+  block
+    decl int32_t n =
+      int 0
+    for
+      decl int32_t i =
+        int 0
+      binary '<' : bool
+        ident i
+        int 5
+      prefix '++' : int32_t
+        ident i
+      block
+        block
+          decl G g
+          expr
+            call 'G::G' : void
+              ident g
+              ident i
+        if
+          binary '==' : bool
+            ident i
+            int 2
+          block
+            if
+              binary '>=' : bool
+                ident n
+                int 0
+              block
+                block
+                  expr
+                    call 'G::~G' : void
+                      ident g
+                  break
+        expr
+          assign '=' : int32_t
+            ident n
+            binary '+' : int32_t
+              ident n
+              int 1
+        expr
+          call 'G::~G' : void
+            ident g
+    return
+      ident n
+
+function main
+  return int32_t()
+  block
+    return
+      call 'run' : int32_t
+
+@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 705 0
+function Pair::Pair
+  return void(Pair& this)
+  block
+    expr
+      assign '=' : int32_t
+        member . a
+          this
+        int 1
+    expr
+      assign '=' : int32_t
+        member . b
+          this
+        int 2
+    expr
+      call 'printf' : int
+        string "ctor\n"
+
+function Pair::~Pair
+  return void(Pair& this)
+  block
+    expr
+      call 'printf' : int
+        string "dtor\n"
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function main
+  return int32_t()
+  block
+    decl Pair p =
+      init-list : Pair (2)
+        int 7
+        int 8
+    return
+      binary '+' : int32_t
+        member . a
+          ident p
+        member . b
+          ident p
 

@@ -914,6 +914,21 @@ Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle
   `build.ps1 -SelfLink -Golden` → 12365 checks / 0 failures, `check_repro.ps1`
   xanh. Chi tiết ở `selfhost/app/H10_NOTES.md` H10.1.
 
+**H10.2 — RAII/dtor: duplicate, return, jump, aggregate init — ✅ (2026-11-22)**
+
+- **H17/H18**: bỏ việc clear danh sách dtor trong `build_return` (giữ trạng
+  thái lexical); mỗi `return` tự emit dtor + tạo `__ret`, còn `build_compound`
+  bỏ emit cuối block khi câu lệnh cuối là terminator → không còn dtor trùng của
+  scope ngoài, và `return` thứ hai cùng scope vẫn có dtor/temp.
+- **C4**: thêm stack `jscope_` (loop body) và `nscope_` (switch);
+  `break`/`continue`/`nextcase` destroy mọi scope tới đích của jump, kể cả
+  `break` nằm trong `if` lồng.
+- **H26**: sửa nhận dạng init-list (`kind 19`); aggregate init đã bypass ctor
+  thì không record dtor (`h10_H26_agg_ctor_dtor`).
+- Golden: `195`/`196` đổi, 4 fixture mới, provenance `expected:H10.2`;
+  `build.ps1 -SelfLink -Golden` → 12421 checks / 0 failures, `check_repro.ps1`
+  xanh. Chi tiết ở `selfhost/app/H10_NOTES.md` H10.2.
+
 **Bảng kế hoạch**
 
 | Mục | ID | Nội dung sửa | Port chính | Fixture / golden ảnh hưởng |

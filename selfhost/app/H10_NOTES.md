@@ -105,12 +105,58 @@
   port làm đúng thay vì báo lỗi, nên `ORACLE_BUGS.md` §3 cập nhật lại mô tả
   port. Không đổi hành vi của bất kỳ fixture cũ nào.
 
+### H10.2 - RAII/Dtor: duplicate, return, jump, aggregate init
+
+- **Bug**:
+  - **H17**: `build_return` emit dtor cho mọi scope tới `dbase_` nhưng chỉ clear
+    scope trong cùng; scope ngoài bị emit lần nữa ở cuối block → HIR có dtor
+    trùng.
+  - **H18**: lần `return` đầu clear danh sách dtor của scope, nên `return` thứ
+    hai **cùng scope** không có dtor và không tạo temp `__ret`.
+  - **C4**: `break`/`continue`/`nextcase` trong `if` lồng chỉ chạy dtor của
+    scope trong cùng, bỏ qua local của loop body.
+  - **H26**: aggregate init `T x = {...}` bypass ctor nhưng vẫn record dtor;
+    port còn so sai kind (`17` = alignof thay vì `19` = init-list).
+- **Sửa** (`hir/hir_builder.ivy`):
+  - `build_return`: danh sách dtor là trạng thái **lexical**, không clear sau
+    khi emit. Mỗi `return` tự emit dtor và tự tạo `__ret`; `build_compound`
+    không emit dtor cuối block khi câu lệnh cuối cùng là terminator
+    (`is_terminator`), nên không còn bản trùng của scope ngoài.
+  - `wrap_scope_dtors` + `jump_target`: thêm hai stack `jscope_` (loop body) và
+    `nscope_` (switch). `break` destroy tới construct sâu hơn trong hai;
+    `continue` tới loop trong cùng; `nextcase` tới switch trong cùng (đi xuyên
+    loop bên trong). Không truncate danh sách dtor, nên nhánh fall-through của
+    cùng block vẫn còn dtor.
+  - `build_decl`: nhận đúng `init-list` (`kind == 19`); khi aggregate đã bypass
+    ctor, đặt `rec_dtor = 0` — không destroy object chưa được construct.
+- **Fixture**:
+  - `h10_H17_nested_return.ivy` - `return` trong block lồng; HIR chỉ còn một
+    `Res::~Res` trên mỗi đường return; chạy in `dtor 1` hai lần, exit `15`.
+  - `h10_H18_two_returns.ivy` - hai `return` trong cùng scope (switch); cả hai
+    có `__ret`/`__ret0` + dtor; chạy in `box 7` hai lần, exit `17`.
+  - `h10_C4_break_nested.ivy` - `break` trong `if` lồng; in `bye 0..2` (3 lần),
+    exit `2`.
+  - `h10_H26_agg_ctor_dtor.ivy` - `Pair p = {7, 8}` với ctor+dtor; không in
+    `ctor`/`dtor`, exit `15`.
+- **Golden**: `195_raii_break`, `196_raii_continue` đổi (5 record mỗi fixture:
+  dtor của loop body xuất hiện trước `break`/`continue`); `196` có thêm dòng
+  `dtor 1` khi chạy. Thêm 4 fixture × 10 mode; `corpus.txt` +4; provenance
+  `expected:H10.2`. Fixture `194_ctor_agg_bypass` không đổi.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, self-link SHA
+  `E506FD7D94F9A154596B3408ABB19AB6AF1E5063A954BA5054C3CA7F39188C36`
+  (27 140 096 B), golden **12421 checks / 0 failures** (1058 fixture).
+  `check_repro.ps1` → PASS.
+- **Ghi chú**: switch mà mọi case đều `return` vẫn có một dtor cuối function
+  body (đường không bao giờ chạy); đây là dead code, không phải emit trùng
+  trong cùng một đường thực thi. Test trực tiếp stage1: cả 4 fixture link 0 và
+  cho output/exit như trên.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
 | H10.0 | - | `selfhost/update_golden.ps1` (golden hậu-oracle, provenance) | ✅ |
 | H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ✅ |
-| H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ☐ |
+| H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ✅ |
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ☐ |
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ☐ |
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ☐ |
