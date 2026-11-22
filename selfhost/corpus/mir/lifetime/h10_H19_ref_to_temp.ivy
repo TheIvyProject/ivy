@@ -1,0 +1,25 @@
+// H10.3 (H19): binding a reference to a value expression produces a
+// reference to a temporary.  The oracle accepts both
+// (stage/s9_ref_to_temp.ivy, LIFETIME_NOTES.md 8.7); H10.3 rejects them.
+int32& get(int32& r) {
+    return r;
+}
+
+void literal_temp() {
+    int32& r = 1;
+}
+
+void arithmetic_temp() {
+    int32 a = 1;
+    int32 b = 2;
+    int32& r = a + b;
+}
+
+// The place forms stay accepted: a variable, a call that returns a
+// reference, and a dereference.
+void place_forms() {
+    int32 x = 5;
+    int32& a = x;
+    int32& b = get(x);
+    a = b + 1;
+}

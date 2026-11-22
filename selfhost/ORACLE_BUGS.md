@@ -82,7 +82,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **H16** | A | `return <local>` chỉ so **base type** (không so đủ type) → widening `int32→int64` sinh `__ret`; NRVO cũng so base nên local **không** được đánh dấu transferred | `hir_builder.cpp:1757-1765` | `hir_builder.ivy` `build_return` ≈L4791 | `LIFETIME_NOTES.md` §8.3 |
 | **H17** | A | Destructor của **outer scope** bị emit **hai lần**: `emitDtorCalls()` đi hết các scope tới `dtorBaseline_`, nhưng chỉ `dtorStacks_.back()` bị clear | `hir_builder.cpp:1836-1839` | `hir_builder.ivy`: **H10.2** bỏ clear, `build_compound` không emit dtor cuối block khi câu lệnh cuối là terminator | `LIFETIME_NOTES.md` §8.5, `H10_NOTES.md` H10.2, `h10_H17_nested_return` |
 | **H18** | A | `return` **đầu tiên** trong một scope clear danh sách dtor của scope đó → `return` **thứ hai** cùng scope không có dtor **và** không có temp `__ret` | `hir_builder.cpp` (`buildReturn`, `dtorStacks_.back().clear()`) | `hir_builder.ivy` `build_return`: **H10.2** giữ danh sách dtor (lexical), mỗi `return` tự emit + tạo `__ret` | `LIFETIME_NOTES.md` §8.6, `H10_NOTES.md` H10.2, `h10_H18_two_returns` |
-| **H19** | A | Borrow-checker có lỗ hổng: ghi qua biến đang borrow, dùng sau destroy, bind ref vào temp **không** bị báo; `checkStore` gần như không tới được ngoài `unsafe`; `unsafe` tắt **mọi** check | `hir_builder.cpp` (borrow/lifetime) | `hir_builder.ivy` | `LIFETIME_NOTES.md` §8.7, `stage/s8,s9,s14,s17` |
+| **H19** | A | Borrow-checker có lỗ hổng: ghi qua biến đang borrow, dùng sau destroy, bind ref vào temp **không** bị báo; `checkStore` gần như không tới được ngoài `unsafe`; `unsafe` tắt **mọi** check | `hir_builder.cpp` (borrow/lifetime) | `mir/mir_builder.ivy`: **H10.3** thêm `check_assign_borrow` (gán/`++`/`--`/compound khi đang borrow) và `check_ref_binding` (ref buộc vào temp); gọi từ `ex_assign`, `ex_unary`, `st_decl`; `checkStore` giữ nguyên bypass `unsafe` | `LIFETIME_NOTES.md` §8.7, `H10_NOTES.md` H10.3, `h10_H19_assign_while_borrowed`, `h10_H19_write_forms`, `h10_H19_ref_to_temp`, `h10_H19_use_after_destroy`, `h10_H19_unsafe_escape` |
 | **H20** | A | `--ast` dump **mất thông tin**: in `fn.attrs`/`param.attrs` nhưng **không** in `declaredLifetimes`, `returnLifetime`, `param.lifetime` → native `$a` vô hình | `src/app/main.cpp:331-356` (`dumpAst`) | `selfhost/parsing/astdump` | `LIFETIME_NOTES.md` §8.8 |
 | **H21** | A | Legacy `[[ivy::lt_ret(x)]]` **thắng** native `$a`, dù comment trong code nói ngược lại. Tái hiện **code**, không tái hiện comment | `hir_builder.cpp:244` | `hir_builder.ivy` | `LIFETIME_NOTES.md` §8.9, §4.2 |
 | **H22** | A | Em dash (U+2014) trong output là **mojibake**: viết em dash thật vào `.ivy`, toolchain tái hiện đúng byte của oracle | `src/**` (encode output) | `selfhost/parsing/*` | `LIFETIME_NOTES.md` §8.10, §3.4 |
@@ -384,8 +384,8 @@ Quy tắc:
 | `selfhost/parsing/parser.ivy` | P1–P5, P7, B-P5 |
 | `selfhost/parsing/preprocessor.ivy` | P5 |
 | `selfhost/parsing/module_io.ivy` | M1, M2 |
-| `selfhost/hir/hir_builder.ivy` | T1–T13, H15–H19, H21, H23, H25, H26, C4 |
-| `selfhost/mir/mir_builder.ivy` | H14 |
+| `selfhost/hir/hir_builder.ivy` | T1–T13, H15–H18, H21, H23, H25, H26, C4 |
+| `selfhost/mir/mir_builder.ivy` | H14, H19 |
 | `selfhost/mir/interpreter.ivy` | I1 |
 | `selfhost/codegen/emitter.ivy` | C1–C20, H23, H24, H29 |
 | `selfhost/codegen/objdrive.ivy` | C7 |

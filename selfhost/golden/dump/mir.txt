@@ -15000,15 +15000,8 @@ function f
     alloca void* v [unsafe]
       ident p [lt: local]
 
-@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 107 0
-function f
-  return void()
-  block 0
-    alloca int32_t& r
-      int 1
-    alloca int32_t a
-      ident r
-
+@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 117 1
+selfhost/corpus/hir/type/66_ref_rvalue.ivy:6:5: error: binding a reference to a temporary value (dangling reference)
 @@ selfhost/corpus/hir/type/67_default_args.ivy 336 0
 function add
   return int32_t(int32_t a, int32_t b)
@@ -19230,3 +19223,30 @@ function main
         member .b : int32_t
           ident p
 
+@@ selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy 249 1
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:7:5: error: cannot assign to 'x' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:13:5: error: cannot assign to 'y' — it is immutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy 255 1
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:9:5: error: binding a reference to a temporary value (dangling reference)
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:15:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 455 1
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:6:6: error: cannot assign to 'a' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:12:6: error: cannot assign to 'b' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:18:5: error: cannot assign to 'c' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:23:5: error: cannot assign to 'p' — it is mutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 218 0
+function unsafe_escape
+  return void()
+  block 0
+    alloca int32_t x
+      int 1
+    alloca int32_t& a [unsafe]
+      ident x
+    alloca int32_t& b [unsafe]
+      ident x
+    store [unsafe]
+      ident x
+      int 3
+
+@@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)

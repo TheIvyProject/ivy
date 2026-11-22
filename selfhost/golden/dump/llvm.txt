@@ -20315,21 +20315,8 @@ store ptr %tmp.0, ptr %v.2
 ret void
 }
 
-@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 350 1
-; LLVM IR emitted by ivy
-define void @"?f@@YXX@Z"() {
-%r.0 = alloca ptr
-%a.1 = alloca i32
-br label %bb0
-bb0:
-store ptr null, ptr %r.0
-%tmp.0 = load ptr, ptr %r.0
-%tmp.1 = load i32, ptr %tmp.0
-store i32 %tmp.1, ptr %a.1
-ret void
-}
-
-selfhost/corpus/hir/type/66_ref_rvalue.ivy:3:16: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
+@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 117 1
+selfhost/corpus/hir/type/66_ref_rvalue.ivy:6:5: error: binding a reference to a temporary value (dangling reference)
 @@ selfhost/corpus/hir/type/67_default_args.ivy 535 0
 ; LLVM IR emitted by ivy
 define i32 @"?add@@YHHH@Z"(i32 %arg0, i32 %arg1) {
@@ -25527,3 +25514,31 @@ define i32 @main() {
 
 @.str.0 = private unnamed_addr constant [6 x i8] c"ctor\0A\00"
 @.str.1 = private unnamed_addr constant [6 x i8] c"dtor\0A\00"
+@@ selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy 249 1
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:7:5: error: cannot assign to 'x' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:13:5: error: cannot assign to 'y' — it is immutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy 255 1
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:9:5: error: binding a reference to a temporary value (dangling reference)
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:15:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 455 1
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:6:6: error: cannot assign to 'a' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:12:6: error: cannot assign to 'b' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:18:5: error: cannot assign to 'c' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:23:5: error: cannot assign to 'p' — it is mutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 245 0
+; LLVM IR emitted by ivy
+define void @"?unsafe_escape@@YXX@Z"() {
+%x.0 = alloca i32
+%a.1 = alloca ptr
+%b.2 = alloca ptr
+br label %bb0
+bb0:
+store i32 1, ptr %x.0
+store ptr %x.0, ptr %a.1
+store ptr %x.0, ptr %b.2
+store i32 3, ptr %x.0
+ret void
+}
+
+@@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)

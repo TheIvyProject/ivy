@@ -11940,13 +11940,14 @@ function
           prefix &
             ident x        decl void* v =
           ident p
-@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 100 0
+@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 217 1
 function 
   return void f()
   block
     decl int32_t r =
       int 1    decl auto a =
       ident r
+selfhost/corpus/hir/type/66_ref_rvalue.ivy:6:5: error: binding a reference to a temporary value (dangling reference)
 @@ selfhost/corpus/hir/type/67_default_args.ivy 286 0
 function 
   return int32_t add(int32_t a, int32_t b)
@@ -15750,3 +15751,112 @@ function
         member . a
           ident p        member . b
           ident p
+@@ selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy 586 1
+function 
+  return void mut_borrow()
+  block
+    decl int32_t x =
+      int 1    decl int32_t r =
+      ident x    expr
+      assign =
+        ident x        int 2
+function 
+  return void shared_borrow()
+  block
+    decl int32_t y =
+      int 1    decl const int32_t r =
+      ident y    expr
+      assign =
+        ident y        int 2
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:7:5: error: cannot assign to 'x' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:13:5: error: cannot assign to 'y' — it is immutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy 856 1
+function 
+  return int32_t get(int32_t r)
+  block
+    return
+      ident r
+function 
+  return void literal_temp()
+  block
+    decl int32_t r =
+      int 1
+function 
+  return void arithmetic_temp()
+  block
+    decl int32_t a =
+      int 1    decl int32_t b =
+      int 2    decl int32_t r =
+      binary +
+        ident a        ident b
+function 
+  return void place_forms()
+  block
+    decl int32_t x =
+      int 5    decl int32_t a =
+      ident x    decl int32_t b =
+      call
+        ident get        ident x    expr
+      assign =
+        ident a        binary +
+          ident b          int 1
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:9:5: error: binding a reference to a temporary value (dangling reference)
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:15:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 1100 1
+function 
+  return void inc_while_borrowed()
+  block
+    decl int32_t a =
+      int 1    decl int32_t r =
+      ident a    expr
+      postfix ++
+        ident a
+function 
+  return void dec_while_borrowed()
+  block
+    decl int32_t b =
+      int 1    decl int32_t r =
+      ident b    expr
+      postfix --
+        ident b
+function 
+  return void compound_while_borrowed()
+  block
+    decl int32_t c =
+      int 1    decl int32_t r =
+      ident c    expr
+      assign +=
+        ident c        int 2
+function 
+  return void param_borrowed(int32_t p)
+  block
+    decl int32_t r =
+      ident p    expr
+      assign =
+        ident p        int 3
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:6:6: error: cannot assign to 'a' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:12:6: error: cannot assign to 'b' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:18:5: error: cannot assign to 'c' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:23:5: error: cannot assign to 'p' — it is mutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 256 0
+function 
+  return void unsafe_escape()
+  block
+    decl int32_t x =
+      int 1    unsafe
+      block
+        decl int32_t a =
+          ident x        decl int32_t b =
+          ident x        expr
+          assign =
+            ident x            int 3
+@@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 291 1
+function 
+  return int32_t use_after_destroy()
+  block
+    decl Res r =
+      call
+        ident Res        int 1    return
+      member . v
+        ident r
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)

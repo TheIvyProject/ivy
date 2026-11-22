@@ -1,0 +1,14 @@
+// H10.3 (H19): `unsafe` is the deliberate escape hatch and is unchanged.
+// The self-host runtime binds local out-parameters inside `unsafe`
+// (mir/interpreter.ivy: `lenptr.p = &dec_len;`), so aliasing inside it cannot
+// be rejected.  This fixture pins the accepted exception: two mutable
+// references and a write while borrowed, all inside `unsafe`, are accepted.
+// See H10_NOTES.md H10.3 for the rationale.
+void unsafe_escape() {
+    int32 x = 1;
+    unsafe {
+        int32& a = x;
+        int32& b = x;
+        x = 3;
+    }
+}

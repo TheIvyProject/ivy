@@ -1,0 +1,24 @@
+// H10.3 (H19): writing through `++`/`--` and compound assignment while a
+// reference borrows the variable.  All four writes are MIR-stage errors.
+void inc_while_borrowed() {
+    int32 a = 1;
+    int32& r = a;
+    a++;
+}
+
+void dec_while_borrowed() {
+    int32 b = 1;
+    int32& r = b;
+    b--;
+}
+
+void compound_while_borrowed() {
+    int32 c = 1;
+    int32& r = c;
+    c += 2;
+}
+
+void param_borrowed(int32& p) {
+    int32& r = p;
+    p = 3;
+}

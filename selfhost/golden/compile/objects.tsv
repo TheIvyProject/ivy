@@ -1056,3 +1056,8 @@ selfhost/corpus/codegen/h10_H17_nested_return.ivy	B30C102E4820EEE09F2EDA266B9EEC
 selfhost/corpus/codegen/h10_H18_two_returns.ivy	01C5E36CA479089D363DF75F8E8AE33E63F7CD7C6C9E89E568FB5B9BB888AD18	1265	-	0
 selfhost/corpus/codegen/h10_C4_break_nested.ivy	36ACA0188A5C6BC015412D69BA98A43EC97565205F3D7E3AE2A72CD89A9EE09F	1218	-	0
 selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy	3307573A57BD71C80376A9F1F48FA0173ED6C31894C52E6D4CD6031DC28B0E31	1047	-	0
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy	-	0	-	0
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy	-	0	-	0
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy	-	0	-	0
+selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy	FA7D2339BC18A9930A99C8B051D8C2E3B0E64E9AFB0AA4A1682A9DFFDC7D97A9	580	-	0
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy	-	0	-	0

@@ -151,13 +151,65 @@
   trong cùng một đường thực thi. Test trực tiếp stage1: cả 4 fixture link 0 và
   cho output/exit như trên.
 
+### H10.3 - Borrow-checker lỏng (soundness)
+
+- **Bug**: **H19** — oracle (và port bug-compat) không chẩn đoán ba lỗ hổng
+  an toàn của borrow-checker: (a) ghi vào biến đang có borrow sống
+  (`stage/s14_assign_through_borrow.ivy` → exit 0); (b) buộc reference vào
+  temporary rồi dùng lại, tức use-after-destroy (`stage/s9_ref_to_temp.ivy`,
+  `stage/s8_use_after_destroy.ivy` → exit 0); (c) `checkStore` gần như không
+  tới được vì mọi giá trị lifetime `Local` đều cần `unsafe`, mà `unsafe` tắt
+  mọi check. Chi tiết: `LIFETIME_NOTES.md` §8.7, `H52_NOTES.md` §9.1.
+- **Sửa** (`mir/mir_builder.ivy`):
+  - `check_assign_borrow(name, line, col)`: tra borrow state từ trong ra ngoài
+    (giống `check_borrow`), báo
+    `cannot assign to '<n>' — it is mutably borrowed` hoặc
+    `... it is immutably borrowed`.
+  - Gọi từ `ex_assign` (gán `=`, `+=`, … trước khi mở rộng compound), từ
+    `ex_unary` cho `++`/`--`. Chỉ áp dụng cho LHS là `IdentRef`; ghi qua
+    member/index để H10.4 (slot theo scope) xử lý.
+  - `check_ref_binding(vi, line, col)`: gọi từ `st_decl` cho **mọi** khai báo
+    reference. Initializer phải là place — `IdentRef`, `This`, `Index`,
+    `Member`, deref `*`, hoặc biểu thức đã có type reference/pointer. Nếu không,
+    báo `binding a reference to a temporary value (dangling reference)` tại
+    điểm khai báo; đây là chỗ chặn cả s9 (bind temp) lẫn s8 (dùng sau đó).
+  - `checkStore` giữ nguyên bypass `unsafe` **có chủ ý**: runtime self-host
+    buộc `&<local>` vào out-parameter trong `unsafe`
+    (`mir/interpreter.ivy`: `lenptr.p = &dec_len;`), nên siết nó sẽ từ chối
+    chính mã nguồn compiler. Ngoại lệ này được khoá bằng fixture.
+- **Fixture** (`selfhost/corpus/mir/lifetime/`):
+  - `h10_H19_assign_while_borrowed.ivy` — borrow mutable và shared; 2 lỗi
+    (`x` mutably, `y` immutably borrowed), exit 1.
+  - `h10_H19_write_forms.ivy` — `a++`, `b--`, `c += 2`, tham số `p` bị borrow
+    rồi gán; 4 lỗi, exit 1.
+  - `h10_H19_ref_to_temp.ivy` — `int32& r = 1` và `int32& r = a + b`; 2 lỗi;
+    các dạng place (`T& a = x`, `T& b = get(x)`, deref) vẫn qua.
+  - `h10_H19_use_after_destroy.ivy` — `Res& r = Res(1)` với destructor; lỗi ở
+    binding, exit 1 (use-after-destroy bị chặn tại nguồn).
+  - `h10_H19_unsafe_escape.ivy` — hai borrow mutable + ghi trong `unsafe` vẫn
+    được chấp nhận (exit 0), khoá ngoại lệ có chủ ý.
+- **Golden**: 5 fixture mới × 10 mode; corpus.txt +5; provenance
+  `expected:H10.3`. `hir/type/66_ref_rvalue.ivy` đổi hành vi (trước đây `--hir`
+  exit 0, `-c` báo "not assignable"; nay lỗi `binding a reference to a
+  temporary` ở MIR), provenance `expected:H10.3`; comment của fixture ghi rõ
+  quy tắc mới. Không fixture nào khác đổi.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `9AAE83B0D6CCF3C5D506EE8549A7AAFF56EA8F30E958BCA4C0508A8113717703`
+  (27 141 120 B), golden **12476 checks / 0 failures** (1063 fixture).
+  `check_repro.ps1` → **PASS** (83 artifacts: 42 object, 38 `.ivm`, 3 exe;
+  stage1 SHA-256 `9AAE83B0…717703`).
+- **Ghi chú**: `unsafe` vẫn là escape hatch cho borrow/alias (giữ nguyên hành
+  vi cũ), đây là ngoại lệ có chủ ý — xem H10.17. Các lỗ hổng còn lại của
+  family H19: ghi qua member/index của biến đang borrow, và use-after-destroy
+  qua raw pointer trong `unsafe` (cố ý cho phép).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
 | H10.0 | - | `selfhost/update_golden.ps1` (golden hậu-oracle, provenance) | ✅ |
 | H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ✅ |
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ✅ |
-| H10.3 | H19 | Borrow-checker lỏng (soundness) | ☐ |
+| H10.3 | H19 | Borrow-checker lỏng (soundness) | ✅ |
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ☐ |
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ☐ |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ☐ |

@@ -1,0 +1,14 @@
+// H10.3 (H19): assigning to a variable while a live reference borrows it.
+// The oracle accepts both functions (LIFETIME_NOTES.md 8.7, stage/s14);
+// H10.3 rejects them at the MIR stage.
+void mut_borrow() {
+    int32 x = 1;
+    int32& r = x;
+    x = 2;
+}
+
+void shared_borrow() {
+    int32 y = 1;
+    const int32& r = y;
+    y = 2;
+}

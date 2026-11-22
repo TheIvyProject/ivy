@@ -1346,8 +1346,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/type/65_ptr_void.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 119 1
-selfhost/corpus/hir/type/66_ref_rvalue.ivy:3:16: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
+@@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 117 1
+selfhost/corpus/hir/type/66_ref_rvalue.ivy:6:5: error: binding a reference to a temporary value (dangling reference)
 @@ selfhost/corpus/hir/type/67_default_args.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/type/68_optional_wrap.ivy 31 0
@@ -2456,3 +2456,18 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 31 0
 ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy 249 1
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:7:5: error: cannot assign to 'x' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy:13:5: error: cannot assign to 'y' — it is immutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy 255 1
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:9:5: error: binding a reference to a temporary value (dangling reference)
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy:15:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 455 1
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:6:6: error: cannot assign to 'a' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:12:6: error: cannot assign to 'b' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:18:5: error: cannot assign to 'c' — it is mutably borrowed
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:23:5: error: cannot assign to 'p' — it is mutably borrowed
+@@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)

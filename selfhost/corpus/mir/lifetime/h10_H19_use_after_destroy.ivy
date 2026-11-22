@@ -1,0 +1,14 @@
+// H10.3 (H19): a reference bound to a temporary whose destructor runs at the
+// end of the declaration.  Using the reference afterwards is a
+// use-after-destroy.  The oracle accepts this (stage/s8_use_after_destroy.ivy,
+// LIFETIME_NOTES.md 8.7); H10.3 rejects the binding.
+struct Res {
+    int32 v;
+    Res(int32 a) : v(a) { }
+    ~Res() { }
+};
+
+int32 use_after_destroy() {
+    Res& r = Res(1);
+    return r.v;
+}

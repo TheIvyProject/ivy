@@ -840,6 +840,11 @@ selfhost/corpus/mir/lifetime/90_borrow_scope_release.ivy
 selfhost/corpus/mir/lifetime/90b_two_shared_ok.ivy
 selfhost/corpus/mir/lifetime/90c_unsafe_borrow.ivy
 selfhost/corpus/mir/lifetime/90d_unsafe_return.ivy
+selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy
+selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy
+selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy
+selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy
+selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy
 selfhost/corpus/parser/aggregate/01_struct.ivy
 selfhost/corpus/parser/aggregate/02_method.ivy
 selfhost/corpus/parser/aggregate/03_ctor.ivy

@@ -1115,3 +1115,8 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 0 0
 @@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 0 0
+@@ selfhost/corpus/mir/lifetime/h10_H19_assign_while_borrowed.ivy 0 0
+@@ selfhost/corpus/mir/lifetime/h10_H19_ref_to_temp.ivy 0 0
+@@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 0 0
+@@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 0 0
+@@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 0 0

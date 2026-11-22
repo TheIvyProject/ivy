@@ -1404,6 +1404,9 @@ Reproduce the code, not the intent.
 
 ### 8.7 Borrow-checker gaps
 
+**Fixed in H10.3** (`selfhost/mir/mir_builder.ivy`); the oracle behaviour below
+is what the port reproduced before H10.3, kept for the historical record.
+
 * Writing through a variable while it is borrowed is **not** diagnosed
   (`stage/s14_assign_through_borrow.ivy` -> exit 0).
 * Using a value after its owner was destroyed is **not** diagnosed
@@ -1415,6 +1418,28 @@ Reproduce the code, not the intent.
   requires `unsafe`, which disables the check.
 * `unsafe` disables **all** of the borrow/lifetime checks
   (`stage/s17_borrow_in_unsafe.ivy` -> exit 0).
+
+H10.3 closes the first three:
+
+* `check_assign_borrow` is called from `ex_assign` (a continuous assignment),
+  from `ex_unary` for `++`/`--` and from the compound-assignment expansion.  It
+  looks the assigned name up in the borrow pool (innermost to outermost, like
+  `check_borrow`) and reports
+  `cannot assign to '<n>' <EMDASH> it is mutably borrowed` /
+  `... it is immutably borrowed`.
+* `check_ref_binding` is called from `st_decl` whenever a reference is
+  initialized.  An initializer that is not a place (IdentRef, This, Index,
+  Member, a `*` dereference, or any expression whose type is already a
+  reference/pointer) is rejected with
+  `binding a reference to a temporary value (dangling reference)`.  That is what
+  turns `stage/s9` (bind a temporary) and `stage/s8` (use it afterwards) into
+  errors at the binding site.
+* `unsafe` remains the escape hatch for both checks, and `checkStore` keeps its
+  `unsafe` bypass: the self-host runtime itself binds `&<local>` to an
+  out-parameter inside `unsafe` (`mir/interpreter.ivy`:
+  `lenptr.p = &dec_len;`), so rejecting it would reject the compiler's own
+  source.  The exception is pinned by
+  `corpus/mir/lifetime/h10_H19_unsafe_escape.ivy`.
 
 ### 8.8 The AST dump is lossy
 

@@ -1,4 +1,7 @@
-// A reference to a scalar binds to a convertible value.
+// A reference to a scalar bound to a convertible value.  The oracle accepted
+// this; H10.3 rejects it as a reference to a temporary (expected:H10.3).  The
+// HIR dump is still emitted before the MIR diagnostic, so the fixture keeps
+// pinning the HIR lowering of `T& = <rvalue>`.
 void f() {
     int32& r = 1;
     auto a = r;
