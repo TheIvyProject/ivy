@@ -842,3 +842,32 @@ duy nhat trong repo.
 | cay **khong co** `src/**`/`CMakeLists.txt`: `build.ps1 -SelfLink -Golden` | **PASS**: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical SHA-256 `B5FDA259…DC92` (27 138 560 B), golden **12337/0** |
 | CI dogfood `44979013655` (`dfc71d2`, checkout **khong co** `src/**`/`CMakeLists.txt`) | **xanh**: bootstrap PASS 5m36s, golden **12337/0**, self-link SHA-256 `46BFA0EE…15B5` (27 139 072 B) |
 | oracle cu | khong con trong cay; khong doc/ghi `build\Release\ivy.exe` (van nguyen SHA-256 `FFB376CF…313E`) |
+
+# H9.10 - Viet lai phan gioi thieu README
+
+## 1. Pham vi
+
+Chi sua tai lieu: `README.md`. Khong dong toi ma nguon, gate hay golden.
+
+## 2. Thay doi
+
+- Tagline: "A C++ successor with Rust-style memory safety - familiar syntax,
+  native ABI compatibility, and zero-cost performance."
+- **What is Ivy?** viet lai: Ivy ke thua cu phap/tinh nang/ABI/thu vien C++,
+  di theo tinh than Carbon (giu ngon ngu lap trinh vien da biet), 80-90% cu
+  phap lay truc tiep tu C++; ba uu diem: an toan bo nho kieu Rust tren nen C++
+  (khong GC, khong overhead), zero-FFI nho dung chung ABI (Itanium tren
+  Unix-like, MSVC tren Windows), cu phap quen thuoc; cau dinh vi
+  "If C3 is a modern C, Ivy is a modern C++".
+- Muc moi **History**: khoi dau la safe subset cua C++ -> rang buoc ISO/IEEE
+  chan hien dai hoa cu phap va kiem tra an toan -> tro thanh ngon ngu doc lap,
+  giu ergonomics/ABI/thu vien C++ -> self-host 22/11/2026 (link toi muc
+  Self-Hosted Compiler).
+- **Core Language Features**: bo 2 bullet trung voi "Why Ivy?" (memory safety,
+  familiar ergonomics); giu lifetime annotations, zero-cost abstractions,
+  RAII/explicit moves.
+
+## 3. Ket qua
+
+Tai lieu-only: khong doi ma nguon, khong doi golden; CI van chay bootstrap +
+golden nhu cac commit truoc.
