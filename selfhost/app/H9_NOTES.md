@@ -801,4 +801,5 @@ tu stdin de harness kiem tra rieng phan link.
 | `build_link_smoke.ps1` | **PASS 10/10** fixture (them `243`/`244`), negative 2/2, space-path 1/1 |
 | `driver_smoke.ps1 -SkipOwn -Filter 24[34]*` | **PASS**: `--llvm` 4/4, `-c` 4/4, link+run 4/4 |
 | driver stage1 vs oracle tren `243`/`244` | ca hai build exit 0, chay exit **42** |
+| CI dogfood `44975834452` (`a961ac7`) | **xanh 5m59s**: bootstrap PASS, golden **12337/0**, self-link SHA-256 `AFACA75F…30E3D` (27 139 072 B; size/hash phu thuoc toolchain nhu H9.7) |
 | oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |
