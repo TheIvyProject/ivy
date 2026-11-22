@@ -852,14 +852,96 @@ vị trí port, bằng chứng, input **cấm** dùng trong corpus và các bug 
 **không** tái hiện — nằm ở
 [selfhost/ORACLE_BUGS.md](file:///d:/project/Ivy/ivyc/selfhost/ORACLE_BUGS.md).
 
-Quy ước:
+**Trạng thái:** kế hoạch chốt ngày 2026-11-22 — H10.0 + 18 mục `H10.1`–`H10.18`;
+nhật ký thực hiện ở
+[selfhost/app/H10_NOTES.md](file:///d:/project/Ivy/ivyc/selfhost/app/H10_NOTES.md).
 
-- **Không sửa lẻ** một bug-compat khi còn gate so với oracle (gate 1–3). Sửa
-  khi H9.3 (golden) + H9.5 (Ivy-only bootstrap) + H9.9 (xoá C++) đã xong.
-- Mỗi fix là một mục `H10.x`, sửa code **và** cập nhật `selfhost/golden/` trong
-  cùng commit (golden là output đã đóng băng của oracle, fix sẽ làm nó đỏ).
-- Mỗi bug có fixture hồi quy riêng; ưu tiên crash/UB → sai kết quả → sai
-  chẩn đoán → chỉ ảnh hưởng dump.
+**Điều kiện bắt đầu:** đã đạt ngày 2026-11-22 — H9.3 (golden), H9.5 (bootstrap
+Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle.
+
+**Nguyên tắc chung**
+
+- Mỗi mục `H10.x` là **một nhóm bug cùng cơ chế**; code + `selfhost/golden/` +
+  fixture hồi quy nằm trong **cùng commit**. Golden đóng băng hành vi cũ nên
+  fix chắc chắn làm nó đỏ; commit message ghi `H10.x: fix <ID> — <mô tả>`.
+- Sau mỗi fix **bắt buộc** chạy lại F2 (stage1 == stage2) và self-link: sửa bug
+  có thể làm chính mã self-host biên dịch khác đi. Nếu stage1 hỏng vì mã
+  self-host đang dựa vào quirk vừa sửa (ví dụ workaround H29), sửa mã self-host
+  trong **cùng** mục H10.x.
+- Mỗi bug có **fixture hồi quy riêng** trong `selfhost/corpus/<layer>/`
+  (`h10_<ID>_<mô tả>.ivy`) + fixture "trước/sau" nếu cần chứng minh hành vi
+  mới. Fixture chạm `selfhost/golden/` phải được thêm record tương ứng.
+- **Không dùng lại oracle** để sinh golden nữa (oracle chỉ còn ở tag
+  `0.5-baseline`). Golden của hành vi **đã sửa** do compiler self-host sinh ra,
+  ghi rõ provenance.
+- Thứ tự ưu tiên: crash/UB → sai kết quả chương trình → IR/chẩn đoán sai →
+  chỉ ảnh hưởng dump/quy ước → bug template/parser (rủi ro cao nhất, làm cuối).
+- Gate mỗi mục: `build.ps1 -SelfLink -Golden` xanh với golden đã cập nhật
+  (F2 + self-link identical + toàn bộ 1052 fixture), fixture mới chạy đúng,
+  `check_repro.ps1` xanh ở các mốc H10.1/H10.4/H10.11/cuối, CI dogfood xanh.
+- Ghi chú từng mục vào `selfhost/app/H10_NOTES.md` (mới, cùng format
+  `H9_NOTES.md`); cập nhật cột trạng thái trong `ORACLE_BUGS.md` (A → fixed).
+
+**H10.0 — công cụ golden hậu-oracle (làm trước tiên)**
+
+`selfhost/update_golden.ps1` (mới):
+
+- chạy một driver self-host đã build (stage1) trên **đúng** danh sách fixture
+  được chỉ định (`-Fixture`, `-Modes`) và ghi record theo format hiện tại
+  (`@@ <path> <nbytes> <exit>` + byte thô, CRLF→LF, `<OUT>`/`<RT>`/`<CLANG>`
+  chuẩn hoá như `freeze_golden.ps1`);
+- cập nhật `selfhost/golden/manifest.txt` với provenance: record cũ giữ
+  `oracle`, record mới ghi `expected:<H10.x>`; không bao giờ ghi đè record
+  ngoài phạm vi `-Fixture`;
+- từ chối chạy nếu thiếu `-Reason H10.x`; chạy hoàn toàn trong TEMP; in diff
+  tóm tắt (record thêm/đổi/xoá) để review tay trước khi commit;
+- `check_golden.ps1` không đổi format; record `expected:*` vẫn được so byte
+  như record oracle.
+
+**Bảng kế hoạch**
+
+| Mục | ID | Nội dung sửa | Port chính | Fixture / golden ảnh hưởng |
+|---|---|---|---|---|
+| H10.1 | B-C3, C19 | Crash/UB: `&<local struct>` (hiện báo lỗi sạch) → sinh địa chỉ đúng; record local còn sống qua call trả record (`setDataLayout("")`) → không hỏng khung stack | `codegen/emitter.ivy`, `codegen/codegen.ivy` | fixture mới `h10_B-C3_addr_of_struct`, `h10_C19_record_across_call`; link/run + IR |
+| H10.2 | H17, H18, C4, H26 | RAII/dtor: outer-scope dtor emit 2 lần (H17); `return` đầu clear dtor list làm `return` sau mất dtor/`__ret` (H18); break/continue trong `if` lồng bỏ dtor loop body (C4); aggregate init bypass ctor nhưng vẫn record dtor (H26) | `hir/hir_builder.ivy` (`emit_dtor_calls`, `build_return`, `wrap_scope_dtors`, `record_dtor_var`) | `ret/r06_nested_scope`, `ret/r07`, `ret/r21`, `stage/s*`, fixture mới; HIR + link/run |
+| H10.3 | H19 | Borrow-checker lỏng: ghi qua biến đang borrow, dùng sau destroy, bind ref vào temp không bị báo; `checkStore` gần như không tới được ngoài `unsafe`, `unsafe` tắt **mọi** check → siết lại để chương trình không an toàn bị từ chối, giữ nguyên các ngoại lệ có chủ ý | `hir/hir_builder.ivy` (borrow/lifetime) | `stage/s8`, `s9`, `s14`, `s17`, `LIFETIME_NOTES` §8.7; fixture mới `h10_H19_*`; HIR + chẩn đoán |
+| H10.4 | C1, C18, H29 | Địa chỉ/bộ nhớ: local slot khoá theo tên last-wins (C1) → slot theo scope; zero-init struct local tại điểm khai báo (C18); store qua `T**` GEP không scale (H29) → dùng `llvmType` như đường đọc, **xoá workaround `__ivy_memcpy`** trong `codegen.ivy` (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`) và `pipeline.ivy` sau khi sửa | `codegen/emitter.ivy`, `codegen/codegen.ivy`, `app/pipeline.ivy` | `codegen/245_move_pointer`, fixture mới `h10_C1_slot_shadow`, `h10_H29_pointer_store`; IR + link/run |
+| H10.5 | C3, C5, C16, C17 | `new`/delete + string: `new T(args)` chỉ store `args[0]` (C3); `collectExpr` không recurse vào `new`/`delete` (C16); declare `@__ivy_alloc/free` suppress trùng (C17); global trùng `@.str.N` do 2 map key (C5) | `codegen/emitter.ivy` | `codegen/137_new_struct`, `143_new_multiarg`, `152_new_struct_i8`, `164_printf_basic`, fixture mới; IR + link/run |
+| H10.6 | C2, C7, C8, C10, C11 | IR/ABI: `sext ptr`/`fpext ptr` cho ref arg (C2); 7 fixture bị chính oracle từ chối IR (C7) → nay `-c` phải thành công; `nullptr`→`i8` (C8); mangle array (C10); mangling fallback symbol chưa resolve (C11) | `codegen/emitter.ivy`, `codegen/objdrive.ivy` | `codegen/103`, `104`, `137`, `143`, `152`, `186`, `190`; `-c`/`-o` + IR |
+| H10.7 | H22, C14, C20, C13, C6 | Literal/format IR: em dash U+2014 bị mojibake (H22); `-0.0` giữ dấu (C14); octal escape sai (C20); `br label %` rỗng (C13); quirk format IR (`{  }`, struct không dùng vẫn in — C6) | `parsing/*`, `codegen/emitter.ivy` | dump text của fixture string/float; `--llvm`; `-o`/link/run cho H22 |
+| H10.8 | R1, R2, R3 | Runtime: `fmt_float` in `2.` thay vì `2.0` (R1); buffer dùng chung → cấp phát mỗi lần (rò rỉ, R2) → scratch buffer/arena; giữ `_gcvt` hoặc thay bằng formatter đúng (R3) | `std/rt.ivy` | mọi fixture in float; fixture stress format vòng lặp; `--run` + link/run |
+| H10.9 | H14, H15, H16, H28 | Lifetime IR: call result bị ép `Unknown` (H14); temp `__ret` dùng type biểu thức (H15); `return`/NRVO chỉ so base type (H16); `move(x)` mất lifetime (H28) | `mir/mir_builder.ivy`, `hir/hir_builder.ivy` | `--mir` của `ret/*`, `hir/move/54_lifetime_param_moved`, `codegen/245` |
+| H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại: `--ast` thiếu lifetime (H20); legacy `[[ivy::lt_ret]]` thắng `$a` (H21); `consteval` bỏ qua (H23); `move(x)` pass-through (H24); `sizeof(expr)`/`switch` enum bị từ chối (H25); `is_fp_ir` theo spelling (C9); `emit()` tiếp tục sau lỗi (C12); "not assignable" fallthrough (C15) | `parsing/astdump`, `hir/hir_builder.ivy`, `codegen/emitter.ivy` | `--ast`/`--hir` fixtures `LIFETIME_NOTES` §8.8–8.10, `H62` §not-assignable, `143…` |
+| H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>` là một token (P1) → split cho template-id lồng nhau; value template arg / `f<>()` (P2); member function template (P3); explicit specialization `template <>` (P4); chain type C-style exclusive (P7); P5 giữ policy deprecated (`_t`) và ghi rõ, không sửa | `parsing/lexer.ivy`, `parsing/parser.ivy`, `parsing/preprocessor.ivy` | `--lex`/`--tokens`/`--ast` của template fixtures; `hir/template/*` |
+| H10.12 | T1, T2, T5, T6, T11 | Template substitution pass 1: local `T` trong function template (T1); template gọi template với arg tường minh (T2); mất const/pointer qualifier khi thay `T` (T5); suy luận int literal → `int` (T6); `currentTypeMapping_` chỉ set cho struct (T11) | `hir/hir_builder.ivy` | `hir/template` C10/C11/C03/p15/p27/p28/p76 |
+| H10.13 | T3, T4, T7, T8, T9 | Template layout/args pass 2: `sizeof`/`alignof` template-id trả 4 (T3); specialization mất base (T4); arg thừa im lặng (T7); template trùng tên last-wins (T8); `Box<T>` không resolve (T9) | `hir/hir_builder.ivy` | p48/p36/p49/p11/p80/p53/p60 |
+| H10.14 | T10, T12, T13 | Pack/concept/non-type pass 3: pack expansion trong call (T10); concept không tồn tại coi là thỏa (T12); non-type template param không bind (T13) | `hir/hir_builder.ivy` | p85/p21/p71/t03 |
+| H10.15 | M1, M2 | `.ivm` escape: return type free function không escape (M1); `serializeType` escape cả tên gốc (M2) → thống nhất format module interface | `parsing/module_io.ivy` | toàn bộ `.ivm` golden của module có type dấu cách (`codegen`) |
+| H10.16 | I1 | Interpreter: CFG self-edge chạy lại từ instruction thứ hai (I1) → quay về đầu block | `mir/interpreter.ivy` | `--run` fixtures có self-edge; `interp` golden |
+| H10.17 | H27, B-P5, B-R2 | Audit bug **không** tái hiện / ngoại lệ: giữ `exceptions.txt` (H27) hoặc thu hẹp nếu port đã xử lý; xác nhận B-P5/B-R2 vẫn là deviation có chủ ý; ghi lý do | `golden/exceptions.txt`, docs | `156/157/160`, fixtures lifetime/template tương ứng |
+| H10.18 | — | **Audit cuối**: rà toàn bộ ID trong `ORACLE_BUGS.md` (mọi A phải `fixed` hoặc `accepted` kèm lý do; **M3** đã sửa bằng `--self-link` ở H9.4 nên chỉ cần xác nhận, không phải bug-compat); chạy `check_repro.ps1`; cập nhật README/PLAN/H10_NOTES; tag phát hành `0.6.0` **(chỉ khi user yêu cầu)** | — | full gate + CI |
+
+**Phụ thuộc & thứ tự thực hiện**
+
+1. H10.0 (tooling) → H10.1–H10.3 (crash / UB / soundness của borrow-checker)
+   → H10.4 (địa chỉ, gỡ workaround H29).
+2. H10.5 → H10.6 (C7 chỉ xanh sau khi C2/C3/C8 đã sửa).
+3. H10.7, H10.8, H10.9, H10.10 độc lập tương đối, làm trước template.
+4. H10.11 **phải** xong trước H10.12–H10.14 (nested `>>` ảnh hưởng parse
+   template-id).
+5. H10.15 (module interface) và H10.16 (interpreter) làm sau cùng vì golden
+   `.ivm`/`--run` churn rộng; H10.17–H10.18 chốt.
+
+**Tiêu chí thoát H10**
+
+- Mọi ID loại **A** trong `ORACLE_BUGS.md` hoặc đã `fixed` (có fixture hồi quy
+  + golden cập nhật), hoặc `accepted` với lý do cụ thể trong tài liệu.
+- Không còn workaround do bug-compat trong mã self-host (H29 memcpy đã xoá;
+  các chỗ khác rà tương tự).
+- `build.ps1 -SelfLink -Golden` xanh liên tục; golden có provenance rõ ràng
+  (`oracle` trước H10.0, `expected:H10.x` sau đó).
+- `check_repro.ps1` xanh; CI dogfood xanh trên `main`.
+- `H10_NOTES.md` đầy đủ; README chỉ sửa khi hành vi người dùng thay đổi.
 
 ---
 
