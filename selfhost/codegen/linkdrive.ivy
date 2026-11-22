@@ -5,6 +5,11 @@
 //   <path of the executable to produce>
 //   <source path, used only to shape diagnostics like the oracle>
 //   <path to the Ivy runtime object (empty line = link without a runtime)>
+// plus, optionally (H9.8):
+//   <number N of `import cpp` headers>, then N header paths
+//   <number M of `import c` headers>, then M header paths
+// (an absent line, or EOF, means zero).  The header paths are already
+// resolved by the caller, like the driver's `Cg::collect_headers`.
 // Emits the object next to the executable (`<stem>__tmp.obj`) through
 // codegen::Linker (mirror of CodeGen::linkExecutable in
 // src/codegen/codegen.cpp:2810-3063), then runs the linker.
@@ -96,6 +101,67 @@ long run() {
 
         long len = (long) __ivy_strlen(ir);
         Linker lk;
+
+        // H9.8: optional header lists (count line, then that many paths).
+        char* hcnt = io::read_line();
+        long ncpp = 0;
+        if (hcnt != (char*) 0) {
+            n = (long) __ivy_strlen(hcnt);
+            while (n > 0 && (hcnt[n - 1] == 13 || hcnt[n - 1] == 10)) {
+                hcnt[n - 1] = 0;
+                n = n - 1;
+            }
+            long dcpp = 0;
+            long dcppi = 0;
+            while (hcnt[dcppi] >= 48 && hcnt[dcppi] <= 57) {
+                dcpp = (dcpp * 10) + (long) (hcnt[dcppi] - 48);
+                dcppi = dcppi + 1;
+            }
+            ncpp = dcpp;
+            __ivy_free(hcnt);
+        }
+        long hk = 0;
+        while (hk < ncpp) {
+            char* hp = io::read_line();
+            if (hp == (char*) 0) { break; }
+            n = (long) __ivy_strlen(hp);
+            while (n > 0 && (hp[n - 1] == 13 || hp[n - 1] == 10)) {
+                hp[n - 1] = 0;
+                n = n - 1;
+            }
+            lk.add_cpp_header(hp);
+            hk = hk + 1;
+        }
+        hcnt = io::read_line();
+        long ncc = 0;
+        if (hcnt != (char*) 0) {
+            n = (long) __ivy_strlen(hcnt);
+            while (n > 0 && (hcnt[n - 1] == 13 || hcnt[n - 1] == 10)) {
+                hcnt[n - 1] = 0;
+                n = n - 1;
+            }
+            long dcc = 0;
+            long dcci = 0;
+            while (hcnt[dcci] >= 48 && hcnt[dcci] <= 57) {
+                dcc = (dcc * 10) + (long) (hcnt[dcci] - 48);
+                dcci = dcci + 1;
+            }
+            ncc = dcc;
+            __ivy_free(hcnt);
+        }
+        hk = 0;
+        while (hk < ncc) {
+            char* hp = io::read_line();
+            if (hp == (char*) 0) { break; }
+            n = (long) __ivy_strlen(hp);
+            while (n > 0 && (hp[n - 1] == 13 || hp[n - 1] == 10)) {
+                hp[n - 1] = 0;
+                n = n - 1;
+            }
+            lk.add_c_header(hp);
+            hk = hk + 1;
+        }
+
         int rc = lk.link_text(ir, (unsigned long long) len, exe_path, ivyrt_lib);
         if (rc != 0) {
             if (src_path != (char*) 0) {
@@ -114,6 +180,9 @@ long run() {
                 }
                 io::eprintln("{}", lk.err());
             } else if (code == 2) {
+                io::eprintln("{}", lk.err());
+            } else if (code == 4) {
+                // H9.8: header compile failure (the oracle reports it at 0:0).
                 io::eprintln("{}", lk.err());
             } else {
                 io::eprint("linker failed (exit code ");

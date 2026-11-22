@@ -40,6 +40,7 @@ import io;
 extern "C" void* __ivy_alloc(unsigned long long n);
 extern "C" void  __ivy_free(void* p);
 extern "C" unsigned long long __ivy_strlen(const char* s);
+extern "C" void  __ivy_memcpy(void* dst, const void* src, unsigned long long n);
 export struct Cg {
     Parser pa;
     Imports im;
@@ -66,6 +67,17 @@ export struct Cg {
     // H9.2: the source buffer, needed by the `--lex` dump (the lexer's token
     // offsets index it).
     char* content_;
+
+    // H9.8: the local headers named by `import cpp` / `import c`, resolved
+    // exactly like `main.cpp:1207-1260` (source directory first, then the `-I`
+    // directories; a header that is not on disk is a system header and stays
+    // declaration-only).  Owned here and read by the driver at link time.
+    char** cpph_;
+    long ncpph_;
+    long capcpph_;
+    char** ch_;
+    long nch_;
+    long capch_;
 
     // --- small string helpers ----------------------------------------------
 
@@ -748,6 +760,151 @@ export struct Cg {
         unsafe { return (char*)0; }
     }
 
+    // --- H9.8: `import cpp` / `import c` headers ----------------------------
+
+    // `std::filesystem::path::parent_path()` as Windows spells it: drop a
+    // trailing separator, then cut after the last one; no separator means the
+    // empty path.  A drive root keeps its separator (`C:\a` -> `C:\`).
+    char* parent_dir(const char* p) {
+        unsafe {
+            long n = (long) __ivy_strlen(p);
+            while (n > 1 && (p[n - 1] == 92 || p[n - 1] == 47)) { n = n - 1; }
+            long cut = -1;
+            long i = 0;
+            while (i < n) {
+                if (p[i] == 92 || p[i] == 47) { cut = i; }
+                i = i + 1;
+            }
+            long keep = 0;
+            if (cut > 0) {
+                keep = cut;
+                if (cut == 2 && p[1] == 58) { keep = 3; }
+            } else if (cut == 0) {
+                keep = 1;
+            }
+            char* r = (char*) __ivy_alloc((unsigned long long) (keep + 1));
+            i = 0;
+            while (i < keep) { r[i] = p[i]; i = i + 1; }
+            r[keep] = 0;
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    void add_cpp_header(const char* p) {
+        unsafe {
+            if (this.ncpph_ >= this.capcpph_) {
+                long ncap = this.capcpph_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.ncpph_) {
+                    // H9.4 workaround (oracle bug H29): stores through
+                    // `char**` are emitted as unscaled `i8` GEPs.
+                    char* v = this.cpph_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    k = k + 1;
+                }
+                if (this.cpph_ != (char**) 0) {
+                    __ivy_free((void*) this.cpph_);
+                }
+                this.cpph_ = nb;
+                this.capcpph_ = ncap;
+            }
+            char* pv = (char*) p;
+            __ivy_memcpy((void*) ((char*) this.cpph_ + (this.ncpph_ * 8)), (void*) &pv, 8);
+            this.ncpph_ = this.ncpph_ + 1;
+        }
+    }
+
+    void add_c_header(const char* p) {
+        unsafe {
+            if (this.nch_ >= this.capch_) {
+                long ncap = this.capch_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.nch_) {
+                    char* v = this.ch_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    k = k + 1;
+                }
+                if (this.ch_ != (char**) 0) {
+                    __ivy_free((void*) this.ch_);
+                }
+                this.ch_ = nb;
+                this.capch_ = ncap;
+            }
+            char* pv = (char*) p;
+            __ivy_memcpy((void*) ((char*) this.ch_ + (this.nch_ * 8)), (void*) &pv, 8);
+            this.nch_ = this.nch_ + 1;
+        }
+    }
+
+    // Resolve every recorded header the way `main.cpp:1207-1260` does:
+    // `<source dir>/<name>` first, then each `-I` directory in order.  A name
+    // that is not on disk is a system header and contributes no object.
+    void collect_headers(const char* path, CliPath* dirs) {
+        unsafe {
+            this.ncpph_ = 0;
+            this.nch_ = 0;
+            char* pc = this.parent_dir(path);
+            HdrRec* h = this.im.hhead;
+            while (h != (HdrRec*)0) {
+                char* found = (char*)0;
+                char* c = this.im.join(pc, h->name, "");
+                if (this.im.exists(c)) {
+                    found = c;
+                } else {
+                    __ivy_free(c);
+                }
+                if (found == (char*)0) {
+                    CliPath* d = dirs;
+                    while (d != (CliPath*)0) {
+                        char* c2 = this.im.join(d->value, h->name, "");
+                        if (this.im.exists(c2)) {
+                            found = c2;
+                            break;
+                        }
+                        __ivy_free(c2);
+                        d = d->next;
+                    }
+                }
+                if (found != (char*)0) {
+                    if (h->is_cpp != 0) {
+                        this.add_cpp_header(found);
+                    } else {
+                        this.add_c_header(found);
+                    }
+                }
+                h = h->next;
+            }
+            __ivy_free(pc);
+        }
+    }
+
+    long cpp_header_count() {
+        return this.ncpph_;
+    }
+
+    char* cpp_header(long i) {
+        unsafe {
+            return this.cpph_[i];
+        }
+        unsafe { return (char*)0; }
+    }
+
+    long c_header_count() {
+        return this.nch_;
+    }
+
+    char* c_header(long i) {
+        unsafe {
+            return this.ch_[i];
+        }
+        unsafe { return (char*)0; }
+    }
+
     // Mirror of main.cpp:1280-1301: the `.ivm` goes next to the source, or
     // next to `-o` (same stem) when an output path is given.
     void write_ivm(const char* path, const char* out_path) {
@@ -847,6 +1004,9 @@ export struct Cg {
             if (this.im.failed != 0) {
                 return 1;
             }
+            // H9.8: resolve the `import cpp` / `import c` headers (the oracle
+            // does this after parsing; nothing here depends on the AST).
+            this.collect_headers(path, includes);
 
             long nmod = this.im.count;
             ModuleUnit* mods = (ModuleUnit*) __ivy_alloc((nmod + 1) * 448);

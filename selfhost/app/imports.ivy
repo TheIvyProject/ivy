@@ -7,12 +7,16 @@
 //      `<cwd>/std/<name>.ivm`; the first existing candidate wins.
 //   2. the pre-scan block in `run()` (src/app/main.cpp:930-1019): walk the
 //      *post-preprocessor* token stream looking for `import`, skip the
-//      `import cpp` and `import c <...>` / `import c "..."` forms, take the
-//      module name from `import <ident>` or `import "<name>"`, resolve it and
-//      record the `.ivm` path. A name that does not resolve prints
+//      `import cpp` and `import c <...>` / `import c "..."` forms when
+//      resolving modules, take the module name from `import <ident>` or
+//      `import "<name>"`, resolve it and record the `.ivm` path. A name that
+//      does not resolve prints
 //      `ivy: error: module '<name>' not found (searched .ivm files in include
 //      paths)` on stderr and sets `failed`; the scan keeps going so every
 //      missing module is reported, then the caller exits 1.
+//      H9.8: the skipped header forms are also recorded (name + C/C++ kind)
+//      so `Cg::collect_headers` can resolve and hand them to the linker,
+//      mirroring `main.cpp:1207-1260`.
 //
 // H7.2 deliberately stops before `readModuleInterface` (H7.3) and before the
 // parser: `scan()` only resolves paths and reports missing modules.
@@ -55,12 +59,27 @@ export struct ImportRec {
     ImportRec* next;
 };
 
+// H9.8: one `import cpp <header>` / `import c "header"` directive.  `name` is
+// the oracle's `ImportDecl::name`: the quoted form with the quotes stripped,
+// the angle form with one space between the token lexemes
+// (`parser.cpp:1948-1957`).  `is_cpp` is 1 for `import cpp`, 0 for `import c`.
+export struct HdrRec {
+    char* name;
+    long is_cpp;
+    HdrRec* next;
+};
+
 // sizeof(ImportRec) = 8 + 8 + 8 = 24 bytes.
 export struct Imports {
     ImportRec* head;
     ImportRec* tail;
     long count;
     long failed;
+    // H9.8: header directives in declaration order (the oracle's
+    // `TranslationUnit::imports`).
+    HdrRec* hhead;
+    HdrRec* htail;
+    long hcount;
 
     void init() {
         unsafe {
@@ -69,6 +88,11 @@ export struct Imports {
         }
         this.count = 0;
         this.failed = 0;
+        unsafe {
+            this.hhead = (HdrRec*)0;
+            this.htail = (HdrRec*)0;
+        }
+        this.hcount = 0;
     }
 
     // --- small string helpers ----------------------------------------------
@@ -266,6 +290,23 @@ export struct Imports {
         this.count = this.count + 1;
     }
 
+    // H9.8: record one header directive (`ImportDecl::name` + `isCpp`).
+    void add_header(char* name, long is_cpp) {
+        unsafe {
+            HdrRec* r = (HdrRec*)__ivy_alloc(24);
+            r->name = name;
+            r->is_cpp = is_cpp;
+            r->next = (HdrRec*)0;
+            if (this.hhead == (HdrRec*)0) {
+                this.hhead = r;
+            } else {
+                this.htail->next = r;
+            }
+            this.htail = r;
+        }
+        this.hcount = this.hcount + 1;
+    }
+
     // Resolve one module name, reporting it exactly like the oracle when it is
     // missing (stderr, one line) and recording the path otherwise.
     void handle(char* name, CliPath* dirs) {
@@ -304,6 +345,51 @@ export struct Imports {
         return false;
     }
 
+    // H9.8: the oracle's angle-header spelling (`parser.cpp:1951-1954`): the
+    // lexemes between `<` and `>` joined with one space.  `start` is the `<`;
+    // a missing `>` (a parse error the parser reports later) stops at `n`.
+    char* angle_name(char* arena, Token* toks, long start, long n) {
+        unsafe {
+            long total = 0;
+            long j = start + 1;
+            while (j < n && !this.kind_eq(toks, j, ">")) {
+                if (total != 0) { total = total + 1; }
+                total = total + toks[j].len;
+                j = j + 1;
+            }
+            char* p = (char*)__ivy_alloc((unsigned long long) (total + 1));
+            long o = 0;
+            j = start + 1;
+            while (j < n && !this.kind_eq(toks, j, ">")) {
+                if (o != 0) { p[o] = 32; o = o + 1; }
+                long k = 0;
+                while (k < toks[j].len) {
+                    p[o] = arena[toks[j].off + k];
+                    o = o + 1;
+                    k = k + 1;
+                }
+                j = j + 1;
+            }
+            p[o] = 0;
+            return p;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // Quoted header spelling: strip the two quote characters when present
+    // (the oracle does not unescape; len < 2 keeps the raw lexeme).
+    char* quoted_name(char* arena, Token* toks, long i) {
+        unsafe {
+            long off = toks[i].off;
+            long len = toks[i].len;
+            if (len >= 2) {
+                return this.dup_range(arena, off + 1, len - 2);
+            }
+            return this.dup_range(arena, off, len);
+        }
+        unsafe { return (char*)0; }
+    }
+
     // --- pre-scan -----------------------------------------------------------
 
     // Walk the post-preprocessor token stream. `i + 2 < n` is the oracle's loop
@@ -315,12 +401,24 @@ export struct Imports {
             while (i + 2 < n) {
                 if (this.kind_eq(toks, i, "keyword") && this.lex_eq(arena, toks, i, "import")) {
                     if (this.kind_eq(toks, i + 1, "keyword") && this.lex_eq(arena, toks, i + 1, "cpp")) {
-                        // `import cpp ...` - C++ interop, not a module.
+                        // `import cpp ...` - H9.8: record the header for the
+                        // linker (the oracle's `TranslationUnit::imports`).
+                        if (this.kind_eq(toks, i + 2, "<")) {
+                            this.add_header(this.angle_name(arena, toks, i + 2, n), 1);
+                        } else if (this.kind_eq(toks, i + 2, "string")) {
+                            this.add_header(this.quoted_name(arena, toks, i + 2), 1);
+                        }
                     } else if (this.kind_eq(toks, i + 1, "identifier") &&
                                this.lex_eq(arena, toks, i + 1, "c") &&
                                (this.kind_eq(toks, i + 2, "<") ||
                                 this.kind_eq(toks, i + 2, "string"))) {
-                        // `import c <header>` / `import c "header"` - C interop.
+                        // `import c <header>` / `import c "header"` - H9.8:
+                        // same handling with the C spelling.
+                        if (this.kind_eq(toks, i + 2, "<")) {
+                            this.add_header(this.angle_name(arena, toks, i + 2, n), 0);
+                        } else {
+                            this.add_header(this.quoted_name(arena, toks, i + 2), 0);
+                        }
                     } else if (this.kind_eq(toks, i + 1, "string")) {
                         // `import "name";` - strip the two quote characters when
                         // present (the oracle does not unescape; len < 2 keeps

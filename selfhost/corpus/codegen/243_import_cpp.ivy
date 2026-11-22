@@ -1,0 +1,10 @@
+// H9.8: `import cpp` with a local header (compiled into an object at link
+// time) plus a system header (declaration-only).  Exit = a8_add(20, 22) = 42.
+import cpp "243_helper.hpp";
+import cpp <cstdint>;
+
+extern "C" int32 a8_add(int32 a, int32 b);
+
+int32 main() {
+    return a8_add(20, 22);
+}

@@ -24,6 +24,13 @@
 # contains a space, because `system()` runs through cmd.exe and the quoting in
 # `Linker::link_text` must survive it.
 #
+# H9.8: fixtures that use `import cpp "local.hpp"` / `import c "local.h"` are
+# linked with those local headers too.  The harness resolves them the way the
+# oracle does (source directory first), passes them to `linkdrive`, and the
+# selfhost linker compiles them with `-x c++ -c` / `-x c -c` exactly like
+# `codegen.cpp:2869-2960`.  The comparison stays end-to-end: both executables
+# must print the same bytes and exit with the same status.
+#
 # Every artefact (.obj/.ivm/.exe) is written under a fresh per-run directory in
 # TEMP; nothing is written into the repository working tree.
 #
@@ -47,7 +54,9 @@ param(
         "105_print_ref_char.ivy",
         "164_printf_basic.ivy",
         "235_inherit_virtual_dtor.ivy",
-        "242_move_struct.ivy"
+        "242_move_struct.ivy",
+        "243_import_cpp.ivy",
+        "244_import_c.ivy"
     ),
     [string]$NegativeFile = "01_return_const.ivy",
     [string]$EmitFailFile = "103_print_ref.ivy"
@@ -80,6 +89,10 @@ $rtSpellings = @(($repo.Replace('\', '/') + "/build/Release/ivyrt.lib"),
                  ($IvyrtLib -replace '\\', '/'), $IvyrtLib)
 function Normalize-Rt([string]$text) {
     foreach ($p in $rtSpellings) { $text = $text.Replace($p, "<RT>") }
+    # H9.7: the selfhost linker passes `-Wl,/Brepro` (reproducible PE) and the
+    # oracle does not, so the command line in a link-failure diagnostic has one
+    # extra flag on the selfhost side.
+    $text = $text.Replace(" -Wl,/Brepro", "")
     return $text
 }
 
@@ -347,6 +360,30 @@ function Get-FixtureArg([string]$full) {
     return $full
 }
 
+# H9.8: local headers named by `import cpp` / `import c`, resolved like the
+# oracle (`main.cpp:1207-1260`): `<source dir>/<name>` first; an angle header
+# that is not on disk is a system header and stays declaration-only.  Returns
+# the paths in the spelling the oracle would use (relative to the repository).
+function Get-ImportHeaders([string]$srcArg, [string]$fullSrc) {
+    $text = [System.IO.File]::ReadAllText($fullSrc)
+    $parent = Split-Path $srcArg -Parent
+    $cpp = New-Object System.Collections.Generic.List[string]
+    $c = New-Object System.Collections.Generic.List[string]
+    foreach ($m in [regex]::Matches($text, 'import\s+cpp\s+(?:<([^>]*)>|"([^"]*)")')) {
+        $n = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+        if (-not $n) { continue }
+        $cand = if ($parent) { Join-Path $parent $n } else { $n }
+        if (Test-Path -LiteralPath (Join-Path $repo $cand)) { $cpp.Add($cand) }
+    }
+    foreach ($m in [regex]::Matches($text, 'import\s+c\s+(?:<([^>]*)>|"([^"]*)")')) {
+        $n = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+        if (-not $n) { continue }
+        $cand = if ($parent) { Join-Path $parent $n } else { $n }
+        if (Test-Path -LiteralPath (Join-Path $repo $cand)) { $c.Add($cand) }
+    }
+    return @{ Cpp = $cpp; C = $c }
+}
+
 # ---------------------------------------------------------------------------
 # [4/6] Link smoke: selfhost Linker vs `ivy -o`, then run both executables.
 # ---------------------------------------------------------------------------
@@ -377,8 +414,13 @@ foreach ($name in $SmokeFiles) {
     # Selfhost link: linkdrive emits <stem>__tmp.obj then runs clang++.
     $selfExe = Join-Path $outDir ($safe + ".self.exe")
     $ldIn = Join-Path $runDir ($safe + ".link.in")
+    $hdr = Get-ImportHeaders $arg $src
+    $hdrLines = $hdr.Cpp.Count.ToString() + "`n"
+    foreach ($h in $hdr.Cpp) { $hdrLines += $h + "`n" }
+    $hdrLines += $hdr.C.Count.ToString() + "`n"
+    foreach ($h in $hdr.C) { $hdrLines += $h + "`n" }
     [System.IO.File]::WriteAllText($ldIn,
-        ($irPath + "`n" + $selfExe + "`n" + $arg + "`n" + $IvyrtLib + "`n"),
+        ($irPath + "`n" + $selfExe + "`n" + $arg + "`n" + $IvyrtLib + "`n" + $hdrLines),
         (New-Object System.Text.UTF8Encoding($false)))
     $ldCode = Invoke-Separate $linkdriveExe @() $ldIn `
                   (Join-Path $runDir ($safe + ".link.out")) `

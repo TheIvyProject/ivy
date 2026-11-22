@@ -22,8 +22,8 @@ Deliverables:
 - `selfhost/codegen/H64_NOTES.md` (file này);
 - `PLAN.md` dòng H6.4.
 
-Ngoài phạm vi (document ở mục 11): object từ `import cpp` / `import c`, object
-module của D1, `--crt-static`, cross-compile.
+Ngoài phạm vi: `--crt-static`, cross-compile.  (H9.8 đã nối object từ
+`import cpp` / `import c`; object module D1 đi qua `add_module_object`.)
 
 Không sửa `src/**`, không rebuild oracle (27,031,552 bytes,
 mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`).
@@ -135,8 +135,9 @@ cấp bằng `__ivy_alloc` (Ivy không decay `char[1024]` thành `char*`).
 - thứ tự và khoảng trắng y hệt `codegen.cpp:2998-3011`;
 - `"<ivyrt>"` chỉ thêm khi `IVYRT_LIB_PATH` khác rỗng (driver truyền dòng 4
   rỗng để bỏ);
-- `--crt-static`, object `import cpp`/`import c`, object module D1 không có
-  trong subset nên không được nối vào.
+- `--crt-static` không có trong subset.  H9.8 nối object `import cpp`/
+  `import c` (sau object chương trình, trước object module D1, đúng
+  `codegen.cpp:2999-3008`).
 
 ## 6. `system()` và quoting của `cmd.exe`
 
@@ -271,9 +272,9 @@ object.
      giải, `CreateProcessA` thì không;
    - stderr/stdout của linker vẫn đi trực tiếp ra stderr/stdout của tiến trình
      như oracle.
-2. **Không nối object `import cpp` / `import c` / module D1.** Oracle thêm các
-   object đó vào cùng command line; selfhost chưa có frontend tương ứng. Mọi
-   fixture H6 đều đơn module, không import header.
+2. **Module D1.** Object module đi qua `add_module_object`; H9.8 thêm object
+   `import cpp` / `import c` do chính linker biên dịch (`-x c++ -c` /
+   `-x c -c`).
 3. **Không có `--crt-static`.** Oracle nối ` -Xclang --dependent-lib=libcmt`
    khi flag bật; port chưa có flag này (H7 sẽ thêm nếu cần).
 4. **Windows-only.** `_popen`/`_pclose` và cách quote của `cmd.exe` là hành vi

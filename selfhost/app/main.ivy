@@ -352,6 +352,10 @@ struct Driver {
             io::eprintln("{}", lk.err());
         } else if (code == 2) {
             io::eprintln("{}", lk.err());
+        } else if (code == 4) {
+            // H9.8: `import cpp` / `import c` header compile failure; the
+            // oracle's `error()` prints it at 0:0 like the other link errors.
+            io::eprintln("{}", lk.err());
         } else {
             io::eprint("linker failed (exit code ");
             io::eprint("{}", lk.link_rc());
@@ -419,6 +423,19 @@ struct Driver {
                         if (obj != (char*)0) {
                             lk.add_module_object(obj);
                         }
+                        i = i + 1;
+                    }
+                    // H9.8: local `import cpp` / `import c` headers.  The
+                    // linker compiles them and puts the objects before the
+                    // module objects (codegen.cpp:2869-2960, 2999-3008).
+                    i = 0;
+                    while (i < cg.cpp_header_count()) {
+                        lk.add_cpp_header(cg.cpp_header(i));
+                        i = i + 1;
+                    }
+                    i = 0;
+                    while (i < cg.c_header_count()) {
+                        lk.add_c_header(cg.c_header(i));
                         i = i + 1;
                     }
                     int rc = lk.link_text(ir, (unsigned long long) len, exe_path, ivyrt);

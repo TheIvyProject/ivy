@@ -6,10 +6,12 @@
 // D:\Cpp\Clang\include\llvm-c\*.h, with the opaque `LLVM*Ref` handles spelled
 // as `void*` and `uint64_t`/`size_t` spelled as `unsigned long long`.
 //
-// `import c <header>` is declaration-only in Ivy: the header is never parsed
-// or compiled, so the prototypes must be repeated here. The declarations are
-// module-private; importers use the exported `LlvmC` facade (thin pass-through
-// methods), because Ivy does not export `extern "C"` declarations.
+// `import c <header>` is declaration-only when the header is a system header:
+// it is never parsed or compiled, so the prototypes must be repeated here.  (A
+// local header found on disk is compiled into an object at link time, H9.8.)
+// The declarations are module-private; importers use the exported `LlvmC`
+// facade (thin pass-through methods), because Ivy does not export `extern "C"`
+// declarations.
 //
 // Calling convention for pointer arrays (`LLVMTypeRef *ParamTypes`,
 // `LLVMValueRef *Args`, ...): Ivy has no `T[]` -> `T**` decay, so allocate a
@@ -707,6 +709,30 @@ struct StrBuf {
         }
     }
 
+    // H9.8: append a non-negative decimal integer (header-object indices and
+    // linker exit codes).
+    void add_int(long v) {
+        unsafe {
+            char b[24];
+            long n = 0;
+            if (v == 0) {
+                b[0] = 48;
+                n = 1;
+            } else {
+                long x = v;
+                while (x > 0 && n < 24) {
+                    b[n] = (char) (48 + (x - ((x / 10) * 10)));
+                    x = x / 10;
+                    n = n + 1;
+                }
+            }
+            while (n > 0) {
+                n = n - 1;
+                this.add_char(b[n]);
+            }
+        }
+    }
+
     // Appends `"s"` - the oracle quotes every path it puts on the linker
     // command line (`codegen.cpp:2998-3011`).
     void add_quoted(const char* s) {
@@ -750,16 +776,21 @@ struct StrBuf {
 //   4. run `"<linker>" "<obj>" -o "<exe>" "<ivyrt>"` (every path quoted);
 //   5. delete the temp object on success, keep it on failure.
 //
-// Out of subset (documented in H64_NOTES.md): `import cpp` / `import c` header
-// objects, `-D1` module objects, `--crt-static`. The oracle appends those to
-// the same command line; none of them exist in the H6 corpus.
+// H9.8 ports the `import cpp` / `import c` header objects: each local header
+// the driver resolved is compiled with the linker (`-x c++ -c` / `-x c -c`)
+// into `<stem>__cpp<i>.obj` / `<stem>__c<i>.obj` and linked after the program
+// object (codegen.cpp:2869-2960, 2999-3008).  Still out of subset (documented
+// in H64_NOTES.md): `-D1` module objects and `--crt-static`; the driver adds
+// the module objects through `add_module_object`, and the corpus does not use
+// `--crt-static`.
 //
 // `code()` values: 0 success, 1 object emission failed, 2 no linker found,
-// 3 linker exited non-zero. `emit_code()` is the `ObjEmit` code (1-6) when
-// `code() == 1`. `link_rc()` is the linker process exit status when
-// `code() == 3`. `err()` is the detail message (no path prefix) and `cmd()`
-// is the exact command line handed to the linker (kept alive until the next
-// `link_text` call; the driver prints it in the failure diagnostic).
+// 3 linker exited non-zero, 4 an `import cpp`/`import c` header failed to
+// compile. `emit_code()` is the `ObjEmit` code (1-6) when `code() == 1`.
+// `link_rc()` is the linker process exit status when `code() == 3`. `err()` is
+// the detail message (no path prefix) and `cmd()` is the exact command line
+// handed to the linker (kept alive until the next `link_text` call; the driver
+// prints it in the failure diagnostic).
 // ---------------------------------------------------------------------------
 
 export struct Linker {
@@ -769,6 +800,9 @@ export struct Linker {
     long link_rc_;
     const char* err_;
     char* cmd_own_;
+    // H9.8: the last `clang++ -x ... -c` line, quoted in the failure
+    // diagnostic (the oracle includes it verbatim).
+    char* hdr_cmd_;
     // H8.1: the `.obj` files of the imported modules (D1).  The oracle
     // appends them to the command line right after the main object
     // (codegen.cpp:3005-3008); the driver fills them from the import list.
@@ -781,6 +815,17 @@ export struct Linker {
     char** extra_;
     long nextra_;
     long capextra_;
+    // H9.8: local `import cpp` / `import c` headers, resolved by the driver
+    // (`Cg::collect_headers`, mirroring main.cpp:1207-1260).  The oracle
+    // compiles each one with the linker (`-x c++` / `-x c`, codegen.cpp:2869-
+    // 2960) into `<stem>__cpp<i>.obj` / `<stem>__c<i>.obj` and links them
+    // between the program object and the module objects.
+    char** cpph_;
+    long ncpph_;
+    long capcpph_;
+    char** ch_;
+    long nch_;
+    long capch_;
 
     // `CodeGen::setModuleObjects` / `moduleObjPaths_.push_back` (D1).
     void add_module_object(const char* p) {
@@ -808,6 +853,58 @@ export struct Linker {
             char* pv = (char*) p;
             __ivy_memcpy((void*) ((char*) this.mods_ + (this.nmod_ * 8)), (void*) &pv, 8);
             this.nmod_ = this.nmod_ + 1;
+        }
+    }
+
+    // --- H9.8: `import cpp` / `import c` headers -----------------------------
+
+    void add_cpp_header(const char* p) {
+        unsafe {
+            if (this.ncpph_ >= this.capcpph_) {
+                long ncap = this.capcpph_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.ncpph_) {
+                    // H9.4 workaround (oracle bug H29), same as
+                    // `add_module_object`.
+                    char* v = this.cpph_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    k = k + 1;
+                }
+                if (this.cpph_ != (char**) 0) {
+                    __ivy_free((void*) this.cpph_);
+                }
+                this.cpph_ = nb;
+                this.capcpph_ = ncap;
+            }
+            char* pv = (char*) p;
+            __ivy_memcpy((void*) ((char*) this.cpph_ + (this.ncpph_ * 8)), (void*) &pv, 8);
+            this.ncpph_ = this.ncpph_ + 1;
+        }
+    }
+
+    void add_c_header(const char* p) {
+        unsafe {
+            if (this.nch_ >= this.capch_) {
+                long ncap = this.capch_ * 2;
+                if (ncap < 4) { ncap = 4; }
+                char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
+                long k = 0;
+                while (k < this.nch_) {
+                    char* v = this.ch_[k];
+                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    k = k + 1;
+                }
+                if (this.ch_ != (char**) 0) {
+                    __ivy_free((void*) this.ch_);
+                }
+                this.ch_ = nb;
+                this.capch_ = ncap;
+            }
+            char* pv = (char*) p;
+            __ivy_memcpy((void*) ((char*) this.ch_ + (this.nch_ * 8)), (void*) &pv, 8);
+            this.nch_ = this.nch_ + 1;
         }
     }
 
@@ -1219,6 +1316,69 @@ export struct Linker {
         }
     }
 
+    // H9.8: `<exe dir>/<stem>__cpp<i>.obj` / `<stem>__c<i>.obj`, exactly the
+    // oracle's `exeP.parent_path() / (exeP.stem() + "__cpp" + i + ".obj")`
+    // (codegen.cpp:2874-2875).
+    char* header_obj_path(const char* exe_path, long ix, long is_cpp) {
+        unsafe {
+            char* t = this.temp_obj_path(exe_path);
+            long n = (long) __ivy_strlen(t);
+            if (n >= 9) { n = n - 9; }  // drop "__tmp.obj"
+            StrBuf sb;
+            sb.setup((unsigned long long) (n + 24));
+            long k = 0;
+            while (k < n) { sb.add_char(t[k]); k = k + 1; }
+            if (is_cpp != 0) {
+                sb.add("__cpp");
+            } else {
+                sb.add("__c");
+            }
+            sb.add_int(ix);
+            sb.add(".obj");
+            char* r = __ivy_strdup(sb.str());
+            sb.release();
+            __ivy_free(t);
+            return r;
+        }
+        unsafe { return (char*)0; }
+    }
+
+    // `"<linker>" -x c++ -c "<header>" -o "<obj>"` (codegen.cpp:2876-2877).
+    // The command is kept in `hdr_cmd_` for the failure diagnostic.  Returns
+    // the process exit status (0 on success).  `system()` goes through cmd.exe,
+    // so run the line wrapped in one extra pair of quotes, like the link.
+    long compile_header(const char* linker, const char* header, const char* obj,
+                        long is_cpp) {
+        unsafe {
+            StrBuf c;
+            c.setup((unsigned long long) (__ivy_strlen(linker) +
+                     __ivy_strlen(header) + __ivy_strlen(obj) + 48));
+            c.add_quoted(linker);
+            c.add(" -x ");
+            if (is_cpp != 0) {
+                c.add("c++");
+            } else {
+                c.add("c");
+            }
+            c.add(" -c ");
+            c.add_quoted(header);
+            c.add(" -o ");
+            c.add_quoted(obj);
+            this.hdr_cmd_ = __ivy_strdup(c.str());
+
+            StrBuf run;
+            run.setup((unsigned long long) (c.length() + 4));
+            run.add_char(34);
+            run.add(c.str());
+            run.add_char(34);
+            int rc = system(run.str());
+            run.release();
+            c.release();
+            return (long) rc;
+        }
+        return 1;
+    }
+
     // `IVY_LINKER` first, then `where clang++` (codegen.cpp:2830-2860).
     // Returns an owned copy, or null when neither yields a path.
     char* find_linker() {
@@ -1288,6 +1448,81 @@ export struct Linker {
                 return 2;
             }
 
+            // 3b) H9.8: compile the `import cpp` / `import c` headers into
+            //     temporary objects (codegen.cpp:2869-2960).  The objects are
+            //     linked after the program object and before the modules.
+            long ntot = this.ncpph_ + this.nch_;
+            char** hobj = (char**) __ivy_alloc((unsigned long long) ((ntot + 1) * 8));
+            long nh = 0;
+            long hk = 0;
+            while (hk < this.ncpph_) {
+                char* hv = this.cpph_[hk];
+                char* op = this.header_obj_path(exe_path, hk, 1);
+                long hrc = this.compile_header(linker, hv, op, 1);
+                if (hrc != 0) {
+                    StrBuf m;
+                    m.setup((unsigned long long) (__ivy_strlen(hv) +
+                             __ivy_strlen(this.hdr_cmd_) + 80));
+                    m.add("failed to compile C++ header '");
+                    m.add(hv);
+                    m.add("' (exit code ");
+                    m.add_int(hrc);
+                    m.add("): ");
+                    m.add(this.hdr_cmd_);
+                    this.err_ = m.str();  // kept for diagnostics
+                    long j = 0;
+                    while (j < nh) {
+                        remove(hobj[j]);
+                        j = j + 1;
+                    }
+                    remove(obj_path);
+                    __ivy_free((void*) hobj);
+                    __ivy_free(op);
+                    __ivy_free(linker);
+                    __ivy_free(obj_path);
+                    this.code_ = 4;
+                    return 4;
+                }
+                char* pv = op;
+                __ivy_memcpy((void*) ((char*) hobj + (nh * 8)), (void*) &pv, 8);
+                nh = nh + 1;
+                hk = hk + 1;
+            }
+            hk = 0;
+            while (hk < this.nch_) {
+                char* hv = this.ch_[hk];
+                char* op = this.header_obj_path(exe_path, hk, 0);
+                long hrc = this.compile_header(linker, hv, op, 0);
+                if (hrc != 0) {
+                    StrBuf m;
+                    m.setup((unsigned long long) (__ivy_strlen(hv) +
+                             __ivy_strlen(this.hdr_cmd_) + 80));
+                    m.add("failed to compile C header '");
+                    m.add(hv);
+                    m.add("' (exit code ");
+                    m.add_int(hrc);
+                    m.add("): ");
+                    m.add(this.hdr_cmd_);
+                    this.err_ = m.str();
+                    long j = 0;
+                    while (j < nh) {
+                        remove(hobj[j]);
+                        j = j + 1;
+                    }
+                    remove(obj_path);
+                    __ivy_free((void*) hobj);
+                    __ivy_free(op);
+                    __ivy_free(linker);
+                    __ivy_free(obj_path);
+                    this.code_ = 4;
+                    return 4;
+                }
+                char* pv = op;
+                __ivy_memcpy((void*) ((char*) hobj + (nh * 8)), (void*) &pv, 8);
+                nh = nh + 1;
+                hk = hk + 1;
+            }
+
             // 4) Build the command line: "linker" "obj" ["mods"...] -o "exe"
             //    ["ivyrt"], or with `--self-link` the harness spelling
             //    "linker" "obj" ["mods"...] "ivyrt" [extras] -o "exe".
@@ -1296,6 +1531,13 @@ export struct Linker {
             cmd.add_quoted(linker);
             cmd.add_char(32);
             cmd.add_quoted(obj_path);
+            // H9.8: header objects first (codegen.cpp:2999-3004).
+            long ho = 0;
+            while (ho < nh) {
+                cmd.add_char(32);
+                cmd.add_quoted(hobj[ho]);
+                ho = ho + 1;
+            }
             // D1: imported module objects, before `-o` (codegen.cpp:3005-3008).
             long mo = 0;
             while (mo < this.nmod_) {
@@ -1361,8 +1603,15 @@ export struct Linker {
                 return 3;
             }
 
-            // 6) Clean up the temporary object file.
+            // 6) Clean up the temporary object files (codegen.cpp:3057-3061).
             remove(obj_path);
+            ho = 0;
+            while (ho < nh) {
+                remove(hobj[ho]);
+                __ivy_free(hobj[ho]);
+                ho = ho + 1;
+            }
+            __ivy_free((void*) hobj);
             __ivy_free(linker);
             __ivy_free(obj_path);
             return 0;

@@ -1,0 +1,10 @@
+// H9.8: `import c` with a local header (compiled with `-x c`) plus a system
+// header (declaration-only).  Exit = a8_mul(6, 7) = 42.
+import c "244_helper.h";
+import c <stdint.h>;
+
+extern "C" int32 a8_mul(int32 a, int32 b);
+
+int32 main() {
+    return a8_mul(6, 7);
+}

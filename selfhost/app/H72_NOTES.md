@@ -84,8 +84,8 @@ dấu `\`), khớp oracle.
 
 - điều kiện vòng: `i + 2 < n` (stream luôn có `eof`);
 - chỉ xét token `keyword` với lexeme `import`;
-- bỏ qua `import cpp ...` (token kế là keyword `cpp`);
-- bỏ qua `import c ...` khi token sau `c` là `<` hoặc `string`;
+- bỏ qua `import cpp ...` / `import c ...` khi phân giải module; từ H9.8 vẫn
+  ghi lại tên header (kèm kind) để linker biên dịch;
 - `import "<name>";` → lấy lexeme, bỏ 2 ký tự quote đầu/cuối khi `len >= 2`
   (không unescape; `len < 2` giữ nguyên lexeme);
 - `import <ident>` → tên là lexeme của identifier;

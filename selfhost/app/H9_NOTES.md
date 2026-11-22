@@ -739,3 +739,66 @@ va release note co the cong bo ca ba cung luc.
 | CI `44937668286` (dogfood, `9436e27`) | **xanh 6m26s**; bootstrap 5m10s: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical, golden **12337/0**; `--version` = `ivy 0.5.0 (9436e27999d3)`; SHA `7B3E82D9…3172A5`, 27 131 904 B |
 | CI `44937692833` (repro, dispatch, `9436e27`) | **xanh 1m37s** (2 bootstrap ~37s): 83 artifact identical; SHA trung dogfood |
 | oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |
+
+# H9.8 - `import cpp` parity (va `import c`)
+
+## 1. Pham vi
+
+Oracle bien dich header C++ local trong `import cpp "header"` bang chinh linker
+(`clang++ -x c++ -c`, `codegen.cpp:2869-2910`) roi noi object vao executable;
+`import c` di qua cung duong voi `-x c` (`codegen.cpp:2912-2960`). Selfhost
+truoc H9.8 chi nhan cu phap va bo qua header, nen chuong trinh co header local
+link that bai. H9.8 port ca hai (cung mot co che, khac moi `-x c++` / `-x c`).
+
+## 2. Thu thap va phan giai header
+
+- `selfhost/app/imports.ivy`: `scan` ghi them `HdrRec { name, is_cpp }` theo
+  thu tu khai bao (oracle: `TranslationUnit::imports`). Ten header dung quy tac
+  parser: form quote bo 2 dau nhay, form `<...>` noi lexeme bang mot dau cach
+  (`parser.cpp:1948-1957`). System header khong co tren dia van duoc ghi ten,
+  nhung se bi bo qua o buoc phan giai.
+- `selfhost/app/pipeline.ivy`: `Cg::collect_headers(path, includes)` chay ngay
+  sau pre-scan: `<thu muc source>/<name>` truoc, roi tung `-I` theo thu tu
+  (`main.cpp:1207-1260`); ten khong ton tai = system header, khong sinh object.
+  `Cg` giu danh sach path (cpp truoc, c sau) cho driver.
+
+## 3. Linker
+
+`selfhost/codegen/codegen.ivy`, `Linker`:
+
+- `add_cpp_header` / `add_c_header` (cung kieu mang + workaround H29).
+- `header_obj_path`: `<exe dir>/<stem>__cpp<i>.obj` / `__c<i>.obj`, dung
+  `exeP.parent_path()/stem` nhu oracle.
+- `link_text`: sau khi tim linker, bien dich tung header bang
+  `"<linker>" -x c++ -c "<header>" -o "<obj>"` (hoac `-x c`), qua `system()`
+  voi mot cap quote bao ngoai nhu lenh link. Loi in
+  `failed to compile C++ header '<h>' (exit code N): <cmd>` (code 4; driver in
+  o `0:0` giong oracle), xoa object chinh + cac header object da tao.
+- Command line: object chuong trinh, header cpp, header c, module D1, `-o`,
+  `"<ivyrt>"`; thanh cong thi xoa het object tam (`codegen.cpp:2999-3061`).
+
+`selfhost/app/main.ivy` truyen danh sach tu `Cg` sang `Linker` truoc
+`link_text`; `selfhost/codegen/linkdrive.ivy` nhan them 2 danh sach tuy chon
+tu stdin de harness kiem tra rieng phan link.
+
+## 4. Fixture va harness
+
+- `selfhost/corpus/codegen/243_import_cpp.ivy` + `243_helper.hpp`:
+  `import cpp "243_helper.hpp"` (header local, `extern "C"`), them
+  `import cpp <cstdint>` (system) de kiem tra nhanh declaration-only.
+- `selfhost/corpus/codegen/244_import_c.ivy` + `244_helper.h`: cung bai toan
+  voi `import c` / `-x c`.
+- `selfhost/codegen/build_link_smoke.ps1`: tu doc fixture, phan giai header
+  giong oracle (thu muc source), truyen cho `linkdrive`, so executable +
+  stdout/stderr/exit voi oracle. Chuan hoa ` -Wl,/Brepro` trong chan doan
+  link-failure (oracle khong co flag H9.7 nay).
+
+## 5. Ket qua (2026-11-22)
+
+| Kiem tra | Ket qua |
+|---|---|
+| `build.ps1 -SelfLink -Golden` (HEAD `0c9c960` + H9.8) | **PASS**: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical SHA-256 `8D66DEF0…90D9` (27 138 560 B), golden **12337/0** |
+| `build_link_smoke.ps1` | **PASS 10/10** fixture (them `243`/`244`), negative 2/2, space-path 1/1 |
+| `driver_smoke.ps1 -SkipOwn -Filter 24[34]*` | **PASS**: `--llvm` 4/4, `-c` 4/4, link+run 4/4 |
+| driver stage1 vs oracle tren `243`/`244` | ca hai build exit 0, chay exit **42** |
+| oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |
