@@ -19310,3 +19310,158 @@ selfhost/corpus/pp/predef/redef_line.ivy:1:9: error: cannot redefine predefined 
 selfhost/corpus/pp/predef/undef_ivy.ivy:1:8: error: cannot #undef predefined macro: __ivy__
 @@ selfhost/corpus/pp/predef/undef_line.ivy 94 1
 selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined macro: __LINE__
+@@ selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy 419 0
+function main
+  return int32_t()
+  block
+    decl S s
+    expr
+      assign '=' : int32_t
+        member . x
+          ident s
+        int 1
+    unsafe
+      block
+        decl S* p =
+          prefix '&' : S*
+            ident s
+        expr
+          assign '=' : int32_t
+            member -> x
+              ident p
+            int 7
+        return
+          member -> x
+            ident p
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 2153 0
+function make
+  return Pair(int64_t base)
+  block
+    decl Pair p
+    expr
+      assign '=' : int64_t
+        member . a
+          ident p
+        ident base
+    expr
+      assign '=' : int64_t
+        member . b
+          ident p
+        binary '+' : int64_t
+          ident base
+          int 1
+    return
+      ident p
+
+function main
+  return int32_t()
+  block
+    decl Pair keep
+    expr
+      assign '=' : int64_t
+        member . a
+          ident keep
+        int 100
+    expr
+      assign '=' : int64_t
+        member . b
+          ident keep
+        int 200
+    decl Pair pad1
+    expr
+      assign '=' : int64_t
+        member . a
+          ident pad1
+        int 1
+    expr
+      assign '=' : int64_t
+        member . b
+          ident pad1
+        int 2
+    decl Pair pad2
+    expr
+      assign '=' : int64_t
+        member . a
+          ident pad2
+        int 3
+    expr
+      assign '=' : int64_t
+        member . b
+          ident pad2
+        int 4
+    decl Pair pad3
+    expr
+      assign '=' : int64_t
+        member . a
+          ident pad3
+        int 5
+    expr
+      assign '=' : int64_t
+        member . b
+          ident pad3
+        int 6
+    decl Pair got =
+      call 'make' : Pair
+        int 7
+    if
+      binary '!=' : bool
+        member . a
+          ident keep
+        int 100
+      block
+        return
+          int 1
+    if
+      binary '!=' : bool
+        member . b
+          ident keep
+        int 200
+      block
+        return
+          int 2
+    if
+      binary '!=' : bool
+        member . a
+          ident pad1
+        int 1
+      block
+        return
+          int 3
+    if
+      binary '!=' : bool
+        member . b
+          ident pad2
+        int 4
+      block
+        return
+          int 4
+    if
+      binary '!=' : bool
+        member . a
+          ident pad3
+        int 5
+      block
+        return
+          int 5
+    if
+      binary '!=' : bool
+        member . a
+          ident got
+        int 7
+      block
+        return
+          int 6
+    if
+      binary '!=' : bool
+        member . b
+          ident got
+        int 8
+      block
+        return
+          int 7
+    return
+      int 15
+

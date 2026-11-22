@@ -901,6 +901,19 @@ Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle
 - `check_golden.ps1` không đổi format; record `expected:*` vẫn được so byte
   như record oracle.
 
+**H10.1 — `&<local struct>` + record sống qua call — ✅ (2026-11-22)**
+
+- **B-C3**: `hir/hir_builder.ivy` `build_unary` chỉ đòi `operator&` cho operand
+  struct khi toán tử **không phải** `&`; `&` đi theo đường address-of thường và
+  nhận slot của local. Fixture `h10_B-C3_addr_of_struct` (exit `7`).
+- **C19**: không đổi code; `codegen/codegen.ivy` đặt module data layout từ
+  `TargetMachine` trước `emit_to_file`, nên record local sống qua call trả
+  record không bị hỏng khung stack. Fixture `h10_C19_record_across_call`
+  (exit `15`) khoá hành vi.
+- Golden: 2 fixture × 10 mode (26 record), provenance `expected:H10.1`;
+  `build.ps1 -SelfLink -Golden` → 12365 checks / 0 failures, `check_repro.ps1`
+  xanh. Chi tiết ở `selfhost/app/H10_NOTES.md` H10.1.
+
 **Bảng kế hoạch**
 
 | Mục | ID | Nội dung sửa | Port chính | Fixture / golden ảnh hưởng |

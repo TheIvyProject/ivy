@@ -1050,3 +1050,5 @@ selfhost/corpus/pp/predef/redef_cplusplus.ivy	-	0
 selfhost/corpus/pp/predef/redef_line.ivy	-	0
 selfhost/corpus/pp/predef/undef_ivy.ivy	-	0
 selfhost/corpus/pp/predef/undef_line.ivy	-	0
+selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy	DE0C70B54CDC28BB434A07C0EAC85925731BC78E753A2BF0B9C27F31A8375EBD	140
+selfhost/corpus/codegen/h10_C19_record_across_call.ivy	D6DD5520918B02D70E68CD0338446779E8497487C3B7FD19F3965097FA6A21A9	636

@@ -1,0 +1,12 @@
+struct S { int32 x; };
+
+int32 main() {
+    S s;
+    s.x = 1;
+    unsafe {
+        S* p = &s;
+        p->x = 7;
+        return p->x;
+    }
+    return 0;
+}

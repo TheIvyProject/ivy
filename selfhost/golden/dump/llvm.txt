@@ -25048,3 +25048,159 @@ selfhost/corpus/pp/predef/redef_line.ivy:1:9: error: cannot redefine predefined 
 selfhost/corpus/pp/predef/undef_ivy.ivy:1:8: error: cannot #undef predefined macro: __ivy__
 @@ selfhost/corpus/pp/predef/undef_line.ivy 94 1
 selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined macro: __LINE__
+@@ selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy 647 0
+; LLVM IR emitted by ivy
+%struct.S = type { i32 }
+
+define i32 @ivy_main() {
+%s.0 = alloca %struct.S
+%p.1 = alloca ptr
+br label %bb0
+bb0:
+store %struct.S zeroinitializer, ptr %s.0
+%tmp.0 = getelementptr %struct.S, ptr %s.0, i32 0, i32 0
+store i32 1, ptr %tmp.0
+store ptr %s.0, ptr %p.1
+%tmp.1 = load ptr, ptr %p.1
+%tmp.2 = getelementptr %struct.S, ptr %tmp.1, i32 0, i32 0
+store i32 7, ptr %tmp.2
+%tmp.3 = load ptr, ptr %p.1
+%tmp.4 = getelementptr %struct.S, ptr %tmp.3, i32 0, i32 0
+%tmp.5 = load i32, ptr %tmp.4
+ret i32 %tmp.5
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 3770 0
+; LLVM IR emitted by ivy
+%struct.Pair = type { i64, i64 }
+
+define %struct.Pair @"?make@@YH_J@Z"(i64 %arg0) {
+%base.0 = alloca i64
+store i64 %arg0, ptr %base.0
+%p.1 = alloca %struct.Pair
+br label %bb0
+bb0:
+store %struct.Pair zeroinitializer, ptr %p.1
+%tmp.0 = getelementptr %struct.Pair, ptr %p.1, i32 0, i32 0
+%tmp.1 = load i64, ptr %base.0
+store i64 %tmp.1, ptr %tmp.0
+%tmp.2 = getelementptr %struct.Pair, ptr %p.1, i32 0, i32 1
+%tmp.3 = load i64, ptr %base.0
+%tmp.4 = sext i32 1 to i64
+%tmp.5 = add i64 %tmp.3, %tmp.4
+store i64 %tmp.5, ptr %tmp.2
+%tmp.6 = load %struct.Pair, ptr %p.1
+ret %struct.Pair %tmp.6
+}
+
+define i32 @ivy_main() {
+%keep.0 = alloca %struct.Pair
+%pad1.1 = alloca %struct.Pair
+%pad2.2 = alloca %struct.Pair
+%pad3.3 = alloca %struct.Pair
+%got.4 = alloca %struct.Pair
+br label %bb0
+bb0:
+store %struct.Pair zeroinitializer, ptr %keep.0
+%tmp.0 = getelementptr %struct.Pair, ptr %keep.0, i32 0, i32 0
+%tmp.1 = sext i32 100 to i64
+store i64 %tmp.1, ptr %tmp.0
+%tmp.2 = getelementptr %struct.Pair, ptr %keep.0, i32 0, i32 1
+%tmp.3 = sext i32 200 to i64
+store i64 %tmp.3, ptr %tmp.2
+store %struct.Pair zeroinitializer, ptr %pad1.1
+%tmp.4 = getelementptr %struct.Pair, ptr %pad1.1, i32 0, i32 0
+%tmp.5 = sext i32 1 to i64
+store i64 %tmp.5, ptr %tmp.4
+%tmp.6 = getelementptr %struct.Pair, ptr %pad1.1, i32 0, i32 1
+%tmp.7 = sext i32 2 to i64
+store i64 %tmp.7, ptr %tmp.6
+store %struct.Pair zeroinitializer, ptr %pad2.2
+%tmp.8 = getelementptr %struct.Pair, ptr %pad2.2, i32 0, i32 0
+%tmp.9 = sext i32 3 to i64
+store i64 %tmp.9, ptr %tmp.8
+%tmp.10 = getelementptr %struct.Pair, ptr %pad2.2, i32 0, i32 1
+%tmp.11 = sext i32 4 to i64
+store i64 %tmp.11, ptr %tmp.10
+store %struct.Pair zeroinitializer, ptr %pad3.3
+%tmp.12 = getelementptr %struct.Pair, ptr %pad3.3, i32 0, i32 0
+%tmp.13 = sext i32 5 to i64
+store i64 %tmp.13, ptr %tmp.12
+%tmp.14 = getelementptr %struct.Pair, ptr %pad3.3, i32 0, i32 1
+%tmp.15 = sext i32 6 to i64
+store i64 %tmp.15, ptr %tmp.14
+%tmp.16 = sext i32 7 to i64
+%tmp.17 = call %struct.Pair @"?make@@YH_J@Z"(i64 %tmp.16)
+store %struct.Pair %tmp.17, ptr %got.4
+%tmp.18 = getelementptr %struct.Pair, ptr %keep.0, i32 0, i32 0
+%tmp.19 = load i64, ptr %tmp.18
+%tmp.20 = sext i32 100 to i64
+%tmp.21 = icmp ne i64 %tmp.19, %tmp.20
+br i1 %tmp.21, label %bb2, label %bb1
+bb1:
+%tmp.22 = getelementptr %struct.Pair, ptr %keep.0, i32 0, i32 1
+%tmp.23 = load i64, ptr %tmp.22
+%tmp.24 = sext i32 200 to i64
+%tmp.25 = icmp ne i64 %tmp.23, %tmp.24
+br i1 %tmp.25, label %bb4, label %bb3
+bb2:
+ret i32 1
+bb3:
+%tmp.26 = getelementptr %struct.Pair, ptr %pad1.1, i32 0, i32 0
+%tmp.27 = load i64, ptr %tmp.26
+%tmp.28 = sext i32 1 to i64
+%tmp.29 = icmp ne i64 %tmp.27, %tmp.28
+br i1 %tmp.29, label %bb6, label %bb5
+bb4:
+ret i32 2
+bb5:
+%tmp.30 = getelementptr %struct.Pair, ptr %pad2.2, i32 0, i32 1
+%tmp.31 = load i64, ptr %tmp.30
+%tmp.32 = sext i32 4 to i64
+%tmp.33 = icmp ne i64 %tmp.31, %tmp.32
+br i1 %tmp.33, label %bb8, label %bb7
+bb6:
+ret i32 3
+bb7:
+%tmp.34 = getelementptr %struct.Pair, ptr %pad3.3, i32 0, i32 0
+%tmp.35 = load i64, ptr %tmp.34
+%tmp.36 = sext i32 5 to i64
+%tmp.37 = icmp ne i64 %tmp.35, %tmp.36
+br i1 %tmp.37, label %bb10, label %bb9
+bb8:
+ret i32 4
+bb9:
+%tmp.38 = getelementptr %struct.Pair, ptr %got.4, i32 0, i32 0
+%tmp.39 = load i64, ptr %tmp.38
+%tmp.40 = sext i32 7 to i64
+%tmp.41 = icmp ne i64 %tmp.39, %tmp.40
+br i1 %tmp.41, label %bb12, label %bb11
+bb10:
+ret i32 5
+bb11:
+%tmp.42 = getelementptr %struct.Pair, ptr %got.4, i32 0, i32 1
+%tmp.43 = load i64, ptr %tmp.42
+%tmp.44 = sext i32 8 to i64
+%tmp.45 = icmp ne i64 %tmp.43, %tmp.44
+br i1 %tmp.45, label %bb14, label %bb13
+bb12:
+ret i32 6
+bb13:
+ret i32 15
+bb14:
+ret i32 7
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+

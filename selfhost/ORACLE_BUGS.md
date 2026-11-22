@@ -116,7 +116,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **C16** | A | `collectExpr` **không** recurse vào argument của `new` và operand của `delete` → string literal/`io::print` bên trong không được pre-collect, global intern muộn, io runtime không emit | `codegen.cpp` (`collectExpr` New/Delete) | `emitter.ivy` ≈L3738 | `H62_NOTES.md` |
 | **C17** | A | `@__ivy_alloc`/`@__ivy_free` được suppress trùng: chỉ emit một lần dù nhiều `new`/`delete` | `codegen.cpp` (declare emission) | `emitter.ivy` ≈L187 | `H62_NOTES.md` |
 | **C18** | A | Struct local chưa khởi tạo được **zero-init** tại điểm khai báo (không phải ở entry) | `codegen.cpp` (`alloca` hoist) | `emitter.ivy` ≈L4556 | `H62_NOTES.md` |
-| **C19** | B | Record local **còn sống** khi gọi hàm trả record theo giá trị bị codegen làm hỏng khung stack (`setDataLayout("")`) | `codegen.cpp:2763` | — (port **không** tái hiện; tránh pattern trong code self-host) | `MIR_NOTES.md` §11.6 |
+| **C19** | B | Record local **còn sống** khi gọi hàm trả record theo giá trị bị codegen làm hỏng khung stack (`setDataLayout("")`) | `codegen.cpp:2763` | `selfhost/codegen/codegen.ivy`: module layout lấy từ TargetMachine **trước** `emit_to_file` (không tái hiện); fixture `h10_C19_record_across_call` (H10.1) | `MIR_NOTES.md` §11.6, `H10_NOTES.md` H10.1 |
 | **C20** | A | Octal escape trong string literal: `"\101"` → byte `0x01`, `"\1"` → `0x00` (bộ đọc bắt đầu từ chữ số mà `switch` đã tiêu thụ) | `codegen.cpp` (`readOctalEscape`) | `emitter.ivy` ≈L633/L657 (`emit_escaped`) | `H62_NOTES.md` §19 |
 
 ### 1.5 Runtime (`lib/ivyrt.c` — port sang Ivy ở H9.1)
@@ -289,7 +289,7 @@ trong corpus (xem §4).
 | ID | Oracle | Port | Lý do |
 |---|---|---|---|
 | **B-P5** | `lifetime<$a> template<...> fn` consume `<` **hai lần** → parse error (`parser.cpp:789` + `:1649`) | `parser.ivy` `parse_template_params` chỉ consume `<` một lần → **parse đúng** | Port không tái hiện double-`<`; corpus **không** đặt `lifetime<...>` trên template function (`LIFETIME_NOTES.md` §8.4) |
-| **B-C3** | `&<biến local kiểu struct>` làm oracle **crash** `0xC0000005` | `emitter.ivy` `lower_unary` ≈L2564: nếu không thấy slot, `fail("internal: address-of is not in the variable table")` | Port báo lỗi sạch, không crash; corpus tránh mẫu này (`MIR_NOTES.md` §11.7, `PLAN.md` L719) |
+| **B-C3** | `&<biến local kiểu struct>` làm oracle **crash** `0xC0000005` | `H10.1`: `hir_builder.ivy` `build_unary` không đòi `operator&` cho operand struct; `emitter.ivy` `lower_unary` hạ `&` về slot của local (nếu không thấy slot vẫn `fail` sạch) | Port sinh địa chỉ đúng, không crash; fixture `h10_B-C3_addr_of_struct` (`H10_NOTES.md` H10.1) |
 | **B-C19** | Record local sống qua call → machine code hỏng | Port **không** viết code theo pattern này; không tái hiện | Bug machine-code, không lộ ở IR; corpus H5.1 không có mẫu |
 | **B-R2** | `__ivy_fmt_int`/`__ivy_fmt_float` trả con trỏ vào **static buffer dùng chung** (`lib/ivyrt.c:61-69`); hai kết quả giữ lại cùng lúc sẽ thấy cùng nội dung | `std/rt.ivy` (H9.1) `malloc` buffer mới mỗi lần gọi → hai kết quả độc lập, nhưng **mỗi lần format là một lần cấp phát không được free** (codegen sinh ra truyền thẳng kết quả cho `_write`) | Ivy subset **không có** biến file-scope/`static` local nên không thể tái hiện buffer dùng chung. Khác biệt chỉ lộ khi caller giữ ≥ 2 kết quả, hoặc khi chương trình format trong vòng lặp dài (rò rỉ ~32/64 B mỗi lần). Không fixture nào trong corpus làm vậy; follow-up: arena/scratch buffer trong runtime hoặc để codegen tự giữ buffer (H10) |
 

@@ -1,10 +1,14 @@
 format=1
-fixtures=1052
+fixtures=1054
 modes=lex,tokens,ast,hir,mir,llvm,c,o,run,link
 interp_fixtures=23
-link_fixtures=249
+link_fixtures=251
 nondet=2
 oracle_sha256=FFB376CF7808A18C226BB8F457A027EB28E68B48EB184FB217CD0CCEFF78313E
 runtime_sha256=F8A92ACC779041D5EFC2739CFAB05E4131D39187D3F7525EA8BBC9FE1FA51EEF
 runtime_size=8711
 note=dump text is CRLF-normalized; objects, preprocessed files and run output are byte-exact
+updated=2026-11-22T08:42:01Z
+updated_reason=H10.1
+provenance=selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy|expected:H10.1
+provenance=selfhost/corpus/codegen/h10_C19_record_across_call.ivy|expected:H10.1

@@ -70,11 +70,46 @@
     từ chối;
   - golden thật trong repo không bị sửa (`git status` chỉ có script mới).
 
+### H10.1 - `&<local struct>` và record sống qua call
+
+- **Bug**: **B-C3** - `&<biến local kiểu struct>` làm oracle crash
+  `0xC0000005`; bản port cũ báo lỗi `no matching operator '&'` vì
+  `build_unary` coi mọi operand struct là cần `operator&` (7.4). **C19** -
+  oracle làm hỏng khung stack khi một record local còn sống trong lúc gọi hàm
+  trả record theo giá trị (`setDataLayout("")`), bug machine-code không lộ ở IR.
+- **Sửa**:
+  - `hir/hir_builder.ivy` `build_unary`: nhánh "struct operand cần operator
+    overload" bỏ qua khi toán tử là `&` (`this.seq(a.sval, "&") == false`).
+    `&` không nằm trong tập operator nạp chồng; nó đi tiếp xuống đường
+    address-of bình thường và nhận địa chỉ local.
+  - `codegen/codegen.ivy`: không đổi code. Đường emit hiện lấy data layout từ
+    `TargetMachine` (`create_target_data_layout` + `set_module_data_layout`)
+    **trước** `target_machine_emit_to_file`, nên pattern C19 không tái hiện.
+    Fixture mới khoá hành vi này.
+- **Fixture**:
+  - `selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy` - `S* p = &s`,
+    ghi/đọc qua `p->x`; kỳ vọng exit `7`.
+  - `selfhost/corpus/codegen/h10_C19_record_across_call.ivy` - ba record local
+    (`keep`, `pad1..3`) còn sống qua `Pair got = make(7)`; kiểm tra cả record
+    cũ lẫn record trả về; kỳ vọng exit `15`.
+- **Golden**: thêm 2 fixture (10 mode mỗi fixture, 26 record; +2 `corpus.txt`)
+  qua `update_golden.ps1 -Reason H10.1 -Fixture "h10_*"`; `manifest.txt`
+  provenance `expected:H10.1`; `link/stdout.txt` của B-C3 không có output,
+  C19 không có output (chỉ exit code).
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, self-link SHA
+  `4892DB3E0D02150279B47D355BABECD4A81336FD342D98169F0BE0FDE593B021`
+  (27 138 560 B), golden **12365 checks / 0 failures** (1054 fixture).
+  `check_repro.ps1` → PASS. Trước khi freeze, driver stage1 chạy trực tiếp hai
+  fixture: link 0, exit `7` và `15`.
+- **Ghi chú**: đây là bug **loại B** (port không tái hiện oracle); sau H10.1
+  port làm đúng thay vì báo lỗi, nên `ORACLE_BUGS.md` §3 cập nhật lại mô tả
+  port. Không đổi hành vi của bất kỳ fixture cũ nào.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
 | H10.0 | - | `selfhost/update_golden.ps1` (golden hậu-oracle, provenance) | ✅ |
-| H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ☐ |
+| H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ✅ |
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ☐ |
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ☐ |
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ☐ |

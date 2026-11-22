@@ -18816,3 +18816,151 @@ selfhost/corpus/pp/predef/redef_line.ivy:1:9: error: cannot redefine predefined 
 selfhost/corpus/pp/predef/undef_ivy.ivy:1:8: error: cannot #undef predefined macro: __ivy__
 @@ selfhost/corpus/pp/predef/undef_line.ivy 94 1
 selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined macro: __LINE__
+@@ selfhost/corpus/codegen/h10_B-C3_addr_of_struct.ivy 400 0
+function main
+  return int32_t()
+  block 0
+    alloca S s
+    store
+      member .x : int32_t
+        ident s
+      int 1
+    alloca S* p [unsafe]
+      prefix '&' : S* [lt: local]
+        ident s
+    store [unsafe]
+      member ->x : int32_t [lt: local]
+        ident p [lt: local]
+      int 7
+    ret [unsafe]
+      member ->x : int32_t [lt: local]
+        ident p [lt: local]
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 2093 0
+function make
+  return Pair(int64_t base)
+  block 0
+    alloca Pair p
+    store
+      member .a : int64_t
+        ident p
+      ident base
+    store
+      member .b : int64_t
+        ident p
+      binary '+' : int64_t
+        ident base
+        int 1
+    ret
+      ident p
+
+function main
+  return int32_t()
+  block 0
+    alloca Pair keep
+    store
+      member .a : int64_t
+        ident keep
+      int 100
+    store
+      member .b : int64_t
+        ident keep
+      int 200
+    alloca Pair pad1
+    store
+      member .a : int64_t
+        ident pad1
+      int 1
+    store
+      member .b : int64_t
+        ident pad1
+      int 2
+    alloca Pair pad2
+    store
+      member .a : int64_t
+        ident pad2
+      int 3
+    store
+      member .b : int64_t
+        ident pad2
+      int 4
+    alloca Pair pad3
+    store
+      member .a : int64_t
+        ident pad3
+      int 5
+    store
+      member .b : int64_t
+        ident pad3
+      int 6
+    alloca Pair got
+      call : Pair [lt: unknown]
+        int 7
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident keep
+        int 100
+  block 1
+    condbranch
+      binary '!=' : bool
+        member .b : int64_t
+          ident keep
+        int 200
+  block 2
+    ret
+      int 1
+  block 3
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident pad1
+        int 1
+  block 4
+    ret
+      int 2
+  block 5
+    condbranch
+      binary '!=' : bool
+        member .b : int64_t
+          ident pad2
+        int 4
+  block 6
+    ret
+      int 3
+  block 7
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident pad3
+        int 5
+  block 8
+    ret
+      int 4
+  block 9
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t [lt: unknown]
+          ident got [lt: unknown]
+        int 7
+  block 10
+    ret
+      int 5
+  block 11
+    condbranch
+      binary '!=' : bool
+        member .b : int64_t [lt: unknown]
+          ident got [lt: unknown]
+        int 8
+  block 12
+    ret
+      int 6
+  block 13
+    ret
+      int 15
+  block 14
+    ret
+      int 7
+

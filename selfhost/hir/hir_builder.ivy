@@ -6496,8 +6496,11 @@ export struct HirBuilder {
         e.sval = a.sval;
         e.flag = a.flag;
         e.a = opnd;
-        if (ot.ptr_depth == 0 && this.is_struct_name(ot.base)) {
-            // A struct operand needs an operator overload (7.4).
+        if (ot.ptr_depth == 0 && this.is_struct_name(ot.base) && this.seq(a.sval, "&") == false) {
+            // A struct operand needs an operator overload (7.4).  `&` is not
+            // overloaded in the subset: H10.1 takes the address of any local,
+            // including a struct, instead of demanding operator& (the oracle
+            // reached codegen here and crashed, B-C3).
             long callIdx = this.try_operator_overload(opnd, a.sval, -1, a.line, a.col);
             if (callIdx >= 0) {
                 return callIdx;
