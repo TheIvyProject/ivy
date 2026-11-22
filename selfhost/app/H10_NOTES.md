@@ -28,11 +28,52 @@
 - **Ghi chú**: <ảnh hưởng, ngoại lệ, việc còn lại>
 ```
 
-## 2. Trạng thái
+### H10.0 - Công cụ golden hậu-oracle
 
+- **Mục đích**: thay `freeze_golden.ps1` sau khi oracle bị xoá. Chạy driver
+  self-host đã build (stage1) trên đúng `-Fixture`/`-Modes` được chọn và chỉ
+  ghi lại các record thuộc phạm vi đó.
+- **Cách dùng**:
+  ```powershell
+  pwsh -NoProfile -File selfhost/update_golden.ps1 -Driver <stage1>\ivy_selfhost.exe `
+      -Reason H10.4 -Fixture "h10_C1_*" -IvmDir <std-ivm>
+  pwsh -NoProfile -File selfhost/update_golden.ps1 ... -Fixture 245_move_pointer.ivy -Modes llvm,link
+  pwsh -NoProfile -File selfhost/update_golden.ps1 ... -Fixture "*" -Modes c
+  pwsh -NoProfile -File selfhost/update_golden.ps1 ... -DryRun
+  ```
+- **Định dạng**: y hệt `freeze_golden.ps1` (`@@ <key> <nbytes> <exit>` + byte
+  thô, CRLF→LF, `<OUT>`/`<RT>`/`<CLANG>`, bỏ ` -Wl,/Brepro`). Chỉ ghi các file
+  thực sự đổi; record ngoài phạm vi giữ nguyên từng byte.
+- **Provenance**: `manifest.txt` nhận thêm dòng
+  `provenance=<fixture>|expected:H10.x` cho fixture vừa đổi; fixture không có
+  dòng provenance vẫn là baseline `oracle`. `oracle_sha256` được giữ làm mốc
+  lịch sử.
+- **An toàn**: bắt buộc `-Reason H10.x`; fixture mới chỉ được thêm vào
+  `corpus.txt` khi cập nhật đủ 10 mode; driver crash (exit âm) làm script dừng
+  trước khi ghi; mọi output compiler nằm trong TEMP riêng.
+- **Kiểm chứng (2026-11-22)**, stage1 dựng từ `56677e4`
+  (SHA-256 `23F5BCF7…C48EA`, 27 138 560 B), golden thử nghiệm là bản copy trong
+  TEMP:
+  - `-DryRun` trên `01_return_const.ivy -Modes lex`: `no golden changes`,
+    file golden không đổi;
+  - thêm fixture tạm `zz_h10_tool_test.ivy` với đủ 10 mode: **+10 record**,
+    `corpus.txt` +1, `manifest.txt` provenance `expected:H10.0`;
+    `check_golden.ps1 -Filter zz_h10_tool_test.ivy` → **11 checks / 0
+    failures**;
+  - chạy lại cùng lệnh: `no golden changes` (idempotent);
+  - sửa header exit của một record thành `1` rồi cập nhật `-Modes lex`:
+    **~1 record**, sửa lại đúng; check xanh trở lại;
+  - `-Modes link` trên `01_return_const.ivy` và trên fixture
+    `138_new_struct_noparen.ivy` (nondet): `no golden changes`, không đụng
+    `link/nondet.txt`;
+  - fixture mới + `-Modes lex` bị từ chối đúng thông báo; `-Reason H9.9` bị
+    từ chối;
+  - golden thật trong repo không bị sửa (`git status` chỉ có script mới).
+
+## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
-| H10.0 | - | `selfhost/update_golden.ps1` (golden hậu-oracle, provenance) | ☐ |
+| H10.0 | - | `selfhost/update_golden.ps1` (golden hậu-oracle, provenance) | ✅ |
 | H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ☐ |
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ☐ |
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ☐ |

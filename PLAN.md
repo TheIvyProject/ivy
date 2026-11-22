@@ -882,19 +882,22 @@ Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle
 - Ghi chú từng mục vào `selfhost/app/H10_NOTES.md` (mới, cùng format
   `H9_NOTES.md`); cập nhật cột trạng thái trong `ORACLE_BUGS.md` (A → fixed).
 
-**H10.0 — công cụ golden hậu-oracle (làm trước tiên)**
+**H10.0 — công cụ golden hậu-oracle (làm trước tiên) — ✅ (2026-11-22)**
 
-`selfhost/update_golden.ps1` (mới):
+`selfhost/update_golden.ps1` (đã có):
 
 - chạy một driver self-host đã build (stage1) trên **đúng** danh sách fixture
   được chỉ định (`-Fixture`, `-Modes`) và ghi record theo format hiện tại
   (`@@ <path> <nbytes> <exit>` + byte thô, CRLF→LF, `<OUT>`/`<RT>`/`<CLANG>`
   chuẩn hoá như `freeze_golden.ps1`);
 - cập nhật `selfhost/golden/manifest.txt` với provenance: record cũ giữ
-  `oracle`, record mới ghi `expected:<H10.x>`; không bao giờ ghi đè record
-  ngoài phạm vi `-Fixture`;
+  `oracle`, record mới ghi `provenance=<fixture>|expected:<H10.x>`; không bao
+  giờ ghi đè record ngoài phạm vi `-Fixture`;
 - từ chối chạy nếu thiếu `-Reason H10.x`; chạy hoàn toàn trong TEMP; in diff
-  tóm tắt (record thêm/đổi/xoá) để review tay trước khi commit;
+  tóm tắt (record thêm/đổi/xoá) để review tay trước khi commit; `-DryRun` chỉ
+  in diff;
+- fixture mới (chưa có trong `golden/corpus.txt`) chỉ được thêm khi cập nhật
+  **đủ 10 mode**, nếu không `check_golden.ps1` sẽ thiếu record các mode khác;
 - `check_golden.ps1` không đổi format; record `expected:*` vẫn được so byte
   như record oracle.
 
