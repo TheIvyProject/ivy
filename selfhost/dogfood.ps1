@@ -49,8 +49,12 @@ function Fail([string]$msg) {
 
 $repo = Split-Path $PSScriptRoot -Parent
 $appDir = Join-Path $PSScriptRoot "app"
-$oracle = Join-Path $repo "build\Release\ivy.exe"
-if (-not (Test-Path -LiteralPath $oracle)) { Fail ("oracle not found: " + $oracle) }
+# H9.9: the C++ oracle no longer ships in the tree; set IVY_ORACLE to a
+# compiler built from tag `0.5-baseline` to run this parity harness.
+$oracle = $env:IVY_ORACLE
+if (-not $oracle) {
+    Fail "this parity harness needs the C++ oracle from tag 0.5-baseline: set IVY_ORACLE"
+}
 
 $tempBase = $TempRoot
 if ($tempBase -eq "") { $tempBase = [System.IO.Path]::GetTempPath() }

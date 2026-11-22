@@ -182,7 +182,13 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 
-$ivy = Join-Path $repo "build\Release\ivy.exe"
+# H9.9: the C++ oracle no longer ships in the tree.  This parity harness needs
+# a compiler built from tag `0.5-baseline`; point IVY_ORACLE at it.
+$ivy = $env:IVY_ORACLE
+if (-not $ivy) {
+    Write-Output "BUILD FAILED (this parity harness needs the C++ oracle: set IVY_ORACLE)"
+    exit 1
+}
 $tempBase = $TempRoot
 if ($tempBase -eq "") { $tempBase = [System.IO.Path]::GetTempPath() }
 $tmp = Join-Path $tempBase "ivydiff_selfhost"

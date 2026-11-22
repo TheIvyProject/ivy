@@ -3,14 +3,14 @@ name: selfhost dogfood
 # H9.6: CI builds the compiler with itself, not with the C++ oracle.
 #
 # Stage 0 is the checked-in seed (`selfhost/bootstrap/ivy-stage0.exe`), so the
-# job needs neither CMake nor `src/**`: it bootstraps seed -> stage1 -> stage2
-# (F2), has stage 1 link stage 2 by itself (`--self-link`, H9.4), and runs the
-# frozen golden gate (H9.3) — 1052 fixtures over all ten modes, no oracle.
+# job needs no C++ compiler and no CMake: it bootstraps seed -> stage1 ->
+# stage2 (F2), has stage 1 link stage 2 by itself (`--self-link`, H9.4), and
+# runs the frozen golden gate (H9.3) — 1052 fixtures over all ten modes.
 #
-# The C++ tree still exists until H9.9, but this workflow never builds or runs
-# it.  The oracle-dependent harnesses (`dogfood.ps1`, `difftest.ps1`,
-# `interpdiff.ps1`) stay for local use while `src/**` is around; the golden
-# baseline replaces them in CI.
+# H9.9 removed the C++ tree (`src/**`, `CMakeLists.txt`).  The parity harnesses
+# that compared against it (`dogfood.ps1`, `difftest.ps1`, `interpdiff.ps1`,
+# ...) remain in git history at tag `0.5-baseline`; the golden baseline
+# replaces them in CI.
 #
 # `clang++` must be on PATH: the self-host driver resolves its linker with
 # `where clang++`, and the harness links the stages with it.
@@ -79,10 +79,9 @@ jobs:
           # LLVM's Windows package bakes the DIA SDK path of the machine that
           # built it (`.../Visual Studio/2019/Professional/DIA SDK/...`) into
           # LLVMExports.cmake.  This workflow does not use CMake any more, but
-          # the patch is cheap and keeps the cached tree usable by the
-          # oracle-era harnesses if `src/**` is still present locally.  It must
-          # be idempotent: on a cache hit the file already points at this
-          # runner's DIA SDK.
+          # the patch is cheap and keeps the cached tree usable by older
+          # harnesses.  It must be idempotent: on a cache hit the file already
+          # points at this runner's DIA SDK.
           $exports = Join-Path $prefix "lib\cmake\llvm\LLVMExports.cmake"
           $text = Get-Content -LiteralPath $exports -Raw
           if ($text -match 'DIA SDK/lib/amd64/diaguids\.lib') {

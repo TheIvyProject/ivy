@@ -2,8 +2,9 @@
 #
 # The golden tree is the oracle-free reference for every gate.  Once frozen,
 # `selfhost/check_golden.ps1` compares a built `ivy_selfhost.exe` against these
-# files and never runs `build/Release/ivy.exe`; a checkout without the C++
-# compiler can therefore still prove parity (H9.5/H9.6/H9.9).
+# files and never runs a C++ compiler; a checkout without the C++ tree can
+# therefore still prove parity (H9.5/H9.6/H9.9).  Re-freezing needs the retired
+# oracle from tag `0.5-baseline` (pass -Oracle or set IVY_ORACLE).
 #
 # What is recorded, per fixture (repository-relative, forward-slash path):
 #
@@ -47,7 +48,9 @@
 # default).  Nothing is written outside -OutDir and the per-run TEMP directory.
 
 param(
-    [string]$Oracle = "build\Release\ivy.exe",
+    # H9.9: the C++ oracle no longer ships in the tree.  Point this at a
+    # compiler built from tag `0.5-baseline` (or set IVY_ORACLE) to re-freeze.
+    [string]$Oracle = "",
     [string]$OutDir = "selfhost/golden",
     [string]$TempRoot = "",
     [int]$TimeoutSec = 120,
@@ -76,6 +79,10 @@ $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 
 $oraclePath = $Oracle
+if (-not $oraclePath) { $oraclePath = $env:IVY_ORACLE }
+if (-not $oraclePath) {
+    Fail "re-freezing needs the C++ oracle from tag 0.5-baseline: pass -Oracle <ivy.exe> or set IVY_ORACLE"
+}
 if (-not [System.IO.Path]::IsPathRooted($oraclePath)) { $oraclePath = Join-Path $repo $oraclePath }
 if (-not (Test-Path -LiteralPath $oraclePath)) { Fail ("oracle not found: " + $oraclePath) }
 $oraclePath = (Resolve-Path -LiteralPath $oraclePath).Path

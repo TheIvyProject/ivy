@@ -66,7 +66,12 @@ function Fail([string]$msg) {
 }
 
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$oracle = Join-Path $repo "build\Release\ivy.exe"
+# H9.9: the C++ oracle no longer ships in the tree; set IVY_ORACLE to a
+# compiler built from tag `0.5-baseline` to run this parity harness.
+$oracle = $env:IVY_ORACLE
+if (-not $oracle) {
+    Fail "this parity harness needs the C++ oracle from tag 0.5-baseline: set IVY_ORACLE"
+}
 if (-not (Test-Path -LiteralPath $oracle)) { Fail ("oracle not found: " + $oracle) }
 if (-not (Test-Path -LiteralPath $Driver)) { Fail ("driver not found: " + $Driver) }
 $Driver = (Resolve-Path -LiteralPath $Driver).Path

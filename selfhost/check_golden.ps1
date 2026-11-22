@@ -1,9 +1,9 @@
 # selfhost/check_golden.ps1 - H9.3: the oracle-free parity gate.
 #
 # Compares a built `ivy_selfhost.exe` against the frozen baseline in
-# `selfhost/golden/` (see `selfhost/freeze_golden.ps1`).  The C++ oracle
-# (`build\Release\ivy.exe`) is NEVER run or required here: this is the gate that
-# still works after the C++ tree is deleted (H9.9).
+# `selfhost/golden/` (see `selfhost/freeze_golden.ps1`).  No C++ compiler and
+# no oracle binary is run or required here: this is the gate that still works
+# after the C++ tree was deleted (H9.9).
 #
 # Sections (all enabled by default, -Modes limits them):
 #

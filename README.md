@@ -62,10 +62,37 @@ Unlike the restricted `constexpr` mechanisms in standard C++, Ivy features **Ivy
 
 ---
 
+## Self-Hosted Compiler (22 November 2026)
+
+On **22 November 2026** Ivy reached full self-hosting: the `ivy` compiler is
+written in Ivy and builds itself. The C++ implementation that hosted the
+language until then has been retired from the repository; it remains in git
+history at tag `0.5-baseline` together with its parity harnesses.
+
+- **Bootstrap chain:** checked-in seed (`selfhost/bootstrap/ivy-stage0.exe`) →
+  stage 1 → stage 2, with byte-identical objects, module interfaces and
+  executables (`selfhost/build.ps1`).
+- **Gates:** `selfhost/build.ps1 -SelfLink -Golden` (F2 + self-link + 1052-fixture
+  golden parity) and `selfhost/check_repro.ps1` (reproducible build).
+- **CI:** `.github/workflows/selfhost-dogfood.yml` runs the whole chain with no
+  C++ compiler and no CMake.
+
+Requirements: Windows x64, PowerShell, and LLVM 21.1.6 (`clang++` on `PATH`, or
+`LLVM_ROOT` pointing at the toolchain). The runtime object is built from
+`std/rt.ivy` by the build script.
+
+```powershell
+# Build and verify the compiler with itself (no oracle, no CMake).
+pwsh -NoProfile -File selfhost/build.ps1 -SelfLink -Golden
+```
+
+---
+
 ## Status & Documentation
 
 Ivy is actively establishing its independent language specifications and foundational documentation following its departure from strict C++ conformance.
 
+- **Compiler Status:** self-hosted as of 22 November 2026 (`selfhost/`).
 - **Official Documentation:** Explore language fundamentals, syntax, and memory safety rules in [`docs/`](docs/).
 - **Legacy Archive:** Historical documentation and previous C++-subset specifications are archived at [TheIvyProject/ivy (archive-2026-4-9)](https://github.com/TheIvyProject/ivy/tree/archive-2026-4-9).
 

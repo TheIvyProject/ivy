@@ -1,8 +1,8 @@
 # selfhost/build.ps1 - H9.5: bootstrap and F2 without the C++ oracle.
 #
 # Same chain as `selfhost/app/bootstrap_smoke.ps1`, but stage 0 is the
-# self-hosted seed `selfhost/bootstrap/ivy-stage0.exe` instead of
-# `build/Release/ivy.exe`.  Nothing here reads `src/**`, CMake or the oracle:
+# self-hosted seed `selfhost/bootstrap/ivy-stage0.exe`.  Nothing here needs a
+# C++ compiler, CMake or the retired oracle:
 #
 #   stage 0 (seed)  ->  stage 1  (F2: stage 1 and stage 2 agree)
 #                   ->  stage 2

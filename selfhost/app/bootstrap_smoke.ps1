@@ -1,6 +1,7 @@
 # selfhost/app/bootstrap_smoke.ps1 - H8.1: `ivy` compiles itself (F2).
 #
-# Stage 0 is the C++-built oracle (`build/Release/ivy.exe`).  It compiles every
+# Stage 0 is a compiler built from tag `0.5-baseline` (the retired C++ oracle,
+# set IVY_ORACLE).  It compiles every
 # selfhost module plus `selfhost/app/main.ivy` into a fresh TEMP directory and
 # the resulting objects are linked (clang + LLVM libraries + the H9.1 runtime
 # `rt.obj`, built from std/rt.ivy) into the
@@ -50,8 +51,12 @@ function Fail([string]$msg) {
 }
 
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$ivy = Join-Path $repo "build\Release\ivy.exe"
-if (-not (Test-Path -LiteralPath $ivy)) { Fail ("oracle not found: " + $ivy) }
+# H9.9: the C++ oracle no longer ships in the tree; set IVY_ORACLE to a
+# compiler built from tag `0.5-baseline` to use this harness.
+$ivy = $env:IVY_ORACLE
+if (-not $ivy) {
+    Fail "this harness needs the C++ oracle from tag 0.5-baseline: set IVY_ORACLE"
+}
 
 # Locate the LLVM installation: -LlvmRoot first, then $env:LLVM_ROOT, then the
 # historical D:\Cpp\Clang, then whatever `llvm-config` is on PATH.  The gate in

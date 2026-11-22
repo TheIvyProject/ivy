@@ -49,7 +49,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$ivy = Join-Path $repo "build\Release\ivy.exe"
+# H9.9: the C++ oracle no longer ships in the tree; set IVY_ORACLE to a
+# compiler built from tag `0.5-baseline` to run this parity harness.
+$ivy = $env:IVY_ORACLE
+if (-not $ivy) {
+    Write-Output "BUILD FAILED (this parity harness needs the C++ oracle: set IVY_ORACLE)"
+    exit 1
+}
 $clang = Join-Path $LlvmRoot "bin\clang.exe"
 $parseDir = Join-Path $repo "selfhost\parsing"
 $stdDir = Join-Path $repo "std"

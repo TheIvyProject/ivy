@@ -803,3 +803,41 @@ tu stdin de harness kiem tra rieng phan link.
 | driver stage1 vs oracle tren `243`/`244` | ca hai build exit 0, chay exit **42** |
 | CI dogfood `44975834452` (`a961ac7`) | **xanh 5m59s**: bootstrap PASS, golden **12337/0**, self-link SHA-256 `AFACA75F…30E3D` (27 139 072 B; size/hash phu thuoc toolchain nhu H9.7) |
 | oracle `build\Release\ivy.exe` | khong doc/ghi; SHA-256 khong doi |
+
+# H9.9 - Xoa ban C++ khoi san pham
+
+## 1. Pham vi
+
+Ban C++ (`src/**`, 25 file, + `CMakeLists.txt`) la oracle trong suot qua trinh
+port. Sau khi H9.5 (bootstrap khong oracle) + H9.6 (CI chi Ivy) + H9.7
+(reproducible) + H9.8 (import cpp) xanh, no duoc xoa khoi nhanh `main`; lich su
+van con o tag `0.5-baseline`. Tu day `ivy` (do Ivy build) la trinh bien dich
+duy nhat trong repo.
+
+## 2. Thay doi
+
+- `git rm -r src CMakeLists.txt`.
+- 14 harness doi chieu oracle khong con duong dan `build\Release\ivy.exe`:
+  `difftest.ps1`, `interpdiff.ps1`, `dogfood.ps1`, `app/bootstrap_smoke.ps1`,
+  `app/driver_smoke.ps1`, `app/build_cli_smoke.ps1`,
+  `app/build_import_smoke.ps1`, `codegen/build_link_smoke.ps1`,
+  `codegen/build_object_smoke.ps1`, `codegen/build_smoke.ps1`,
+  `codegen/cgdiff.ps1`, `common/build_diag_smoke.ps1`,
+  `parsing/build_ivm_smoke.ps1` doc oracle tu `IVY_ORACLE` va bao loi ro rang
+  neu thieu; `freeze_golden.ps1` doi `-Oracle` mac dinh rong (fallback
+  `IVY_ORACLE`). Cac gate oracle-free (`build.ps1`, `check_golden.ps1`,
+  `check_repro.ps1`) giu nguyen.
+- Comment cua `build.ps1`, `check_golden.ps1`, `freeze_golden.ps1` va workflow
+  dogfood noi ro khong can C++/CMake sau H9.9.
+- `README.md`: muc **Self-Hosted Compiler (22 November 2026)** (chuoi bootstrap,
+  gate, CI, yeu cau LLVM 21.1.6, lenh build) + dong trang thai trong
+  "Status & Documentation".
+- `PLAN.md`: H9.9 ✅, H0.2 ✅, muc 3 danh dau la lich su, gate 2 ghi chu harness
+  doi chieu da chuyen vao lich su.
+
+## 3. Gate (2026-11-22)
+
+| Kiem tra | Ket qua |
+|---|---|
+| cay **khong co** `src/**`/`CMakeLists.txt`: `build.ps1 -SelfLink -Golden` | **PASS**: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical SHA-256 `B5FDA259…DC92` (27 138 560 B), golden **12337/0** |
+| oracle cu | khong con trong cay; khong doc/ghi `build\Release\ivy.exe` (van nguyen SHA-256 `FFB376CF…313E`) |
