@@ -2,7 +2,7 @@
 
 # 🌿 Ivy Programming Language
 
-**A modern systems programming language built on the foundations of C++, fortified with compile-time memory safety, zero-cost abstractions, and clean ergonomics.**
+**A C++ successor with Rust-style memory safety — familiar syntax, native ABI compatibility, and zero-cost performance.**
 
 </div>
 
@@ -10,16 +10,43 @@
 
 ## What is Ivy?
 
-Ivy originally started as a safe subset of C++. However, maintaining strict C++ backwards compatibility imposed severe limitations: ISO/IEEE standardization constraints prevented critical syntax modernizations and deeper compile-time safety guarantees.
+Ivy is a modern systems programming language built on the syntax, features, ABI
+and libraries of C++. It is a successor to C++ in the spirit of Carbon: it keeps
+the language developers already know instead of asking them to start over.
+Around 80–90% of Ivy syntax is taken directly from C++.
 
-To eliminate undefined behavior while retaining high performance and developer ergonomics, Ivy evolved into an **independent systems programming language**. It gives developers the familiar power and expressiveness of C++ while introducing modern ownership, lifetime checking, and clean language mechanics.
+If C3 is a modern C, Ivy is a modern C++.
+
+**Why Ivy?**
+
+- **Memory safety on a C++ foundation.** Ivy applies Rust-style ownership,
+  borrowing and lifetime checking to C++ semantics — no garbage collector and no
+  runtime overhead.
+- **Zero-FFI C++ interoperability.** Unlike Rust or Zig, Ivy shares the native
+  C++ ABI (Itanium C++ ABI on Unix-like systems, MSVC ABI on Windows), so Ivy
+  and C++ code call each other directly, without bindings or glue layers.
+- **A familiar language.** Declarations, expressions, operators and much of the
+  standard vocabulary come straight from C++, so existing C++ developers are
+  productive on day one.
+
+---
+
+## History
+
+Ivy began as a safe subset of C++. Strict C++ backwards compatibility soon
+became the limiting factor: ISO/IEEE standardization constraints blocked syntax
+modernizations and deeper compile-time safety guarantees. Ivy therefore grew
+into an independent language, keeping C++'s ergonomics, ABI and library model
+while defining its own specification.
+
+The compiler became fully self-hosted on 22 November 2026: the C++
+implementation was retired and `ivy` now builds itself (see
+[Self-Hosted Compiler](#self-hosted-compiler-22-november-2026)).
 
 ---
 
 ## Core Language Features
 
-- **Compile-Time Memory Safety:** Smartly integrates Rust-proven ownership, borrowing, and lifetime mechanics without garbage collection runtime overhead.
-- **Familiar Ergonomics (~80% C++ Syntax):** Designed so C++ developers feel instantly at home. The transition learning curve is drastically reduced.
 - **Native Lifetime Annotations:** Express reference validity cleanly without awkward attribute wrappers.
 
 ```ivy
