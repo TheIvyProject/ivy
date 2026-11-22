@@ -840,4 +840,5 @@ duy nhat trong repo.
 | Kiem tra | Ket qua |
 |---|---|
 | cay **khong co** `src/**`/`CMakeLists.txt`: `build.ps1 -SelfLink -Golden` | **PASS**: F2 20 OBJ + 19 IVM + `rt.obj`, self-link identical SHA-256 `B5FDA259…DC92` (27 138 560 B), golden **12337/0** |
+| CI dogfood `44979013655` (`dfc71d2`, checkout **khong co** `src/**`/`CMakeLists.txt`) | **xanh**: bootstrap PASS 5m36s, golden **12337/0**, self-link SHA-256 `46BFA0EE…15B5` (27 139 072 B) |
 | oracle cu | khong con trong cay; khong doc/ghi `build\Release\ivy.exe` (van nguyen SHA-256 `FFB376CF…313E`) |
