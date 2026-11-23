@@ -53,18 +53,21 @@ trong `selfhost/codegen/emitter.ivy` tru hai cho:
   array-to-pointer decay **vo dieu kien** (ca nhanh co param type lan fallback,
   khong cast); `emit_mangle_type` array mangle theo element type; call khong co
   MIR entry -> `emit_unresolved_symbol` (`?<name>@@YHX@Z`) + co `has_fn`.
+  **H10.6 (C10/C11)**: array mangle nhu pointer (`PAV`); symbol khong resolve
+  mangle theo signature call site va co `declare` di kem.
 - `hir/type` (124/124): `llvm_type("nullptr")` -> `i8` (chi `nullptr_t` la
   `ptr`); `find_call_target` phan loai float bang **spelling base**
   (`is_fp_ir(at.base)`), khong phai LLVM spelling, nen `double` khong khop
   `float64_t`; nhanh lvalue fallthrough bao dung message
   `expression is not assignable [nodeIdx=<kind> type.base=<base> isRef=<n>]` va
   tra `null`; `emit()` **tiep tuc** emit cac function sau khi loi (oracle chi
-  set `hadError_`).
+  set `hadError_`).  **H10.6 (C8)**: `llvm_type("nullptr")` -> `ptr`.
 
 Hai fixture cuoi chi lo ra khi mo rong ra toan corpus:
 
 - `hir/template/01_deduce_array.ivy`: oracle `msvcMangleType` khong co nhanh
-  array nen `int32_t[4]` mangle theo element (`H`);
+  array nen `int32_t[4]` mangle theo element (`H`); **H10.6 (C10)** sua thanh
+  `PAV` nen fixture nay doi symbol (`?arr_int32_t_@@YHPAV@Z`);
 - `hir/type/64_overload_resolution.ivy`: cung ly do `isFpType(a.base)` o tren -
   `double` khong khop `float64_t`, fallback name-only chon overload dau tien.
 

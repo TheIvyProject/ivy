@@ -253,9 +253,11 @@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy
 selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy
 selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy
 selfhost/corpus/codegen/h10_C19_record_across_call.ivy
+selfhost/corpus/codegen/h10_C2_print_ref.ivy
 selfhost/corpus/codegen/h10_C3_new_struct_args.ivy
 selfhost/corpus/codegen/h10_C4_break_nested.ivy
 selfhost/corpus/codegen/h10_C5_string_dedup.ivy
+selfhost/corpus/codegen/h10_C8_nullptr_literal.ivy
 selfhost/corpus/codegen/h10_H17_nested_return.ivy
 selfhost/corpus/codegen/h10_H18_two_returns.ivy
 selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy
@@ -561,6 +563,8 @@ selfhost/corpus/hir/template/e_struct_concept_fail.ivy
 selfhost/corpus/hir/template/e_template_calls_template.ivy
 selfhost/corpus/hir/template/e_undeclared_identifier.ivy
 selfhost/corpus/hir/template/e_unsatisfied_concept.ivy
+selfhost/corpus/hir/template/h10_C10_array_mangle.ivy
+selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy
 selfhost/corpus/hir/type/01_lit_int.ivy
 selfhost/corpus/hir/type/02_lit_float.ivy
 selfhost/corpus/hir/type/03_lit_char.ivy

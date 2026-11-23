@@ -1,0 +1,19 @@
+#pragma ivy cnumber
+
+// H10.6 (C2): a reference argument to io::print is formatted through its
+// referent type, so the IR widens `i32`/`float` (not `sext ptr`/`fpext ptr`).
+void show_int(int32& r) {
+    io::println("{}", r);
+}
+
+void show_float(float64& r) {
+    io::println("{}", r);
+}
+
+int32 main() {
+    int32 i = 7;
+    float64 f = 1.5;
+    show_int(i);
+    show_float(f);
+    return 0;
+}

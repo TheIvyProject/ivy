@@ -24,16 +24,10 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/102_bool_array.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/codegen/103_print_ref.ivy 209 1
-selfhost/corpus/codegen/103_print_ref.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:19: error: '%tmp.1' defined with type 'i32' but expected 'ptr'
-%tmp.2 = sext ptr %tmp.1 to i64
-                  ^
-
-@@ selfhost/corpus/codegen/104_print_ref_float.ivy 223 1
-selfhost/corpus/codegen/104_print_ref_float.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:9:20: error: '%tmp.1' defined with type 'double' but expected 'ptr'
-%tmp.2 = fpext ptr %tmp.1 to double
-                   ^
-
+@@ selfhost/corpus/codegen/103_print_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/104_print_ref_float.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/105_print_ref_char.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/106_enum_local.ivy 31 0
@@ -212,11 +206,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/185_ivy_print_types.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 203 1
-selfhost/corpus/codegen/186_ivy_print_explicit.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:17:11: error: use of undefined value '@ivy__print_char'
-call void @ivy__print_char(i8 65)
-          ^
-
+@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/187_io_read_line.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/188_io_write_file.ivy 31 0
@@ -225,11 +216,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/19_print_int_var.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 203 1
-selfhost/corpus/codegen/190_ivy_print_decl_order.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:16:11: error: use of undefined value '@ivy__print_int'
-call void @ivy__print_int(i32 1)
-          ^
-
+@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/192_ctor_dtor.ivy 31 0
@@ -356,11 +344,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/codegen/249_std_vector.ivy 215 1
-selfhost/corpus/codegen/249_std_vector.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:80:20: error: '%tmp.27' defined with type 'i32' but expected 'ptr'
-%tmp.28 = sext ptr %tmp.27 to i64
-                   ^
-
+@@ selfhost/corpus/codegen/249_std_vector.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/25_array_loop.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/26_array_unsafe.ivy 31 0
@@ -1092,22 +1077,16 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 233 1
-selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:19: error: use of undefined value '@?TCall@@YHX@Z'
-%tmp.0 = call i32 @"?TCall@@YHX@Z"(i32 1)
-                  ^
-
+@@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_struct_calls_template.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_struct_field.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_struct_methods.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy 243 1
-selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:8:19: error: use of undefined value '@?TDup@@YHX@Z'
-%tmp.0 = call i32 @"?TDup@@YHX@Z"(i32 1)
-                  ^
-
+@@ selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_template_and_plain_struct.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_template_id_on_plain_struct.ivy 31 0
@@ -1199,11 +1178,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/type/05_lit_string.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/type/06_lit_nullptr.ivy 170 1
-selfhost/corpus/hir/type/06_lit_nullptr.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:6:10: error: null must be a pointer type
-store i8 null, ptr %a.0
-         ^
-
+@@ selfhost/corpus/hir/type/06_lit_nullptr.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/type/07_lit_nullopt.ivy 170 1
 selfhost/corpus/hir/type/07_lit_nullopt.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:6:10: error: null must be a pointer type
 store i8 null, ptr %a.0
@@ -2475,4 +2451,12 @@ ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C2_print_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C8_nullptr_literal.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy 31 0
 ivy: '<OUT>\out.obj' generated

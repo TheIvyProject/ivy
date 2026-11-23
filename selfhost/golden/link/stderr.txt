@@ -249,3 +249,12 @@ ef
 @@ selfhost/corpus/codegen/137_new_struct.ivy 0 5
 @@ selfhost/corpus/codegen/143_new_multiarg.ivy 0 1
 @@ selfhost/corpus/codegen/152_new_struct_i8.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C2_print_ref.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C8_nullptr_literal.ivy 0 0
+@@ selfhost/corpus/codegen/103_print_ref.ivy 0 0
+@@ selfhost/corpus/codegen/104_print_ref_float.ivy 0 0
+@@ selfhost/corpus/codegen/249_std_vector.ivy 0 0
+@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 0 0
+@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 0 0
+@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 0 0
+@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 0 0

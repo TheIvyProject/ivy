@@ -1665,6 +1665,12 @@ trong cây làm việc; mọi scratch nằm dưới
   đúng `sext ptr ...` / `fpext ptr ...` — bug-compatible, IR này không
   hợp lệ cho backend về sau nhưng khớp byte oracle.
 
+**H10.6 — đã sửa (C2).** `lower_io_arg` dùng kiểu **referent**
+(`llvm_type(at, 1)`) cho extension vì `lower_expr` đã load giá trị; IR còn
+`sext i32`/`fpext float` (hợp lệ) và `103/104_print_ref*` link/run được. Đoạn
+bug-compat phía trên là lịch sử; xem `H10_NOTES.md` H10.6 và fixture
+`h10_C2_print_ref`.
+
 #### 35.3 Corpus mới
 
 | fixture | nội dung |
@@ -1678,7 +1684,7 @@ trong cây làm việc; mọi scratch nằm dưới
 | `101_struct_array_float.ivy` | struct chứa `float64` trong mảng |
 | `102_bool_array.ivy` | mảng `bool` (regression int base) |
 | `103_print_ref.ivy` | `io::println("{}", r)` với `int32&` |
-| `104_print_ref_float.ivy` | reference `float64&` (bug-compat `fpext ptr`) |
+| `104_print_ref_float.ivy` | reference `float64&` (H10.6: `fpext float`; trước đó bug-compat `fpext ptr`) |
 | `105_print_ref_char.ivy` | reference `int8&` → `__ivy_write_char` |
 
 #### 35.4 Kết quả
@@ -2398,6 +2404,10 @@ Stage r phủ bốn nhóm builtin còn lại của `isCodegenBuiltin`:
    bug-compat), không mangling, arg giữ type value, return type lấy từ HIR
    (`builtin_ret`: void cho print*, `int32` cho `io::write_file`, `char*`
    cho `io::read_line`/`io::read_file`).
+   **H10.6 (C7) đã sửa:** `::` → **một** `_`, nên symbol là `ivy_print_int`,
+   khớp `declare void @ivy_print_int(...)` và `lib/ivy.h` (runtime `rt.obj`
+   hiện chưa định nghĩa các symbol này, nên link vẫn dừng ở LNK2019 - giống
+   `191_ivy_print_enum`; IR đã hợp lệ và `-c` thành công).
 3. **`io::read_line`** — `%tmp.N = call ptr @__ivy_read_line()`.
 4. **`io::write_file`** — lower lần lượt arg 0/1/2 (thiếu thì dùng literal
    `null`/`null`/`0` như oracle), rồi cấp temp kết quả và emit

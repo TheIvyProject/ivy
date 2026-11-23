@@ -192,6 +192,53 @@ extern "C" uint64 __ivy_fmt_bool(bool b) {
     return 0;
 }
 
+// ── ivy::print_* builtins (H10.6) ───────────────────────────────────
+// The codegen declares these eight symbols (see `lib/ivy.h`) for the
+// explicit `ivy::print_int` family.  An explicit string builtin passes a
+// `ptr`, so its parameter is `uint64` like `__ivy_write_str` (the subset
+// rejects raw pointer parameters outside `unsafe`).  Output reuses the
+// io::print formatters, so both spellings produce identical bytes.
+
+extern "C" void ivy_print_int(int32 v) {
+    unsafe {
+        __ivy_write_str(1, __ivy_fmt_int((int64)v));
+    }
+}
+
+extern "C" void ivy_print_float(float64 v) {
+    __ivy_write_str(1, __ivy_fmt_float(v));
+}
+
+extern "C" void ivy_print_str(uint64 s) {
+    __ivy_write_str(1, s);
+}
+
+extern "C" void ivy_print_char(char c) {
+    __ivy_write_char(1, c);
+}
+
+extern "C" void ivy_println_int(int32 v) {
+    unsafe {
+        __ivy_write_str(1, __ivy_fmt_int((int64)v));
+    }
+    __ivy_write_newline(1);
+}
+
+extern "C" void ivy_println_float(float64 v) {
+    __ivy_write_str(1, __ivy_fmt_float(v));
+    __ivy_write_newline(1);
+}
+
+extern "C" void ivy_println_str(uint64 s) {
+    __ivy_write_str(1, s);
+    __ivy_write_newline(1);
+}
+
+extern "C" void ivy_println_char(char c) {
+    __ivy_write_char(1, c);
+    __ivy_write_newline(1);
+}
+
 // ── Panic ───────────────────────────────────────────────────────────
 
 extern "C" void __ivy_panic(uint64 msg, int32 line) {

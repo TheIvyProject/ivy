@@ -99,16 +99,16 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | ID | Loại | Triệu chứng | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|---|
 | **C1** | A | Slot biến local khoá theo **tên** (không có scope): hai local cùng tên ở scope khác nhau dùng chung một `alloca`, **last-wins** | `codegen.cpp:2503-2526` | **H10.4**: `selfhost/mir/mir_builder.ivy` gán **binding id** cho từng khai báo (tham số id âm) và ghi vào `alloca.b`/`expr.b`; `selfhost/codegen/emitter.ivy` tra slot theo id (fallback theo lịch sử khai báo cho dtor do HIR tạo sau khi scope đã đóng) | `MIR_NOTES.md` §11.6; `H10_NOTES.md` H10.4; `h10_C1_slot_shadow` |
-| **C2** | A | `sext ptr` / `fpext ptr` cho **reference argument** (`io::print(x)` với `x` là `T&`) — IR không hợp lệ nhưng được emit | `codegen.cpp` (`lowerCall` ref args) | `emitter.ivy` ≈L57 (`io::print` ref) | `H62_NOTES.md` |
+| **C2** | A | `sext ptr` / `fpext ptr` cho **reference argument** (`io::print(x)` với `x` là `T&`) — IR không hợp lệ nhưng được emit | `codegen.cpp` (`lowerCall` ref args) | **H10.6**: `emitter.ivy` `lower_io_arg` dùng kiểu **referent** (`llvm_type(at, 1)`) vì `lower_expr` đã load giá trị; chỉ còn `sext i32`/`fpext float`. `103_print_ref`, `104_print_ref_float`, `249_std_vector` nay link/run được | `H62_NOTES.md`; `H10_NOTES.md` H10.6; `h10_C2_print_ref` |
 | **C3** | A | `new T(args)` chỉ **store `args[0]`** (bỏ các arg còn lại) rồi coi là `T` | `codegen.cpp` (`lowerExpr` New) | **H10.5**: `emitter.ivy` `lower_new` zero-init cả struct rồi store **từng field** (đúng thứ tự args, có cast); scalar vẫn store một giá trị. `137_new_struct`, `143_new_multiarg`, `152_new_struct_i8` từ chỗ linker từ chối IR nay chạy đúng | `H62_NOTES.md`; `H10_NOTES.md` H10.5; `h10_C3_new_struct_args` |
 | **C4** | A | `break`/`continue`/`nextcase` viết trong `if` lồng **không** chạy dtor của loop body — chỉ dtor của scope **trong cùng** | `hir_builder.cpp` (`dtorStacks_.back()`) | `hir_builder.ivy` `wrap_scope_dtors`: **H10.2** theo dõi `jscope_`/`nscope_` và destroy mọi scope tới đích của jump | `H62_NOTES.md`, `H10_NOTES.md` H10.2, `h10_C4_break_nested` |
 | **C5** | A | **Global trùng lặp**: `io::print("hi")` sinh **hai** `@.str.N` (`@.str.0` từ pre-pass, `@.str.1` từ segment) vì hai map key khác nhau (`"1:"+bytes` vs raw bytes) | `codegen.cpp` (`stringList_`, `collectExpr` vs `internCString`) | **H10.5**: `emitter.ivy` chỉ còn **một** bảng intern khoá theo raw bytes (`intern_cstring`), dùng chung cho pre-pass, segment format và panic message; `@.str.N` không còn trùng | `H62_NOTES.md` §20; `H10_NOTES.md` H10.5; `h10_C5_string_dedup` |
 | **C6** | A | Quirk format IR: empty struct in `{  }` (hai dấu cách), có dòng trống, struct **không dùng** vẫn được in | `codegen.cpp` (struct/global emission) | `emitter.ivy` | `H62_NOTES.md` §28.5 |
-| **C7** | A | 7 fixture mà `ivy -c` **từ chối IR do chính nó sinh ra**; port phải fail với stderr **byte-identical** | `codegen.cpp` (LLVM parse/verify) | `selfhost/codegen/objdrive.ivy`. **H10.5** sửa 3 fixture (`137_new_struct`, `143_new_multiarg`, `152_new_struct_i8`) bằng C3 — nay compile/link/run bình thường; còn `103_print_ref`, `104_print_ref_float`, `186_ivy_print_explicit`, `190_ivy_print_decl_order` (H10.6) | `H63_NOTES.md` §7; `H10_NOTES.md` H10.5 |
-| **C8** | A | `nullptr` literal (không có `_t`) rơi vào nhánh base lạ → **`i8`**, không phải `ptr` (`auto a = nullptr` cấp `i8`) | `codegen.cpp:227`, `:239` | `emitter.ivy` ≈L1280 (`llvm_type`) | `H82_NOTES.md` §2 |
+| **C7** | A | 7 fixture mà `ivy -c` **từ chối IR do chính nó sinh ra**; port phải fail với stderr **byte-identical** | `codegen.cpp` (LLVM parse/verify) | `selfhost/codegen/objdrive.ivy`. **H10.5** sửa 3 fixture (`137_new_struct`, `143_new_multiarg`, `152_new_struct_i8`) bằng C3; **H10.6** sửa 4 fixture còn lại: `103_print_ref`, `104_print_ref_float` bằng C2, `186_ivy_print_explicit`, `190_ivy_print_decl_order` bằng symbol `ivy_print_*` (một `_`, khớp declare thay vì `ivy__print_*`) + 8 hàm `ivy_print_*` trong `std/rt.ivy` — cả 7 nay `-c` + link/run thành công | `H63_NOTES.md` §7; `H10_NOTES.md` H10.5/H10.6 |
+| **C8** | A | `nullptr` literal (không có `_t`) rơi vào nhánh base lạ → **`i8`**, không phải `ptr` (`auto a = nullptr` cấp `i8`) | `codegen.cpp:227`, `:239` | **H10.6**: `emitter.ivy` `llvm_type` trả `ptr` cho cả `nullptr` lẫn `nullptr_t`; `auto a = nullptr` nay là `alloca ptr` + `store ptr null` | `H82_NOTES.md` §2; `H10_NOTES.md` H10.6; `h10_C8_nullptr_literal` |
 | **C9** | A | `is_fp_ir` xét theo **spelling base**, không theo type thật | `codegen.cpp` (`isFpIr`) | `emitter.ivy` | `H82_NOTES.md` §2 |
-| **C10** | A | `msvcMangleType` **không có nhánh array** → array mangle như element type (`int32_t[4]` → `H`) | `codegen.cpp` (`msvcMangleType`) | `emitter.ivy` ≈L1939 (`emit_mangle_type`) | `H82_NOTES.md` §2 |
-| **C11** | A | Symbol chưa resolve dùng mangling fallback `?<name>@@YHX@Z` | `codegen.cpp` (`msvcMangleFunction`) | `emitter.ivy` | `H82_NOTES.md` §2 |
+| **C10** | A | `msvcMangleType` **không có nhánh array** → array mangle như element type (`int32_t[4]` → `H`) | `codegen.cpp` (`msvcMangleType`) | **H10.6**: `emitter.ivy` `emit_mangle_type` mangle array như **pointer** (`PAV`), khớp array-to-pointer decay ở call site; `int32_t[4]` không còn đụng `H` của scalar | `H82_NOTES.md` §2; `H10_NOTES.md` H10.6; `hir/template/01_deduce_array`, `h10_C10_array_mangle` |
+| **C11** | A | Symbol chưa resolve dùng mangling fallback `?<name>@@YHX@Z` | `codegen.cpp` (`msvcMangleFunction`) | **H10.6**: `emitter.ivy` `emit_unresolved_symbol` mangle theo **signature tại call site** (kiểu trả về + từng arg) và `emit()` phát thêm `declare` khớp; `?<name>@@YHX@Z` không còn xuất hiện, IR hợp lệ | `H82_NOTES.md` §2; `H10_NOTES.md` H10.6; `hir/template/05_specid_call_without_constructor`, `h10_C11_unresolved_decl` |
 | **C12** | A | `emit()` **tiếp tục** sau lỗi (không dừng module) | `codegen.cpp` (`emit`) | `emitter.ivy` | `H82_NOTES.md` §2 |
 | **C13** | A | Có trường hợp emit `br label %` với **label rỗng** | `codegen.cpp` | `emitter.ivy` | `H82_NOTES.md` §2 |
 | **C14** | A | `-0.0` **giữ dấu** (`std::to_string(-0.0)` = `"-0.000000"`; `-0.0 < 0.0` là false nên phải tự dò dấu) | `codegen.cpp` (float literal) | `emitter.ivy` ≈L1701 | `H82_NOTES.md` §2 |
@@ -208,21 +208,28 @@ Port giữ hai map riêng (`pm_*` key `"1:"+bytes`, `sm_*` key raw bytes), dedup
 **trong từng map**. In cùng literal hai lần vẫn chỉ có một `@.str.0` pre-pass và
 một `@.str.1` segment.
 
-### 2.4 C7 — 7 fixture oracle từ chối IR của chính nó
+### 2.4 C7 — fixture oracle từ chối IR của chính nó
 
 Đây là **bug-compat quan trọng nhất** của tầng object: oracle sinh IR không hợp
-lệ, rồi `ivy -c` từ chối chính IR đó. Port phải **fail giống hệt** (cùng exit
-code, cùng stderr byte-identical), không được "sửa" IR cho hợp lệ:
+lệ, rồi `ivy -c` từ chối chính IR đó. Trong H6.2 port phải **fail giống hệt**
+(cùng exit code, cùng stderr byte-identical), không được "sửa" IR cho hợp lệ.
+**H10.5/H10.6 đã sửa tận gốc**: cả bảng dưới nay `-c` **và** link/run thành
+công, golden được ghi lại với provenance `expected:H10.5/H10.6`. Bốn fixture
+`ivy::print_*` còn cần 8 hàm `ivy_print_*` trong runtime; H10.6 thêm chúng vào
+`std/rt.ivy` (runtime sống, dùng lại `__ivy_fmt_*`/`__ivy_write_*`).
 
-| Fixture | Lý do |
-|---|---|
-| `103_print_ref` | reference argument → `sext ptr` (C2) |
-| `104_print_ref_float` | reference float argument |
-| `137_new_struct` | `new` struct + store `args[0]` (C3) |
-| `143_new_multiarg` | `new P(1, 2)` — chỉ `args[0]` được store (C3) |
-| `152_new_struct_i8` | `new` với base `i8` (C8) |
-| `186_ivy_print_explicit` | `ivy::print_*` explicit |
-| `190_ivy_print_decl_order` | thứ tự declare io runtime |
+| Fixture | Lý do | Sửa ở |
+|---|---|---|
+| `103_print_ref` | reference argument → `sext ptr` (C2) | H10.6 |
+| `104_print_ref_float` | reference float argument → `fpext ptr` (C2) | H10.6 |
+| `137_new_struct` | `new` struct + store `args[0]` (C3) | H10.5 |
+| `143_new_multiarg` | `new P(1, 2)` - chỉ `args[0]` được store (C3) | H10.5 |
+| `152_new_struct_i8` | `new` với base `i8` (C8) | H10.5 |
+| `186_ivy_print_explicit` | `ivy::print_*` explicit → `ivy__print_*` | H10.6 |
+| `190_ivy_print_decl_order` | thứ tự declare io runtime + `ivy__print_int` | H10.6 |
+
+`249_std_vector` (không có trong danh sách gốc của `H63_NOTES.md` §7) cùng
+nguyên nhân C2 và cũng được H10.6 sửa: `-c` + link/run từ fail thành pass.
 
 Nguồn: `H63_NOTES.md` §7.
 

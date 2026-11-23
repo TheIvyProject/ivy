@@ -1,0 +1,8 @@
+// H10.6 (C10): an array parameter decays to a pointer at the call site, so it
+// mangles with the pointer code ("PAV"), not the element code ("H").
+template <typename T> int32 first(T a) { return 0; }
+
+void f() {
+    int32 xs[4];
+    int32 a = first(xs);
+}

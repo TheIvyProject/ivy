@@ -191,7 +191,11 @@ build_smoke:   PASS (h61 smoke ok)
 ```
 
 Port báo cùng lỗi, cùng vị trí (`ivy-module:<line>:<col>`) và stderr khớp
-byte. Đây là hành vi đúng: oracle cũng không tạo được object cho các file này.
+byte. Đây là hành vi đúng *trong giai đoạn bug-compat*: oracle cũng không tạo
+được object cho các file này. **H10.5/H10.6 đã sửa tận gốc** (C3 cho
+`137/143/152`, C2 cho `103/104`, symbol `ivy_print_*` cho `186/190`): cả 7 nay
+`-c` thành công; golden object/golden `-c` được ghi lại với provenance
+`expected:H10.5/H10.6`. Xem `H10_NOTES.md` H10.5/H10.6 và `ORACLE_BUGS.md` §2.4.
 
 Link smoke:
 

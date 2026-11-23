@@ -1,5 +1,5 @@
-// Explicit ivy::print_*/println_* builtins: the symbol keeps the double
-// underscore produced by replacing '::' with '_'.
+// Explicit ivy::print_*/println_* builtins: the '::' separator becomes a
+// single '_' (H10.6 fixed the old double underscore, which matched no declare).
 #pragma ivy cnumber
 int32 main() {
     ivy::print_int(42);

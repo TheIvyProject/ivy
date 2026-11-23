@@ -1,0 +1,10 @@
+#pragma ivy cnumber
+
+// H10.6 (C8): `nullptr` is the null pointer constant even without `_t`, so
+// `auto a = nullptr` allocates a `ptr` slot (not `i8`).
+int32 main() {
+    unsafe {
+        auto a = nullptr;
+    }
+    return 0;
+}

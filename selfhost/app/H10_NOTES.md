@@ -305,6 +305,75 @@
   `exceptions.txt` của H27 nếu chạy `-Fixture "*"`; ở đây cập nhật theo từng
   fixture để giữ nguyên phạm vi H27.
 
+### H10.6 - IR/ABI: reference arg, IR tự từ chối, `nullptr`, mangling
+
+- **Bug**: **C2** - `io::print(x)` với `x` là `T&`: `lower_expr` đã load
+  referent nhưng phần mở rộng vẫn dùng `llvmType(at)` nên in `sext ptr` /
+  `fpext ptr` (IR không hợp lệ, `-c` từ chối). **C7** - 7 fixture mà oracle từ
+  chối IR của chính nó; H10.5 đã sửa `137/143/152`, còn `103/104` (C2) và
+  `186/190` (`ivy::print_*` explicit in `ivy__print_*` trong khi declare là
+  `ivy_print_*`). `249_std_vector` cũng dính C2 dù không có trong danh sách
+  `H63_NOTES.md` §7. **C8** - `nullptr` (không `_t`) rơi vào base lạ nên
+  `llvm_type` trả `i8`; `auto a = nullptr` cấp slot số nguyên. **C10** -
+  `msvcMangleType` không có nhánh array nên `int32_t[4]` mangle theo element
+  (`H`), đụng overload scalar. **C11** - call không có MIR entry dùng mangle
+  cố định `?<name>@@YHX@Z`; không declare nào khớp nên `-c` báo "use of
+  undefined value".
+- **Sửa** (chỉ `codegen/emitter.ivy`; `objdrive.ivy` không đổi):
+  - `lower_io_arg`: `drop = 1` khi `at.is_ref`; nhánh float và integer dùng
+    `llvm_type(at, drop)` (kiểu referent) vì `lower_expr` đã load giá trị
+    (nhánh char/bool vốn không dùng `llvm_type`). IR còn `sext i32` /
+    `fpext float`.
+  - `llvm_type`: `nullptr` → `ptr` (như `nullptr_t`).
+  - `emit_mangle_type`: array → `PAV` (array param decay thành pointer ở call
+    site); đặt **sau** `is_ref`/`ptr_depth` để `T(&)[N]` vẫn là `AAV`.
+  - `emit_builtin_symbol`: `::` → **một** `_` (bỏ `:` thứ hai), nên
+    `ivy::print_int` → `ivy_print_int`, khớp declare/runtime.
+  - `emit_unresolved_symbol(MExpr)`: mangle theo **signature call site**
+    (`@Y` + kiểu trả về + từng arg; `X` cho void/không arg). Thêm
+    `emit_unresolved_decl`: phát `declare` khớp (array arg → `ptr`, còn lại
+    `llvm_type(a.type, 1)`). `emit()` quét `mu->exprs` sau các declare bodyless
+    và trước function definitions, bỏ qua callee đặc biệt (virtual, `move`,
+    `io::*`, `ivy::*`).
+  - `std/rt.ivy`: thêm 8 hàm `ivy_print_int|float|str|char` và
+    `ivy_println_*` (dùng lại `__ivy_fmt_*`/`__ivy_write_*`; tham số string là
+    `uint64` như `__ivy_write_str`), để `rt.obj` định nghĩa đúng các symbol mà
+    emitter declare cho `ivy::print_*` explicit. `lib/ivyrt.c` là runtime C cũ,
+    không còn tham gia bootstrap; runtime sống là `std/rt.ivy`.
+- **Fixture**: `h10_C2_print_ref` (`int32&`/`float64&` vào `io::println`, in
+  `7`/`1.5`), `h10_C8_nullptr_literal` (`alloca ptr` + `store ptr null`),
+  `h10_C10_array_mangle` (`?first_int32_t_@@YHPAV@Z` thay vì `YHH`),
+  `h10_C11_unresolved_decl` (`declare i32 @"?Box@@YHH@Z"(i32)` + call khớp).
+- **Golden**: thêm 4 fixture (đủ 10 mode). Đổi hành vi 11 fixture cũ:
+  `103_print_ref`, `104_print_ref_float`, `249_std_vector` (`-c` + link/run
+  fail → pass; `249` in `20 24`), `186_ivy_print_explicit`,
+  `190_ivy_print_decl_order`, `191_ivy_print_enum`, `185_ivy_print_types`
+  (`-c` đã pass từ trước; link/run fail vì thiếu `ivy_print_*` → nay pass:
+  `186` in `423.5hiA7…`, `190` in `1x`, `191` in `2`/`1`, `185` in
+  `1`,`13.14`,`A`,`s`,`5`,`1`), `hir/template/01_deduce_array` (`PAV`),
+  `hir/template/05_specid_call_without_constructor`,
+  `05_struct_template_wins_over_function_template` (declare + call khớp),
+  `hir/type/06_lit_nullptr` (`ptr`). Provenance `expected:H10.6`;
+  `exceptions.txt` không đổi.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap PASS, F2 + self-link
+  identical SHA `2E2298C772E20330F5B9EB15D9431935E2E602519B2563BEA4FA486ECC1F8C42`
+  (27 166 208 B), golden **12 644 checks / 0 failures** (1 074 fixture). Seed
+  giữ nguyên `5AAD7AC5…E4BA`: stage 1 == stage 2 chứng minh IR mà compiler sinh
+  cho chính nó không đổi (C2/C7/C8/C10/C11 chỉ đụng construct không xuất hiện
+  trong `selfhost/**`), nên không cần dựng lại seed như H10.4/H10.5. Exe
+  self-link đổi SHA so với H10.5 (27 165 696 → 27 166 208 B) chỉ vì `rt.obj`
+  lớn hơn 8 hàm mới, không phải vì codegen đổi. `check_repro.ps1` → **PASS**
+  (83 artifact: 42 object, 38 `.ivm`, 3 exe; stage 1 SHA-256 `2E2298C7…8C42`).
+- **Ghi chú**: symbol `ivy_print_*` nay khớp đúng `declare` (một `_`) và 8 hàm
+  cùng tên đã được thêm vào runtime sống `std/rt.ivy`, nên `185/186/190/191`
+  link/run được và in đúng output. `lib/ivyrt.c` là runtime C cũ, không còn
+  tham gia bootstrap; `std/rt.ivy` là nguồn của `rt.obj`. Tham số string của
+  builtin là `uint64` (như `__ivy_write_str`) vì subset từ chối raw pointer
+  parameter ngoài `unsafe`. `rt.obj` mới là 9 909 B (SHA `28539B39…66C1`,
+  stage 0 và stage 1 dựng giống hệt), nên `manifest.txt` cập nhật
+  `runtime_sha256`/`runtime_size` - từ đây `check_golden` không còn warning
+  "runtime differs" (baseline cũ 8 711 B là runtime C thời oracle).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -314,7 +383,7 @@
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ✅ |
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ✅ |
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ✅ |
-| H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ☐ |
+| H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ✅ |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ☐ |
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ☐ |
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ☐ |

@@ -1252,10 +1252,10 @@ export struct Emitter {
         if (this.streq(t.base, "ptrdiff_t")) return "i64";
         if (this.streq(t.base, "uptr_t")) return "i64";
         if (this.streq(t.base, "nullptr_t")) return "ptr";
-        // H8.2: the literal type `nullptr` (no `_t`) is not `nullptr_t`; the
-        // oracle's llvmType falls through to the unknown-base `i8`
-        // (`auto a = nullptr` allocates `i8`), codegen.cpp:227/239.
-        if (this.streq(t.base, "nullptr")) return "i8";
+        // H10.6 (C8): the literal type `nullptr` (no `_t`) is the null pointer
+        // constant, so it denotes `ptr` like `nullptr_t`.  Spelling it `i8`
+        // made `auto a = nullptr` allocate an integer slot.
+        if (this.streq(t.base, "nullptr")) return "ptr";
         if (this.streq(t.base, "max_align_t")) return "i8";
         return "i8";
     }
@@ -1910,18 +1910,18 @@ export struct Emitter {
     //   int64_t _J  uint64_t _K  size_t _K  ptrdiff_t J  uptr_t _K
     //   void ?A (a void *return* is spelled X by msvcMangleFunction).
     void emit_mangle_type(AType t, long line, long col) {
-        if (t.array_size > 0) {
-            // H8.2: the oracle's msvcMangleType has no array branch, so an
-            // array mangles as its element type (`int32_t[4]` -> "H").
-            AType elem = t;
-            elem.array_size = 0;
-            this.emit_mangle_type(elem, line, col);
-            return;
-        }
         // H6.2h: the oracle's msvcMangleType maps every pointer/reference to
         // the same placeholder ("AAV" for a reference, "PAV" otherwise).
         if (t.is_ref != 0) { this.ps("AAV"); return; }
         if (t.ptr_depth > 0) { this.ps("PAV"); return; }
+        if (t.array_size > 0) {
+            // H10.6 (C10): an array parameter decays to a pointer at the call
+            // site (`ptr`), so it must mangle like a pointer.  The old code
+            // recursed on the element type, so `int32_t[4]` mangled as `H` and
+            // collided with a scalar overload.
+            this.ps("PAV");
+            return;
+        }
         if (this.streq(t.base, "void")) { this.ps("?A"); return; }
         if (this.streq(t.base, "bool")) { this.ps("_N"); return; }
         if (this.streq(t.base, "char")) { this.ps("D"); return; }
@@ -2199,21 +2199,76 @@ export struct Emitter {
     }
 
     // H8.2: the symbol of a call whose callee has no MIR entry (an unresolved
-    // template-id call).  The oracle's `mangleFunction(name, nullptr)` uses the
-    // int return fallback and the empty parameter list, e.g. `?TCall@@YHX@Z`
-    // (codegen.cpp:2450-2464).
-    void emit_unresolved_symbol(const char* name) {
-        long np = this.name_part_count(name);
+    // template-id call).  H10.6 (C11): the oracle's `mangleFunction(name,
+    // nullptr)` fell back to a fixed int-return/empty-args signature
+    // (`?TCall@@YHX@Z`), which matches no declaration.  Mangle the *call-site*
+    // signature instead, and pair the call with a `declare` (see
+    // `emit_unresolved_decl`), so the module stays well formed.
+    void emit_unresolved_symbol(MExpr e) {
+        long np = this.name_part_count(e.sval);
         this.ps("\"?");
-        this.emit_name_part(name, np - 1);
+        this.emit_name_part(e.sval, np - 1);
         this.ps("@");
         long k = np - 2;
         while (k >= 0) {
-            this.emit_name_part(name, k);
+            this.emit_name_part(e.sval, k);
             this.ps("@");
             k = k - 1;
         }
-        this.ps("@YHX@Z\"");
+        this.ps("@Y");
+        if (this.streq(e.type.base, "void")) {
+            this.ps("X");
+        } else {
+            this.emit_mangle_type(e.type, e.line, e.col);
+        }
+        if (e.an == 0) {
+            this.ps("X");
+        } else {
+            long j = 0;
+            while (j < e.an) {
+                unsafe {
+                    long ai = this.mu->args[e.astart + j];
+                    if (ai >= 0) {
+                        MExpr a = this.mu->exprs[ai];
+                        this.emit_mangle_type(a.type, e.line, e.col);
+                    }
+                }
+                j = j + 1;
+            }
+        }
+        this.ps("@Z\"");
+    }
+
+    // H10.6 (C11): an unresolved call references a symbol no function
+    // declares.  Emit the matching declaration (with the same call-site
+    // signature) once per definition pass, so LLVM parses the module instead
+    // of rejecting an undefined value.
+    void emit_unresolved_decl(MExpr e) {
+        this.ps("declare ");
+        this.ps(this.llvm_type(e.type, 0));
+        this.ps(" @");
+        this.emit_unresolved_symbol(e);
+        this.ps("(");
+        long j = 0;
+        while (j < e.an) {
+            if (j > 0) {
+                this.ps(", ");
+            }
+            unsafe {
+                long ai = this.mu->args[e.astart + j];
+                if (ai >= 0) {
+                    MExpr a = this.mu->exprs[ai];
+                    if (a.type.array_size > 0) {
+                        this.ps("ptr");
+                    } else {
+                        this.ps(this.llvm_type(a.type, 1));
+                    }
+                }
+            }
+            j = j + 1;
+        }
+        this.ps(")");
+        this.nl();
     }
 
     // --- casts ------------------------------------------------------------
@@ -3338,7 +3393,7 @@ export struct Emitter {
         if (this.streq(this.llvm_type(e.type, 0), "void")) {
             this.ps("call void @");
             if (has_fn == 0) {
-                this.emit_unresolved_symbol(e.sval);
+                this.emit_unresolved_symbol(e);
             } else {
                 this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
             }
@@ -3355,7 +3410,7 @@ export struct Emitter {
         this.ps(this.llvm_type(e.type, 0));
         this.ps(" @");
         if (has_fn == 0) {
-            this.emit_unresolved_symbol(e.sval);
+            this.emit_unresolved_symbol(e);
         } else {
             this.emit_fn_symbol(e.sval, callee.is_extern_c, fi, e.line, e.col);
         }
@@ -3425,8 +3480,11 @@ export struct Emitter {
                this.streq(t.base, "bfloat16_t");
     }
 
-    // Emit a builtin symbol with `::` replaced by `_` (CodeGen::lowerExpr's
-    // `isBuiltinCall` branch), e.g. `ivy::print_int` -> `ivy__print_int`.
+    // Emit a builtin symbol with the `::` separator replaced by a single `_`
+    // (CodeGen::lowerExpr's `isBuiltinCall` branch), e.g.
+    // `ivy::print_int` -> `ivy_print_int`.  H10.6 (C7): the previous spelling
+    // turned every ':' into '_' and produced `ivy__print_int`, a symbol that
+    // matches neither the emitted declare nor the runtime (`lib/ivy.h`).
     void emit_builtin_symbol(const char* name) {
         unsafe {
             char* buf = (char*) __ivy_alloc(256);
@@ -3435,6 +3493,9 @@ export struct Emitter {
             while (name[i] != 0 && n < 255) {
                 if (name[i] == ':') {
                     buf[n] = '_';
+                    if (name[i + 1] == ':') {
+                        i = i + 1;
+                    }
                 } else {
                     buf[n] = name[i];
                 }
@@ -3917,10 +3978,14 @@ export struct Emitter {
             return;
         }
         // H6.2l: a reference argument takes the same branch as its referent
-        // (CodeGen::lowerIoArg never special-cases isReference).  The oracle
-        // spells the operand type with llvmType(at), which is `ptr` for a
-        // reference, so the extension line is reproduced verbatim even though
-        // that IR is not valid for a later backend pass.
+        // (CodeGen::lowerIoArg never special-cases isReference).  H10.6 (C2):
+        // `lower_expr` already loaded the referent, so the operand type must be
+        // the *referent* type (`drop_ref = 1`); spelling it with `llvmType(at)`
+        // produced `sext ptr`/`fpext ptr` and invalid IR.
+        long drop = 0;
+        if (at.is_ref != 0) {
+            drop = 1;
+        }
         if (this.streq(at.base, "char") || this.streq(at.base, "int8_t") ||
             this.streq(at.base, "uint8_t")) {
             VRef v = this.lower_expr(idx);
@@ -3943,11 +4008,11 @@ export struct Emitter {
             // __ivy_fmt_float (CodeGen::lowerIoArg).
             VRef v = this.lower_expr(idx);
             VRef ext = v;
-            if (!this.streq(this.llvm_type(at, 0), "double")) {
+            if (!this.streq(this.llvm_type(at, drop), "double")) {
                 ext = this.new_temp();
                 this.emit_val(ext);
                 this.ps(" = fpext ");
-                this.ps(this.llvm_type(at, 0));
+                this.ps(this.llvm_type(at, drop));
                 this.ps(" ");
                 this.emit_val(v);
                 this.ps(" to double");
@@ -3964,7 +4029,7 @@ export struct Emitter {
         }
         VRef v = this.lower_expr(idx);
         unsafe {
-            const char* ty = this.llvm_type(at, 0);
+            const char* ty = this.llvm_type(at, drop);
             VRef ext = v;
             if (!this.streq(ty, "i64")) {
                 ext = this.new_temp();
@@ -5250,6 +5315,28 @@ export struct Emitter {
                 }
             }
             fi = fi + 1;
+        }
+        // H10.6 (C11): a call whose callee has no MIR entry still needs a
+        // declaration.  Mangle it from the call-site signature (the same
+        // helper the call uses) so the module has no undefined value.
+        long xi = 0;
+        while (xi < this.mu->ex_n) {
+            MExpr ce;
+            unsafe {
+                ce = this.mu->exprs[xi];
+            }
+            if (ce.kind == 11 && ce.flag == 0 &&
+                !this.is_io_print_name(ce.sval) &&
+                !this.is_ivy_print_name(ce.sval) &&
+                !this.streq(ce.sval, "io::read_line") &&
+                !this.streq(ce.sval, "io::write_file") &&
+                !this.streq(ce.sval, "io::read_file") &&
+                !(this.streq(ce.sval, "move") &&
+                  this.find_call_target(ce.sval, ce.astart, ce.an) < 0) &&
+                this.find_call_target(ce.sval, ce.astart, ce.an) < 0) {
+                this.emit_unresolved_decl(ce);
+            }
+            xi = xi + 1;
         }
         fi = 0;
         while (fi < this.mu->fn_n) {

@@ -20254,3 +20254,70 @@ function main
     return
       int 0
 
+@@ selfhost/corpus/codegen/h10_C2_print_ref.ivy 511 0
+function show_int
+  return void(int32_t& r)
+  block
+    expr
+      call 'io::println' : void
+        string "{}"
+        ident r
+
+function show_float
+  return void(float64_t& r)
+  block
+    expr
+      call 'io::println' : void
+        string "{}"
+        ident r
+
+function main
+  return int32_t()
+  block
+    decl int32_t i =
+      int 7
+    decl float64_t f =
+      float 1.5
+    expr
+      call 'show_int' : void
+        ident i
+    expr
+      call 'show_float' : void
+        ident f
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C8_nullptr_literal.ivy 131 0
+function main
+  return int32_t()
+  block
+    unsafe
+      block
+        decl nullptr a =
+          nullptr
+    return
+      int 0
+
+@@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy 216 0
+function f
+  return void()
+  block
+    decl int32_t xs
+    decl int32_t a =
+      call 'first<int32_t>' : int32_t
+        ident xs
+
+function first<int32_t>
+  return int32_t(int32_t a)
+  block
+    return
+      int 0
+
+@@ selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy 94 0
+function f
+  return void()
+  block
+    decl int32_t a =
+      call 'Box' : int
+        int 1
+

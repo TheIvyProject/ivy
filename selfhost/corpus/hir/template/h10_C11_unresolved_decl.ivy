@@ -1,0 +1,8 @@
+// H10.6 (C11): an unresolved call is mangled from the call-site signature and
+// paired with a matching `declare`, instead of the fixed `YHX@Z` fallback
+// (which referenced an undefined symbol and made `-c` reject the module).
+template <typename T> struct Box { T value; };
+
+void f() {
+    int32 a = Box<int32>(1);
+}
