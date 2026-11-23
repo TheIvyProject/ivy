@@ -19461,3 +19461,119 @@ function main
     ret
       int 0
 
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 588 0
+function strlen [extern "C"]
+  return int32_t(const char* s)
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t* p [unsafe]
+      new : int32_t* [lt: unknown]
+        binary '+' : int32_t
+          call : int32_t [lt: unknown]
+            string "hi" [lt: static]
+          int 3
+    alloca int32_t v [unsafe]
+      prefix '*' : int32_t [lt: unknown]
+        ident p [lt: unknown]
+    eval [unsafe]
+      call : void [lt: unknown]
+        string "{}" [lt: static]
+        ident v [lt: unknown]
+    eval [unsafe]
+      delete
+        ident p [lt: unknown]
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 1003 0
+function one
+  return int32_t()
+  block 0
+    alloca int32_t* p [unsafe]
+      new : int32_t* [lt: unknown]
+        int 1
+    alloca int32_t v [unsafe]
+      prefix '*' : int32_t [lt: unknown]
+        ident p [lt: unknown]
+    eval [unsafe]
+      delete
+        ident p [lt: unknown]
+    ret [unsafe]
+      ident v [lt: unknown]
+    ret
+      int 0
+
+function two
+  return int32_t(int32_t n)
+  block 0
+    alloca int32_t* p [unsafe]
+      new : int32_t* [lt: unknown]
+        ident n
+    alloca int32_t v [unsafe]
+      prefix '*' : int32_t [lt: unknown]
+        ident p [lt: unknown]
+    eval [unsafe]
+      delete
+        ident p [lt: unknown]
+    ret [unsafe]
+      ident v [lt: unknown]
+    ret
+      int 0
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t v
+      binary '+' : int32_t
+        call : int32_t [lt: unknown]
+        call : int32_t [lt: unknown]
+          int 2
+    eval
+      call : void [lt: unknown]
+        string "{}" [lt: static]
+        ident v
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 513 0
+function main
+  return int32_t()
+  block 0
+    alloca P* p [unsafe]
+      new : P* [lt: unknown]
+        int 7
+        int 9
+    alloca int32_t v [unsafe]
+      binary '+' : int32_t
+        member ->x : int32_t [lt: unknown]
+          ident p [lt: unknown]
+        member ->y : int32_t [lt: unknown]
+          ident p [lt: unknown]
+    eval [unsafe]
+      call : void [lt: unknown]
+        string "{}" [lt: static]
+        ident v
+    eval [unsafe]
+      delete
+        ident p [lt: unknown]
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 284 0
+function main
+  return int32_t()
+  block 0
+    eval
+      call : void [lt: unknown]
+        string "hi" [lt: static]
+    eval
+      call : void [lt: unknown]
+        string "hi" [lt: static]
+    eval
+      call : void [lt: unknown]
+        string "" [lt: static]
+    ret
+      int 0
+

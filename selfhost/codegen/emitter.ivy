@@ -201,11 +201,9 @@ export struct Emitter {
     long str_cap_;
     void* str_bytes_;
     void* str_lens_;
-    void* pm_keys_;
-    void* pm_klens_;
-    void* pm_idx_;
-    long pm_n_;
-    long pm_cap_;
+    // H10.5 (C5): one intern table for every string literal, keyed by the raw
+    // decoded bytes.  The pre-pass and the io format segments share it, so an
+    // identical literal no longer gets two `@.str.N` globals.
     void* sm_keys_;
     void* sm_klens_;
     void* sm_idx_;
@@ -307,8 +305,6 @@ export struct Emitter {
         this.dec_len_ = -1;
         this.str_n_ = 0;
         this.str_cap_ = 4096;
-        this.pm_n_ = 0;
-        this.pm_cap_ = 4096;
         this.sm_n_ = 0;
         this.sm_cap_ = 4096;
         this.cap_ = 0;
@@ -328,9 +324,6 @@ export struct Emitter {
             this.arg_tys_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 8);
             this.str_bytes_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
             this.str_lens_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
-            this.pm_keys_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
-            this.pm_klens_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
-            this.pm_idx_ = __ivy_alloc((unsigned long long) this.pm_cap_ * 8);
             this.sm_keys_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
             this.sm_klens_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
             this.sm_idx_ = __ivy_alloc((unsigned long long) this.sm_cap_ * 8);
@@ -353,9 +346,6 @@ export struct Emitter {
             __ivy_free(this.arg_tys_);
             __ivy_free(this.str_bytes_);
             __ivy_free(this.str_lens_);
-            __ivy_free(this.pm_keys_);
-            __ivy_free(this.pm_klens_);
-            __ivy_free(this.pm_idx_);
             __ivy_free(this.sm_keys_);
             __ivy_free(this.sm_klens_);
             __ivy_free(this.sm_idx_);
@@ -442,8 +432,8 @@ export struct Emitter {
 
     // Builds the LLVM spelling of `T[N]`, mirroring CodeGen::llvmType's array
     // branch: `[N x T]`.  The element is the same type with array_size = 0.
-    // The buffer is returned as a `long` (the pointer-cast idiom used by
-    // make_prefixed_key) so the lifetime checker sees no borrowed reference.
+    // The buffer is returned as a `long` (the pointer-cast idiom used by the
+    // string-key helpers) so the lifetime checker sees no borrowed reference.
     long make_array_type(long n, const char* elem) {
         unsafe {
             long elen = (long) __ivy_strlen(elem);
@@ -834,22 +824,6 @@ export struct Emitter {
 
     // --- H6.2c: string global tables --------------------------------------
 
-    long make_prefixed_key(const char* bytes, long n) {
-        unsafe {
-            char* k = (char*) __ivy_alloc((unsigned long long) (n + 3));
-            k[0] = '1';
-            k[1] = ':';
-            long i = 0;
-            while (i < n) {
-                k[2 + i] = bytes[i];
-                i = i + 1;
-            }
-            k[n + 2] = 0;
-            return (long) k;
-        }
-        return 0;
-    }
-
     long map_get(void* keys, void* klens, void* idxs, long n,
                  const char* key, long klen) {
         long i = 0;
@@ -912,35 +886,10 @@ export struct Emitter {
         return gi;
     }
 
-    // Pre-pass interning: key `"1:" + bytes`.
-    long intern_prepass(const char* raw, long line, long col) {
-        unsafe {
-            long p = this.decode_string(raw);
-            if (p == 0) {
-                if (this.failed_ == 0) {
-                    this.fail(line, col, "malformed string literal");
-                }
-                return -1;
-            }
-            long bl = this.dec_len_;
-            long key = this.make_prefixed_key((char*) p, bl);
-            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
-                                   this.pm_n_, (char*) key, bl + 2);
-            if (gi >= 0) {
-                return gi;
-            }
-            gi = this.add_string((char*) p, bl);
-            this.pm_n_ = this.map_add(this.pm_keys_, this.pm_klens_,
-                                      this.pm_idx_, this.pm_n_, this.pm_cap_,
-                                      key, bl + 2, gi);
-            return gi;
-        }
-        return -1;
-    }
-
-    // io format-segment interning: key is the raw decoded byte string (no
-    // `"1:"` prefix), which is why it never collides with the pre-pass map.
-    long intern_segment(const char* bytes, long len) {
+    // H10.5 (C5): the single string table.  The pre-pass, the io format
+    // segments and the panic messages all key by the raw decoded bytes, so an
+    // identical byte string maps to exactly one `@.str.N`.
+    long intern_cstring(const char* bytes, long len) {
         unsafe {
             long gi = this.map_get(this.sm_keys_, this.sm_klens_, this.sm_idx_,
                                    this.sm_n_, bytes, len);
@@ -959,6 +908,21 @@ export struct Emitter {
                                       this.sm_idx_, this.sm_n_, this.sm_cap_,
                                       (long) cp, len, gi);
             return gi;
+        }
+        return -1;
+    }
+
+    // Pre-pass interning: decode the literal, then add it to the shared table.
+    long intern_prepass(const char* raw, long line, long col) {
+        unsafe {
+            long p = this.decode_string(raw);
+            if (p == 0) {
+                if (this.failed_ == 0) {
+                    this.fail(line, col, "malformed string literal");
+                }
+                return -1;
+            }
+            return this.intern_cstring((char*) p, this.dec_len_);
         }
         return -1;
     }
@@ -1033,7 +997,7 @@ export struct Emitter {
         unsafe {
             const char* mb = reinterpret_cast<const char*>(mp);
             long mlen = (long) __ivy_strlen(mb);
-            long gi = this.intern_segment(mb, mlen);
+            long gi = this.intern_cstring(mb, mlen);
             __ivy_free((void*) mp);
             VRef msg = this.new_temp();
             this.emit_val(msg);
@@ -3738,18 +3702,25 @@ export struct Emitter {
             this.intern_prepass(e.sval, e.line, e.col);
             return;
         }
-        // H6.2n: `new`/`delete` only set the allocator flags.  The oracle's
-        // collectExpr does NOT recurse into the New arguments or the Delete
-        // operand, so a string literal / io::print inside them is not
-        // pre-collected: the argument still lowers, but its string global is
-        // interned at lowering time and the io runtime is not emitted
-        // (bug-compatible).
+        // H10.5 (C16): recurse into the New arguments and the Delete operand
+        // so string literals are pre-collected and `io::print` reaches the
+        // runtime flags, like every other argument list.
         if (e.kind == 15) {
             this.uses_alloc_ = 1;
+            long j = 0;
+            while (j < e.an) {
+                long ai = -1;
+                unsafe {
+                    ai = this.mu->args[e.astart + j];
+                }
+                this.collect_expr(ai);
+                j = j + 1;
+            }
             return;
         }
         if (e.kind == 16) {
             this.uses_free_ = 1;
+            this.collect_expr(e.a);
             return;
         }
         if (e.kind == 11) {
@@ -4067,7 +4038,7 @@ export struct Emitter {
                 while (i < fmt_len) {
                     if (i + 1 < fmt_len && fp[i] == '{' && fp[i + 1] == '}') {
                         if (seg_len > 0) {
-                            long gi = this.intern_segment(seg, seg_len);
+                            long gi = this.intern_cstring(seg, seg_len);
                             VRef g = this.emit_string_gep(gi);
                             this.emit_write_str(fd, g);
                             seg_len = 0;
@@ -4086,7 +4057,7 @@ export struct Emitter {
                     }
                 }
                 if (seg_len > 0) {
-                    long gi = this.intern_segment(seg, seg_len);
+                    long gi = this.intern_cstring(seg, seg_len);
                     VRef g = this.emit_string_gep(gi);
                     this.emit_write_str(fd, g);
                 }
@@ -4123,23 +4094,17 @@ export struct Emitter {
                 return this.imm(0);
             }
             long bl = this.dec_len_;
-            long key = this.make_prefixed_key((char*) p, bl);
-            long gi = this.map_get(this.pm_keys_, this.pm_klens_, this.pm_idx_,
-                                   this.pm_n_, (char*) key, bl + 2);
-            if (gi < 0) {
-                // CodeGen::lowerExpr's StringLit branch returns "null" when
-                // the pre-pass did not collect the literal (it never does
-                // inside a `new` argument, mirroring the oracle).
-                return this.null_ref();
-            }
-            return this.emit_string_gep(gi);
+            // H10.5 (C5/C16): the literal is in the shared table already (the
+            // pre-pass collects it, including inside `new` arguments); this
+            // lookup is idempotent and interns on demand if it was missed.
+            return this.emit_string_gep(this.intern_cstring((char*) p, bl));
         }
         return this.imm(0);
     }
 
-    // H6.2n: `new T(args)` (CodeGen::lowerExpr New branch): allocate
-    // sizeof(T) bytes with @__ivy_alloc, then optionally store the first
-    // argument as a T into the fresh block.  The result is the pointer
+    // H6.2n/H10.5: `new T(args)` (CodeGen::lowerExpr New branch): allocate
+    // sizeof(T) bytes with @__ivy_alloc, then store the arguments into the
+    // fresh object (field by field for a struct).  The result is the pointer
     // temporary.
     VRef lower_new(MExpr e) {
         this.uses_alloc_ = 1;
@@ -4155,18 +4120,69 @@ export struct Emitter {
         this.ps(")");
         this.nl();
         if (e.an > 0) {
-            long ai = -1;
-            unsafe {
-                ai = this.mu->args[e.astart];
+            // H10.5 (C3): a struct aggregate is initialized field by field
+            // (remaining fields zeroed), not by storing args[0] as the whole
+            // `T` -- that was invalid IR for every struct `new`.
+            long si = this.find_struct(target.base);
+            if (si >= 0) {
+                MStruct sd;
+                unsafe {
+                    sd = this.mu->structs[si];
+                }
+                this.ps("store ");
+                this.ps(this.llvm_type(target, 0));
+                this.ps(" zeroinitializer, ptr ");
+                this.emit_val(t);
+                this.nl();
+                long i = 0;
+                while (i < e.an && i < sd.nfields) {
+                    long ai = -1;
+                    unsafe {
+                        ai = this.mu->args[e.astart + i];
+                    }
+                    MField fld;
+                    MExpr elem;
+                    unsafe {
+                        fld = sd.fields[i];
+                        elem = this.mu->exprs[ai];
+                    }
+                    VRef v = this.lower_expr(ai);
+                    VRef c = this.emit_cast(v, this.llvm_type(elem.type, 1),
+                                            this.llvm_type(fld.type, 0),
+                                            elem.type.is_unsigned != 0 ? 1 : 0,
+                                            e.line, e.col);
+                    VRef gep = this.new_temp();
+                    this.emit_val(gep);
+                    this.ps(" = getelementptr ");
+                    this.ps(this.llvm_type(target, 0));
+                    this.ps(", ptr ");
+                    this.emit_val(t);
+                    this.ps(", i32 0, i32 ");
+                    this.out_long(i);
+                    this.nl();
+                    this.ps("store ");
+                    this.ps(this.llvm_type(fld.type, 0));
+                    this.ps(" ");
+                    this.emit_val(c);
+                    this.ps(", ptr ");
+                    this.emit_val(gep);
+                    this.nl();
+                    i = i + 1;
+                }
+            } else {
+                long ai = -1;
+                unsafe {
+                    ai = this.mu->args[e.astart];
+                }
+                VRef v = this.lower_expr(ai);
+                this.ps("store ");
+                this.ps(this.llvm_type(target, 0));
+                this.ps(" ");
+                this.emit_val(v);
+                this.ps(", ptr ");
+                this.emit_val(t);
+                this.nl();
             }
-            VRef v = this.lower_expr(ai);
-            this.ps("store ");
-            this.ps(this.llvm_type(target, 0));
-            this.ps(" ");
-            this.emit_val(v);
-            this.ps(", ptr ");
-            this.emit_val(t);
-            this.nl();
         }
         return t;
     }

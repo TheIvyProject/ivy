@@ -257,6 +257,54 @@
   đều mang binding id chính xác. `233` từ crash thành chạy đúng là hệ quả trực
   tiếp của C1 (range-for dùng cùng tên `p` ở nhiều scope).
 
+### H10.5 - `new` đa tham số, một bảng string, pre-collect trong `new`/`delete`
+
+- **Bug**: **C3** — `new T(args)` chỉ store `args[0]` rồi store với kiểu `T`;
+  với struct đó là IR không hợp lệ (`store %struct.P 1`), nên `137_new_struct`,
+  `143_new_multiarg`, `152_new_struct_i8` bị linker từ chối. **C5** — pre-pass
+  và segment format dùng hai map key khác nhau nên `io::print("hi")` sinh hai
+  `@.str.N` giống hệt nhau. **C16** — `collect_expr` không đi vào arg của
+  `new`/operand của `delete`, nên string literal trong `new` arg bị lower thành
+  `null` và io runtime có thể thiếu. **C17** — declare `@__ivy_alloc`/
+  `@__ivy_free` phải chỉ xuất hiện một lần cho cả module.
+- **Sửa**:
+  - `codegen/emitter.ivy` `lower_new`: với struct, `store zeroinitializer` rồi
+    store từng field qua GEP (đúng thứ tự arg, cast như init-list); scalar/enum
+    giữ một store. Số arg nhiều hơn field bị bỏ qua.
+  - `codegen/emitter.ivy`: bỏ `pm_*`/`make_prefixed_key`; chỉ còn bảng
+    `sm_*` khoá theo **raw bytes** (`intern_cstring`) dùng chung cho pre-pass,
+    format segment và panic message. `lower_string` tra bảng này (idempotent,
+    intern tại chỗ nếu pre-pass bỏ sót), nên không còn trả `null`.
+  - `codegen/emitter.ivy` `collect_expr`: kind 15 duyệt mọi arg của `new`,
+    kind 16 duyệt operand của `delete` (C16).
+  - C17: giữ dedup một cặp declare/module và khoá bằng fixture IR.
+  - `bootstrap/ivy-stage0.exe`: dựng lại seed từ chính bản đã sửa (stage 1 ==
+    stage 2), vì C5/C16 đổi IR mà seed cũ sinh ra cho chính compiler;
+    `ivy-stage0.sha256` và `README.md` cập nhật.
+- **Fixture**: `h10_C3_new_struct_args` (`new P(7, 9)`, in `16`),
+  `h10_C5_string_dedup` (hai `print("hi")` dùng chung `@.str.0`, in `hihi`),
+  `h10_C16_new_arg_string` (`new int32(strlen("hi") + 3)`, in `5`),
+  `h10_C17_alloc_decl_once` (nhiều `new`/`delete` trong hai hàm, một cặp
+  declare). Tất cả đều link/run được với runtime.
+- **Golden**: thêm 4 fixture (đủ 10 mode). Đổi hành vi ở 12 fixture cũ:
+  `137_new_struct`, `143_new_multiarg`, `152_new_struct_i8` (IR hợp lệ; `-c`
+  và link/run từ fail thành pass), `17_print_str`, `18_println_mix`,
+  `21_eprint`, `22_string_escape`, `248_std_unique_ptr`,
+  `hir/name/11_builtins`, `interp/15_io_format`, `interp/24_exit`,
+  `mir/cfg/04_call_builtin` (bảng string thống nhất nên `@.str.N` đổi số/giảm
+  số global). Provenance `expected:H10.5`; `exceptions.txt` không đổi.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap PASS, F2 + self-link
+  identical SHA `5AAD7AC5526A043DB3E9B0AFF1713C63D27F69614FAEC6082534E92A11E8E4BA`
+  (27 159 552 B; trùng seed mới), golden **12580 checks / 0 failures**
+  (1070 fixture). `check_repro.ps1` → **PASS** (stage1 SHA-256 `5AAD7AC5…E4BA`).
+- **Ghi chú**: C3 sửa luôn 3 trong 7 fixture của **C7** (IR tự từ chối):
+  `137/143/152` nay compile/link/run bình thường; `103_print_ref`,
+  `104_print_ref_float`, `186_ivy_print_explicit`, `190_ivy_print_decl_order`
+  vẫn để H10.6. C17 vốn đã đúng (một cặp declare cho cả module) nên chỉ thêm
+  fixture khoá. Việc chạy full `update_golden` có thể xoá các dòng
+  `exceptions.txt` của H27 nếu chạy `-Fixture "*"`; ở đây cập nhật theo từng
+  fixture để giữ nguyên phạm vi H27.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -265,7 +313,7 @@
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ✅ |
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ✅ |
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ✅ |
-| H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ☐ |
+| H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ✅ |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ☐ |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ☐ |
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ☐ |

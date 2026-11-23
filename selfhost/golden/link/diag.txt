@@ -104,11 +104,8 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/136_new_no_paren.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/137_new_struct.ivy 195 1
-selfhost/corpus/codegen/137_new_struct.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
-store %struct.P 5, ptr %tmp.0
-                ^
-
+@@ selfhost/corpus/codegen/137_new_struct.ivy 31 0
+ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/138_new_struct_noparen.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/139_new_enum.ivy 31 0
@@ -121,11 +118,8 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/142_new_expr_arg.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/143_new_multiarg.ivy 197 1
-selfhost/corpus/codegen/143_new_multiarg.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
-store %struct.P 1, ptr %tmp.0
-                ^
-
+@@ selfhost/corpus/codegen/143_new_multiarg.ivy 31 0
+ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/144_delete_array.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/145_new_in_expr.ivy 31 0
@@ -144,11 +138,8 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/151_new_struct_pad.ivy 31 0
 ivy: '<OUT>\app.exe' generated
-@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 198 1
-selfhost/corpus/codegen/152_new_struct_i8.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:10:17: error: integer constant must have integer type
-store %struct.Q 3, ptr %tmp.0
-                ^
-
+@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 31 0
+ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/153_new_nested_struct.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/154_struct_brace_init.ivy 31 0
@@ -557,4 +548,12 @@ ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 31 0
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 31 0
 ivy: '<OUT>\app.exe' generated

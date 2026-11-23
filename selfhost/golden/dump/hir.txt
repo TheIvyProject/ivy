@@ -20129,3 +20129,128 @@ function main
     return
       int 0
 
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 560 0
+function strlen [extern "C"]
+  return int32_t(const char* s)
+  (declaration only)
+
+function main
+  return int32_t()
+  block
+    unsafe
+      block
+        decl int32_t* p =
+          new : int32_t*
+            binary '+' : int32_t
+              call 'strlen' : int32_t
+                string "hi"
+              int 3
+        decl int32_t v =
+          prefix '*' : int32_t
+            ident p
+        expr
+          call 'io::println' : void
+            string "{}"
+            ident v
+        expr
+          delete
+            ident p
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 905 0
+function one
+  return int32_t()
+  block
+    unsafe
+      block
+        decl int32_t* p =
+          new : int32_t*
+            int 1
+        decl int32_t v =
+          prefix '*' : int32_t
+            ident p
+        expr
+          delete
+            ident p
+        return
+          ident v
+    return
+      int 0
+
+function two
+  return int32_t(int32_t n)
+  block
+    unsafe
+      block
+        decl int32_t* p =
+          new : int32_t*
+            ident n
+        decl int32_t v =
+          prefix '*' : int32_t
+            ident p
+        expr
+          delete
+            ident p
+        return
+          ident v
+    return
+      int 0
+
+function main
+  return int32_t()
+  block
+    decl int32_t v =
+      binary '+' : int32_t
+        call 'one' : int32_t
+        call 'two' : int32_t
+          int 2
+    expr
+      call 'io::println' : void
+        string "{}"
+        ident v
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 454 0
+function main
+  return int32_t()
+  block
+    unsafe
+      block
+        decl P* p =
+          new : P*
+            int 7
+            int 9
+        decl int32_t v =
+          binary '+' : int32_t
+            member -> x
+              ident p
+            member -> y
+              ident p
+        expr
+          call 'io::println' : void
+            string "{}"
+            ident v
+        expr
+          delete
+            ident p
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 242 0
+function main
+  return int32_t()
+  block
+    expr
+      call 'io::print' : void
+        string "hi"
+    expr
+      call 'io::print' : void
+        string "hi"
+    expr
+      call 'io::println' : void
+        string ""
+    return
+      int 0
+

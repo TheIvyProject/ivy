@@ -1,0 +1,15 @@
+#pragma ivy cnumber
+
+// H10.5 (C16): the string literal inside a `new` argument must be collected
+// by the pre-pass (global + io runtime), not lowered as `null`.
+extern "C" int32 strlen(const char* s);
+
+int32 main() {
+    unsafe {
+        int32* p = new int32(strlen("hi") + 3);
+        int32 v = *p;
+        io::println("{}", v);
+        delete p;
+    }
+    return 0;
+}

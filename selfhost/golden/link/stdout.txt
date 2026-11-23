@@ -350,3 +350,14 @@ before
 0 0
 @@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 3 0
 9
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 3 0
+5
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 3 0
+3
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 4 0
+16
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 6 0
+hihi
+@@ selfhost/corpus/codegen/137_new_struct.ivy 0 5
+@@ selfhost/corpus/codegen/143_new_multiarg.ivy 0 1
+@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 0 0

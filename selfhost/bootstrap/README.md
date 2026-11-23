@@ -12,7 +12,7 @@ knows it) or when a fix must reach the first generation.
 | | |
 |---|---|
 | size | 27 159 552 bytes |
-| SHA-256 | `7FCFDE62EE757156C40D4A85A34CB928E82B1823B604989844B2B6380BE827FD` |
+| SHA-256 | `5AAD7AC5526A043DB3E9B0AFF1713C63D27F69614FAEC6082534E92A11E8E4BA` |
 | built from | the H10.4 sources (parent commit `745deaf`, H10.3) |
 | built by | `selfhost/build.ps1 -SelfLink` - re-bootstrapped from the previous seed until stage 1 and stage 2 agreed (H10.4 needs its own slot/GEP fixes in the first generation) |
 | runtime | `rt.obj` from `std/rt.ivy` (H9.1), linked statically |

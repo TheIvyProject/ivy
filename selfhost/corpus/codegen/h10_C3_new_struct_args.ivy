@@ -1,0 +1,18 @@
+#pragma ivy cnumber
+
+// H10.5 (C3): `new P(7, 9)` initializes every struct field.  Before the fix
+// only args[0] was stored (as a whole-struct value, which is invalid IR).
+struct P {
+    int32 x;
+    int32 y;
+};
+
+int32 main() {
+    unsafe {
+        P* p = new P(7, 9);
+        int32 v = p->x + p->y;
+        io::println("{}", v);
+        delete p;
+    }
+    return 0;
+}

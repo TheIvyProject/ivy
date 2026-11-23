@@ -1,0 +1,11 @@
+#pragma ivy cnumber
+
+// H10.5 (C5): the pre-pass and the io segments share one intern table, so the
+// same byte string is emitted as a single `@.str.N` (the golden IR shows one
+// `@.str.0` used by both `io::print` calls).
+int32 main() {
+    io::print("hi");
+    io::print("hi");
+    io::println("");
+    return 0;
+}

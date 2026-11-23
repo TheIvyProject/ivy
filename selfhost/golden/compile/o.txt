@@ -1123,3 +1123,7 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 0 0
 @@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 0 0

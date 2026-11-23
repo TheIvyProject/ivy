@@ -453,6 +453,12 @@ sinh thêm segment. `io::print(x, "tail")` chỉ có `@.str.0` = `"tail"` (p08).
 Với format, segment rỗng (ví dụ ngay trước `{}`) không được intern; chỉ segment
 có ít nhất một byte mới sinh global raw-bytes.
 
+**H10.5 — đã sửa (C5).** Emitter chỉ còn **một** bảng intern (`sm_*`, key raw
+bytes) dùng chung cho pre-pass, segment và panic message, nên `io::print("hi")`
+chỉ sinh một `@.str.N` và không còn `pm_*`/`make_prefixed_key`. Phần mô tả
+quirk phía trên là lịch sử của thời bug-compat; xem `H10_NOTES.md` H10.5 và
+fixture `h10_C5_string_dedup`.
+
 ## 21. Hạ io::print và thứ tự %tmp
 
 `lower_call` kiểm tra `is_io_print_name(e.sval)` **trước** `find_fn`, nên các
@@ -1895,6 +1901,13 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
     dùng như biểu thức (`emit_val` không in gì, khớp chuỗi `""` của
     oracle).
 
+**H10.5 — đã sửa (C3, C16).** `collect_expr` nay đệ quy vào args của `new`
+và operand của `delete`, nên literal bên trong được pre-collect và io runtime
+được bật. `lower_new` zero-init struct rồi store từng field qua GEP (có cast),
+scalar/enum vẫn một store; `lower_string` tra bảng string chung và intern tại
+chỗ nếu cần, không còn `null`. Xem `H10_NOTES.md` H10.5; fixture
+`h10_C3_new_struct_args`, `h10_C16_new_arg_string`.
+
 #### 37.3 Corpus mới
 
 | fixture | nội dung |
@@ -1907,7 +1920,7 @@ mtime `2026-10-21 16:41:44`, SHA-256 `FFB376CF...313E`). Không có
 | `140_new_float.ivy` | `new float64(1.5)` + in |
 | `141_new_float32.ivy` | `new float32(2.25)` + in |
 | `142_new_expr_arg.ivy` | `new int32(v + 1)` |
-| `143_new_multiarg.ivy` | `new P(1, 2)` (chỉ args[0] được store) |
+| `143_new_multiarg.ivy` | `new P(1, 2)` (H10.5: store cả hai field; trước đó chỉ args[0] và IR không hợp lệ) |
 | `144_delete_array.ivy` | `delete[] p` |
 | `145_new_in_expr.ivy` | `*new int32(9)` |
 | `146_new_loop.ivy` | cấp phát/giải phóng trong `while` |

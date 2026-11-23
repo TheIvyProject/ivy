@@ -1487,7 +1487,7 @@ define i32 @main() {
 
 declare ptr @__ivy_alloc(i64)
 declare void @__ivy_free(ptr)
-@@ selfhost/corpus/codegen/137_new_struct.ivy 654 0
+@@ selfhost/corpus/codegen/137_new_struct.ivy 751 0
 ; LLVM IR emitted by ivy
 %struct.P = type { i32 }
 
@@ -1497,16 +1497,18 @@ define i32 @ivy_main() {
 br label %bb0
 bb0:
 %tmp.0 = call ptr @__ivy_alloc(i64 8)
-store %struct.P 5, ptr %tmp.0
+store %struct.P zeroinitializer, ptr %tmp.0
+%tmp.1 = getelementptr %struct.P, ptr %tmp.0, i32 0, i32 0
+store i32 5, ptr %tmp.1
 store ptr %tmp.0, ptr %p.0
-%tmp.1 = load ptr, ptr %p.0
-%tmp.2 = getelementptr %struct.P, ptr %tmp.1, i32 0, i32 0
-%tmp.3 = load i32, ptr %tmp.2
-store i32 %tmp.3, ptr %v.1
-%tmp.4 = load ptr, ptr %p.0
-call void @__ivy_free(ptr %tmp.4)
-%tmp.5 = load i32, ptr %v.1
-ret i32 %tmp.5
+%tmp.2 = load ptr, ptr %p.0
+%tmp.3 = getelementptr %struct.P, ptr %tmp.2, i32 0, i32 0
+%tmp.4 = load i32, ptr %tmp.3
+store i32 %tmp.4, ptr %v.1
+%tmp.5 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.5)
+%tmp.6 = load i32, ptr %v.1
+ret i32 %tmp.6
 ret i32 0
 }
 
@@ -1705,7 +1707,7 @@ define i32 @main() {
 
 declare ptr @__ivy_alloc(i64)
 declare void @__ivy_free(ptr)
-@@ selfhost/corpus/codegen/143_new_multiarg.ivy 659 0
+@@ selfhost/corpus/codegen/143_new_multiarg.ivy 839 0
 ; LLVM IR emitted by ivy
 %struct.P = type { i32, i32 }
 
@@ -1715,16 +1717,20 @@ define i32 @ivy_main() {
 br label %bb0
 bb0:
 %tmp.0 = call ptr @__ivy_alloc(i64 8)
-store %struct.P 1, ptr %tmp.0
+store %struct.P zeroinitializer, ptr %tmp.0
+%tmp.1 = getelementptr %struct.P, ptr %tmp.0, i32 0, i32 0
+store i32 1, ptr %tmp.1
+%tmp.2 = getelementptr %struct.P, ptr %tmp.0, i32 0, i32 1
+store i32 2, ptr %tmp.2
 store ptr %tmp.0, ptr %p.0
-%tmp.1 = load ptr, ptr %p.0
-%tmp.2 = getelementptr %struct.P, ptr %tmp.1, i32 0, i32 0
-%tmp.3 = load i32, ptr %tmp.2
-store i32 %tmp.3, ptr %v.1
-%tmp.4 = load ptr, ptr %p.0
-call void @__ivy_free(ptr %tmp.4)
-%tmp.5 = load i32, ptr %v.1
-ret i32 %tmp.5
+%tmp.3 = load ptr, ptr %p.0
+%tmp.4 = getelementptr %struct.P, ptr %tmp.3, i32 0, i32 0
+%tmp.5 = load i32, ptr %tmp.4
+store i32 %tmp.5, ptr %v.1
+%tmp.6 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.6)
+%tmp.7 = load i32, ptr %v.1
+ret i32 %tmp.7
 ret i32 0
 }
 
@@ -2012,7 +2018,7 @@ define i32 @main() {
 
 declare ptr @__ivy_alloc(i64)
 declare void @__ivy_free(ptr)
-@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 658 0
+@@ selfhost/corpus/codegen/152_new_struct_i8.ivy 786 0
 ; LLVM IR emitted by ivy
 %struct.Q = type { i8, i32 }
 
@@ -2022,16 +2028,19 @@ define i32 @ivy_main() {
 br label %bb0
 bb0:
 %tmp.0 = call ptr @__ivy_alloc(i64 8)
-store %struct.Q 3, ptr %tmp.0
+store %struct.Q zeroinitializer, ptr %tmp.0
+%tmp.1 = trunc i32 3 to i8
+%tmp.2 = getelementptr %struct.Q, ptr %tmp.0, i32 0, i32 0
+store i8 %tmp.1, ptr %tmp.2
 store ptr %tmp.0, ptr %q.0
-%tmp.1 = load ptr, ptr %q.0
-%tmp.2 = getelementptr %struct.Q, ptr %tmp.1, i32 0, i32 1
-%tmp.3 = load i32, ptr %tmp.2
-store i32 %tmp.3, ptr %v.1
-%tmp.4 = load ptr, ptr %q.0
-call void @__ivy_free(ptr %tmp.4)
-%tmp.5 = load i32, ptr %v.1
-ret i32 %tmp.5
+%tmp.3 = load ptr, ptr %q.0
+%tmp.4 = getelementptr %struct.Q, ptr %tmp.3, i32 0, i32 1
+%tmp.5 = load i32, ptr %tmp.4
+store i32 %tmp.5, ptr %v.1
+%tmp.6 = load ptr, ptr %q.0
+call void @__ivy_free(ptr %tmp.6)
+%tmp.7 = load i32, ptr %v.1
+ret i32 %tmp.7
 ret i32 0
 }
 
@@ -2538,12 +2547,12 @@ define i32 @main() {
   ret i32 %r
 }
 
-@@ selfhost/corpus/codegen/17_print_str.ivy 616 0
+@@ selfhost/corpus/codegen/17_print_str.ivy 558 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.1, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.0)
 ret i32 0
 }
@@ -2561,7 +2570,6 @@ declare ptr @__ivy_fmt_float(double)
 declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
-@.str.1 = private unnamed_addr constant [3 x i8] c"hi\00"
 @@ selfhost/corpus/codegen/170_ptr_ret_void.ivy 212 0
 ; LLVM IR emitted by ivy
 declare ptr @alloc(i64)
@@ -2934,12 +2942,12 @@ define i32 @main() {
   ret i32 %r
 }
 
-@@ selfhost/corpus/codegen/18_println_mix.ivy 773 0
+@@ selfhost/corpus/codegen/18_println_mix.ivy 715 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.1, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.0)
 call void @__ivy_write_newline(i32 1)
 %tmp.1 = sext i32 42 to i64
@@ -2961,7 +2969,6 @@ declare ptr @__ivy_fmt_float(double)
 declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
-@.str.1 = private unnamed_addr constant [3 x i8] c"hi\00"
 @@ selfhost/corpus/codegen/180_const_cast.ivy 432 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
@@ -4685,14 +4692,14 @@ define i32 @main() {
 }
 
 @.str.0 = private unnamed_addr constant [20 x i8] c"a=%d b=%d twice=%d\0A\00"
-@@ selfhost/corpus/codegen/21_eprint.ivy 858 0
+@@ selfhost/corpus/codegen/21_eprint.ivy 744 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.2, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 2, ptr %tmp.0)
-%tmp.1 = getelementptr i8, ptr @.str.3, i64 0
+%tmp.1 = getelementptr i8, ptr @.str.1, i64 0
 call void @__ivy_write_str(i32 2, ptr %tmp.1)
 call void @__ivy_write_newline(i32 2)
 ret i32 0
@@ -4712,8 +4719,6 @@ declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [2 x i8] c"e\00"
 @.str.1 = private unnamed_addr constant [2 x i8] c"f\00"
-@.str.2 = private unnamed_addr constant [2 x i8] c"e\00"
-@.str.3 = private unnamed_addr constant [2 x i8] c"f\00"
 @@ selfhost/corpus/codegen/210_template_struct_int64.ivy 969 0
 ; LLVM IR emitted by ivy
 %struct.Box_int64_t_ = type { i64 }
@@ -5265,16 +5270,16 @@ define i32 @main() {
 }
 
 @.str.0 = private unnamed_addr constant [4 x i8] c"%d\0A\00"
-@@ selfhost/corpus/codegen/22_string_escape.ivy 1072 0
+@@ selfhost/corpus/codegen/22_string_escape.ivy 878 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.3, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.0)
-%tmp.1 = getelementptr i8, ptr @.str.4, i64 0
+%tmp.1 = getelementptr i8, ptr @.str.1, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.1)
-%tmp.2 = getelementptr i8, ptr @.str.5, i64 0
+%tmp.2 = getelementptr i8, ptr @.str.2, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.2)
 ret i32 0
 }
@@ -5294,9 +5299,6 @@ declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [12 x i8] c"a\0Ab\09\22q\22\5Cend\00"
 @.str.1 = private unnamed_addr constant [2 x i8] c"A\00"
 @.str.2 = private unnamed_addr constant [2 x i8] c"\01\00"
-@.str.3 = private unnamed_addr constant [12 x i8] c"a\0Ab\09\22q\22\5Cend\00"
-@.str.4 = private unnamed_addr constant [2 x i8] c"A\00"
-@.str.5 = private unnamed_addr constant [2 x i8] c"\01\00"
 @@ selfhost/corpus/codegen/220_variadic_mixed.ivy 929 0
 ; LLVM IR emitted by ivy
 declare i32 @printf(ptr, ...)
@@ -7677,7 +7679,7 @@ declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [9 x i8] c"{} {} {}\00"
 @.str.1 = private unnamed_addr constant [2 x i8] c" \00"
-@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 6581 0
+@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 6511 0
 ; LLVM IR emitted by ivy
 %struct.unique_ptr_int32_t_ = type { ptr }
 
@@ -7717,7 +7719,7 @@ call void @"?1unique_ptr_int32_t_@@AEXAAV@Z"(ptr %p.0)
 %tmp.8 = load i32, ptr %__ret.3
 ret i32 %tmp.8
 bb3:
-%tmp.9 = getelementptr i8, ptr @.str.2, i64 0
+%tmp.9 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.9)
 call void @__ivy_write_newline(i32 1)
 store i32 0, ptr %__ret.4
@@ -7894,7 +7896,6 @@ declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [14 x i8] c"unique_ptr ok\00"
 @.str.1 = private unnamed_addr constant [31 x i8] c"unique_ptr dereference of null\00"
-@.str.2 = private unnamed_addr constant [14 x i8] c"unique_ptr ok\00"
 @@ selfhost/corpus/codegen/249_std_vector.ivy 13046 0
 ; LLVM IR emitted by ivy
 %struct.vector_int32_t_ = type { ptr, i64, i64 }
@@ -17138,7 +17139,7 @@ store i32 %tmp.15, ptr %a.0
 ret void
 }
 
-@@ selfhost/corpus/hir/name/11_builtins.ivy 1084 0
+@@ selfhost/corpus/hir/name/11_builtins.ivy 1027 0
 ; LLVM IR emitted by ivy
 declare void @ivy_print_int(i32)
 declare void @ivy_print_float(double)
@@ -17155,7 +17156,7 @@ br label %bb0
 bb0:
 %tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @ivy_print_str(ptr %tmp.0)
-%tmp.1 = getelementptr i8, ptr @.str.2, i64 0
+%tmp.1 = getelementptr i8, ptr @.str.1, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.1)
 call void @__ivy_write_newline(i32 1)
 store i32 1, ptr %x.0
@@ -17172,7 +17173,6 @@ declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [2 x i8] c"a\00"
 @.str.1 = private unnamed_addr constant [2 x i8] c"b\00"
-@.str.2 = private unnamed_addr constant [2 x i8] c"b\00"
 @@ selfhost/corpus/hir/name/e_arrow.ivy 94 1
 selfhost/corpus/hir/name/e_arrow.ivy:7:16: error: '->' requires a pointer to struct (got 'P')
 @@ selfhost/corpus/hir/name/e_call.ivy 162 1
@@ -21232,7 +21232,7 @@ declare void @__ivy_write_newline(i32)
 @.str.1 = private unnamed_addr constant [7 x i8] c"err={}\00"
 @.str.2 = private unnamed_addr constant [5 x i8] c"out=\00"
 @.str.3 = private unnamed_addr constant [5 x i8] c"err=\00"
-@@ selfhost/corpus/interp/15_io_format.ivy 1038 0
+@@ selfhost/corpus/interp/15_io_format.ivy 975 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 br label %bb0
@@ -21243,7 +21243,7 @@ call void @__ivy_write_str(i32 1, ptr %tmp.0)
 %tmp.2 = call ptr @__ivy_fmt_int(i64 %tmp.1)
 call void @__ivy_write_str(i32 1, ptr %tmp.2)
 call void @__ivy_write_newline(i32 1)
-%tmp.3 = getelementptr i8, ptr @.str.3, i64 0
+%tmp.3 = getelementptr i8, ptr @.str.1, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.3)
 call void @__ivy_write_newline(i32 1)
 ret i32 0
@@ -21264,7 +21264,6 @@ declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [9 x i8] c"value={}\00"
 @.str.1 = private unnamed_addr constant [8 x i8] c"literal\00"
 @.str.2 = private unnamed_addr constant [7 x i8] c"value=\00"
-@.str.3 = private unnamed_addr constant [8 x i8] c"literal\00"
 @@ selfhost/corpus/interp/16_c_output.ivy 837 0
 ; LLVM IR emitted by ivy
 declare i32 @puts(ptr)
@@ -21547,13 +21546,13 @@ define i32 @main() {
   ret i32 %r
 }
 
-@@ selfhost/corpus/interp/24_exit.ivy 709 0
+@@ selfhost/corpus/interp/24_exit.ivy 647 0
 ; LLVM IR emitted by ivy
 declare void @exit(i32)
 define i32 @ivy_main() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.1, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.0)
 call void @__ivy_write_newline(i32 1)
 call void @exit(i32 7)
@@ -21573,7 +21572,6 @@ declare ptr @__ivy_fmt_float(double)
 declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [7 x i8] c"before\00"
-@.str.1 = private unnamed_addr constant [7 x i8] c"before\00"
 @@ selfhost/corpus/lexer/err/block_unterm.ivy 84 1
 "selfhost/corpus/lexer/err/block_unterm.ivy":1:8: error: unterminated block comment
 @@ selfhost/corpus/lexer/err/char_unterm.ivy 174 1
@@ -22290,12 +22288,12 @@ bb0:
 ret i32 %tmp.1
 }
 
-@@ selfhost/corpus/mir/cfg/04_call_builtin.ivy 557 0
+@@ selfhost/corpus/mir/cfg/04_call_builtin.ivy 496 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 br label %bb0
 bb0:
-%tmp.0 = getelementptr i8, ptr @.str.1, i64 0
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.0)
 call void @__ivy_write_newline(i32 1)
 ret void
@@ -22308,7 +22306,6 @@ declare ptr @__ivy_fmt_float(double)
 declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
-@.str.1 = private unnamed_addr constant [6 x i8] c"hello\00"
 @@ selfhost/corpus/mir/cfg/04_call_in_condition.ivy 242 0
 ; LLVM IR emitted by ivy
 define i1 @"?g@@Y_NX@Z"() {
@@ -25759,3 +25756,194 @@ define i32 @main() {
 }
 
 @.str.0 = private unnamed_addr constant [6 x i8] c"%lld\0A\00"
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 1186 0
+; LLVM IR emitted by ivy
+declare i32 @strlen(ptr)
+define i32 @ivy_main() {
+%p.0 = alloca ptr
+%v.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call ptr @__ivy_alloc(i64 4)
+%tmp.1 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.2 = call i32 @strlen(ptr %tmp.1)
+%tmp.3 = add i32 %tmp.2, 3
+store i32 %tmp.3, ptr %tmp.0
+store ptr %tmp.0, ptr %p.0
+%tmp.4 = load ptr, ptr %p.0
+%tmp.5 = load i32, ptr %tmp.4
+store i32 %tmp.5, ptr %v.1
+%tmp.6 = load i32, ptr %v.1
+%tmp.7 = sext i32 %tmp.6 to i64
+%tmp.8 = call ptr @__ivy_fmt_int(i64 %tmp.7)
+call void @__ivy_write_str(i32 1, ptr %tmp.8)
+call void @__ivy_write_newline(i32 1)
+%tmp.9 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.9)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare ptr @__ivy_alloc(i64)
+declare void @__ivy_free(ptr)
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
+@.str.1 = private unnamed_addr constant [3 x i8] c"{}\00"
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 1707 0
+; LLVM IR emitted by ivy
+define i32 @"?one@@YHX@Z"() {
+%p.0 = alloca ptr
+%v.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call ptr @__ivy_alloc(i64 4)
+store i32 1, ptr %tmp.0
+store ptr %tmp.0, ptr %p.0
+%tmp.1 = load ptr, ptr %p.0
+%tmp.2 = load i32, ptr %tmp.1
+store i32 %tmp.2, ptr %v.1
+%tmp.3 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.3)
+%tmp.4 = load i32, ptr %v.1
+ret i32 %tmp.4
+ret i32 0
+}
+
+define i32 @"?two@@YHH@Z"(i32 %arg0) {
+%n.0 = alloca i32
+store i32 %arg0, ptr %n.0
+%p.1 = alloca ptr
+%v.2 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call ptr @__ivy_alloc(i64 4)
+%tmp.1 = load i32, ptr %n.0
+store i32 %tmp.1, ptr %tmp.0
+store ptr %tmp.0, ptr %p.1
+%tmp.2 = load ptr, ptr %p.1
+%tmp.3 = load i32, ptr %tmp.2
+store i32 %tmp.3, ptr %v.2
+%tmp.4 = load ptr, ptr %p.1
+call void @__ivy_free(ptr %tmp.4)
+%tmp.5 = load i32, ptr %v.2
+ret i32 %tmp.5
+ret i32 0
+}
+
+define i32 @ivy_main() {
+%v.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?one@@YHX@Z"()
+%tmp.1 = call i32 @"?two@@YHH@Z"(i32 2)
+%tmp.2 = add i32 %tmp.0, %tmp.1
+store i32 %tmp.2, ptr %v.0
+%tmp.3 = load i32, ptr %v.0
+%tmp.4 = sext i32 %tmp.3 to i64
+%tmp.5 = call ptr @__ivy_fmt_int(i64 %tmp.4)
+call void @__ivy_write_str(i32 1, ptr %tmp.5)
+call void @__ivy_write_newline(i32 1)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare ptr @__ivy_alloc(i64)
+declare void @__ivy_free(ptr)
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@.str.0 = private unnamed_addr constant [3 x i8] c"{}\00"
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 1420 0
+; LLVM IR emitted by ivy
+%struct.P = type { i32, i32 }
+
+define i32 @ivy_main() {
+%p.0 = alloca ptr
+%v.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call ptr @__ivy_alloc(i64 8)
+store %struct.P zeroinitializer, ptr %tmp.0
+%tmp.1 = getelementptr %struct.P, ptr %tmp.0, i32 0, i32 0
+store i32 7, ptr %tmp.1
+%tmp.2 = getelementptr %struct.P, ptr %tmp.0, i32 0, i32 1
+store i32 9, ptr %tmp.2
+store ptr %tmp.0, ptr %p.0
+%tmp.3 = load ptr, ptr %p.0
+%tmp.4 = getelementptr %struct.P, ptr %tmp.3, i32 0, i32 0
+%tmp.5 = load i32, ptr %tmp.4
+%tmp.6 = load ptr, ptr %p.0
+%tmp.7 = getelementptr %struct.P, ptr %tmp.6, i32 0, i32 1
+%tmp.8 = load i32, ptr %tmp.7
+%tmp.9 = add i32 %tmp.5, %tmp.8
+store i32 %tmp.9, ptr %v.1
+%tmp.10 = load i32, ptr %v.1
+%tmp.11 = sext i32 %tmp.10 to i64
+%tmp.12 = call ptr @__ivy_fmt_int(i64 %tmp.11)
+call void @__ivy_write_str(i32 1, ptr %tmp.12)
+call void @__ivy_write_newline(i32 1)
+%tmp.13 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.13)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare ptr @__ivy_alloc(i64)
+declare void @__ivy_free(ptr)
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@.str.0 = private unnamed_addr constant [3 x i8] c"{}\00"
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 744 0
+; LLVM IR emitted by ivy
+define i32 @ivy_main() {
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.0)
+%tmp.1 = getelementptr i8, ptr @.str.0, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.1)
+call void @__ivy_write_newline(i32 1)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@.str.0 = private unnamed_addr constant [3 x i8] c"hi\00"
+@.str.1 = private unnamed_addr constant [1 x i8] c"\00"
