@@ -1,0 +1,13 @@
+// H10.7 (C14): a constant-folded negative zero keeps its runtime value but
+// the literal printer emits the canonical "0.000000" (not "-0.000000").
+constexpr float64 neg(float64 x) {
+    return -x;
+}
+
+int32 main() {
+    float64 z = neg(0.0);
+    if (z != 0.0) {
+        return 1;
+    }
+    return 0;
+}

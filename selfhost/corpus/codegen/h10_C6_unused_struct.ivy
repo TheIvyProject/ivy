@@ -1,0 +1,12 @@
+// H10.7 (C6): an unused struct definition is not printed and an empty
+// struct is the canonical `{}`.
+struct Used { int32 x; };
+struct Unused { int32 y; };
+struct Empty { };
+
+int32 main() {
+    Used u;
+    u.x = 7;
+    Empty e;
+    return u.x;
+}

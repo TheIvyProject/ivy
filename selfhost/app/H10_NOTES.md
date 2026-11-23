@@ -374,6 +374,70 @@
   `runtime_sha256`/`runtime_size` - từ đây `check_golden` không còn warning
   "runtime differs" (baseline cũ 8 711 B là runtime C thời oracle).
 
+### H10.7 — Literal/format IR: em dash, `-0.0`, octal escape, label rỗng, struct
+
+- **Bug**:
+  - **C20** — `decodeBody`/`readOctalEscape` bắt đầu đọc từ chữ số **sau** chữ
+    số mà `switch` đã tiêu thụ, nên `"\101"` ra byte `0x01` và `"\1"` ra
+    `0x00` (thay vì `'A'` và `0x01`).
+  - **C13** — `continue` nằm trong `switch` lấy context loop của switch
+    (`incr == -1`, `cond == -1`) rồi `jump_to(-1)`; emitter in ra
+    `br label %` với nhãn rỗng, làm IR không hợp lệ (`llvm-as` từ chối).
+  - **C6** — `emit_struct_defs` in **mọi** struct (kể cả struct không được
+    dùng), in struct rỗng thành `{  }` (hai dấu cách) và luôn thêm một dòng
+    trống sau khối.
+  - **C14** — literal `-0.0` giữ dấu và in `-0.000000` trong IR, trong khi
+    ngôn ngữ coi `+0.0` và `-0.0` bằng nhau.
+  - **H22** — em dash U+2014 bị đồn là mojibake. Kiểm tra byte thô cho thấy
+    port **đã** truyền nguyên UTF-8 (`E2 80 94`) ở cả diagnostic lẫn
+    `@.str.N`; mojibake trước đây đến từ lớp capture của PowerShell (`2>`),
+    không phải từ compiler. H10.7 khoá hành vi đúng bằng fixture.
+- **Sửa**:
+  - `codegen/emitter.ivy` `decode_body` (C20): khởi tạo `v = e - '0'`,
+    `cnt = 1` rồi mới đọc tối đa hai chữ số bát phân tiếp theo.
+  - `mir/mir_builder.ivy` `st_continue` + `loop_continue_target` (C13): bỏ
+    qua context switch (`sw_base >= 0`) và nhắm block tăng/điều kiện của
+    loop thật gần nhất; không có loop thì không emit jump. Emitter thêm
+    guard bỏ branch/arm/default có target âm (phòng thủ, không còn xảy ra).
+  - `codegen/emitter.ivy` `emit_struct_defs` (C6): chỉ in struct được dùng;
+    `mark_used_structs` quét type trong pool expr/inst, tham số, return và
+    đóng closure qua field (giữ cả struct chỉ xuất hiện qua con trỏ/tham
+    chiếu vì member access cần layout; struct polymorphic giữ vì vtable là
+    global). Struct rỗng in `{}`, không còn dòng trống thừa.
+  - `codegen/emitter.ivy` `emit_double_lit` (C14): bỏ phép dò dấu bằng
+    `1.0 / v`; `-0.0` in thành `0.000000`.
+- **Fixture** (`selfhost/corpus/codegen/`):
+  - `h10_C20_octal_escape.ivy` — `"\101"`/`"\1"`; link stdout
+    `AAB\r\n\x01\r\n` (8 B), exit 0.
+  - `h10_H22_em_dash.ivy` — em dash thật trong source; IR
+    `c"A\E2\80\94B\00"`, stdout `A\xE2\x80\x94B\r\n`.
+  - `h10_C14_negative_zero.ivy` — `neg(0.0)` constexpr thành `-0.0`; IR
+    `store double 0.000000`, runtime `z == 0.0`.
+  - `h10_C13_switch_continue.ivy` — `continue` trong switch; IR không còn
+    `br label %` rỗng, chạy cho exit 5.
+  - `h10_C6_unused_struct.ivy` — struct `Unused` không được in, `Empty` in
+    `{}`; chạy cho exit 7.
+- **Golden**: 5 fixture mới × 10 mode; corpus.txt +5 (1079 fixture, 269
+  link). 20 fixture cũ đổi record: `22_string_escape` (octal), `34_struct_multi`
+  (`{}`), 8 `hir/constexpr` (`05,06,08,11,12,13,14_sizeof*`, `58_negative_zero`),
+  4 `hir/template` (`04_template_in_method`, `05_base_dropped`,
+  `05_specid_call_without_constructor`, `05_struct_template_wins_over_function_template`),
+  `hir/template/h10_C11_unresolved_decl`, `hir/type/60_inherit_field`,
+  `mir/cfg/03_sizeof_alignof_types`, `mir/cfg/07_deep_nesting` (nay `-c`
+  exit 0), `parser/aggregate/12_base`, `parser/aggregate/14_field_init`.
+  Provenance `expected:H10.7` cho cả 25 fixture. Không fixture nào khác đổi.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `B809B62811BC900B0F0C61003E4CFF0B45CEC32D7821B93E7620BEA3D2ACC1F1`
+  (27 169 792 B), golden **12714 checks / 0 failures** (1079 fixture).
+  `check_repro.ps1` → **PASS** (83 artifacts: 42 object, 38 `.ivm`, 3 exe;
+  stage1 SHA-256 `B809B628…D2ACC1F1`).
+- **Ghi chú**: C14 chọn chuẩn hoá `-0.0` → `0.000000` (giá trị runtime vẫn
+  là `-0.0`); `llvm-as` chấp nhận cả `-0.000000` nên đây là thay đổi canonical
+  hoá, không phải sửa lỗi IR. C13 sửa ở nguồn MIR (jump target) và giữ guard ở
+  emitter để không bao giờ in nhãn rỗng. `07_deep_nesting.ivy` trước đây được
+  ghi nhận là fixture `-c` **thất bại** (exit 1) đúng theo bug; nay nó qua và
+  object được lưu — đây là thay đổi hành vi có chủ ý của H10.7.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -384,7 +448,7 @@
 | H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ✅ |
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ✅ |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ✅ |
-| H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ☐ |
+| H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ✅ |
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ☐ |
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ☐ |
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ☐ |

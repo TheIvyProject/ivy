@@ -1,0 +1,6 @@
+// H10.7 (H22): an em dash (U+2014) in a string literal is passed through as
+// raw UTF-8 bytes (E2 80 94), never re-encoded as mojibake.
+int32 main() {
+    io::println("A—B");
+    return 0;
+}

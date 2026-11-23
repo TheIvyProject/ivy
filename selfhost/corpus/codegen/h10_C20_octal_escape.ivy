@@ -1,0 +1,6 @@
+// H10.7 (C20): octal escapes use all (up to three) digits.
+int32 main() {
+    io::println("A\101B");
+    io::println("\1");
+    return 0;
+}

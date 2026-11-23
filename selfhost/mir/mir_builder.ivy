@@ -3040,12 +3040,43 @@ export struct MirBuilder {
 
     void st_continue(long idx) {
         if (this.lp_n_ > 0) {
-            long target = this.loop_incr();
-            if (target < 0) {
-                target = this.loop_cond();
+            // H10.7 (C13): a switch has a loop context (for `nextcase`) but
+            // no increment/condition block.  The oracle read that null target
+            // and emitted a bare `br label %`; skip switch contexts and
+            // continue the nearest enclosing loop instead.
+            long target = this.loop_continue_target();
+            if (target >= 0) {
+                this.jump_to(target);
             }
-            this.jump_to(target);
         }
+    }
+
+    // The continue target of the innermost enclosing real loop (-1 when there
+    // is none): its increment block, or its condition block for a while/do.
+    // H10.7 (C13): switch contexts (`sw_base >= 0`) carry no such block.
+    long loop_continue_target() {
+        long i = this.lp_n_ - 1;
+        while (i >= 0) {
+            long sb = -1;
+            long inc = -1;
+            long cond = -1;
+            unsafe {
+                sb = this.lp_sw_base_[i];
+                inc = this.lp_incr_[i];
+                cond = this.lp_cond_[i];
+            }
+            if (sb < 0) {
+                if (inc >= 0) {
+                    return inc;
+                }
+                if (cond >= 0) {
+                    return cond;
+                }
+                return -1;
+            }
+            i = i - 1;
+        }
+        return -1;
     }
 
     void st_nextcase(long idx) {

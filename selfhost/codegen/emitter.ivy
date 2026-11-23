@@ -652,9 +652,8 @@ export struct Emitter {
     }
 
     // Mirror of CodeGen::decodeBody for a string body (without the quotes).
-    // The octal branch deliberately starts at the digit that the `switch`
-    // already consumed, exactly like readOctalEscape: this reproduces the
-    // oracle's byte-for-byte quirk `"\101"` -> 0x01.
+    // H10.7 (C20): the octal branch decodes the digit that the `switch`
+    // consumed as the first digit, so `"\101"` is 'A' and `"\1"` is 0x01.
     long decode_body(const char* body, long n, char* out) {
         long o = 0;
         long i = 0;
@@ -701,8 +700,12 @@ export struct Emitter {
                 o = o + 1;
             }
             else if (e >= '0' && e <= '7') {
-                long v = 0;
-                long cnt = 0;
+                // H10.7 (C20): the oracle's readOctalEscape started after the
+                // digit the `switch` had already consumed, so "\101" became
+                // 0x01 and "\1" became 0x00.  Decode the full (at most three
+                // digit) octal escape: "\101" -> 'A', "\1" -> 0x01.
+                long v = e - '0';
+                long cnt = 1;
                 while (i + 1 < n && cnt < 3 &&
                        ((long) body[i + 1]) >= '0' &&
                        ((long) body[i + 1]) <= '7') {
@@ -1672,14 +1675,10 @@ export struct Emitter {
             neg = 1;
             v = -v;
         }
-        if (v == 0.0) {
-            // H8.2: a negative zero keeps its sign (`std::to_string(-0.0)` is
-            // "-0.000000"); `-0.0 < 0.0` is false, so recover the sign from
-            // 1.0 / v (which is -inf for a negative zero).
-            if (neg == 0 && (1.0 / v) < 0.0) {
-                neg = 1;
-            }
-        }
+        // H10.7 (C14): a negative zero is printed as a positive zero.  The
+        // oracle recovered the sign of -0.0 from its reciprocal, so the IR
+        // carried `-0.000000`; the language treats the two zeros as equal and
+        // the canonical literal is `0.000000`.
         if (neg != 0) {
             this.ps("-");
         }
@@ -4750,6 +4749,12 @@ export struct Emitter {
             return;
         }
         if (inst.kind == 5) {
+            // H10.7 (C13): a null jump target (e.g. `continue` whose loop is
+            // not reachable) has no block name.  The oracle printed a bare
+            // `br label %`; skip the branch so the module stays valid IR.
+            if (inst.b < 0) {
+                return;
+            }
             this.ps("br label ");
             this.emit_bb(inst.b);
             this.nl();
@@ -4759,6 +4764,10 @@ export struct Emitter {
             // H6.2k: `switch` (CodeGen::lowerInst Switch).  A missing
             // condition prints nothing (the oracle's `if (!sw.cond) return`).
             if (inst.a < 0) {
+                return;
+            }
+            // H10.7 (C13): a missing default target cannot be printed.
+            if (inst.b < 0) {
                 return;
             }
             MExpr ce;
@@ -4781,6 +4790,12 @@ export struct Emitter {
                 unsafe {
                     av = this.mu->arm_val[inst.astart + k];
                     ab = this.mu->arm_blk[inst.astart + k];
+                }
+                // H10.7 (C13): drop an arm that has no target block instead
+                // of printing an empty label.
+                if (ab < 0) {
+                    k = k + 1;
+                    continue;
                 }
                 this.ps("    ");
                 this.ps(this.llvm_type(ce.type, 0));
@@ -5054,39 +5069,143 @@ export struct Emitter {
 
     // --- declarations -----------------------------------------------------
 
-    // H6.2e: the `%struct.Name = type { ... }` block printed immediately
-    // after the module header (mirror of CodeGen::generate's struct loop).
-    // Unused definitions are printed too; the order is the source order.
-    void emit_struct_defs() {
+    // H10.7 (C6): the oracle printed every struct definition, even when no
+    // function or global referenced it.  Mark a struct (and, recursively, the
+    // structs in its fields) when a value of that type is actually emitted.
+    // A pointer/reference to a struct still keeps the definition: the emitter
+    // needs the field layout for a member access even though the LLVM type of
+    // the value itself is opaque `ptr`.
+    void mark_used_type(long* used, AType t) {
+        if (t.array_size > 0) {
+            AType elem = t;
+            elem.array_size = 0;
+            this.mark_used_type(used, elem);
+            return;
+        }
         long i = 0;
         unsafe {
             while (i < this.mu->st_n) {
+                MStruct s = this.mu->structs[i];
+                if (this.streq(s.name, t.base)) {
+                    if (used[i] != 0) {
+                        return;
+                    }
+                    used[i] = 1;
+                    long j = 0;
+                    while (j < s.nfields) {
+                        AType ft = s.fields[j].type;
+                        this.mark_used_type(used, ft);
+                        j = j + 1;
+                    }
+                    return;
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // H10.7 (C6): compute the struct definitions the module needs.  The MIR
+    // expression/instruction pools hold every type the function bodies use;
+    // the signatures cover declarations and definitions.  A polymorphic
+    // struct keeps its definition because its vtable is a module global.
+    void mark_used_structs(long* used) {
+        long i = 0;
+        unsafe {
+            while (i < this.mu->ex_n) {
+                AType t = this.mu->exprs[i].type;
+                this.mark_used_type(used, t);
+                i = i + 1;
+            }
+            i = 0;
+            while (i < this.mu->in_n) {
+                AType t = this.mu->insts[i].type;
+                this.mark_used_type(used, t);
+                i = i + 1;
+            }
+            i = 0;
+            while (i < this.mu->pa_n) {
+                AType t = this.mu->params[i].type;
+                this.mark_used_type(used, t);
+                i = i + 1;
+            }
+            i = 0;
+            while (i < this.mu->fn_n) {
+                MFunction f = this.mu->fns[i];
+                this.mark_used_type(used, f.ret);
+                i = i + 1;
+            }
+            i = 0;
+            while (i < this.mu->st_n) {
+                MStruct s = this.mu->structs[i];
+                if (s.is_poly != 0) {
+                    used[i] = 1;
+                }
+                i = i + 1;
+            }
+        }
+        // The explicit polymorphic roots need the field closure too.
+        i = 0;
+        unsafe {
+            while (i < this.mu->st_n) {
+                if (used[i] != 0) {
+                    MStruct s = this.mu->structs[i];
+                    long j = 0;
+                    while (j < s.nfields) {
+                        AType ft = s.fields[j].type;
+                        this.mark_used_type(used, ft);
+                        j = j + 1;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // H6.2e: the `%struct.Name = type { ... }` block printed immediately
+    // after the module header (mirror of CodeGen::generate's struct loop).
+    // H10.7 (C6): only the definitions in `used` are printed (in source
+    // order); an empty struct is the canonical `{}`, not the oracle's `{  }`.
+    void emit_struct_defs(long* used) {
+        long i = 0;
+        long any = 0;
+        unsafe {
+            while (i < this.mu->st_n) {
+                if (used[i] == 0) {
+                    i = i + 1;
+                    continue;
+                }
+                any = 1;
                 MStruct s = this.mu->structs[i];
                 long tn = this.make_struct_type_name(s.name);
                 unsafe {
                     this.ps(reinterpret_cast<const char*>(tn));
                 }
-                this.ps(" = type { ");
+                this.ps(" = type {");
                 // H6.2y: a polymorphic struct starts with the vptr.
+                long first = 1;
                 if (s.is_poly != 0) {
-                    this.ps("ptr");
-                    if (s.nfields > 0) {
-                        this.ps(", ");
-                    }
+                    this.ps(" ptr");
+                    first = 0;
                 }
                 long j = 0;
                 while (j < s.nfields) {
-                    if (j > 0) {
+                    if (first == 0) {
                         this.ps(", ");
+                    } else {
+                        this.ps(" ");
+                        first = 0;
                     }
                     this.ps(this.llvm_type(s.fields[j].type, 0));
                     j = j + 1;
                 }
-                this.ps(" }");
+                if (first == 0) {
+                    this.ps(" ");
+                }
+                this.ps("}");
                 this.nl();
                 i = i + 1;
             }
-            if (this.mu->st_n > 0) {
+            if (any != 0) {
                 this.nl();
             }
         }
@@ -5272,8 +5391,18 @@ export struct Emitter {
         if (this.failed_ != 0) {
             return 1;
         }
-        this.pl("; LLVM IR emitted by ivy");
-        this.emit_struct_defs();
+        // H10.7 (C6): only the needed struct definitions are printed.
+        unsafe {
+            long* used = (long*) __ivy_alloc((unsigned long long) ((this.mu->st_n + 1) * 8));
+            long ui = 0;
+            while (ui < this.mu->st_n) {
+                used[ui] = 0;
+                ui = ui + 1;
+            }
+            this.mark_used_structs(used);
+            this.pl("; LLVM IR emitted by ivy");
+            this.emit_struct_defs(used);
+        }
         if (this.failed_ != 0) {
             return 1;
         }

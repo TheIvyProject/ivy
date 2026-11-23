@@ -535,3 +535,13 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_C8_nullptr_literal.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C13_switch_continue.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C14_negative_zero.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C6_unused_struct.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 31 0
+ivy: '<OUT>\app.exe' generated

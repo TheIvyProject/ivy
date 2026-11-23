@@ -1,5 +1,5 @@
-// The negation of a zero keeps its sign: the folded value is a negative zero
-// and is printed as "-0" (like the C library prints it).
+// The negation of a zero keeps its sign at runtime; the literal printer
+// normalises the negative zero to "0.000000" (H10.7, C14).
 constexpr float64 neg(float64 x) {
     return -x;
 }

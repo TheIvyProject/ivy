@@ -1801,11 +1801,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/mir/cfg/06_lt_ternary_merge.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/mir/cfg/07_deep_nesting.ivy 151 1
-selfhost/corpus/mir/cfg/07_deep_nesting.ivy:0:0: error: LLVM IR parse error: ivy: ivy-module:56:10: error: expected value token
-br label %
-         ^
-
+@@ selfhost/corpus/mir/cfg/07_deep_nesting.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/mir/cfg/07_long_function.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/mir/cfg/07_many_locals_and_calls.ivy 31 0
@@ -2459,4 +2456,14 @@ ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C13_switch_continue.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C14_negative_zero.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C6_unused_struct.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 31 0
 ivy: '<OUT>\out.obj' generated

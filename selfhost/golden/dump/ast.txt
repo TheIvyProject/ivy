@@ -16171,3 +16171,86 @@ function
     decl int32_t a =
       call
         ident Box        int 1
+@@ selfhost/corpus/codegen/h10_C13_switch_continue.ivy 689 0
+function 
+  return int32_t f(int32_t n)
+  block
+    decl int32_t sum =
+      int 0    for
+      init
+      decl int32_t i =
+        int 0      cond
+      binary <
+        ident i        ident n      incr
+      assign =
+        ident i        binary +
+          ident i          int 1      body
+      block
+        switch
+          ident i          case
+            int 1            continue
+          default
+            expr
+              assign =
+                ident sum                binary +
+                  ident sum                  ident i            break
+    return
+      ident sum
+function 
+  return int32_t main()
+  block
+    return
+      call
+        ident f        int 4
+@@ selfhost/corpus/codegen/h10_C14_negative_zero.ivy 333 0
+function 
+  return float64_t neg(float64_t x)
+  block
+    return
+      prefix -
+        ident x
+function 
+  return int32_t main()
+  block
+    decl float64_t z =
+      call
+        ident neg        float 0    if
+      binary !=
+        ident z        float 0      then
+      block
+        return
+          int 1    return
+      int 0
+@@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 233 0
+function 
+  return int32_t main()
+  block
+    expr
+      call
+        member . println
+          ident io        string "A\101B"    expr
+      call
+        member . println
+          ident io        string "\1"    return
+      int 0
+@@ selfhost/corpus/codegen/h10_C6_unused_struct.ivy 192 0
+function 
+  return int32_t main()
+  block
+    decl Used u
+    expr
+      assign =
+        member . x
+          ident u        int 7    decl Empty e
+    return
+      member . x
+        ident u
+@@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 150 0
+function 
+  return int32_t main()
+  block
+    expr
+      call
+        member . println
+          ident io        string "A—B"    return
+      int 0

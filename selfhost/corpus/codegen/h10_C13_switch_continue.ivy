@@ -1,0 +1,18 @@
+// H10.7 (C13): `continue` inside a switch targets the enclosing loop.
+int32 f(int32 n) {
+    int32 sum = 0;
+    for (int32 i = 0; i < n; i = i + 1) {
+        switch (i) {
+            case 1:
+                continue;
+            default:
+                sum = sum + i;
+                break;
+        }
+    }
+    return sum;
+}
+
+int32 main() {
+    return f(4);
+}
