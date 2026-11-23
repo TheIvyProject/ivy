@@ -951,6 +951,27 @@ Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle
   -Golden` → 12476 checks / 0 failures (1063 fixture), self-link SHA
   `9AAE83B0…717703` (27 141 120 B); `check_repro.ps1` PASS (83 artifacts).
 
+**H10.4 — Slot theo scope, zero-init, GEP `T**` (C1, C18, H29) — ✅ (2026-11-23)**
+
+- **C1**: `mir/mir_builder.ivy` gán binding id duy nhất cho từng khai báo
+  (tham số âm), ghi vào `alloca.b`/`expr.b`; `codegen/emitter.ivy` tra slot
+  theo id thay vì theo tên (`find_var_bid`/`is_ref_var_bid`), nên hai local
+  cùng tên ở scope khác nhau có slot riêng. `clone_expr` copy nguyên `b` cho
+  `IdentRef`/`This`; pool lịch sử khai báo phân giải destructor call do HIR
+  đặt sau khi scope đã đóng (`break`).
+- **C18**: hành vi vốn đã đúng (zero-init tại điểm khai báo); thêm fixture IR
+  `h10_C18_zero_init_decl` để khoá.
+- **H29**: `lower_index_addr` dùng `llvmType(e.type)` cho cả store lẫn load;
+  xoá workaround `__ivy_memcpy` khỏi `codegen/codegen.ivy`
+  (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`/`hobj`) và
+  `app/pipeline.ivy`.
+- **Seed**: dựng lại `selfhost/bootstrap/ivy-stage0.exe` (SHA `7FCFDE62…27FD`,
+  27 159 552 B) vì fix nằm trong compiler; gate: `build.ps1 -SelfLink -Golden`
+  → 12518 checks / 0 failures (1066 fixture), self-link SHA trùng seed;
+  `check_repro.ps1` PASS. Fixture mới `h10_C1_slot_shadow`,
+  `h10_C18_zero_init_decl`, `h10_H29_pointer_store`; golden đổi ở 7 fixture
+  cũ (slot numbering) + `h10_H17_nested_return`, provenance `expected:H10.4`.
+
 **Bảng kế hoạch**
 
 | Mục | ID | Nội dung sửa | Port chính | Fixture / golden ảnh hưởng |
@@ -958,7 +979,7 @@ Ivy-only), H9.9 (`src/**` đã xoá) xong; không còn gate nào so với oracle
 | H10.1 | B-C3, C19 | Crash/UB: `&<local struct>` (hiện báo lỗi sạch) → sinh địa chỉ đúng; record local còn sống qua call trả record (`setDataLayout("")`) → không hỏng khung stack | `codegen/emitter.ivy`, `codegen/codegen.ivy` | fixture mới `h10_B-C3_addr_of_struct`, `h10_C19_record_across_call`; link/run + IR |
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: outer-scope dtor emit 2 lần (H17); `return` đầu clear dtor list làm `return` sau mất dtor/`__ret` (H18); break/continue trong `if` lồng bỏ dtor loop body (C4); aggregate init bypass ctor nhưng vẫn record dtor (H26) | `hir/hir_builder.ivy` (`emit_dtor_calls`, `build_return`, `wrap_scope_dtors`, `record_dtor_var`) | `ret/r06_nested_scope`, `ret/r07`, `ret/r21`, `stage/s*`, fixture mới; HIR + link/run |
 | H10.3 | H19 | Borrow-checker lỏng: ghi qua biến đang borrow, dùng sau destroy, bind ref vào temp không bị báo; `checkStore` gần như không tới được ngoài `unsafe`, `unsafe` tắt **mọi** check → siết lại để chương trình không an toàn bị từ chối, giữ nguyên các ngoại lệ có chủ ý | `mir/mir_builder.ivy` (`check_assign_borrow`, `check_ref_binding`) | `stage/s8`, `s9`, `s14`; fixture `h10_H19_assign_while_borrowed`, `h10_H19_write_forms`, `h10_H19_ref_to_temp`, `h10_H19_use_after_destroy`, `h10_H19_unsafe_escape`; `hir/type/66_ref_rvalue` |
-| H10.4 | C1, C18, H29 | Địa chỉ/bộ nhớ: local slot khoá theo tên last-wins (C1) → slot theo scope; zero-init struct local tại điểm khai báo (C18); store qua `T**` GEP không scale (H29) → dùng `llvmType` như đường đọc, **xoá workaround `__ivy_memcpy`** trong `codegen.ivy` (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`) và `pipeline.ivy` sau khi sửa | `codegen/emitter.ivy`, `codegen/codegen.ivy`, `app/pipeline.ivy` | `codegen/245_move_pointer`, fixture mới `h10_C1_slot_shadow`, `h10_H29_pointer_store`; IR + link/run |
+| H10.4 | C1, C18, H29 | Địa chỉ/bộ nhớ: local slot khoá theo tên last-wins (C1) → slot theo binding id/scope; zero-init struct local tại điểm khai báo (C18); store qua `T**` GEP không scale (H29) → dùng `llvmType` như đường đọc, **xoá workaround `__ivy_memcpy`** trong `codegen.ivy` (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`/`hobj`) và `pipeline.ivy` sau khi sửa; seed dựng lại | `mir/mir_builder.ivy`, `codegen/emitter.ivy`, `codegen/codegen.ivy`, `app/pipeline.ivy`, `bootstrap/ivy-stage0.exe` | `codegen/245_move_pointer`, fixture mới `h10_C1_slot_shadow`, `h10_C18_zero_init_decl`, `h10_H29_pointer_store`; golden đổi ở `229/232/233_range_for_*`, `248/249_std_*`, `hir/name/02_shadow`, `mir/cfg/02_local_shadowed`, `h10_H17`; IR + link/run |
 | H10.5 | C3, C5, C16, C17 | `new`/delete + string: `new T(args)` chỉ store `args[0]` (C3); `collectExpr` không recurse vào `new`/`delete` (C16); declare `@__ivy_alloc/free` suppress trùng (C17); global trùng `@.str.N` do 2 map key (C5) | `codegen/emitter.ivy` | `codegen/137_new_struct`, `143_new_multiarg`, `152_new_struct_i8`, `164_printf_basic`, fixture mới; IR + link/run |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: `sext ptr`/`fpext ptr` cho ref arg (C2); 7 fixture bị chính oracle từ chối IR (C7) → nay `-c` phải thành công; `nullptr`→`i8` (C8); mangle array (C10); mangling fallback symbol chưa resolve (C11) | `codegen/emitter.ivy`, `codegen/objdrive.ivy` | `codegen/103`, `104`, `137`, `143`, `152`, `186`, `190`; `-c`/`-o` + IR |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR: em dash U+2014 bị mojibake (H22); `-0.0` giữ dấu (C14); octal escape sai (C20); `br label %` rỗng (C13); quirk format IR (`{  }`, struct không dùng vẫn in — C6) | `parsing/*`, `codegen/emitter.ivy` | dump text của fixture string/float; `--llvm`; `-o`/link/run cho H22 |

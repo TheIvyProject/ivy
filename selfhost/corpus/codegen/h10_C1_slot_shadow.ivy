@@ -1,0 +1,43 @@
+#pragma ivy cnumber
+
+// H10.4 / C1: a local slot is keyed by the *declaration*, not by the source
+// name.  Before the fix the code generator kept one `alloca` per name and the
+// last declaration won, so the outer `MInst x` below aliased the inner
+// `int64 x` (the oracle printed `6 22`, the struct read back as the long).
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct MInst { int64 kind; int64 a; };
+
+int64 shadow(int64 v) {
+    {
+        int64 v = 8;
+        return v;
+    }
+}
+
+int32 main() {
+    MInst x;
+    x.kind = 11;
+    x.a = 22;
+    {
+        int64 x = 5;
+        x = x + 1;
+    }
+    printf("%lld %lld\n", x.kind, x.a);
+    if (x.kind != 11) { return 1; }
+    if (x.a != 22) { return 2; }
+
+    int64 y = 1;
+    {
+        int64 y = 100;
+        y = y + 1;
+        if (y != 101) { return 3; }
+    }
+    if (y != 1) { return 4; }
+
+    if (shadow(7) != 8) { return 5; }
+    return 0;
+}

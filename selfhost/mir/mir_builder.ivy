@@ -91,6 +91,22 @@ export struct MirBuilder {
     long* sc_name_;      // (long) const char* - the variable names
     long* sc_lt_;        // the lifetime kinds
     long* sc_ltn_;       // (long) const char* - the lifetime names
+    // H10.4 (C1): unique binding id per declaration.  The emitter keys its
+    // stack-slot table by this id (not by the source name), so two locals that
+    // shadow each other in different scopes get different slots.
+    long* sc_bid_;
+    // H10.4 (C1): every declaration of the function, in order, live or not.
+    // The HIR builder puts the destructor calls of a `break`/loop-body scope
+    // at a location where the scope is already closed, so the *scope* stack
+    // no longer knows the name; the most recent declaration of that name is
+    // still the binding the synthesized call meant (this mirrors the oracle's
+    // name-keyed "last wins" slot on purpose, but only as a fallback).
+    long* hn_name_;      // (long) const char* - the declaration names
+    long* hn_bid_;       // the binding ids
+    long hn_n_;
+    long hn_cap_;
+    long bid_next_;
+    long bind_id_;
     long sc_n_;
     long sc_cap_;
     long* sc_start_;     // the scope stack
@@ -101,6 +117,9 @@ export struct MirBuilder {
     long* pm_name_;      // (long) const char* - the parameter names
     long* pm_lt_;        // the lifetime kinds
     long* pm_ltn_;       // (long) const char* - the lifetime names
+    // H10.4 (C1): the binding id of each named parameter (negative, so it can
+    // never collide with a local declaration's id).
+    long* pm_bid_;
     long pm_n_;
     long pm_cap_;
 
@@ -673,7 +692,13 @@ export struct MirBuilder {
             this.sc_name_ = (long*) __ivy_alloc(nsc * 8);
             this.sc_lt_ = (long*) __ivy_alloc(nsc * 8);
             this.sc_ltn_ = (long*) __ivy_alloc(nsc * 8);
+            this.sc_bid_ = (long*) __ivy_alloc(nsc * 8);
             this.sc_n_ = 0;
+            this.hn_cap_ = nsc;
+            this.hn_name_ = (long*) __ivy_alloc(nsc * 8);
+            this.hn_bid_ = (long*) __ivy_alloc(nsc * 8);
+            this.hn_n_ = 0;
+            this.bid_next_ = 0;
             this.scs_cap_ = u.st_n + 64;
             this.sc_start_ = (long*) __ivy_alloc(this.scs_cap_ * 8);
             this.scs_n_ = 0;
@@ -682,6 +707,7 @@ export struct MirBuilder {
             this.pm_name_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
             this.pm_lt_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
             this.pm_ltn_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
+            this.pm_bid_ = (long*) __ivy_alloc(this.pm_cap_ * 8);
             this.pm_n_ = 0;
 
             // The borrow states (24 bytes each, measured), the active
@@ -768,10 +794,14 @@ export struct MirBuilder {
             __ivy_free(this.sc_name_);
             __ivy_free(this.sc_lt_);
             __ivy_free(this.sc_ltn_);
+            __ivy_free(this.sc_bid_);
+            __ivy_free(this.hn_name_);
+            __ivy_free(this.hn_bid_);
             __ivy_free(this.sc_start_);
             __ivy_free(this.pm_name_);
             __ivy_free(this.pm_lt_);
             __ivy_free(this.pm_ltn_);
+            __ivy_free(this.pm_bid_);
             __ivy_free(this.bs_);
             __ivy_free(this.ar_);
             __ivy_free(this.ars_);
@@ -919,10 +949,12 @@ export struct MirBuilder {
     }
 
     // Declare a local.  Like the oracle's `scopes_.back().emplace`, an
-    // entry that already exists in the same scope is NOT replaced.
-    void declare(const char* name, long kind, const char* lname) {
+    // entry that already exists in the same scope is NOT replaced.  Returns
+    // the binding id of the declaration (H10.4/C1): a fresh id for a new
+    // local, the existing one for a duplicate in the same scope.
+    long declare(const char* name, long kind, const char* lname) {
         if (this.scs_n_ <= 0) {
-            return;
+            return -1;
         }
         long start = 0;
         unsafe {
@@ -932,7 +964,7 @@ export struct MirBuilder {
         while (i < this.sc_n_) {
             unsafe {
                 if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
-                    return;
+                    return this.sc_bid_[i];
                 }
             }
             i = i + 1;
@@ -964,15 +996,94 @@ export struct MirBuilder {
                 }
                 __ivy_free(this.sc_ltn_);
                 this.sc_ltn_ = t;
+                long* b = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.sc_n_) {
+                    b[k] = this.sc_bid_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.sc_bid_);
+                this.sc_bid_ = b;
             }
             this.sc_cap_ = ncap;
         }
+        long bid = this.bid_next_;
+        this.bid_next_ = this.bid_next_ + 1;
         unsafe {
             this.sc_name_[this.sc_n_] = (long) name;
             this.sc_lt_[this.sc_n_] = kind;
             this.sc_ltn_[this.sc_n_] = (long) lname;
+            this.sc_bid_[this.sc_n_] = bid;
         }
         this.sc_n_ = this.sc_n_ + 1;
+        if (this.hn_n_ >= this.hn_cap_) {
+            long ncap = this.hn_cap_ * 2 + 64;
+            unsafe {
+                long* q = (long*) __ivy_alloc(ncap * 8);
+                long k = 0;
+                while (k < this.hn_n_) {
+                    q[k] = this.hn_name_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.hn_name_);
+                this.hn_name_ = q;
+                long* r = (long*) __ivy_alloc(ncap * 8);
+                k = 0;
+                while (k < this.hn_n_) {
+                    r[k] = this.hn_bid_[k];
+                    k = k + 1;
+                }
+                __ivy_free(this.hn_bid_);
+                this.hn_bid_ = r;
+            }
+            this.hn_cap_ = ncap;
+        }
+        unsafe {
+            this.hn_name_[this.hn_n_] = (long) name;
+            this.hn_bid_[this.hn_n_] = bid;
+        }
+        this.hn_n_ = this.hn_n_ + 1;
+        return bid;
+    }
+
+    // H10.4 (C1): the binding id that a source name denotes at this point:
+    // the innermost local that shadows it, else the named parameter, else -1
+    // (a global, enum constant or function - not a stack slot here).
+    void lookup_binding(const char* name) {
+        long i = this.sc_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.sc_name_[i]), name)) {
+                    this.bind_id_ = this.sc_bid_[i];
+                    return;
+                }
+            }
+            i = i - 1;
+        }
+        long j = 0;
+        while (j < this.pm_n_) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.pm_name_[j]), name)) {
+                    this.bind_id_ = this.pm_bid_[j];
+                    return;
+                }
+            }
+            j = j + 1;
+        }
+        // The HIR builder may synthesize a destructor call after the scope of
+        // the variable has been popped (`break` out of a loop body).  The
+        // most recent declaration of that name is the binding it means.
+        long h = this.hn_n_ - 1;
+        while (h >= 0) {
+            unsafe {
+                if (this.seq(reinterpret_cast<const char*>(this.hn_name_[h]), name)) {
+                    this.bind_id_ = this.hn_bid_[h];
+                    return;
+                }
+            }
+            h = h - 1;
+        }
+        this.bind_id_ = -1;
     }
 
     // True when the name is a local variable of an enclosing scope.
@@ -1727,7 +1838,15 @@ export struct MirBuilder {
                 this.mu.exprs[ni].a = ca;
             }
         }
-        if (b >= 0) {
+        // H10.4 (C1): for an identifier / `this`, `b` is the binding id that
+        // the builder recorded, not a child expression.  Copy it verbatim:
+        // cloning it as an expression index would corrupt the lookup (and the
+        // id of a parameter is negative, so it must not be treated as `none`).
+        if (kind == 6 || kind == 7) {
+            unsafe {
+                this.mu.exprs[ni].b = b;
+            }
+        } else if (b >= 0) {
             long cb = this.clone_expr(b);
             unsafe {
                 this.mu.exprs[ni].b = cb;
@@ -1918,6 +2037,9 @@ export struct MirBuilder {
             this.mu.exprs[i].type = this.ep[idx].type;
             this.mu.exprs[i].line = this.ep[idx].line;
             this.mu.exprs[i].col = this.ep[idx].col;
+            // H10.4 (C1): `this` is the hidden first parameter.
+            this.lookup_binding("this");
+            this.mu.exprs[i].b = this.bind_id_;
         }
         return i;
     }
@@ -1960,6 +2082,9 @@ export struct MirBuilder {
             this.lookup(this.ep[idx].sval);
             this.mu.exprs[i].lt = this.lt_kind_;
             this.mu.exprs[i].ltname = this.lt_name_;
+            // H10.4 (C1): record which declaration the name denotes.
+            this.lookup_binding(this.ep[idx].sval);
+            this.mu.exprs[i].b = this.bind_id_;
         }
         return i;
     }
@@ -2605,11 +2730,13 @@ export struct MirBuilder {
             }
             // The lifetime of the local is the lifetime of its initializer.
             unsafe {
-                this.declare(this.sp[idx].sval, lk, this.mu.exprs[ii].ltname);
+                long bid = this.declare(this.sp[idx].sval, lk, this.mu.exprs[ii].ltname);
+                this.mu.insts[inst].b = bid;
             }
         } else {
             unsafe {
-                this.declare(this.sp[idx].sval, 0, "");
+                long bid = this.declare(this.sp[idx].sval, 0, "");
+                this.mu.insts[inst].b = bid;
             }
         }
         // B3: a new variable starts Initialized (an existing entry in the
@@ -3367,6 +3494,9 @@ export struct MirBuilder {
         this.unsafe_depth_ = 0;
         this.pm_n_ = 0;
         this.sc_n_ = 0;
+        this.bid_next_ = 0;
+        this.bind_id_ = -1;
+        this.hn_n_ = 0;
         this.scs_n_ = 0;
         this.bs_n_ = 0;
         this.bsc_n_ = 0;
@@ -3439,6 +3569,7 @@ export struct MirBuilder {
                     this.pm_name_[this.pm_n_] = pname;
                     this.pm_lt_[this.pm_n_] = kind;
                     this.pm_ltn_[this.pm_n_] = lname;
+                    this.pm_bid_[this.pm_n_] = -(j + 2);
                 }
                 this.pm_n_ = this.pm_n_ + 1;
             }
@@ -3488,6 +3619,14 @@ export struct MirBuilder {
             }
             __ivy_free(this.pm_ltn_);
             this.pm_ltn_ = t;
+            long* u = (long*) __ivy_alloc(ncap * 8);
+            k = 0;
+            while (k < this.pm_n_) {
+                u[k] = this.pm_bid_[k];
+                k = k + 1;
+            }
+            __ivy_free(this.pm_bid_);
+            this.pm_bid_ = u;
         }
         this.pm_cap_ = ncap;
     }

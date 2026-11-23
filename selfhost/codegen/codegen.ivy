@@ -836,12 +836,7 @@ export struct Linker {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.nmod_) {
-                    // H9.4 workaround (oracle bug H29): an assignment through a
-                    // `char**` element is emitted as an unscaled `i8` GEP,
-                    // while the read is a correct `ptr` GEP.  Copy the pointer
-                    // with __ivy_memcpy to avoid the buggy store path.
-                    char* v = this.mods_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.mods_[k];
                     k = k + 1;
                 }
                 if (this.mods_ != (char**) 0) {
@@ -851,7 +846,7 @@ export struct Linker {
                 this.capmod_ = ncap;
             }
             char* pv = (char*) p;
-            __ivy_memcpy((void*) ((char*) this.mods_ + (this.nmod_ * 8)), (void*) &pv, 8);
+            this.mods_[this.nmod_] = pv;
             this.nmod_ = this.nmod_ + 1;
         }
     }
@@ -866,10 +861,7 @@ export struct Linker {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.ncpph_) {
-                    // H9.4 workaround (oracle bug H29), same as
-                    // `add_module_object`.
-                    char* v = this.cpph_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.cpph_[k];
                     k = k + 1;
                 }
                 if (this.cpph_ != (char**) 0) {
@@ -879,7 +871,7 @@ export struct Linker {
                 this.capcpph_ = ncap;
             }
             char* pv = (char*) p;
-            __ivy_memcpy((void*) ((char*) this.cpph_ + (this.ncpph_ * 8)), (void*) &pv, 8);
+            this.cpph_[this.ncpph_] = pv;
             this.ncpph_ = this.ncpph_ + 1;
         }
     }
@@ -892,8 +884,7 @@ export struct Linker {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.nch_) {
-                    char* v = this.ch_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.ch_[k];
                     k = k + 1;
                 }
                 if (this.ch_ != (char**) 0) {
@@ -903,7 +894,7 @@ export struct Linker {
                 this.capch_ = ncap;
             }
             char* pv = (char*) p;
-            __ivy_memcpy((void*) ((char*) this.ch_ + (this.nch_ * 8)), (void*) &pv, 8);
+            this.ch_[this.nch_] = pv;
             this.nch_ = this.nch_ + 1;
         }
     }
@@ -933,10 +924,7 @@ export struct Linker {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.nextra_) {
-                    // H9.4 workaround (oracle bug H29), same as
-                    // `add_module_object`.
-                    char* v = this.extra_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.extra_[k];
                     k = k + 1;
                 }
                 if (this.extra_ != (char**) 0) {
@@ -946,7 +934,7 @@ export struct Linker {
                 this.capextra_ = ncap;
             }
             char* fv = (char*) frag;
-            __ivy_memcpy((void*) ((char*) this.extra_ + (this.nextra_ * 8)), (void*) &fv, 8);
+            this.extra_[this.nextra_] = fv;
             this.nextra_ = this.nextra_ + 1;
         }
     }
@@ -1484,7 +1472,7 @@ export struct Linker {
                     return 4;
                 }
                 char* pv = op;
-                __ivy_memcpy((void*) ((char*) hobj + (nh * 8)), (void*) &pv, 8);
+                hobj[nh] = pv;
                 nh = nh + 1;
                 hk = hk + 1;
             }
@@ -1518,7 +1506,7 @@ export struct Linker {
                     return 4;
                 }
                 char* pv = op;
-                __ivy_memcpy((void*) ((char*) hobj + (nh * 8)), (void*) &pv, 8);
+                hobj[nh] = pv;
                 nh = nh + 1;
                 hk = hk + 1;
             }

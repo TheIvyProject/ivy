@@ -15860,3 +15860,161 @@ function
       member . v
         ident r
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 1532 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int64_t shadow(int64_t v)
+  block
+    block
+      decl int64_t v =
+        int 8      return
+        ident v
+function 
+  return int32_t main()
+  block
+    decl MInst x
+    expr
+      assign =
+        member . kind
+          ident x        int 11    expr
+      assign =
+        member . a
+          ident x        int 22    block
+      decl int64_t x =
+        int 5      expr
+        assign =
+          ident x          binary +
+            ident x            int 1    expr
+      call
+        ident printf        string "%lld %lld\n"        member . kind
+          ident x        member . a
+          ident x    if
+      binary !=
+        member . kind
+          ident x        int 11      then
+      block
+        return
+          int 1    if
+      binary !=
+        member . a
+          ident x        int 22      then
+      block
+        return
+          int 2    decl int64_t y =
+      int 1    block
+      decl int64_t y =
+        int 100      expr
+        assign =
+          ident y          binary +
+            ident y            int 1      if
+        binary !=
+          ident y          int 101        then
+        block
+          return
+            int 3    if
+      binary !=
+        ident y        int 1      then
+      block
+        return
+          int 4    if
+      binary !=
+        call
+          ident shadow          int 7        int 8      then
+      block
+        return
+          int 5    return
+      int 0
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 1103 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int32_t main()
+  block
+    expr
+      call
+        ident printf        string "before\n"    decl Pair p
+    expr
+      call
+        ident printf        string "%lld %lld\n"        member . a
+          ident p        member . b
+          ident p    if
+      binary !=
+        member . a
+          ident p        int 0      then
+      block
+        return
+          int 1    if
+      binary !=
+        member . b
+          ident p        int 0      then
+      block
+        return
+          int 2    decl int64_t n =
+      int 3    while
+      binary >
+        ident n        int 0      block
+        decl Pair q
+        if
+          binary !=
+            member . a
+              ident q            int 0          then
+          block
+            return
+              int 3        expr
+          assign =
+            member . a
+              ident q            ident n        expr
+          assign =
+            ident n            binary -
+              ident n              int 1    return
+      int 0
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1204 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function [extern "C"] 
+  return void* __ivy_alloc(unsigned long long n)
+  (declaration only)
+
+function [extern "C"] 
+  return void __ivy_free(void* p)
+  (declaration only)
+
+function 
+  return int32_t main()
+  block
+    unsafe
+      block
+        decl int64_t* p =
+          C-cast<int64_t>(
+            call
+              ident __ivy_alloc              int 8          )
+        expr
+          assign =
+            prefix *
+              ident p            int 9        decl int64_t** pp =
+          C-cast<int64_t>(
+            call
+              ident __ivy_alloc              int 16          )
+        expr
+          assign =
+            index
+              ident pp              int 1            ident p        decl int64_t* q =
+          index
+            ident pp            int 1        expr
+          call
+            ident printf            string "%lld\n"            prefix *
+              ident q        expr
+          call
+            ident __ivy_free            ident p        expr
+          call
+            ident __ivy_free            C-cast<void>(
+              ident pp            )
+    return
+      int 0

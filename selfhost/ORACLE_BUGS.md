@@ -92,13 +92,13 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **H26** | A | `T x = {...}` (aggregate init) **bypass** constructor nhưng **vẫn** record destructor | `hir_builder.cpp` (`buildVarDecl`) | `hir_builder.ivy` `build_decl`: **H10.2** nhận đúng init-list (kind 19) và không `record_dtor_var` khi aggregate đã bypass ctor | `H62_NOTES.md` (RAII, L2516), `H10_NOTES.md` H10.2, `h10_H26_agg_ctor_dtor` |
 | **H27** | C | `--hir`/`--mir` **crash** `0xC0000005` (`exit -1073741819`) trên init-list có phần tử `<zero-init>` do HIR builder sinh ra: oracle lưu `nullptr` trong `elements` rồi `dumpHirExpr`/`buildExpr` dereference | `src/app/main.cpp` (`dumpHirExpr` InitList), `src/mir/mir_builder.cpp` (`buildExpr` InitList) | `selfhost/hir/hir.ivy`, `selfhost/mir/mir.ivy` (in `<zero-init>` / bỏ qua, **không** crash) | `selfhost/golden/exceptions.txt` (`156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init`); port phải exit 0 |
 | **H28** | A | `move(x)` giữ lifetime `None`: `out->lifetime = arg->lifetime` chạy **sau** `call.args.push_back(std::move(arg))`, nên `if (arg)` false và call không có `[lt: ...]` trong `--mir` | `src/mir/mir_builder.cpp:578-583` | `selfhost/mir/mir_builder.ivy` (`ex_call`): `move` để `lt_kind_ = 0`, không copy lifetime của operand | `codegen/245_move_pointer`, `hir/move/54_lifetime_param_moved` |
-| **H29** | A | Ghi qua **phần tử con trỏ** (`p[i] = x` với `p` là `T**`) emit GEP **không scale**: `getelementptr i8, ptr %p, iN k` (dùng `llvmElemType`) trong khi đọc `p[i]` emit `getelementptr ptr` (dùng `llvmType`) → offset `k` thay vì `k*8`. **Sai bộ nhớ ở machine-code**, không lộ ra trong dump IR so sánh được | `codegen.cpp:1046-1063` (`lowerLValue` Index, `llvmElemType` tại `:255-260`); đọc đúng ở `:1742-1765` | `selfhost/codegen/emitter.ivy` **tái hiện**; workaround bắt buộc trong `selfhost/codegen/codegen.ivy` (`add_module_object`/`add_extra` dùng `__ivy_memcpy` 8 byte) | `H9_NOTES.md` §H9.4; repro bên dưới §2.6 |
+| **H29** | A | Ghi qua **phần tử con trỏ** (`p[i] = x` với `p` là `T**`) emit GEP **không scale**: `getelementptr i8, ptr %p, iN k` (dùng `llvmElemType`) trong khi đọc `p[i]` emit `getelementptr ptr` (dùng `llvmType`) → offset `k` thay vì `k*8`. **Sai bộ nhớ ở machine-code**, không lộ ra trong dump IR so sánh được | `codegen.cpp:1046-1063` (`lowerLValue` Index, `llvmElemType` tại `:255-260`); đọc đúng ở `:1742-1765` | **H10.4**: `selfhost/codegen/emitter.ivy` `lower_index_addr` dùng `llvmType(e.type)` cho cả hai đường; workaround `__ivy_memcpy` đã xoá khỏi `selfhost/codegen/codegen.ivy` (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`/`hobj`) và `selfhost/app/pipeline.ivy` | `H9_NOTES.md` §H9.4; `H10_NOTES.md` H10.4; `h10_H29_pointer_store` |
 
 ### 1.4 Codegen / IR
 
 | ID | Loại | Triệu chứng | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|---|
-| **C1** | A | Slot biến local khoá theo **tên** (không có scope): hai local cùng tên ở scope khác nhau dùng chung một `alloca`, **last-wins** | `codegen.cpp:2503-2526` | `emitter.ivy` (bảng biến theo tên) | `MIR_NOTES.md` §11.6 |
+| **C1** | A | Slot biến local khoá theo **tên** (không có scope): hai local cùng tên ở scope khác nhau dùng chung một `alloca`, **last-wins** | `codegen.cpp:2503-2526` | **H10.4**: `selfhost/mir/mir_builder.ivy` gán **binding id** cho từng khai báo (tham số id âm) và ghi vào `alloca.b`/`expr.b`; `selfhost/codegen/emitter.ivy` tra slot theo id (fallback theo lịch sử khai báo cho dtor do HIR tạo sau khi scope đã đóng) | `MIR_NOTES.md` §11.6; `H10_NOTES.md` H10.4; `h10_C1_slot_shadow` |
 | **C2** | A | `sext ptr` / `fpext ptr` cho **reference argument** (`io::print(x)` với `x` là `T&`) — IR không hợp lệ nhưng được emit | `codegen.cpp` (`lowerCall` ref args) | `emitter.ivy` ≈L57 (`io::print` ref) | `H62_NOTES.md` |
 | **C3** | A | `new T(args)` chỉ **store `args[0]`** (bỏ các arg còn lại) rồi coi là `T` | `codegen.cpp` (`lowerExpr` New) | `emitter.ivy` `lower_new` ≈L4141, store ≈L4160 | `H62_NOTES.md`; fixture `143_new_multiarg`, `152_new_struct_i8` |
 | **C4** | A | `break`/`continue`/`nextcase` viết trong `if` lồng **không** chạy dtor của loop body — chỉ dtor của scope **trong cùng** | `hir_builder.cpp` (`dtorStacks_.back()`) | `hir_builder.ivy` `wrap_scope_dtors`: **H10.2** theo dõi `jscope_`/`nscope_` và destroy mọi scope tới đích của jump | `H62_NOTES.md`, `H10_NOTES.md` H10.2, `h10_C4_break_nested` |
@@ -115,7 +115,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **C15** | A | Biểu thức **không assignable** rơi xuống `lowerLValue` → in `expression is not assignable [nodeIdx=… type.base=… isRef=…]` rồi lower thành literal `null` (D1-debug fallthrough) | `codegen.cpp:1106-1116` | `emitter.ivy` `not_assignable_msg` ≈L584 | `H62_NOTES.md` |
 | **C16** | A | `collectExpr` **không** recurse vào argument của `new` và operand của `delete` → string literal/`io::print` bên trong không được pre-collect, global intern muộn, io runtime không emit | `codegen.cpp` (`collectExpr` New/Delete) | `emitter.ivy` ≈L3738 | `H62_NOTES.md` |
 | **C17** | A | `@__ivy_alloc`/`@__ivy_free` được suppress trùng: chỉ emit một lần dù nhiều `new`/`delete` | `codegen.cpp` (declare emission) | `emitter.ivy` ≈L187 | `H62_NOTES.md` |
-| **C18** | A | Struct local chưa khởi tạo được **zero-init** tại điểm khai báo (không phải ở entry) | `codegen.cpp` (`alloca` hoist) | `emitter.ivy` ≈L4556 | `H62_NOTES.md` |
+| **C18** | A | Struct local chưa khởi tạo được **zero-init** tại điểm khai báo (không phải ở entry) | `codegen.cpp` (`alloca` hoist) | `emitter.ivy` ≈L4556; **H10.4** khoá bằng fixture IR `h10_C18_zero_init_decl` | `H62_NOTES.md`; `H10_NOTES.md` H10.4 |
 | **C19** | B | Record local **còn sống** khi gọi hàm trả record theo giá trị bị codegen làm hỏng khung stack (`setDataLayout("")`) | `codegen.cpp:2763` | `selfhost/codegen/codegen.ivy`: module layout lấy từ TargetMachine **trước** `emit_to_file` (không tái hiện); fixture `h10_C19_record_across_call` (H10.1) | `MIR_NOTES.md` §11.6, `H10_NOTES.md` H10.1 |
 | **C20** | A | Octal escape trong string literal: `"\101"` → byte `0x01`, `"\1"` → `0x00` (bộ đọc bắt đầu từ chữ số mà `switch` đã tiêu thụ) | `codegen.cpp` (`readOctalEscape`) | `emitter.ivy` ≈L633/L657 (`emit_escaped`) | `H62_NOTES.md` §19 |
 
@@ -275,8 +275,17 @@ phải spelling) và corpus H5.1 không có mẫu `p[i] = x` với `T**`. Nhưng
 self-host phải tránh**: `Linker` giữ `char** mods_`/`extra_` chính là pattern
 này, nên `add_module_object`/`add_extra` (`selfhost/codegen/codegen.ivy`
 ≈L786-812, ≈L830-855) ghi từng phần tử bằng `__ivy_memcpy(..., 8)` thay vì
-`this.mods_[i] = p`. Fix đúng (dùng `llvmType` như đường đọc) để **H10** —
-sửa xong phải freeze lại golden.
+`this.mods_[i] = p`.
+
+**H10.4 — đã sửa**: `lower_index_addr` dùng `llvmType(e.type)` cho cả hai
+đường, nên store qua `T**` scale đúng như load. Toàn bộ workaround
+`__ivy_memcpy` ở `add_module_object`, `add_extra`, `add_cpp_header`,
+`add_c_header`, mảng `hobj` (`selfhost/codegen/codegen.ivy`) và `pipeline.ivy`
+đã bị xoá; các chỗ đó lại ghi trực tiếp `this.mods_[i] = p`. Fixture
+`selfhost/corpus/codegen/h10_H29_pointer_store.ivy` (`pp[1] = p`, in `9`);
+golden `expected:H10.4`. Vì đây là fix của chính compiler, seed
+`selfhost/bootstrap/ivy-stage0.exe` được dựng lại (H10.4) để generation đầu
+tiên đã có hành vi đúng — xem `H10_NOTES.md` H10.4.
 
 ---
 

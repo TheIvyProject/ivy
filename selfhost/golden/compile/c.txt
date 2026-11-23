@@ -2471,3 +2471,9 @@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy:23:5: error: cannot assign 
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 31 0
+ivy: '<OUT>\out.obj' generated

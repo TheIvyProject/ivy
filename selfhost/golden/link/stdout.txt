@@ -215,7 +215,7 @@ sum = 18
 @@ selfhost/corpus/codegen/231_range_for_nested.ivy 0 36
 @@ selfhost/corpus/codegen/232_range_for_struct_range.ivy 6 34
 8 10
-@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 0 -1073741819
+@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 0 60
 @@ selfhost/corpus/codegen/234_range_for_float.ivy 0 1
 @@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 25 0
 base dtor
@@ -343,3 +343,10 @@ bye 0
 bye 1
 bye 2
 @@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 0 15
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 7 0
+11 22
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 13 0
+before
+0 0
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 3 0
+9

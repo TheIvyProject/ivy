@@ -203,6 +203,60 @@
   family H19: ghi qua member/index của biến đang borrow, và use-after-destroy
   qua raw pointer trong `unsafe` (cố ý cho phép).
 
+### H10.4 - Slot theo scope, zero-init, GEP `T**`
+
+- **Bug**: **C1** — slot biến local khoá theo **tên**, không theo scope: hai
+  local cùng tên ở scope khác nhau dùng chung một `alloca`, last-wins (ví dụ
+  `MInst x` ngoài + `long x` trong block: đọc `x.kind` ra giá trị của `long`).
+  **C18** — struct local chưa khởi tạo phải được zero-init tại điểm khai báo
+  (port đã đúng; mục này chỉ khoá hồi quy bằng fixture IR). **H29** — store qua
+  `T**` emit GEP `i8` không scale (`llvmElemType`), lệch với đường đọc
+  (`llvmType`), nên `p[i] = x` ghi sai ô; các mảng `char**` của `Linker`
+  (`mods_`, `extra_`, `cpph_`, `ch_`) phải đi vòng bằng `__ivy_memcpy`.
+- **Sửa**:
+  - `mir/mir_builder.ivy`: `declare` trả **binding id** duy nhất cho từng khai
+    báo (địa chỉ tăng dần; tham số id âm `-(j+2)`), ghi vào `alloca.b` và
+    `expr.b` của `IdentRef`/`This`. Pool lịch sử `hn_*` giữ mọi khai báo của
+    function để `lookup_binding` còn phân giải được các destructor call mà HIR
+    đặt sau khi scope đã đóng (`break` ra khỏi loop body) — fallback này chỉ
+    dùng khi scope/parameter không còn tên đó.
+  - `mir/mir_builder.ivy` `clone_expr`: với kind 6/7, `b` là binding id chứ
+    không phải index biểu thức con, nên copy nguyên giá trị (nếu clone như
+    child sẽ hỏng lookup).
+  - `codegen/emitter.ivy`: bảng biến có thêm `vbid_`; `find_var_bid` /
+    `is_ref_var_bid` thay cho tra theo tên trong `lower_ident`,
+    `lower_lvalue`, address-of, array base và lowering `alloca`; prologue
+    dùng `-(i+2)` cho tham số (`this` cũng là tham số như MIR).
+  - `codegen/emitter.ivy` `lower_index_addr`: cả hai đường dùng
+    `llvmType(e.type)`; xoá toàn bộ workaround `__ivy_memcpy` trong
+    `codegen/codegen.ivy` (`add_module_object`, `add_extra`, `add_cpp_header`,
+    `add_c_header`, mảng `hobj`) và `app/pipeline.ivy`.
+  - `bootstrap/ivy-stage0.exe`: dựng lại seed (fix của compiler phải có ngay
+    generation đầu): bootstrap từ seed cũ tới khi stage 1 == stage 2, rồi lấy
+    stage 1 làm seed; `ivy-stage0.sha256` và `README.md` cập nhật.
+- **Fixture**: `selfhost/corpus/codegen/h10_C1_slot_shadow.ivy` (shadow
+  struct/long/parameter; exit 0), `h10_C18_zero_init_decl.ivy` (zero-init ở
+  điểm khai báo + trong loop; exit 0), `h10_H29_pointer_store.ivy`
+  (`pp[1] = p`, in `9`; exit 0).
+- **Golden**: thêm 3 fixture (13+13+11 record; `corpus.txt` +3). Đổi hành vi ở
+  7 fixture cũ do slot numbering/binding đúng: `229_range_for_ref`,
+  `232_range_for_struct_range`, `233_range_for_struct_elem` (trước crash
+  `-1073741819`, nay exit `60` — kết quả đúng), `248_std_unique_ptr`,
+  `249_std_vector`, `hir/name/02_shadow` (đúng mục đích C1),
+  `mir/cfg/02_local_shadowed`; thêm `h10_H17_nested_return` (slot `__ret` tách
+  theo scope). Tất cả provenance `expected:H10.4`.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap PASS, F2 + self-link
+  identical SHA `7FCFDE62EE757156C40D4A85A34CB928E82B1823B604989844B2B6380BE827FD`
+  (27 159 552 B; trùng seed mới), golden **12518 checks / 0 failures**
+  (1066 fixture). `check_repro.ps1` → **PASS** (83 artifact; stage1 SHA-256
+  `7FCFDE62…27FD`).
+- **Ghi chú**: đây là mục H10 đầu tiên phải **đổi seed** — C1/H29 nằm trong
+  chính compiler, nên seed cũ sinh ra stage 1 khác stage 2. C18 vốn đã đúng
+  (zero-init tại điểm khai báo); fixture chỉ khoá lại. Fallback lịch sử khai
+  báo chỉ áp dụng cho destructor call do HIR tổng hợp; mọi biểu thức từ source
+  đều mang binding id chính xác. `233` từ crash thành chạy đúng là hệ quả trực
+  tiếp của C1 (range-for dùng cùng tên `p` ở nhiều scope).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -210,7 +264,7 @@
 | H10.1 | B-C3, C19 | `&<local struct>` + record local qua call | ✅ |
 | H10.2 | H17, H18, C4, H26 | RAII/dtor: emit 2 lần, `return`, break/continue, aggregate init | ✅ |
 | H10.3 | H19 | Borrow-checker lỏng (soundness) | ✅ |
-| H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ☐ |
+| H10.4 | C1, C18, H29 | Slot theo scope, zero-init đúng điểm, GEP `T**`, xoá workaround memcpy | ✅ |
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ☐ |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ☐ |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ☐ |

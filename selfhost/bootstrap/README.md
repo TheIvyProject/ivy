@@ -11,10 +11,10 @@ knows it) or when a fix must reach the first generation.
 
 | | |
 |---|---|
-| size | 27 130 368 bytes |
-| SHA-256 | `C5DF31991234D0AD4C9637DA882D8C4DEB9C35ECCBD961307056EAA89EF46008` |
-| built from | commit `d8252ba` (H9.4) |
-| built by | `selfhost/app/bootstrap_smoke.ps1 -SelfLink` — the stage 1 compiler that the oracle built from `src/**` |
+| size | 27 159 552 bytes |
+| SHA-256 | `7FCFDE62EE757156C40D4A85A34CB928E82B1823B604989844B2B6380BE827FD` |
+| built from | the H10.4 sources (parent commit `745deaf`, H10.3) |
+| built by | `selfhost/build.ps1 -SelfLink` - re-bootstrapped from the previous seed until stage 1 and stage 2 agreed (H10.4 needs its own slot/GEP fixes in the first generation) |
 | runtime | `rt.obj` from `std/rt.ivy` (H9.1), linked statically |
 | linker | `clang++` + `llvm-config --libs x86` + `--system-libs`, `-Wl,/Brepro` |
 

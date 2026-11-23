@@ -1,0 +1,27 @@
+#pragma ivy cnumber
+
+// H10.4 / H29: an assignment through a pointer index (`T*` base) must scale
+// the index by the pointee size.  The old lvalue path decayed the type one
+// more level and emitted `getelementptr i8` for a `T**` store, so `pp[1] = p`
+// wrote one byte past the base instead of eight.  The read path already used
+// the correct element type; both paths share it now.
+
+extern "C" {
+    int printf(const char* fmt, ...);
+    void* __ivy_alloc(unsigned long long n);
+    void __ivy_free(void* p);
+}
+
+int32 main() {
+    unsafe {
+        int64* p = (int64*)__ivy_alloc(8);
+        *p = 9;
+        int64** pp = (int64**)__ivy_alloc(16);
+        pp[1] = p;
+        int64* q = pp[1];
+        printf("%lld\n", *q);
+        __ivy_free(p);
+        __ivy_free((void*)pp);
+    }
+    return 0;
+}

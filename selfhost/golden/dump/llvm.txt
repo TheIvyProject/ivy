@@ -5890,9 +5890,9 @@ call void @__ivy_panic(ptr %tmp.20, i32 14)
 unreachable
 bb.i7:
 %tmp.17 = getelementptr [3 x i32], ptr %arr.0, i32 0, i64 %tmp.16
-store ptr %tmp.17, ptr %x.5
-%tmp.21 = load ptr, ptr %x.5
-%tmp.22 = load ptr, ptr %x.5
+store ptr %tmp.17, ptr %x.2
+%tmp.21 = load ptr, ptr %x.2
+%tmp.22 = load ptr, ptr %x.2
 %tmp.23 = load i32, ptr %tmp.22
 %tmp.24 = mul i32 %tmp.23, 10
 store i32 %tmp.24, ptr %tmp.21
@@ -6351,9 +6351,9 @@ bb2:
 %tmp.6 = load i64, ptr %__rfi0.2
 %tmp.7 = call ptr @"?operator[]@Buf@@YAAVAAV_K@Z"(ptr %b.0, i64 %tmp.6)
 %tmp.8 = load i32, ptr %tmp.7
-store i32 %tmp.8, ptr %x.5
+store i32 %tmp.8, ptr %x.3
 %tmp.9 = load i32, ptr %s.1
-%tmp.10 = load i32, ptr %x.5
+%tmp.10 = load i32, ptr %x.3
 %tmp.11 = add i32 %tmp.9, %tmp.10
 store i32 %tmp.11, ptr %s.1
 br label %bb3
@@ -6410,7 +6410,7 @@ define i32 @main() {
 }
 
 @.str.0 = private unnamed_addr constant [7 x i8] c"%d %d\0A\00"
-@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 6500 0
+@@ selfhost/corpus/codegen/233_range_for_struct_elem.ivy 6436 0
 ; LLVM IR emitted by ivy
 %struct.P = type { i32, i32 }
 
@@ -6512,91 +6512,89 @@ unreachable
 bb.i13:
 %tmp.35 = getelementptr [3 x %struct.P], ptr %ps.0, i32 0, i64 %tmp.34
 %tmp.39 = load %struct.P, ptr %tmp.35
-store %struct.P %tmp.39, ptr %p.7
+store %struct.P %tmp.39, ptr %p.3
 %tmp.40 = load i32, ptr %s.1
-%tmp.41 = load ptr, ptr %p.7
-%tmp.42 = getelementptr %struct.P, ptr %tmp.41, i32 0, i32 0
-%tmp.43 = load i32, ptr %tmp.42
-%tmp.44 = add i32 %tmp.40, %tmp.43
-%tmp.45 = load ptr, ptr %p.7
-%tmp.46 = getelementptr %struct.P, ptr %tmp.45, i32 0, i32 1
-%tmp.47 = load i32, ptr %tmp.46
-%tmp.48 = add i32 %tmp.44, %tmp.47
-store i32 %tmp.48, ptr %s.1
+%tmp.41 = getelementptr %struct.P, ptr %p.3, i32 0, i32 0
+%tmp.42 = load i32, ptr %tmp.41
+%tmp.43 = add i32 %tmp.40, %tmp.42
+%tmp.44 = getelementptr %struct.P, ptr %p.3, i32 0, i32 1
+%tmp.45 = load i32, ptr %tmp.44
+%tmp.46 = add i32 %tmp.43, %tmp.45
+store i32 %tmp.46, ptr %s.1
 br label %bb3
 bb3:
-%tmp.49 = load i64, ptr %__rfi0.2
-%tmp.50 = add i64 %tmp.49, 1
-store i64 %tmp.50, ptr %__rfi0.2
+%tmp.47 = load i64, ptr %__rfi0.2
+%tmp.48 = add i64 %tmp.47, 1
+store i64 %tmp.48, ptr %__rfi0.2
 br label %bb1
 bb4:
-%tmp.51 = sext i32 0 to i64
-store i64 %tmp.51, ptr %__rfi1.4
+%tmp.49 = sext i32 0 to i64
+store i64 %tmp.49, ptr %__rfi1.4
 br label %bb5
 bb5:
-%tmp.52 = load i64, ptr %__rfi1.4
-%tmp.53 = sext i32 3 to i64
-%tmp.54 = icmp slt i64 %tmp.52, %tmp.53
-br i1 %tmp.54, label %bb6, label %bb8
+%tmp.50 = load i64, ptr %__rfi1.4
+%tmp.51 = sext i32 3 to i64
+%tmp.52 = icmp slt i64 %tmp.50, %tmp.51
+br i1 %tmp.52, label %bb6, label %bb8
 bb6:
-%tmp.55 = load i64, ptr %__rfi1.4
-%tmp.58 = icmp uge i64 %tmp.55, 3
-br i1 %tmp.58, label %bb.i14, label %bb.i15
+%tmp.53 = load i64, ptr %__rfi1.4
+%tmp.56 = icmp uge i64 %tmp.53, 3
+br i1 %tmp.56, label %bb.i14, label %bb.i15
 bb.i14:
-%tmp.59 = getelementptr i8, ptr @.str.7, i64 0
-call void @__ivy_panic(ptr %tmp.59, i32 22)
+%tmp.57 = getelementptr i8, ptr @.str.7, i64 0
+call void @__ivy_panic(ptr %tmp.57, i32 22)
 unreachable
 bb.i15:
-%tmp.56 = getelementptr [3 x %struct.P], ptr %ps.0, i32 0, i64 %tmp.55
-store ptr %tmp.56, ptr %p.7
-%tmp.60 = load ptr, ptr %p.7
+%tmp.54 = getelementptr [3 x %struct.P], ptr %ps.0, i32 0, i64 %tmp.53
+store ptr %tmp.54, ptr %p.5
+%tmp.58 = load ptr, ptr %p.5
+%tmp.59 = getelementptr %struct.P, ptr %tmp.58, i32 0, i32 0
+%tmp.60 = load ptr, ptr %p.5
 %tmp.61 = getelementptr %struct.P, ptr %tmp.60, i32 0, i32 0
-%tmp.62 = load ptr, ptr %p.7
-%tmp.63 = getelementptr %struct.P, ptr %tmp.62, i32 0, i32 0
-%tmp.64 = load i32, ptr %tmp.63
-%tmp.65 = add i32 %tmp.64, 10
-store i32 %tmp.65, ptr %tmp.61
+%tmp.62 = load i32, ptr %tmp.61
+%tmp.63 = add i32 %tmp.62, 10
+store i32 %tmp.63, ptr %tmp.59
 br label %bb7
 bb7:
-%tmp.66 = load i64, ptr %__rfi1.4
-%tmp.67 = add i64 %tmp.66, 1
-store i64 %tmp.67, ptr %__rfi1.4
+%tmp.64 = load i64, ptr %__rfi1.4
+%tmp.65 = add i64 %tmp.64, 1
+store i64 %tmp.65, ptr %__rfi1.4
 br label %bb5
 bb8:
-%tmp.68 = sext i32 0 to i64
-store i64 %tmp.68, ptr %__rfi2.6
+%tmp.66 = sext i32 0 to i64
+store i64 %tmp.66, ptr %__rfi2.6
 br label %bb9
 bb9:
-%tmp.69 = load i64, ptr %__rfi2.6
-%tmp.70 = sext i32 3 to i64
-%tmp.71 = icmp slt i64 %tmp.69, %tmp.70
-br i1 %tmp.71, label %bb10, label %bb12
+%tmp.67 = load i64, ptr %__rfi2.6
+%tmp.68 = sext i32 3 to i64
+%tmp.69 = icmp slt i64 %tmp.67, %tmp.68
+br i1 %tmp.69, label %bb10, label %bb12
 bb10:
-%tmp.72 = load i64, ptr %__rfi2.6
-%tmp.75 = icmp uge i64 %tmp.72, 3
-br i1 %tmp.75, label %bb.i16, label %bb.i17
+%tmp.70 = load i64, ptr %__rfi2.6
+%tmp.73 = icmp uge i64 %tmp.70, 3
+br i1 %tmp.73, label %bb.i16, label %bb.i17
 bb.i16:
-%tmp.76 = getelementptr i8, ptr @.str.8, i64 0
-call void @__ivy_panic(ptr %tmp.76, i32 27)
+%tmp.74 = getelementptr i8, ptr @.str.8, i64 0
+call void @__ivy_panic(ptr %tmp.74, i32 27)
 unreachable
 bb.i17:
-%tmp.73 = getelementptr [3 x %struct.P], ptr %ps.0, i32 0, i64 %tmp.72
-store ptr %tmp.73, ptr %p.7
-%tmp.77 = load i32, ptr %s.1
-%tmp.78 = load ptr, ptr %p.7
-%tmp.79 = getelementptr %struct.P, ptr %tmp.78, i32 0, i32 0
-%tmp.80 = load i32, ptr %tmp.79
-%tmp.81 = add i32 %tmp.77, %tmp.80
-store i32 %tmp.81, ptr %s.1
+%tmp.71 = getelementptr [3 x %struct.P], ptr %ps.0, i32 0, i64 %tmp.70
+store ptr %tmp.71, ptr %p.7
+%tmp.75 = load i32, ptr %s.1
+%tmp.76 = load ptr, ptr %p.7
+%tmp.77 = getelementptr %struct.P, ptr %tmp.76, i32 0, i32 0
+%tmp.78 = load i32, ptr %tmp.77
+%tmp.79 = add i32 %tmp.75, %tmp.78
+store i32 %tmp.79, ptr %s.1
 br label %bb11
 bb11:
-%tmp.82 = load i64, ptr %__rfi2.6
-%tmp.83 = add i64 %tmp.82, 1
-store i64 %tmp.83, ptr %__rfi2.6
+%tmp.80 = load i64, ptr %__rfi2.6
+%tmp.81 = add i64 %tmp.80, 1
+store i64 %tmp.81, ptr %__rfi2.6
 br label %bb9
 bb12:
-%tmp.84 = load i32, ptr %s.1
-ret i32 %tmp.84
+%tmp.82 = load i32, ptr %s.1
+ret i32 %tmp.82
 }
 
 ; C1: C entry point — calls ivy_main()
@@ -7714,17 +7712,17 @@ call void @"?0unique_ptr_int32_t_@@AEXAAV@Z"(ptr %q.2)
 %tmp.7 = icmp ne ptr %tmp.5, %tmp.6
 br i1 %tmp.7, label %bb4, label %bb3
 bb2:
-store i32 1, ptr %__ret.5
+store i32 1, ptr %__ret.3
 call void @"?1unique_ptr_int32_t_@@AEXAAV@Z"(ptr %p.0)
-%tmp.8 = load i32, ptr %__ret.5
+%tmp.8 = load i32, ptr %__ret.3
 ret i32 %tmp.8
 bb3:
 %tmp.9 = getelementptr i8, ptr @.str.2, i64 0
 call void @__ivy_write_str(i32 1, ptr %tmp.9)
 call void @__ivy_write_newline(i32 1)
-store i32 0, ptr %__ret.5
+store i32 0, ptr %__ret.4
 call void @"?1unique_ptr_int32_t_@@AEXAAV@Z"(ptr %q.2)
-%tmp.10 = load i32, ptr %__ret.5
+%tmp.10 = load i32, ptr %__ret.4
 ret i32 %tmp.10
 bb4:
 store i32 2, ptr %__ret.5
@@ -7932,9 +7930,9 @@ bb1:
 %tmp.6 = icmp ne i32 %tmp.5, 2
 br i1 %tmp.6, label %bb4, label %bb3
 bb2:
-store i32 1, ptr %__ret.7
+store i32 1, ptr %__ret.1
 call void @"?1vector_int32_t_@@AEXAAV@Z"(ptr %v.0)
-%tmp.7 = load i32, ptr %__ret.7
+%tmp.7 = load i32, ptr %__ret.1
 ret i32 %tmp.7
 bb3:
 %tmp.8 = sext i32 1 to i64
@@ -7945,9 +7943,9 @@ store i32 0, ptr %s.2
 store i64 %tmp.10, ptr %__rfi0.3
 br label %bb5
 bb4:
-store i32 2, ptr %__ret.7
+store i32 2, ptr %__ret.4
 call void @"?1vector_int32_t_@@AEXAAV@Z"(ptr %v.0)
-%tmp.11 = load i32, ptr %__ret.7
+%tmp.11 = load i32, ptr %__ret.4
 ret i32 %tmp.11
 bb5:
 %tmp.12 = load i64, ptr %__rfi0.3
@@ -7987,9 +7985,9 @@ call void @__ivy_write_str(i32 1, ptr %tmp.30)
 %tmp.33 = call ptr @__ivy_fmt_int(i64 %tmp.32)
 call void @__ivy_write_str(i32 1, ptr %tmp.33)
 call void @__ivy_write_newline(i32 1)
-store i32 0, ptr %__ret.7
+store i32 0, ptr %__ret.6
 call void @"?1vector_int32_t_@@AEXAAV@Z"(ptr %v.0)
-%tmp.34 = load i32, ptr %__ret.7
+%tmp.34 = load i32, ptr %__ret.6
 ret i32 %tmp.34
 bb10:
 store i32 3, ptr %__ret.7
@@ -16903,11 +16901,11 @@ store i32 %arg0, ptr %n.0
 br label %bb0
 bb0:
 %tmp.0 = load i32, ptr %n.0
-store i32 %tmp.0, ptr %x.4
-store i32 1, ptr %x.4
-%tmp.1 = load i32, ptr %x.4
+store i32 %tmp.0, ptr %x.1
+store i32 1, ptr %x.2
+%tmp.1 = load i32, ptr %x.2
 %tmp.2 = add i32 %tmp.1, 1
-store i32 %tmp.2, ptr %x.4
+store i32 %tmp.2, ptr %x.2
 store i32 0, ptr %i.3
 br label %bb1
 bb1:
@@ -21947,7 +21945,7 @@ define void @"?f@@YXX@Z"() {
 %x.1 = alloca i32
 br label %bb0
 bb0:
-store i32 1, ptr %x.1
+store i32 1, ptr %x.0
 store i32 2, ptr %x.1
 ret void
 }
@@ -25244,9 +25242,9 @@ br i1 %tmp.2, label %bb2, label %bb1
 bb1:
 %tmp.3 = load i32, ptr %inner.2
 %tmp.4 = add i32 %tmp.3, 1
-store i32 %tmp.4, ptr %__ret.4
+store i32 %tmp.4, ptr %__ret.3
 call void @"?1Res@@AEXAAV@Z"(ptr %r.1)
-%tmp.5 = load i32, ptr %__ret.4
+%tmp.5 = load i32, ptr %__ret.3
 ret i32 %tmp.5
 bb2:
 store i32 10, ptr %__ret.4
@@ -25542,3 +25540,222 @@ ret void
 
 @@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 2567 0
+; LLVM IR emitted by ivy
+%struct.MInst = type { i64, i64 }
+
+declare i32 @printf(ptr, ...)
+define i64 @"?shadow@@Y_J_J@Z"(i64 %arg0) {
+%v.0 = alloca i64
+store i64 %arg0, ptr %v.0
+%v.1 = alloca i64
+br label %bb0
+bb0:
+%tmp.0 = sext i32 8 to i64
+store i64 %tmp.0, ptr %v.1
+%tmp.1 = load i64, ptr %v.1
+ret i64 %tmp.1
+}
+
+define i32 @ivy_main() {
+%x.0 = alloca %struct.MInst
+%x.1 = alloca i64
+%y.2 = alloca i64
+%y.3 = alloca i64
+br label %bb0
+bb0:
+store %struct.MInst zeroinitializer, ptr %x.0
+%tmp.0 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 0
+%tmp.1 = sext i32 11 to i64
+store i64 %tmp.1, ptr %tmp.0
+%tmp.2 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 1
+%tmp.3 = sext i32 22 to i64
+store i64 %tmp.3, ptr %tmp.2
+%tmp.4 = sext i32 5 to i64
+store i64 %tmp.4, ptr %x.1
+%tmp.5 = load i64, ptr %x.1
+%tmp.6 = sext i32 1 to i64
+%tmp.7 = add i64 %tmp.5, %tmp.6
+store i64 %tmp.7, ptr %x.1
+%tmp.8 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.9 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 0
+%tmp.10 = load i64, ptr %tmp.9
+%tmp.11 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 1
+%tmp.12 = load i64, ptr %tmp.11
+%tmp.13 = call i32 @printf(ptr %tmp.8, i64 %tmp.10, i64 %tmp.12)
+%tmp.14 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 0
+%tmp.15 = load i64, ptr %tmp.14
+%tmp.16 = sext i32 11 to i64
+%tmp.17 = icmp ne i64 %tmp.15, %tmp.16
+br i1 %tmp.17, label %bb2, label %bb1
+bb1:
+%tmp.18 = getelementptr %struct.MInst, ptr %x.0, i32 0, i32 1
+%tmp.19 = load i64, ptr %tmp.18
+%tmp.20 = sext i32 22 to i64
+%tmp.21 = icmp ne i64 %tmp.19, %tmp.20
+br i1 %tmp.21, label %bb4, label %bb3
+bb2:
+ret i32 1
+bb3:
+%tmp.22 = sext i32 1 to i64
+store i64 %tmp.22, ptr %y.2
+%tmp.23 = sext i32 100 to i64
+store i64 %tmp.23, ptr %y.3
+%tmp.24 = load i64, ptr %y.3
+%tmp.25 = sext i32 1 to i64
+%tmp.26 = add i64 %tmp.24, %tmp.25
+store i64 %tmp.26, ptr %y.3
+%tmp.27 = load i64, ptr %y.3
+%tmp.28 = sext i32 101 to i64
+%tmp.29 = icmp ne i64 %tmp.27, %tmp.28
+br i1 %tmp.29, label %bb6, label %bb5
+bb4:
+ret i32 2
+bb5:
+%tmp.30 = load i64, ptr %y.2
+%tmp.31 = sext i32 1 to i64
+%tmp.32 = icmp ne i64 %tmp.30, %tmp.31
+br i1 %tmp.32, label %bb8, label %bb7
+bb6:
+ret i32 3
+bb7:
+%tmp.33 = sext i32 7 to i64
+%tmp.34 = call i64 @"?shadow@@Y_J_J@Z"(i64 %tmp.33)
+%tmp.35 = sext i32 8 to i64
+%tmp.36 = icmp ne i64 %tmp.34, %tmp.35
+br i1 %tmp.36, label %bb10, label %bb9
+bb8:
+ret i32 4
+bb9:
+ret i32 0
+bb10:
+ret i32 5
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@.str.0 = private unnamed_addr constant [11 x i8] c"%lld %lld\0A\00"
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 2045 0
+; LLVM IR emitted by ivy
+%struct.Pair = type { i64, i64 }
+
+declare i32 @printf(ptr, ...)
+define i32 @ivy_main() {
+%p.0 = alloca %struct.Pair
+%n.1 = alloca i64
+%q.2 = alloca %struct.Pair
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.1 = call i32 @printf(ptr %tmp.0)
+store %struct.Pair zeroinitializer, ptr %p.0
+%tmp.2 = getelementptr i8, ptr @.str.1, i64 0
+%tmp.3 = getelementptr %struct.Pair, ptr %p.0, i32 0, i32 0
+%tmp.4 = load i64, ptr %tmp.3
+%tmp.5 = getelementptr %struct.Pair, ptr %p.0, i32 0, i32 1
+%tmp.6 = load i64, ptr %tmp.5
+%tmp.7 = call i32 @printf(ptr %tmp.2, i64 %tmp.4, i64 %tmp.6)
+%tmp.8 = getelementptr %struct.Pair, ptr %p.0, i32 0, i32 0
+%tmp.9 = load i64, ptr %tmp.8
+%tmp.10 = sext i32 0 to i64
+%tmp.11 = icmp ne i64 %tmp.9, %tmp.10
+br i1 %tmp.11, label %bb2, label %bb1
+bb1:
+%tmp.12 = getelementptr %struct.Pair, ptr %p.0, i32 0, i32 1
+%tmp.13 = load i64, ptr %tmp.12
+%tmp.14 = sext i32 0 to i64
+%tmp.15 = icmp ne i64 %tmp.13, %tmp.14
+br i1 %tmp.15, label %bb4, label %bb3
+bb2:
+ret i32 1
+bb3:
+%tmp.16 = sext i32 3 to i64
+store i64 %tmp.16, ptr %n.1
+br label %bb5
+bb4:
+ret i32 2
+bb5:
+%tmp.17 = load i64, ptr %n.1
+%tmp.18 = sext i32 0 to i64
+%tmp.19 = icmp sgt i64 %tmp.17, %tmp.18
+br i1 %tmp.19, label %bb6, label %bb7
+bb6:
+store %struct.Pair zeroinitializer, ptr %q.2
+%tmp.20 = getelementptr %struct.Pair, ptr %q.2, i32 0, i32 0
+%tmp.21 = load i64, ptr %tmp.20
+%tmp.22 = sext i32 0 to i64
+%tmp.23 = icmp ne i64 %tmp.21, %tmp.22
+br i1 %tmp.23, label %bb9, label %bb8
+bb7:
+ret i32 0
+bb8:
+%tmp.24 = getelementptr %struct.Pair, ptr %q.2, i32 0, i32 0
+%tmp.25 = load i64, ptr %n.1
+store i64 %tmp.25, ptr %tmp.24
+%tmp.26 = load i64, ptr %n.1
+%tmp.27 = sext i32 1 to i64
+%tmp.28 = sub i64 %tmp.26, %tmp.27
+store i64 %tmp.28, ptr %n.1
+br label %bb5
+bb9:
+ret i32 3
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@.str.0 = private unnamed_addr constant [8 x i8] c"before\0A\00"
+@.str.1 = private unnamed_addr constant [11 x i8] c"%lld %lld\0A\00"
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1234 0
+; LLVM IR emitted by ivy
+declare i32 @printf(ptr, ...)
+declare ptr @__ivy_alloc(i64)
+declare void @__ivy_free(ptr)
+define i32 @ivy_main() {
+%p.0 = alloca ptr
+%pp.1 = alloca ptr
+%q.2 = alloca ptr
+br label %bb0
+bb0:
+%tmp.0 = sext i32 8 to i64
+%tmp.1 = call ptr @__ivy_alloc(i64 %tmp.0)
+store ptr %tmp.1, ptr %p.0
+%tmp.2 = load ptr, ptr %p.0
+%tmp.3 = sext i32 9 to i64
+store i64 %tmp.3, ptr %tmp.2
+%tmp.4 = sext i32 16 to i64
+%tmp.5 = call ptr @__ivy_alloc(i64 %tmp.4)
+store ptr %tmp.5, ptr %pp.1
+%tmp.7 = load ptr, ptr %pp.1
+%tmp.6 = getelementptr ptr, ptr %tmp.7, i32 1
+%tmp.8 = load ptr, ptr %p.0
+store ptr %tmp.8, ptr %tmp.6
+%tmp.10 = load ptr, ptr %pp.1
+%tmp.9 = getelementptr ptr, ptr %tmp.10, i32 1
+%tmp.11 = load ptr, ptr %tmp.9
+store ptr %tmp.11, ptr %q.2
+%tmp.12 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.13 = load ptr, ptr %q.2
+%tmp.14 = load i64, ptr %tmp.13
+%tmp.15 = call i32 @printf(ptr %tmp.12, i64 %tmp.14)
+%tmp.16 = load ptr, ptr %p.0
+call void @__ivy_free(ptr %tmp.16)
+%tmp.17 = load ptr, ptr %pp.1
+call void @__ivy_free(ptr %tmp.17)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@.str.0 = private unnamed_addr constant [6 x i8] c"%lld\0A\00"

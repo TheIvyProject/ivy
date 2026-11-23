@@ -1,0 +1,30 @@
+#pragma ivy cnumber
+
+// H10.4 / C18: an uninitialized struct local is zeroed at its declaration
+// point, not in the function entry block.  The runtime result is the same
+// here; the `llvm` golden records where the `store zeroinitializer` lands
+// relative to the preceding call and to the loop body.
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Pair { int64 a; int64 b; };
+
+int32 main() {
+    printf("before\n");
+
+    Pair p;
+    printf("%lld %lld\n", p.a, p.b);
+    if (p.a != 0) { return 1; }
+    if (p.b != 0) { return 2; }
+
+    int64 n = 3;
+    while (n > 0) {
+        Pair q;
+        if (q.a != 0) { return 3; }
+        q.a = n;
+        n = n - 1;
+    }
+    return 0;
+}

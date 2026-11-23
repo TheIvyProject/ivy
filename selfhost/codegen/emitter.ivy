@@ -154,6 +154,12 @@ export struct Emitter {
     // parameter's slot holds the address of the referenced object, so the
     // variable table must remember which slots are references.
     void* vrefs_;
+    // H10.4 (C1): the *binding id* of the declaration behind every slot.  The
+    // oracle keys its table by name only, so a shadowing local overwrites the
+    // outer binding (last wins).  The MIR builder now records the binding on
+    // each `alloca` (`MInst.b`) and on every `ident` reference (`MExpr.b`), so
+    // the emitter can pick the slot the source name actually denotes.
+    void* vbids_;
     long vn_;
     long vcap_;
     // Per-call argument scratch: `arg_vals_` holds VRef records (40 bytes
@@ -317,6 +323,7 @@ export struct Emitter {
             this.vnames_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vnums_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.vrefs_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
+            this.vbids_ = __ivy_alloc((unsigned long long) this.vcap_ * 8);
             this.arg_vals_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 40);
             this.arg_tys_ = __ivy_alloc((unsigned long long) this.arg_cap_ * 8);
             this.str_bytes_ = __ivy_alloc((unsigned long long) this.str_cap_ * 8);
@@ -341,6 +348,7 @@ export struct Emitter {
             __ivy_free(this.vnames_);
             __ivy_free(this.vnums_);
             __ivy_free(this.vrefs_);
+            __ivy_free(this.vbids_);
             __ivy_free(this.arg_vals_);
             __ivy_free(this.arg_tys_);
             __ivy_free(this.str_bytes_);
@@ -1106,7 +1114,7 @@ export struct Emitter {
         this.vn_ = 0;
     }
 
-    void add_var(const char* name, long slot, long is_ref) {
+    void add_var(const char* name, long slot, long is_ref, long bid) {
         if (this.vn_ >= this.vcap_) {
             this.fail(0, 0, "too many variables for the H6.2a variable table");
             return;
@@ -1118,21 +1126,25 @@ export struct Emitter {
             long* names = (long*) this.vnames_;
             long* nums = (long*) this.vnums_;
             long* refs = (long*) this.vrefs_;
+            long* bids = (long*) this.vbids_;
             names[this.vn_] = (long) name;
             nums[this.vn_] = slot;
             refs[this.vn_] = is_ref;
+            bids[this.vn_] = bid;
         }
         this.vn_ = this.vn_ + 1;
     }
 
-    long find_var(const char* name) {
+    // H10.4 (C1): the binding id recorded by the MIR builder.  A binding is
+    // unique per declaration in the function and unique per parameter, so the
+    // slot lookup never confuses two locals that share a source name.
+    long find_var_bid(long bid) {
         long i = this.vn_ - 1;
         unsafe {
-            long* names = (long*) this.vnames_;
+            long* bids = (long*) this.vbids_;
             long* nums = (long*) this.vnums_;
             while (i >= 0) {
-                const char* nm = reinterpret_cast<const char*>(names[i]);
-                if (this.streq(nm, name)) {
+                if (bids[i] == bid) {
                     return nums[i];
                 }
                 i = i - 1;
@@ -1143,14 +1155,13 @@ export struct Emitter {
 
     // H6.2h: mirror of the oracle's `varIsRef_` lookup.  Returns 1 when the
     // variable's alloca holds an address (reference parameter).
-    long is_ref_var(const char* name) {
+    long is_ref_var_bid(long bid) {
         long i = this.vn_ - 1;
         unsafe {
-            long* names = (long*) this.vnames_;
+            long* bids = (long*) this.vbids_;
             long* refs = (long*) this.vrefs_;
             while (i >= 0) {
-                const char* nm = reinterpret_cast<const char*>(names[i]);
-                if (this.streq(nm, name)) {
+                if (bids[i] == bid) {
                     return refs[i];
                 }
                 i = i - 1;
@@ -2371,7 +2382,7 @@ export struct Emitter {
     // --- expression lowering ---------------------------------------------
 
     VRef lower_ident(MExpr e) {
-        long slot = this.find_var(e.sval);
+        long slot = this.find_var_bid(e.b);
         if (slot < 0) {
             this.fail(e.line, e.col, "internal: identifier is not in the variable table");
             return this.imm(0);
@@ -2380,10 +2391,8 @@ export struct Emitter {
             // H6.2h: reference variable (reference parameter).  The slot holds
             // the address of the referenced object; load it, then load the
             // value through it (CodeGen::lowerExpr's IdentRef reference case).
-            // H6.2x: the *expression* type decides, not the name-based
-            // `varIsRef_` table: a name redeclared as a reference in a later
-            // scope still reads as a value where the earlier value
-            // declaration is in scope (mirror of lowerExpr).
+            // H10.4 (C1): the slot comes from the reference's binding id, so a
+            // shadowing declaration (value or reference) never leaks in.
             VRef addr = this.new_temp();
             this.emit_val(addr);
             this.ps(" = load ptr, ptr ");
@@ -2425,7 +2434,7 @@ export struct Emitter {
             this.fail(line, col, "array decay is out of scope for H6.2d");
             return -1;
         }
-        long slot = this.find_var(base.sval);
+        long slot = this.find_var_bid(base.b);
         if (slot < 0) {
             this.fail(line, col, "internal: array base is not in the variable table");
         }
@@ -2437,13 +2446,11 @@ export struct Emitter {
     // the GEP, and returns the element address.  The oracle allocates the GEP
     // temporary BEFORE the bounds-check temporaries but emits it after the
     // ok-block label; that ordering fixes the `%tmp.N` numbering.
-    // H8.1: `as_lvalue` selects the oracle branch, because the two disagree on
-    // the GEP element type of a pointer index:
-    //   * lowerLValue (codegen.cpp:1060) uses `llvmElemType(e.type)`, i.e. one
-    //     more pointer decay, so `p[i]` with `char** p` yields `i8`;
-    //   * lowerExpr (codegen.cpp:1747) uses `llvmType(e.type)`, so reading
-    //     `p[i]` yields `ptr`.
-    // Both must be mirrored byte for byte.
+    // H10.4 (H29): the oracle's lvalue branch used `llvmElemType(e.type)` for a
+    // pointer index, i.e. one more pointer decay, so a store through `T**`
+    // scaled by 1 instead of 8.  The read branch used `llvmType(e.type)`.
+    // Both branches now use `llvmType(e.type)`, mirroring the read path so the
+    // store and the load agree on the element size.
     VRef lower_index_addr(MExpr e, long as_lvalue) {
         MExpr base;
         MExpr ix;
@@ -2478,14 +2485,10 @@ export struct Emitter {
                 this.nl();
                 return gep;
             }
-            // H6.2p: pointer indexing (CodeGen::lowerExpr Index / lowerLValue
-            // Index, pointer base).  No bounds check; the GEP element type
-            // depends on the branch: `llvmElemType(resultType)` for an
-            // lvalue, `llvmType(resultType)` for a read.
+            // H10.4 (H29): the element type of a pointer index is the same on
+            // both paths now (`llvmType(e.type)`), so a store through `T**`
+            // scales by the pointer size exactly like the load.
             const char* elem_ty = this.llvm_type(e.type, 0);
-            if (as_lvalue != 0) {
-                elem_ty = this.llvm_elem_type(e.type);
-            }
             VRef bv = this.lower_expr(e.a);
             this.emit_val(gep);
             this.ps(" = getelementptr ");
@@ -2567,7 +2570,7 @@ export struct Emitter {
                 opnd = this.mu->exprs[e.a];
             }
             if (opnd.kind == 6) {
-                long slot = this.find_var(opnd.sval);
+                long slot = this.find_var_bid(opnd.b);
                 if (slot < 0) {
                     this.fail(e.line, e.col,
                               "internal: address-of is not in the variable table");
@@ -4287,12 +4290,12 @@ export struct Emitter {
         // CodeGen::lowerExpr loads the struct address out of the `%this.N`
         // slot (the parameter is passed by reference).
         if (e.kind == 7) {
-            long slot = this.find_var("this");
+            long slot = this.find_var_bid(e.b);
             if (slot < 0) {
                 this.fail(e.line, e.col, "internal: `this` is not in the variable table");
                 return this.null_ref();
             }
-            if (this.is_ref_var("this") != 0 || e.type.is_ref != 0) {
+            if (this.is_ref_var_bid(e.b) != 0 || e.type.is_ref != 0) {
                 VRef t = this.new_temp();
                 this.emit_val(t);
                 this.ps(" = load ptr, ptr ");
@@ -4387,12 +4390,12 @@ export struct Emitter {
             e = this.mu->exprs[idx];
         }
         if (e.kind == 6) {
-            long slot = this.find_var(e.sval);
+            long slot = this.find_var_bid(e.b);
             if (slot < 0) {
                 this.fail(e.line, e.col, "internal: lvalue is not in the variable table");
                 return this.imm(0);
             }
-            if (this.is_ref_var(e.sval) != 0) {
+            if (this.is_ref_var_bid(e.b) != 0) {
                 // H6.2h: a reference variable's slot holds the address of the
                 // referenced object (CodeGen::lowerLValue's IdentRef case).
                 // H6.2s: the expression type is NOT consulted — a value
@@ -4409,12 +4412,12 @@ export struct Emitter {
         }
         // H6.2s: `this` as an lvalue is the address of the object.
         if (e.kind == 7) {
-            long slot = this.find_var("this");
+            long slot = this.find_var_bid(e.b);
             if (slot < 0) {
                 this.fail(e.line, e.col, "internal: `this` is not in the variable table");
                 return this.imm(0);
             }
-            if (this.is_ref_var("this") != 0) {
+            if (this.is_ref_var_bid(e.b) != 0) {
                 VRef t = this.new_temp();
                 this.emit_val(t);
                 this.ps(" = load ptr, ptr ");
@@ -4516,7 +4519,9 @@ export struct Emitter {
         if (inst.kind == 0) {
             // Alloca: the slot itself was hoisted to the entry block; only
             // the initializer store runs here (mirror of lowerInst).
-            long slot = this.find_var(inst.var);
+            // H10.4 (C1): resolve through the declaration's binding id, not
+            // through the name (a shadowing local has its own slot).
+            long slot = this.find_var_bid(inst.b);
             if (slot < 0) {
                 this.fail(inst.line, inst.col, "internal: alloca is not in the variable table");
                 return;
@@ -4820,7 +4825,7 @@ export struct Emitter {
             this.ps(", ptr ");
             this.emit_slot(p.name, slot);
             this.nl();
-            this.add_var(p.name, slot, p.type.is_ref != 0 ? 1 : 0);
+            this.add_var(p.name, slot, p.type.is_ref != 0 ? 1 : 0, -(i + 2));
             i = i + 1;
         }
 
@@ -4849,7 +4854,7 @@ export struct Emitter {
                         this.ps(this.llvm_type(inst.type, 0));
                     }
                     this.nl();
-                    this.add_var(inst.var, slot, inst.type.is_ref != 0 ? 1 : 0);
+                    this.add_var(inst.var, slot, inst.type.is_ref != 0 ? 1 : 0, inst.b);
                 }
                 ii = inst.next;
             }

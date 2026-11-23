@@ -799,10 +799,7 @@ export struct Cg {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.ncpph_) {
-                    // H9.4 workaround (oracle bug H29): stores through
-                    // `char**` are emitted as unscaled `i8` GEPs.
-                    char* v = this.cpph_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.cpph_[k];
                     k = k + 1;
                 }
                 if (this.cpph_ != (char**) 0) {
@@ -812,7 +809,7 @@ export struct Cg {
                 this.capcpph_ = ncap;
             }
             char* pv = (char*) p;
-            __ivy_memcpy((void*) ((char*) this.cpph_ + (this.ncpph_ * 8)), (void*) &pv, 8);
+            this.cpph_[this.ncpph_] = pv;
             this.ncpph_ = this.ncpph_ + 1;
         }
     }
@@ -825,8 +822,7 @@ export struct Cg {
                 char** nb = (char**) __ivy_alloc((unsigned long long) (ncap * 8));
                 long k = 0;
                 while (k < this.nch_) {
-                    char* v = this.ch_[k];
-                    __ivy_memcpy((void*) ((char*) nb + (k * 8)), (void*) &v, 8);
+                    nb[k] = this.ch_[k];
                     k = k + 1;
                 }
                 if (this.ch_ != (char**) 0) {
@@ -836,7 +832,7 @@ export struct Cg {
                 this.capch_ = ncap;
             }
             char* pv = (char*) p;
-            __ivy_memcpy((void*) ((char*) this.ch_ + (this.nch_ * 8)), (void*) &pv, 8);
+            this.ch_[this.nch_] = pv;
             this.nch_ = this.nch_ + 1;
         }
     }

@@ -19250,3 +19250,214 @@ function unsafe_escape
 
 @@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 1481 0
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function shadow
+  return int64_t(int64_t v)
+  block 0
+    alloca int64_t v
+      int 8
+    ret
+      ident v
+
+function main
+  return int32_t()
+  block 0
+    alloca MInst x
+    store
+      member .kind : int64_t
+        ident x
+      int 11
+    store
+      member .a : int64_t
+        ident x
+      int 22
+    alloca int64_t x
+      int 5
+    store
+      ident x
+      binary '+' : int64_t
+        ident x
+        int 1
+    eval
+      call : int [lt: unknown]
+        string "%lld %lld\n" [lt: static]
+        member .kind : int64_t
+          ident x
+        member .a : int64_t
+          ident x
+    condbranch
+      binary '!=' : bool
+        member .kind : int64_t
+          ident x
+        int 11
+  block 1
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident x
+        int 22
+  block 2
+    ret
+      int 1
+  block 3
+    alloca int64_t y
+      int 1
+    alloca int64_t y
+      int 100
+    store
+      ident y
+      binary '+' : int64_t
+        ident y
+        int 1
+    condbranch
+      binary '!=' : bool
+        ident y
+        int 101
+  block 4
+    ret
+      int 2
+  block 5
+    condbranch
+      binary '!=' : bool
+        ident y
+        int 1
+  block 6
+    ret
+      int 3
+  block 7
+    condbranch
+      binary '!=' : bool
+        call : int64_t [lt: unknown]
+          int 7
+        int 8
+  block 8
+    ret
+      int 4
+  block 9
+    ret
+      int 0
+  block 10
+    ret
+      int 5
+
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 1130 0
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function main
+  return int32_t()
+  block 0
+    eval
+      call : int [lt: unknown]
+        string "before\n" [lt: static]
+    alloca Pair p
+    eval
+      call : int [lt: unknown]
+        string "%lld %lld\n" [lt: static]
+        member .a : int64_t
+          ident p
+        member .b : int64_t
+          ident p
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident p
+        int 0
+  block 1
+    condbranch
+      binary '!=' : bool
+        member .b : int64_t
+          ident p
+        int 0
+  block 2
+    ret
+      int 1
+  block 3
+    alloca int64_t n
+      int 3
+    jump
+  block 4
+    ret
+      int 2
+  block 5
+    condbranch
+      binary '>' : bool
+        ident n
+        int 0
+  block 6
+    alloca Pair q
+    condbranch
+      binary '!=' : bool
+        member .a : int64_t
+          ident q
+        int 0
+  block 7
+    ret
+      int 0
+  block 8
+    store
+      member .a : int64_t
+        ident q
+      ident n
+    store
+      ident n
+      binary '-' : int64_t
+        ident n
+        int 1
+    jump
+  block 9
+    ret
+      int 3
+
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1202 0
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function __ivy_alloc [extern "C"]
+  return void*(unsigned long long n)
+
+function __ivy_free [extern "C"]
+  return void(void* p)
+
+function main
+  return int32_t()
+  block 0
+    alloca int64_t* p [unsafe]
+      C-cast : int64_t* [lt: unknown]
+        call : void* [lt: unknown]
+          int 8
+    store [unsafe]
+      prefix '*' : int64_t [lt: unknown]
+        ident p [lt: unknown]
+      int 9
+    alloca int64_t** pp [unsafe]
+      C-cast : int64_t** [lt: unknown]
+        call : void* [lt: unknown]
+          int 16
+    store [unsafe]
+      index : int64_t* [lt: unknown]
+        ident pp [lt: unknown]
+        int 1
+      ident p [lt: unknown]
+    alloca int64_t* q [unsafe]
+      index : int64_t* [lt: unknown]
+        ident pp [lt: unknown]
+        int 1
+    eval [unsafe]
+      call : int [lt: unknown]
+        string "%lld\n" [lt: static]
+        prefix '*' : int64_t [lt: unknown]
+          ident q [lt: unknown]
+    eval [unsafe]
+      call : void [lt: unknown]
+        ident p [lt: unknown]
+    eval [unsafe]
+      call : void [lt: unknown]
+        C-cast : void* [lt: unknown]
+          ident pp [lt: unknown]
+    ret
+      int 0
+

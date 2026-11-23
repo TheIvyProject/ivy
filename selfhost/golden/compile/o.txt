@@ -1120,3 +1120,6 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/mir/lifetime/h10_H19_write_forms.ivy 0 0
 @@ selfhost/corpus/mir/lifetime/h10_H19_unsafe_escape.ivy 0 0
 @@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 0 0

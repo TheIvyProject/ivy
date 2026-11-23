@@ -2142,6 +2142,14 @@ the corpus when the corpus is used with `--run` or a native build - the
 sources, and the two rules above (no record across a call, no duplicate
 local names) must be kept.
 
+**H10.4 update.**  The name-keyed slot bug (C1) is fixed: the MIR builder
+records a per-declaration binding id in `alloca.b` / `expr.b` and the emitter
+looks the slot up by that id, so duplicate local names are no longer a hazard
+for the port's sources (the "no duplicate local names" rule above is
+historical).  The record-across-a-call hazard (C19) is *not* a slot bug and
+the first rule still applies.  See `H10_NOTES.md` H10.4 and
+`corpus/codegen/h10_C1_slot_shadow.ivy`.
+
 ### 11.7 The other oracle bug that the probes found
 
 `h51f3\fx5\t01_compound_lhs_call.ivy` makes the **oracle crash**: the

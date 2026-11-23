@@ -19912,3 +19912,220 @@ function use_after_destroy
         ident __ret
 
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 1615 0
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function shadow
+  return int64_t(int64_t v)
+  block
+    block
+      decl int64_t v =
+        int 8
+      return
+        ident v
+
+function main
+  return int32_t()
+  block
+    decl MInst x
+    expr
+      assign '=' : int64_t
+        member . kind
+          ident x
+        int 11
+    expr
+      assign '=' : int64_t
+        member . a
+          ident x
+        int 22
+    block
+      decl int64_t x =
+        int 5
+      expr
+        assign '=' : int64_t
+          ident x
+          binary '+' : int64_t
+            ident x
+            int 1
+    expr
+      call 'printf' : int
+        string "%lld %lld\n"
+        member . kind
+          ident x
+        member . a
+          ident x
+    if
+      binary '!=' : bool
+        member . kind
+          ident x
+        int 11
+      block
+        return
+          int 1
+    if
+      binary '!=' : bool
+        member . a
+          ident x
+        int 22
+      block
+        return
+          int 2
+    decl int64_t y =
+      int 1
+    block
+      decl int64_t y =
+        int 100
+      expr
+        assign '=' : int64_t
+          ident y
+          binary '+' : int64_t
+            ident y
+            int 1
+      if
+        binary '!=' : bool
+          ident y
+          int 101
+        block
+          return
+            int 3
+    if
+      binary '!=' : bool
+        ident y
+        int 1
+      block
+        return
+          int 4
+    if
+      binary '!=' : bool
+        call 'shadow' : int64_t
+          int 7
+        int 8
+      block
+        return
+          int 5
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 1148 0
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function main
+  return int32_t()
+  block
+    expr
+      call 'printf' : int
+        string "before\n"
+    decl Pair p
+    expr
+      call 'printf' : int
+        string "%lld %lld\n"
+        member . a
+          ident p
+        member . b
+          ident p
+    if
+      binary '!=' : bool
+        member . a
+          ident p
+        int 0
+      block
+        return
+          int 1
+    if
+      binary '!=' : bool
+        member . b
+          ident p
+        int 0
+      block
+        return
+          int 2
+    decl int64_t n =
+      int 3
+    while
+      binary '>' : bool
+        ident n
+        int 0
+      block
+        decl Pair q
+        if
+          binary '!=' : bool
+            member . a
+              ident q
+            int 0
+          block
+            return
+              int 3
+        expr
+          assign '=' : int64_t
+            member . a
+              ident q
+            ident n
+        expr
+          assign '=' : int64_t
+            ident n
+            binary '-' : int64_t
+              ident n
+              int 1
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1177 0
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function __ivy_alloc [extern "C"]
+  return void*(unsigned long long n)
+  (declaration only)
+
+function __ivy_free [extern "C"]
+  return void(void* p)
+  (declaration only)
+
+function main
+  return int32_t()
+  block
+    unsafe
+      block
+        decl int64_t* p =
+          C-cast
+            call '__ivy_alloc' : void*
+              int 8
+        expr
+          assign '=' : int64_t
+            prefix '*' : int64_t
+              ident p
+            int 9
+        decl int64_t** pp =
+          C-cast
+            call '__ivy_alloc' : void*
+              int 16
+        expr
+          assign '=' : int64_t*
+            index : int64_t*
+              ident pp
+              int 1
+            ident p
+        decl int64_t* q =
+          index : int64_t*
+            ident pp
+            int 1
+        expr
+          call 'printf' : int
+            string "%lld\n"
+            prefix '*' : int64_t
+              ident q
+        expr
+          call '__ivy_free' : void
+            ident p
+        expr
+          call '__ivy_free' : void
+            C-cast
+              ident pp
+    return
+      int 0
+
