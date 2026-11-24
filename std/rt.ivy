@@ -23,10 +23,17 @@
 // Deliberate deviation from `lib/ivyrt.c`: `__ivy_fmt_int` /
 // `__ivy_fmt_float` return a freshly allocated buffer instead of a
 // static one, because the subset has no file-scope variables and no
-// function-local `static`.  Callers consume the result immediately, so
-// the observable text is the same; the cost is one unfreed 32/64-byte
-// block per format (the generated caller hands the pointer straight to
-// `_write`).  See selfhost/ORACLE_BUGS.md (B-R2).
+// function-local `static`.  That also fixes the oracle's shared-buffer
+// aliasing bug (R2): two formatted results never overwrite each other.
+// Callers consume the result immediately (the generated caller hands the
+// pointer straight to `_write`), so the only cost is one unfreed
+// 32/64-byte block per format.  See selfhost/ORACLE_BUGS.md (B-R2).
+//
+// H10.8 (R1/R3): `_gcvt` is still used because the non-variadic call
+// avoids the Windows x64 varargs double ABI problem of `snprintf("%g")`,
+// but its spelling drops the fraction of integral values ("2.").  The
+// formatter repairs the decimal point in place, so `2.0` is printed as
+// `2.0` while every other `_gcvt` digit is left byte-for-byte intact.
 
 #pragma ivy cnumber
 
@@ -123,8 +130,8 @@ extern "C" void __ivy_write_newline(int32 fd) {
 // ── Format helpers ──────────────────────────────────────────────────
 // `lib/ivyrt.c` returned a pointer into a static scratch buffer.  The
 // subset has no statics, so each call returns a fresh buffer; callers
-// must still consume the result before formatting again (they always
-// do, since the result is passed straight to `_write`).
+// consume the result before formatting again (the generated code always
+// passes it straight to `_write`).
 
 extern "C" uint64 __ivy_fmt_int(int64 v) {
     unsafe {
@@ -172,9 +179,31 @@ extern "C" uint64 __ivy_fmt_float(double v) {
         }
         // Non-variadic, so it avoids the Windows x64 varargs double ABI
         // issue that `snprintf("%g", dbl)` has under LLJIT.  15
-        // significant digits is enough for IEEE-754 double, and the
-        // resulting spelling (e.g. "2." for 2.0) is the oracle's.
+        // significant digits is enough for IEEE-754 double.
         _gcvt(v, 15, buf);
+        // H10.8 (R1): `_gcvt` leaves a dangling decimal point on integral
+        // values ("2.", "100.") and before an exponent ("1.e+020").  Put a
+        // zero after the point so the spelling is well formed; the rest of
+        // the digits (including `_gcvt`'s exponent form) are untouched.
+        uint64 n = strlen(buf);
+        if (n > 0 && n < 63) {
+            uint64 dot = 0;
+            uint64 i = 0;
+            while (i < n) {
+                if (buf[i] == 46) {      // '.'
+                    dot = i + 1;
+                }
+                i = i + 1;
+            }
+            if (dot > 0 && (dot == n || buf[dot] == 101 || buf[dot] == 69)) {
+                uint64 j = n + 1;
+                while (j > dot) {
+                    buf[j] = buf[j - 1];
+                    j = j - 1;
+                }
+                buf[dot] = 48;           // '0'
+            }
+        }
         return (uint64)buf;
     }
     return 0;

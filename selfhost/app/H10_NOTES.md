@@ -438,6 +438,50 @@
   ghi nhận là fixture `-c` **thất bại** (exit 1) đúng theo bug; nay nó qua và
   object được lưu — đây là thay đổi hành vi có chủ ý của H10.7.
 
+### H10.8 - Runtime `fmt_float`, buffer, `_gcvt`
+
+- **Bug**:
+  - **R1** — `__ivy_fmt_float` giữ `_gcvt(v, 15)` từ H9.1 nên bỏ chữ số sau
+    dấu chấm: `2.0` in thành `2.`, `100.0` thành `100.`, và dạng mũ thành
+    `1.e+020` / `1.e-005`.
+  - **R2** — oracle trả con trỏ vào **static buffer dùng chung**; port H9.1
+    đã cấp buffer mới mỗi lần gọi nhưng chưa có fixture khoá hành vi (và
+    subset không có biến file-scope/`static` local để tái hiện buffer chung).
+  - **R3** — `_gcvt` được giữ vì `snprintf("%g", double)` hỏng ABI varargs
+    double dưới LLJIT trên Windows x64; bản vá R1 không được đổi các chữ số
+    khác của `_gcvt`.
+- **Sửa**:
+  - `std/rt.ivy` `__ivy_fmt_float`: sau `_gcvt`, tìm dấu `.` cuối cùng; nếu
+    nó đứng ngay trước NUL hoặc `e`/`E` thì chèn `0` (dời phần đuôi sang
+    phải). Buffer 64 B an toàn vì `_gcvt(..., 15)` dài tối đa ~24 ký tự.
+    Mọi byte khác giữ nguyên; `__ivy_fmt_int` và cách cấp buffer mới không
+    đổi.
+  - Cập nhật comment đầu `std/rt.ivy`: R2 là deviation cố ý (buffer riêng
+    mỗi lần gọi), R1/R3 là bản vá quanh `_gcvt`.
+- **Fixture** (`selfhost/corpus/codegen/`):
+  - `h10_R1_float_format.ivy` — in `2.0`, `0.0`, `1.0`, `100.0`, `2.5`,
+    `1.0/3.0`, `1e20`, `1e-5`; link stdout `66 B`, exit 0.
+  - `h10_R2_format_stress.ivy` — format int+float 64 vòng và một call 4
+    argument; link stdout `559 B`, exit 0.
+- **Golden**: 2 fixture mới × 10 mode; corpus 1079 → 1081 fixture, link
+  269 → 271. Record link đổi: `95_float_array` và
+  `101_struct_array_float` (`0.` → `0.0`), `247_std_math` (`3.` → `3.0`).
+  Provenance `expected:H10.8` cho 5 fixture. `manifest.txt` cập nhật
+  `runtime_sha256`/`runtime_size` (`2DAC59FB…C73B5D65`, `10 191 B`) vì đây
+  là lần đầu runtime đổi kể từ H9.1.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA
+  `B3E9126586CA1DE5F47B312DFD10DF19639D3D2073D4F733944D876DA9F5AEE8`
+  (27 170 304 B), golden **12742 checks / 0 failures** (1081 fixture).
+  `check_repro.ps1` → **PASS** (83 artifacts: 42 object, 38 `.ivm`, 3 exe;
+  stage1 SHA-256 `B3E91265.A9F5AEE8`).
+- **Ghi chú**: `_gcvt` vẫn in exponent 3 chữ số (`1.0e+020`,
+  `1.0e-005`) — giữ đúng quirk của oracle, chỉ vá dấu chấm treo. R2 không
+  thể thành scratch buffer/arena cố định trong `std/rt.ivy` vì subset không
+  có biến file-scope/`static` local, nên chấp nhận **B** (xem
+  `ORACLE_BUGS.md`). `--run` vẫn dùng formatter `%g` 6 chữ số của
+  interpreter (không đổi); runtime được kiểm qua link/run.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -449,7 +493,7 @@
 | H10.5 | C3, C5, C16, C17 | `new`/`delete` + global string trùng | ✅ |
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ✅ |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ✅ |
-| H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ☐ |
+| H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ✅ |
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ☐ |
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ☐ |
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ☐ |

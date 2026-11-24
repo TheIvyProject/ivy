@@ -9,8 +9,8 @@
 @@ selfhost/corpus/codegen/09_cast.ivy 0 7
 @@ selfhost/corpus/codegen/10_void.ivy 0 0
 @@ selfhost/corpus/codegen/100_struct_array_nested.ivy 0 3
-@@ selfhost/corpus/codegen/101_struct_array_float.ivy 4 0
-0.
+@@ selfhost/corpus/codegen/101_struct_array_float.ivy 5 0
+0.0
 @@ selfhost/corpus/codegen/102_bool_array.ivy 0 1
 @@ selfhost/corpus/codegen/105_print_ref_char.ivy 3 0
 A
@@ -243,8 +243,8 @@ shared 11
 9
 @@ selfhost/corpus/codegen/246_move_cond.ivy 5 0
 1 2
-@@ selfhost/corpus/codegen/247_std_math.ivy 8 0
-7 9 3.
+@@ selfhost/corpus/codegen/247_std_math.ivy 9 0
+7 9 3.0
 @@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 15 0
 unique_ptr ok
 @@ selfhost/corpus/codegen/25_array_loop.ivy 0 12
@@ -323,8 +323,8 @@ unique_ptr ok
 @@ selfhost/corpus/codegen/92_dowhile.ivy 0 3
 @@ selfhost/corpus/codegen/93_loop_break_continue.ivy 0 8
 @@ selfhost/corpus/codegen/94_and_if.ivy 0 1
-@@ selfhost/corpus/codegen/95_float_array.ivy 4 0
-0.
+@@ selfhost/corpus/codegen/95_float_array.ivy 5 0
+0.0
 @@ selfhost/corpus/codegen/96_float32_array.ivy 5 0
 1.5
 @@ selfhost/corpus/codegen/97_float_array_loop.ivy 0 0
@@ -395,3 +395,78 @@ AAB
 @@ selfhost/corpus/codegen/h10_C6_unused_struct.ivy 0 7
 @@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 7 0
 A—B
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 66 0
+2.0
+0.0
+1.0
+100.0
+2.5
+0.333333333333333
+1.0e+020
+1.0e-005
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 559 0
+0 0.0
+1 0.5
+2 1.0
+3 1.5
+4 2.0
+5 2.5
+6 3.0
+7 3.5
+8 4.0
+9 4.5
+10 5.0
+11 5.5
+12 6.0
+13 6.5
+14 7.0
+15 7.5
+16 8.0
+17 8.5
+18 9.0
+19 9.5
+20 10.0
+21 10.5
+22 11.0
+23 11.5
+24 12.0
+25 12.5
+26 13.0
+27 13.5
+28 14.0
+29 14.5
+30 15.0
+31 15.5
+32 16.0
+33 16.5
+34 17.0
+35 17.5
+36 18.0
+37 18.5
+38 19.0
+39 19.5
+40 20.0
+41 20.5
+42 21.0
+43 21.5
+44 22.0
+45 22.5
+46 23.0
+47 23.5
+48 24.0
+49 24.5
+50 25.0
+51 25.5
+52 26.0
+53 26.5
+54 27.0
+55 27.5
+56 28.0
+57 28.5
+58 29.0
+59 29.5
+60 30.0
+61 30.5
+62 31.0
+63 31.5
+1 2.0 3 0.0

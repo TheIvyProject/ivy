@@ -267,6 +267,8 @@ selfhost/corpus/codegen/h10_H18_two_returns.ivy
 selfhost/corpus/codegen/h10_H22_em_dash.ivy
 selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy
 selfhost/corpus/codegen/h10_H29_pointer_store.ivy
+selfhost/corpus/codegen/h10_R1_float_format.ivy
+selfhost/corpus/codegen/h10_R2_format_stress.ivy
 selfhost/corpus/hir/borrow/01_param_lt_leading_form.ivy
 selfhost/corpus/hir/borrow/01_param_lt_ptr.ivy
 selfhost/corpus/hir/borrow/01_param_lt_ref.ivy

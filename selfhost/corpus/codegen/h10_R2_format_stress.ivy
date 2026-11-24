@@ -1,0 +1,17 @@
+// H10.8 (R2): the oracle handed back a pointer into one static scratch
+// buffer; the port allocates a fresh buffer per call, so formatted
+// results are independent.  The subset cannot hold two results at once
+// (the emitter consumes each one immediately), so this fixture instead
+// stresses many consecutive int/float formats in a loop plus one
+// multi-argument print, catching regressions in the formatting path.
+int32 main() {
+    int32 i = 0;
+    while (i < 64) {
+        float64 fi = i;
+        float64 x = fi * 0.5;
+        io::println("{} {}", i, x);
+        i = i + 1;
+    }
+    io::println("{} {} {} {}", 1, 2.0, 3, 0.0);
+    return 0;
+}

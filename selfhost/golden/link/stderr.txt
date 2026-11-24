@@ -263,3 +263,5 @@ ef
 @@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 0 0
 @@ selfhost/corpus/codegen/h10_C6_unused_struct.ivy 0 7
 @@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 0 0
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 0 0
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 0 0

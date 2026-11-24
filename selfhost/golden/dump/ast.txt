@@ -16254,3 +16254,61 @@ function
         member . println
           ident io        string "A—B"    return
       int 0
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 925 0
+function 
+  return int32_t main()
+  block
+    expr
+      call
+        member . println
+          ident io        float 2    expr
+      call
+        member . println
+          ident io        float 0    expr
+      call
+        member . println
+          ident io        float 1    expr
+      call
+        member . println
+          ident io        float 100    expr
+      call
+        member . println
+          ident io        float 2.5    decl float64_t third =
+      binary /
+        float 1        float 3    expr
+      call
+        member . println
+          ident io        ident third    decl float64_t big =
+      binary *
+        float 1e+20        float 1    expr
+      call
+        member . println
+          ident io        ident big    decl float64_t small =
+      binary *
+        float 1e-05        float 1    expr
+      call
+        member . println
+          ident io        ident small    return
+      int 0
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 697 0
+function 
+  return int32_t main()
+  block
+    decl int32_t i =
+      int 0    while
+      binary <
+        ident i        int 64      block
+        decl float64_t fi =
+          ident i        decl float64_t x =
+          binary *
+            ident fi            float 0.5        expr
+          call
+            member . println
+              ident io            string "{} {}"            ident i            ident x        expr
+          assign =
+            ident i            binary +
+              ident i              int 1    expr
+      call
+        member . println
+          ident io        string "{} {} {} {}"        int 1        float 2        int 3        float 0    return
+      int 0

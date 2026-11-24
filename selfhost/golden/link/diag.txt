@@ -545,3 +545,7 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 31 0
+ivy: '<OUT>\app.exe' generated

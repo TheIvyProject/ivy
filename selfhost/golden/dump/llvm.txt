@@ -26185,3 +26185,130 @@ declare ptr @__ivy_fmt_float(double)
 declare ptr @__ivy_fmt_bool(i1)
 declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [6 x i8] c"A\E2\80\94B\00"
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 1916 0
+; LLVM IR emitted by ivy
+define i32 @ivy_main() {
+%third.0 = alloca double
+%big.1 = alloca double
+%small.2 = alloca double
+br label %bb0
+bb0:
+%tmp.0 = call ptr @__ivy_fmt_float(double 2.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.0)
+call void @__ivy_write_newline(i32 1)
+%tmp.1 = call ptr @__ivy_fmt_float(double 0.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.1)
+call void @__ivy_write_newline(i32 1)
+%tmp.2 = call ptr @__ivy_fmt_float(double 1.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.2)
+call void @__ivy_write_newline(i32 1)
+%tmp.3 = call ptr @__ivy_fmt_float(double 100.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.3)
+call void @__ivy_write_newline(i32 1)
+%tmp.4 = call ptr @__ivy_fmt_float(double 2.500000)
+call void @__ivy_write_str(i32 1, ptr %tmp.4)
+call void @__ivy_write_newline(i32 1)
+%tmp.5 = fdiv double 1.000000, 3.000000
+store double %tmp.5, ptr %third.0
+%tmp.6 = load double, ptr %third.0
+%tmp.7 = call ptr @__ivy_fmt_float(double %tmp.6)
+call void @__ivy_write_str(i32 1, ptr %tmp.7)
+call void @__ivy_write_newline(i32 1)
+%tmp.8 = fmul double 100000000000000000000.000000, 1.000000
+store double %tmp.8, ptr %big.1
+%tmp.9 = load double, ptr %big.1
+%tmp.10 = call ptr @__ivy_fmt_float(double %tmp.9)
+call void @__ivy_write_str(i32 1, ptr %tmp.10)
+call void @__ivy_write_newline(i32 1)
+%tmp.11 = fmul double 0.000010, 1.000000
+store double %tmp.11, ptr %small.2
+%tmp.12 = load double, ptr %small.2
+%tmp.13 = call ptr @__ivy_fmt_float(double %tmp.12)
+call void @__ivy_write_str(i32 1, ptr %tmp.13)
+call void @__ivy_write_newline(i32 1)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 2276 0
+; LLVM IR emitted by ivy
+define i32 @ivy_main() {
+%i.0 = alloca i32
+%fi.1 = alloca double
+%x.2 = alloca double
+br label %bb0
+bb0:
+store i32 0, ptr %i.0
+br label %bb1
+bb1:
+%tmp.0 = load i32, ptr %i.0
+%tmp.1 = icmp slt i32 %tmp.0, 64
+br i1 %tmp.1, label %bb2, label %bb3
+bb2:
+%tmp.2 = load i32, ptr %i.0
+%tmp.3 = sitofp i32 %tmp.2 to double
+store double %tmp.3, ptr %fi.1
+%tmp.4 = load double, ptr %fi.1
+%tmp.5 = fmul double %tmp.4, 0.500000
+store double %tmp.5, ptr %x.2
+%tmp.6 = load i32, ptr %i.0
+%tmp.7 = sext i32 %tmp.6 to i64
+%tmp.8 = call ptr @__ivy_fmt_int(i64 %tmp.7)
+call void @__ivy_write_str(i32 1, ptr %tmp.8)
+%tmp.9 = getelementptr i8, ptr @.str.2, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.9)
+%tmp.10 = load double, ptr %x.2
+%tmp.11 = call ptr @__ivy_fmt_float(double %tmp.10)
+call void @__ivy_write_str(i32 1, ptr %tmp.11)
+call void @__ivy_write_newline(i32 1)
+%tmp.12 = load i32, ptr %i.0
+%tmp.13 = add i32 %tmp.12, 1
+store i32 %tmp.13, ptr %i.0
+br label %bb1
+bb3:
+%tmp.14 = sext i32 1 to i64
+%tmp.15 = call ptr @__ivy_fmt_int(i64 %tmp.14)
+call void @__ivy_write_str(i32 1, ptr %tmp.15)
+%tmp.16 = getelementptr i8, ptr @.str.2, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.16)
+%tmp.17 = call ptr @__ivy_fmt_float(double 2.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.17)
+%tmp.18 = getelementptr i8, ptr @.str.2, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.18)
+%tmp.19 = sext i32 3 to i64
+%tmp.20 = call ptr @__ivy_fmt_int(i64 %tmp.19)
+call void @__ivy_write_str(i32 1, ptr %tmp.20)
+%tmp.21 = getelementptr i8, ptr @.str.2, i64 0
+call void @__ivy_write_str(i32 1, ptr %tmp.21)
+%tmp.22 = call ptr @__ivy_fmt_float(double 0.000000)
+call void @__ivy_write_str(i32 1, ptr %tmp.22)
+call void @__ivy_write_newline(i32 1)
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+declare void @__ivy_write_str(i32, ptr)
+declare void @__ivy_write_char(i32, i8)
+declare ptr @__ivy_fmt_int(i64)
+declare ptr @__ivy_fmt_float(double)
+declare ptr @__ivy_fmt_bool(i1)
+declare void @__ivy_write_newline(i32)
+@.str.0 = private unnamed_addr constant [6 x i8] c"{} {}\00"
+@.str.1 = private unnamed_addr constant [12 x i8] c"{} {} {} {}\00"
+@.str.2 = private unnamed_addr constant [2 x i8] c" \00"

@@ -19750,3 +19750,87 @@ function main
     ret
       int 0
 
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 795 0
+function main
+  return int32_t()
+  block 0
+    eval
+      call : void [lt: unknown]
+        float 2
+    eval
+      call : void [lt: unknown]
+        float 0
+    eval
+      call : void [lt: unknown]
+        float 1
+    eval
+      call : void [lt: unknown]
+        float 100
+    eval
+      call : void [lt: unknown]
+        float 2.5
+    alloca float64_t third
+      binary '/' : double
+        float 1
+        float 3
+    eval
+      call : void [lt: unknown]
+        ident third
+    alloca float64_t big
+      binary '*' : double
+        float 1e+20
+        float 1
+    eval
+      call : void [lt: unknown]
+        ident big
+    alloca float64_t small
+      binary '*' : double
+        float 1e-05
+        float 1
+    eval
+      call : void [lt: unknown]
+        ident small
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 673 0
+function main
+  return int32_t()
+  block 0
+    alloca int32_t i
+      int 0
+    jump
+  block 1
+    condbranch
+      binary '<' : bool
+        ident i
+        int 64
+  block 2
+    alloca float64_t fi
+      ident i
+    alloca float64_t x
+      binary '*' : float64_t
+        ident fi
+        float 0.5
+    eval
+      call : void [lt: unknown]
+        string "{} {}" [lt: static]
+        ident i
+        ident x
+    store
+      ident i
+      binary '+' : int32_t
+        ident i
+        int 1
+    jump
+  block 3
+    eval
+      call : void [lt: unknown]
+        string "{} {} {} {}" [lt: static]
+        int 1
+        float 2
+        int 3
+        float 0
+    ret
+      int 0
+

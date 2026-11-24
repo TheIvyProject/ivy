@@ -20423,3 +20423,84 @@ function main
     return
       int 0
 
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 796 0
+function main
+  return int32_t()
+  block
+    expr
+      call 'io::println' : void
+        float 2
+    expr
+      call 'io::println' : void
+        float 0
+    expr
+      call 'io::println' : void
+        float 1
+    expr
+      call 'io::println' : void
+        float 100
+    expr
+      call 'io::println' : void
+        float 2.5
+    decl float64_t third =
+      binary '/' : double
+        float 1
+        float 3
+    expr
+      call 'io::println' : void
+        ident third
+    decl float64_t big =
+      binary '*' : double
+        float 1e+20
+        float 1
+    expr
+      call 'io::println' : void
+        ident big
+    decl float64_t small =
+      binary '*' : double
+        float 1e-05
+        float 1
+    expr
+      call 'io::println' : void
+        ident small
+    return
+      int 0
+
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 709 0
+function main
+  return int32_t()
+  block
+    decl int32_t i =
+      int 0
+    while
+      binary '<' : bool
+        ident i
+        int 64
+      block
+        decl float64_t fi =
+          ident i
+        decl float64_t x =
+          binary '*' : float64_t
+            ident fi
+            float 0.5
+        expr
+          call 'io::println' : void
+            string "{} {}"
+            ident i
+            ident x
+        expr
+          assign '=' : int32_t
+            ident i
+            binary '+' : int32_t
+              ident i
+              int 1
+    expr
+      call 'io::println' : void
+        string "{} {} {} {}"
+        int 1
+        float 2
+        int 3
+        float 0
+    return
+      int 0
+

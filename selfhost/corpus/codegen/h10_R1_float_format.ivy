@@ -1,0 +1,19 @@
+// H10.8 (R1/R3): `__ivy_fmt_float` must not leave a dangling decimal
+// point.  The oracle's `_gcvt(v, 15)` prints 2.0 as "2." and 1.0e20 as
+// "1.e+020"; the port keeps `_gcvt` (non-variadic, R3) and inserts the
+// missing fractional digit ("2.0", "1.0e+020").  Values that already
+// have a fraction are unchanged.
+int32 main() {
+    io::println(2.0);
+    io::println(0.0);
+    io::println(1.0);
+    io::println(100.0);
+    io::println(2.5);
+    float64 third = 1.0 / 3.0;
+    io::println(third);
+    float64 big = 1.0e20 * 1.0;
+    io::println(big);
+    float64 small = 1.0e-5 * 1.0;
+    io::println(small);
+    return 0;
+}
