@@ -1165,3 +1165,7 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy 0 0
 @@ selfhost/corpus/hir/template/h10_T8_template_overload.ivy 0 0
 @@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 0 0
+@@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 0 0

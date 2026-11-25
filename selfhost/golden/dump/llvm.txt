@@ -17652,8 +17652,33 @@ bb0:
 ret i32 0
 }
 
-@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 98 1
-selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
+@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 452 0
+; LLVM IR emitted by ivy
+define void @"?take@@YXH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+ret void
+}
+
+define void @"?f@@YXX@Z"() {
+br label %bb0
+bb0:
+call void @"?pass_int32_t_@@YXH@Z"(i32 1)
+ret void
+}
+
+define void @"?pass_int32_t_@@YXH@Z"(i32 %arg0) {
+%__args0.0 = alloca i32
+store i32 %arg0, ptr %__args0.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %__args0.0
+call void @"?take@@YXH@Z"(i32 %tmp.0)
+ret void
+}
+
 @@ selfhost/corpus/hir/template/03_pack_expansion.ivy 411 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
@@ -18278,27 +18303,24 @@ store %struct.Box_Box_ zeroinitializer, ptr %c.1
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_nontype_param.ivy 482 0
+@@ selfhost/corpus/hir/template/05_nontype_param.ivy 322 0
 ; LLVM IR emitted by ivy
-%struct.Box_int32_t_ = type { i32 }
+%struct.Box_5_ = type { i32 }
 
 define void @"?f@@YXX@Z"() {
-%b.0 = alloca %struct.Box_int32_t_
+%b.0 = alloca %struct.Box_5_
 br label %bb0
 bb0:
-store %struct.Box_int32_t_ zeroinitializer, ptr %b.0
+store %struct.Box_5_ zeroinitializer, ptr %b.0
 ret void
 }
 
-define i32 @"?get@Box_int32_t_@@YHAAV@Z"(ptr %arg0) {
+define i32 @"?get@Box_5_@@YHAAV@Z"(ptr %arg0) {
 %this.0 = alloca ptr
 store ptr %arg0, ptr %this.0
 br label %bb0
 bb0:
-%tmp.0 = load ptr, ptr %this.0
-%tmp.1 = getelementptr %struct.Box_int32_t_, ptr %tmp.0, i32 0, i32 0
-%tmp.2 = load i32, ptr %tmp.1
-ret i32 %tmp.2
+ret i32 5
 }
 
 @@ selfhost/corpus/hir/template/05_order.ivy 394 0
@@ -18810,26 +18832,9 @@ bb0:
 ret i32 %tmp.2
 }
 
-@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 334 0
-; LLVM IR emitted by ivy
-define void @"?f@@YXX@Z"() {
-%a.0 = alloca i32
-br label %bb0
-bb0:
-%tmp.0 = call i32 @"?id_int32_t_@@YHH@Z"(i32 1)
-store i32 %tmp.0, ptr %a.0
-ret void
-}
-
-define i32 @"?id_int32_t_@@YHH@Z"(i32 %arg0) {
-%x.0 = alloca i32
-store i32 %arg0, ptr %x.0
-br label %bb0
-bb0:
-%tmp.0 = load i32, ptr %x.0
-ret i32 %tmp.0
-}
-
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 199 1
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: unknown concept 'UnknownConcept'
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: failed to instantiate template 'id'
 @@ selfhost/corpus/hir/template/e_alias_template_argument.ivy 417 1
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:4:35: error: cannot return value of type 'int32_t' from function returning 'MyInt'
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:5:32: error: argument 1 of 'id<MyInt>' expects 'MyInt', got 'int'
@@ -27273,3 +27278,78 @@ bb0:
 ret i32 %tmp.1
 }
 
+@@ selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy 804 0
+; LLVM IR emitted by ivy
+define i32 @"?add2@@YHHH@Z"(i32 %arg0, i32 %arg1) {
+%a.0 = alloca i32
+store i32 %arg0, ptr %a.0
+%b.1 = alloca i32
+store i32 %arg1, ptr %b.1
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %a.0
+%tmp.1 = load i32, ptr %b.1
+%tmp.2 = add i32 %tmp.0, %tmp.1
+ret i32 %tmp.2
+}
+
+define void @"?f@@YXX@Z"() {
+%r.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?sum_int32_t_int32_t_@@YHHH@Z"(i32 3, i32 4)
+store i32 %tmp.0, ptr %r.0
+ret void
+}
+
+define i32 @"?sum_int32_t_int32_t_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
+%__args0.0 = alloca i32
+store i32 %arg0, ptr %__args0.0
+%__args1.1 = alloca i32
+store i32 %arg1, ptr %__args1.1
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %__args0.0
+%tmp.1 = load i32, ptr %__args1.1
+%tmp.2 = call i32 @"?add2@@YHHH@Z"(i32 %tmp.0, i32 %tmp.1)
+ret i32 %tmp.2
+}
+
+@@ selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy 205 1
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: unknown concept 'Missing'
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: failed to instantiate template 'relay'
+@@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 571 0
+; LLVM IR emitted by ivy
+%struct.Arr_7_ = type { i32 }
+
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+%b.1 = alloca %struct.Arr_7_
+%c.2 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?fixed_3_@@YHX@Z"()
+store i32 %tmp.0, ptr %a.0
+store %struct.Arr_7_ zeroinitializer, ptr %b.1
+%tmp.1 = call i32 @"?get@Arr_7_@@YHAAV@Z"(ptr %b.1)
+store i32 %tmp.1, ptr %c.2
+ret void
+}
+
+define i32 @"?fixed_3_@@YHX@Z"() {
+br label %bb0
+bb0:
+ret i32 3
+}
+
+define i32 @"?get@Arr_7_@@YHAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+ret i32 7
+}
+
+@@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 233 1
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'

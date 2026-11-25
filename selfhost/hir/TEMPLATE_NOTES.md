@@ -90,14 +90,18 @@ produces errors prints diagnostics only.
    (C03, p42, p43, examples/test_template_deduction.ivy)
 10. **Concepts are checked at instantiation time only** and are *permissive*: an unknown
     concept name is assumed satisfied; `bool`/`int`/… count as arithmetic and satisfy
-    `a + b`; a struct needs a real `operator+` overload. (C06, C07, p21, p09)
+    `a + b`; a struct needs a real `operator+` overload. (C06, C07, p21, p09) — **unknown
+    concept fixed at H10.14**: `unknown concept 'X'` (T12); the permissive operator check
+    is unchanged.
 11. **Too many explicit template arguments are silently accepted**; **too few** leave the
     unmapped parameter type as the literal parameter name (`U`) and produce a cascade of
     type errors. (p11, p14, t12) — **too many fixed at H10.13**: `too many template
     arguments for 'X'`; too few is unchanged.
 12. **Non-type template parameters are unusable**: the parser accepts `template <int32 N>` but
     the call site cannot pass a value (`f<3>(x)` is a parse error) and `N` is never bound
-    (using `N` in the body ⇒ `undeclared identifier 'N'`). (p04, p71, t03, t04)
+    (using `N` in the body ⇒ `undeclared identifier 'N'`). (p04, p71, t03, t04) — **value
+    arguments parse since H10.11 (P2) and are bound since H10.14 (T13)**; a non-constant
+    argument is rejected.
 13. **Nested template-ids do not parse** (`Box<Box<int32>>`): the lexer makes `>>` a single
     token, so the parser expects `>` and fails. (t3, t4, p38)
 14. **Struct-template specializations lose their base classes** (the cloned struct never
@@ -105,7 +109,8 @@ produces errors prints diagnostics only.
     4, it does not resolve the specialization). (p49, p48, p36)
 15. **Member function templates, explicit specializations (`template <> ...`), trailing
     `requires` clauses, `static` members and non-type template arguments are all rejected by
-    the parser.** (p25, p44, p23, p46, t14)
+    the parser.** (p25, p44, p23, p46, t14) — the port accepts member templates, explicit
+    specializations and value arguments since H10.11.
 
 ---
 
@@ -116,8 +121,8 @@ produces errors prints diagnostics only.
 | `template <typename T> ret f(T x) { }` | **supported**; instantiated on call | C01, p02 |
 | `template <class T> …` | **supported** (`class` is a synonym for `typename`) | corpus/parser/template/02 |
 | `template <typename T, typename U> …` | **supported**; `U` unmapped ⇒ type name `U` leaks | p03, t12 |
-| `template <int32 N> …` (non-type) | **parses**, never bindable; `N` ⇒ `undeclared identifier 'N'` | p71, t03 |
-| `template <auto V> …` | **parses** (non-type param); unusable | p22 |
+| `template <int32 N> …` (non-type) | **parses**, never bindable; `N` ⇒ `undeclared identifier 'N'` | p71, t03 — **fixed H10.14 (T13)**: explicit value args bind `N` |
+| `template <auto V> …` | **parses** (non-type param); unusable | p22 — value args bind it since H10.14 (T13) |
 | `template <typename... Args> …` | **supported**; pack expands to N params | C04, examples/test_variadic.ivy |
 | `template <typename T, typename... Args> …` | **supported**; fixed param keeps its name, pack params become `__<name>N` | examples/test_variadic.ivy (`count_after<int,int>`) |
 | `template <Addable T> …` (constrained) | **supported**; constraint checked at instantiation | C06, C07 |
@@ -131,7 +136,7 @@ produces errors prints diagnostics only.
 | member function template `template <typename T> T m(T) { }` inside a struct | **PARSE ERROR** `expected field or method declaration in struct body` | p25 |
 | explicit specialization `template <> int32 f<int32>(int32) { }` | **PARSE ERROR** | p44 |
 | explicit template args at a call `f<int32>(x)` | **supported** | C01 |
-| explicit template args at a call `f<3>(x)` (value) | **PARSE ERROR** (the parser needs a *type* after `<`) | p04 |
+| explicit template args at a call `f<3>(x)` (value) | **PARSE ERROR** (the parser needs a *type* after `<`) | p04 — value args parse since H10.11 (P2) |
 | explicit template args at a call `f<>(x)` (empty) | **PARSE ERROR** `unexpected token in expression` | p19 |
 | template-id type `Vec<int32>` | **supported** | p13, p37 |
 | qualified template-id `ns::Vec<int32>` | **parses**; the *call* `ns::id<int32>(x)` ⇒ `call to undeclared function 'ns::id'` | p26 |
@@ -141,7 +146,7 @@ produces errors prints diagnostics only.
 | `sizeof(T)` / `alignof(T)` inside a template | compiles; **value is the 4-byte fallback**, not the real size | p30, p48 |
 | `sizeof...(pack)` / `sizeof...(Pack)` | **supported** (pack size) | p62, p86 |
 | fold expression `(args + ...)`, `(... + args)`, `(init + ... + args)`, `(f(args), ...)` | **supported**; expanded to a **left-nested** binary chain | examples/test_variadic.ivy, p88 |
-| pack expansion in a call `f(args...)` (not a fold) | **BROKEN**: `undeclared identifier 'args'` | p85 |
+| pack expansion in a call `f(args...)` (not a fold) | **BROKEN**: `undeclared identifier 'args'` | p85 — **fixed H10.14 (T10)**: expands to `__args0`, ... |
 | `if constexpr` inside a template | condition evaluated at instantiation; the **discarded branch is not checked** | C12, p39, p51, p52 |
 | template-id on a non-template struct `Box<int32>` (plain struct) | parsed; the args are **ignored** (type stays `Box`) | p79 |
 | template-id with an unknown name `Unknown<int32> b;` | **PARSE ERROR** `unexpected token in expression` | p90 |
@@ -583,7 +588,7 @@ condition is false, the `else` branch is kept and the `if` branch (with
 | `alignof(T)` | | real alignment (H10.13, T3) | p48, h10_T3_sizeof_template_id |
 | `sizeof(T)` where T = a struct | | resolved to the specialization (H10.13, T3) | p48 |
 | `sizeof(Box<int32>)` | | resolved to the specialization (H10.13, T3) | p48, 05_sizeof_template_id |
-| non-type param `N` | | never bound ⇒ `undeclared identifier 'N'` | p71 |
+| non-type param `N` | | bound to the explicit value literal (H10.14, T13); unbound when the argument is missing | p71, h10_T13_nontype_param |
 | variadic pack | `Args... args` | expands to N params `__args0…` | C04 |
 | pack in `sizeof...(args)` | | pack element count | p62 |
 | pack in `sizeof...(Args)` | | pack element count (template-param name also works) | p86 |
@@ -609,7 +614,7 @@ condition is false, the `else` branch is kept and the `if` branch (with
 | fewer args than params, trailing params have defaults | allowed | `hir_builder.cpp:5250-5254` |
 | fewer args than params, no defaults | **deduction fails** | p56, t12 |
 | variadic template | fixed params deduce one-to-one, the pack absorbs the rest | examples/test_variadic.ivy, p87 |
-| non-type params | **never deduced** ⇒ deduction fails | t04 (`cannot deduce template arguments for 'f'`) |
+| non-type params | **never deduced** ⇒ deduction fails; a value argument binds it explicitly (H10.14, T13) | t04 (`cannot deduce template arguments for 'f'`), `e_nontype_param_deduce` |
 | explicit args given | deduction is skipped entirely (no conflict check!) | p11 (extra args ignored) |
 | deduction fails | `cannot deduce template arguments for 'X'` (bare name, not mangled) | p56, t04 |
 | a non-template overload with the same name exists | the **non-template wins**; the template is only used for a template-id call | p54 |
@@ -633,7 +638,8 @@ condition is false, the `else` branch is kept and the `if` branch (with
 * Member-access requirements (`a.foo()`) are **not** checked at all
   (`hir_builder.cpp:4943-4946`).
 * An **unknown concept name is assumed satisfied** (`hir_builder.cpp:4838-4841`) — p21 shows
-  `template <UnknownConcept T>` instantiating happily.
+  `template <UnknownConcept T>` instantiating happily. **H10.14 (T12)** turns this into
+  `unknown concept 'UnknownConcept'` followed by `failed to instantiate template 'X'`.
 * `bool` satisfies `a + b` (it is in the arithmetic list) — p09 shows `add<bool>` succeeding.
 
 Diagnostics:
@@ -660,6 +666,7 @@ whenever any diagnostic is produced; exit code 1.
 | D2 | deduction failed | `cannot deduce template arguments for 'id'` | the call | p56, t04 |
 | D3 | instantiation aborted (constraint) | `failed to instantiate template 'add'` | the call | C07 |
 | D4 | concept not satisfied | `concept 'Addable' not satisfied: type 'P' does not support operator '+'` | the call | C07 |
+| D4b | unknown concept | `unknown concept 'Missing'` + `failed to instantiate template 'relay'` (H10.14) | the call | `h10_T12_unknown_concept` |
 | D5 | wrong number of function arguments | `call to 'id<int32_t>' expects 1 argument(s), got 2` | the call | p40 |
 | D6 | missing argument without default | `call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)` | the call | p53 |
 | D7 | argument type mismatch | `argument 1 of 'identity<char const*>' expects 'char', got 'const char*'` | the *argument* | p15 |
@@ -668,6 +675,7 @@ whenever any diagnostic is produced; exit code 1.
 | D9 | return with an unsubstituted `T` | `cannot return value of type 'T' from function returning 'int32_t'` | the `return` keyword | C10, p28 |
 | D9b | return of an unmapped param | `cannot return value of type 'U' from function returning 'U'` | the `return` keyword | t12 |
 | D10 | unknown name in an instantiated body | `undeclared identifier 'N'` / `undeclared identifier 'value'` | the identifier | p71, p07 |
+| D10b | non-type argument is not a constant | `template argument for non-type parameter 'N' must be a constant` + `failed to instantiate template 'fixed'` (H10.14) | the call | `e_nontype_type_arg` |
 | D11 | fold over an unknown pack | `fold expression references unknown parameter pack` | the fold | `hir_builder.cpp:3934` (not triggered in a corpus file) |
 | D12 | template-id on a plain struct in a *type* position | *no diagnostic* — the args are ignored | — | p79 |
 | D13 | too many template arguments | `too many template arguments for 'X'` (H10.13; the oracle stayed silent) | the template-id | p11, p80 |
@@ -743,10 +751,10 @@ p84) — the crash may require a different shape. **Treat it as unsafe.**
 | B7 | Extra template arguments are silently accepted; the mangled name contains them | `instantiateTemplate` maps only `min(#params,#args)` | p11, p80 — **fixed**: `too many template arguments for 'X'` |
 | B8 | Two templates with the same name: the second silently replaces the first (no overloading) | `templates_` is keyed by name | p53 — **fixed**: every declaration is kept and the explicit/arity match selects one |
 | B9 | `Box<T>` as a *parameter* type is never resolved to the specialization ⇒ every call mismatches | `instantiateTemplate` does not call `resolveTemplateStructType` on params | p60 — **fixed**: substituted return/parameter/pack types are resolved |
-| B10 | A pack expansion in a call (`f(args...)`) is broken | the pack name is not a scope name | p85 |
+| B10 | A pack expansion in a call (`f(args...)`) is broken | the pack name is not a scope name | p85 — **fixed**: the pattern is rebuilt per element with the pack bound to `__argsN` |
 | B11 | The `currentTypeMapping_` is set during *struct* instantiation but not during *function* instantiation | `hir_builder.cpp:5460` vs `:4995` | C11 vs p76 — **fixed**: both paths set `gmap_base_` |
-| B12 | An unknown concept name is silently treated as satisfied | `hir_builder.cpp:4838-4841` | p21 |
-| B13 | A non-type template parameter is never bound | `instantiateTemplate` only maps `isTypename` params | p71, t03 |
+| B12 | An unknown concept name is silently treated as satisfied | `hir_builder.cpp:4838-4841` | p21 — **fixed**: `unknown concept 'X'` |
+| B13 | A non-type template parameter is never bound | `instantiateTemplate` only maps `isTypename` params | p71, t03 — **fixed**: value arguments bind `N` in the body |
 
 ### 10.3 Parser limitations of the oracle (fixed in the port at H10.11)
 
@@ -765,8 +773,9 @@ the corpus can lock the accepted behaviour (see `app/H10_NOTES.md`):
   *Port:* `parse_struct()` keeps `<...>` in `AStruct.spec_args`, and
   `parse_function()` accepts `<...>` after the function name.
 
-Remaining parser limitations: a non-type template parameter is still never bound
-(B13) and member-template instantiation is deferred to the later template passes.
+Remaining parser limitations: a non-type template parameter binds only an explicit
+value argument (H10.14, T13) and member-template instantiation is deferred to the
+later template passes.
 
 ---
 
@@ -960,8 +969,9 @@ prints *no* template information, so all the new AST fields are invisible to it.
   parameter list`), but the exact message for that specific input was not captured.
 * Whether a **default argument** of a template parameter is substituted.
 * Whether a **variadic pack** used as a *function argument* (not a fold) can ever work —
-  p85 shows the plain `f(args...)` form is broken, but the fold-with-call form
-  `(f(args), ...)` works.
+  p85 shows the plain `f(args...)` form is broken in the oracle, but the fold-with-call form
+  `(f(args), ...)` works. The port expands `f(args...)` to one argument per element
+  (H10.14, T10).
 * The exact behaviour of `expected<T,E>` inside a template (the plain case crashes).
 * Whether a struct-template specialization with a **virtual** method produces a correct
   vtable (not probed; `isPolymorphic` is computed from the *cloned* struct, whose
@@ -1287,9 +1297,10 @@ changed so that it
 | B6 | **H10.12 fixed**: `T` deduced from an integer literal is `int32_t` | `C03`, `F50`, `F51` |
 | B7 | **H10.13 fixed**: extra template arguments are rejected with `too many template arguments for 'X'` (the oracle silently accepted them and mangled them into the name) | `F12` |
 | B8 | **H10.13 fixed**: two function templates with the same name form an overload set (the oracle kept the last one) | `F28` |
-| B10 | A pack expansion in a call (`f(args...)`) is broken: the pack name is not a scope name → `undeclared identifier 'args'` | `F47` |
+| B10 | **H10.14 fixed**: a pack expansion in a call (`f(args...)`) expands to one argument per element (the oracle reported `undeclared identifier 'args'`) | `F47` |
 | B11 | **H10.12 fixed**: the type mapping is propagated into the body of a function template, like a struct template | `C11`, `F31`, `F40` |
-| B13 | A non-type template parameter is never bound → `undeclared identifier 'N'` in the body; an implicit call cannot deduce it | `F16`, `F17` |
+| B12 | **H10.14 fixed**: an unknown concept name is reported (`unknown concept 'X'`) instead of being assumed satisfied | `K03` |
+| B13 | **H10.14 fixed**: a non-type template parameter binds its explicit value (an implicit call still cannot deduce it) | `F16`, `F17` |
 | — | **H10.13 fixed**: a template-id **parameter** type (`Box<T>`) is resolved to the specialization after substitution | phase 4 |
 | — | The "may reach the end without returning a value" diagnostic of a specialization is reported at the call site with the mangled name | `F41` |
 | — | The `constexpr` flag and the `extern "C"` flag are inherited by the specialization | `F27` |
@@ -1977,7 +1988,8 @@ resolved first).
 `instantiateStructTemplate` (`hir_builder.cpp:5414`):
 
 * the mapping is built one-to-one: parameter *i* takes argument *i* for
-  `i < min(#params, #args)`; a **non-type** parameter is never bound; a
+  `i < min(#params, #args)`; a **non-type** parameter binds the text of its
+  value argument (H10.14, T13), so `N` is a literal in a method body; a
   variadic parameter is **not** special — it takes the argument at its own
   index (the oracle maps one-to-one for structs as well);
 * the **template name itself** is mapped to the specialization name, so a
@@ -2051,8 +2063,9 @@ recursive use does not re-instantiate).
    parser can only attach a concept name to the `Concept T` form, which is
    always a *type* parameter (`parser.cpp:1660`), so a **non-type**
    parameter can never carry a constraint and is never checked;
-3. an **unknown concept name is assumed to be satisfied** (bug B12) — the
-   parameter is instantiated happily (K03);
+3. an **unknown concept name is assumed to be satisfied** in the oracle
+   (bug B12); the port reports `unknown concept 'X'` and aborts the
+   instantiation (H10.14) — K03;
 4. the concept's requirements are the **raw source text** of the
    `requires` body, one text per `;`-terminated requirement;
 5. for every requirement the checker looks for a **binary operator** in
@@ -2394,7 +2407,7 @@ the diagnostic, not the argument syntax.
 | `03_empty_pack_deduced.ivy` | an empty pack is mangled `count_args<>` and the specialization has **no** parameter |
 | `03_mixed_pack.ivy` | a fixed parameter followed by a pack (explicit arguments) |
 | `03_mixed_pack_deduced.ivy` | the same template with the pack deduced from the call arguments |
-| `03_pack_call_expansion.ivy` | a pack expansion in a call: the pack name is not a scope name ⇒ `undeclared identifier 'args'` (bug B10) |
+| `03_pack_call_expansion.ivy` | a pack expansion in a call expands to `__args0`, ... and the call succeeds (H10.14, T10) |
 
 #### 17.1.4 `04_` — overloads, recursion, prototypes, ordering
 
@@ -2441,7 +2454,7 @@ the diagnostic, not the argument syntax.
 | `05_return_type.ivy` | a template-id as a return type |
 | `05_alias.ivy` | `using MyBox = Box<int32>;` — the alias expands to the template-id |
 | `05_overloaded_methods.ivy` | two methods with the same name in a specialization |
-| `05_nontype_param.ivy` | a non-type parameter of a struct template is never bound (bug B13) |
+| `05_nontype_param.ivy` | a non-type parameter of a struct template binds its value argument and is used in a method body (H10.14, T13) |
 | `05_variadic.ivy` | a variadic struct template (the arguments are mapped one to one) |
 | `05_own_type_field.ivy` | a field of the template's own type |
 | `05_pass_specialization.ivy` | a specialization passed as an argument |
@@ -2457,7 +2470,7 @@ the diagnostic, not the argument syntax.
 |---|---|
 | `06_concept_satisfied.ivy` | an arithmetic type satisfies `a + b` |
 | `06_concept_bool.ivy` | `bool` is arithmetic |
-| `06_unknown_concept.ivy` | an unknown concept name is assumed to be satisfied (bug B12) |
+| `06_unknown_concept.ivy` | an unknown concept name is reported: `unknown concept 'UnknownConcept'` + `failed to instantiate template 'id'` (H10.14, T12) |
 | `06_concept_equality.ivy` | the `==` requirement: a struct type does **not** satisfy it (no free `operator==`) |
 | `06_concept_member_unchecked.ivy` | a requirement without a binary operator (a member access) is not checked at all |
 | `06_concept_sizeof_unchecked.ivy` | a `sizeof` requirement is not checked at all |
@@ -2474,6 +2487,7 @@ the diagnostic, not the argument syntax.
 | `e_cannot_deduce.ivy` | `cannot deduce template arguments for 'id'` (§8 D2) |
 | `e_deduce_conflict.ivy` | `cannot deduce template arguments for 'two'` (the same type parameter deduced with two different types) |
 | `e_nontype_param_deduce.ivy` | `cannot deduce template arguments for 'val'` (a non-type parameter is never deduced) |
+| `e_nontype_type_arg.ivy` | `template argument for non-type parameter 'N' must be a constant` + `failed to instantiate template 'fixed'` (H10.14, T13) |
 | `e_failed_to_instantiate.ivy` | `concept 'Addable' not satisfied: type 'P' does not support operator '+'` **and** `failed to instantiate template 'add'` (§8 D3, D4) |
 | `e_unsatisfied_concept.ivy` | the same two, plus the knock-on `cannot initialize variable 'r' of type 'P' with a value of type 'int'` |
 | `e_concept_deduce_fail.ivy` | `concept ... not satisfied` **and** `failed to deduce template arguments for 'add'` (the deduced path) |

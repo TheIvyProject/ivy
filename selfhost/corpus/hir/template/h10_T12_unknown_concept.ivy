@@ -1,0 +1,3 @@
+// H10.14 (T12): an unknown concept is reported at instantiation time.
+template <Missing T> T relay(T x) { return x; }
+void f() { int32 r = relay<int32>(1); }

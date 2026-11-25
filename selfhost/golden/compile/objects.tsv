@@ -473,7 +473,7 @@ selfhost/corpus/hir/template/02_unsigned_arg.ivy	1A67AF81DC16582B1A035EBC32457EC
 selfhost/corpus/hir/template/03_empty_pack_deduced.ivy	EC302185B8C04155A6ECB0B04C956C07BD3EC66C1A2FF8561340E6C02779C56D	620	-	0
 selfhost/corpus/hir/template/03_mixed_pack.ivy	71EA57F7E57829190B9357005BFDB149D5440E19F76589BE56A5E4957E7A626C	696	-	0
 selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy	BE94D21BF159D78FB066DE0ED98BCFDF7641EC13AB64C7B889E6E4247A367933	692	-	0
-selfhost/corpus/hir/template/03_pack_call_expansion.ivy	-	0	-	0
+selfhost/corpus/hir/template/03_pack_call_expansion.ivy	358ACDA2E283D87AED63E126E4CD641CE6E86143A4217D6D9E80F99064F84FBC	798	-	0
 selfhost/corpus/hir/template/03_pack_expansion.ivy	F3DB780F0D5680929A86760AD76B948EC568CFFCC1E218A0427F920BF9DEC67D	690	-	0
 selfhost/corpus/hir/template/04_call_before_declaration.ivy	F5A32E1474393DEE231F2DC275173A0C068B95E2D968BC2819029258B293F1F6	680	-	0
 selfhost/corpus/hir/template/04_constexpr_template.ivy	BEFF5755735053966479CDB1369EA6BFF5A949238F014FB774DD0C87D8E7A8ED	652	-	0
@@ -502,7 +502,7 @@ selfhost/corpus/hir/template/05_field_in_struct.ivy	C5C4C9C27C0E2646914586BC0455
 selfhost/corpus/hir/template/05_local_type_param.ivy	F1DB3275C0C78477D9BF3A656F020E3403C189A813E5ABEB1F864CAB178DB5DD	667	-	0
 selfhost/corpus/hir/template/05_method_call.ivy	29DF553DBE7F0F389F92EB076F3E38BB34858263F6BB5627B99CFF3BC2525DEF	682	-	0
 selfhost/corpus/hir/template/05_nested_specialization.ivy	-	0	-	0
-selfhost/corpus/hir/template/05_nontype_param.ivy	3B7CD57B20B3CDC7C6F8C5BF9EBAF6CA21CBE6EBB9633B3368560A945194B83D	656	-	0
+selfhost/corpus/hir/template/05_nontype_param.ivy	9C2FB0BF0D0E3C27BF5F9E9E3630BCFAD56839E581986486186DA2FFB714698A	653	-	0
 selfhost/corpus/hir/template/05_order.ivy	5CFFAC34D1CE39DFA93AA1B616D6CB1A77B6A97444B3CB6549EBCA3B8AC8FE3A	640	-	0
 selfhost/corpus/hir/template/05_overloaded_methods.ivy	2379AB4B57EAF2D9F426500A921EF9B2A654D2CED9019221D181478BB7E7A398	779	-	0
 selfhost/corpus/hir/template/05_own_type_field.ivy	-	0	-	0
@@ -528,7 +528,7 @@ selfhost/corpus/hir/template/06_concept_satisfied.ivy	EB3E0F030D000CEC6DB702424C
 selfhost/corpus/hir/template/06_concept_sizeof_unchecked.ivy	D15569931C1A2AD22FAEA040880ADE6B8ED533C064648AD7DEB2577936B6F01E	669	-	0
 selfhost/corpus/hir/template/06_concept_two_requirements.ivy	D0CB96045655F1C4516D2FCA9DE77FBF0FF306EF533F6CAE6FA2FD582D98216E	677	-	0
 selfhost/corpus/hir/template/06_struct_concept_ok.ivy	3B7CD57B20B3CDC7C6F8C5BF9EBAF6CA21CBE6EBB9633B3368560A945194B83D	656	-	0
-selfhost/corpus/hir/template/06_unknown_concept.ivy	D0CB96045655F1C4516D2FCA9DE77FBF0FF306EF533F6CAE6FA2FD582D98216E	677	-	0
+selfhost/corpus/hir/template/06_unknown_concept.ivy	-	0	-	0
 selfhost/corpus/hir/template/e_alias_template_argument.ivy	-	0	-	0
 selfhost/corpus/hir/template/e_argument_type_mismatch.ivy	-	0	-	0
 selfhost/corpus/hir/template/e_arity_mismatch.ivy	-	0	-	0
@@ -1106,3 +1106,7 @@ selfhost/corpus/hir/template/h10_T4_base_class.ivy	C6B1B4390851C11B3577AFEFBD6DF
 selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy	-	0	-	0
 selfhost/corpus/hir/template/h10_T8_template_overload.ivy	F04C0F88AFE4CC4DB7E572D5B6BF1ABF08B84E97BE7D8B62AAA13A0F5F60BBDB	886	-	0
 selfhost/corpus/hir/template/h10_T9_param_template_id.ivy	5F1878666305C233B8DCEE8A03D3D754208BE9E66DE7433B0C6253136B7FFE51	678	-	0
+selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy	5EF3B41F4E96E8DDBBA2131C88A73FB3E84C53BA8B52E48CDC3D433BAE0BEED2	831	-	0
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy	-	0	-	0
+selfhost/corpus/hir/template/h10_T13_nontype_param.ivy	6BD9F379E314E2DE595C71DF9A5097B164387062B5F362848FB156393D3C9F46	756	-	0
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy	-	0	-	0

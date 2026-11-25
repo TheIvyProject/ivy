@@ -1,0 +1,5 @@
+// H10.14 (T10): a pack expansion in a call passes every pack element as an
+// argument.
+int32 add2(int32 a, int32 b) { return a + b; }
+template <typename... Args> int32 sum(Args... args) { return add2(args...); }
+void f() { int32 r = sum<int32, int32>(3, 4); }

@@ -993,8 +993,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 98 1
-selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
+@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/03_pack_expansion.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/04_call_before_declaration.ivy 31 0
@@ -1112,8 +1112,9 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/06_struct_concept_ok.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 31 0
-ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 199 1
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: unknown concept 'UnknownConcept'
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: failed to instantiate template 'id'
 @@ selfhost/corpus/hir/template/e_alias_template_argument.ivy 417 1
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:4:35: error: cannot return value of type 'int32_t' from function returning 'MyInt'
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:5:32: error: argument 1 of 'id<MyInt>' expects 'MyInt', got 'int'
@@ -2521,3 +2522,13 @@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy:4:24: error: too man
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 31 0
 ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy 205 1
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: unknown concept 'Missing'
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: failed to instantiate template 'relay'
+@@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 233 1
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'

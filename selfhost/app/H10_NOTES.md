@@ -764,6 +764,55 @@
   `05_base_ctor_not_inherited`). T8 chỉ gộp **function** template; struct
   template trùng tên vẫn last-wins (`05_template_redefinition`).
 
+### H10.14 - Template pack/concept/non-type pass 3 (T10, T12, T13)
+
+- **ID**: T10, T12, T13.
+- **Code** (`selfhost/hir/hir_builder.ivy`):
+  - **T10**: pack expansion trong call (`f(args...)`) được build lại
+    pattern cho **từng** phần tử pack với `fold_pack_name_` trỏ tới tên
+    pack và `fold_elem_name_` trỏ tới `__argsN`, thay vì build pattern
+    một lần khi pack chưa bind (dẫn tới `undeclared identifier 'args'`).
+    Call `sum<int32, int32>(3, 4)` gọi `add2(__args0, __args1)`.
+  - **T12**: `check_constraint` báo `unknown concept 'X'` và trả false khi
+    tên concept không tồn tại, thay vì coi là thỏa im lặng; nhánh call
+    cộng thêm `failed to instantiate template 'X'`.
+  - **T13**: bảng binding `nt_name_`/`nt_text_`/`nt_type_`/`nt_val_` giữ
+    (tên, text hằng, kiểu khai báo, giá trị). `build_ident` phát literal
+    `int`/`bool` từ text khi gặp tham số non-type, nên `N` dùng được
+    trong body. Cả `instantiate_template` và `instantiate_struct_template`
+    bind tham số non-type từ argument tường minh và lưu/khôi phục
+    `nt_n_` qua `ntbase`. Argument không phải hằng (ví dụ một type) bị
+    từ chối bằng `template argument for non-type parameter 'N' must be a
+    constant`.
+- **Fixture**:
+  - Mới (`selfhost/corpus/hir/template/`):
+    - `h10_T10_pack_call_expansion.ivy` - `add2(args...)` trong
+      `sum<Args...>` truyền `__args0`, `__args1`.
+    - `h10_T12_unknown_concept.ivy` - concept `Missing` không tồn tại ⇒
+      hai lỗi `unknown concept` + `failed to instantiate`.
+    - `h10_T13_nontype_param.ivy` - `fixed<3>()` và `Arr<7>::get()` trả
+      hằng số đã bind trong cả function lẫn struct template.
+    - `e_nontype_type_arg.ivy` - `fixed<int32>()` ⇒ argument type không
+      phải hằng.
+  - Cập nhật nội dung (giữ tên cũ):
+    - `03_pack_call_expansion.ivy` - `pass<int32>(1)` gọi `take(__args0)`
+      và **thành công** (trước là `undeclared identifier 'args'`).
+    - `06_unknown_concept.ivy` - `UnknownConcept` nay là lỗi thay vì
+      được coi là thỏa.
+    - `05_nontype_param.ivy` - `Box<5>::get()` trả `N`, tức 5, thay vì
+      lỗi `undeclared identifier 'N'`.
+- **Golden**: 4 fixture mới × 10 mode = 40 record; corpus 1108 → **1112**;
+  link 289 (không đổi). 7 fixture có provenance `expected:H10.14` (4 mới
+  + 3 cập nhật).
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `01B3918D6C6C7EC85A60DB4B43A0971BB709AD24FC137BB0BD44D853EA1EE260`
+  (27222016 B), golden 13131 checks / 0 failures (1112 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`, 3 executable).
+- **Ghi chú**: non-type param vẫn **không** được suy luận
+  (`e_nontype_param_deduce` giữ `cannot deduce template arguments for
+  'val'`); chỉ argument tường minh dạng literal `int`/`bool` mới bind.
+  T10 chỉ sửa call-arg expansion; fold `(f(args), ...)` vốn đã chạy.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -781,7 +830,7 @@
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ✅ |
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ✅ |
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ✅ |
-| H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ☐ |
+| H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ✅ |
 | H10.15 | M1, M2 | `.ivm` escape | ☐ |
 | H10.16 | I1 | Interpreter CFG self-edge | ☐ |
 | H10.17 | H27, B-P5, B-R2 | Audit bug không tái hiện / ngoại lệ | ☐ |

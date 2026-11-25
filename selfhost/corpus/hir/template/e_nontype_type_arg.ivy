@@ -1,0 +1,3 @@
+// A type argument cannot bind a non-type template parameter.
+template <int32 N> int32 fixed() { return N; }
+void f() { int32 a = fixed<int32>(); }

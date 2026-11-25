@@ -220,6 +220,17 @@ export struct HirBuilder {
     long map_n_;
     long map_cap_;
 
+    // H10.14 (T13): the non-type template-parameter bindings of the
+    // specialization that is being built: the parameter name, the text of
+    // the value argument and the declared type.  A nested instantiation
+    // saves and restores the length.
+    long* nt_name_;
+    long* nt_text_;
+    AType* nt_type_;
+    long nt_n_;
+    long nt_cap_;
+    long nt_val_;
+
     // Stable storage for the strings that must outlive their scratch
     // buffer: the mangled names, the synthesized pack parameter names and
     // the diagnostic messages.  Every allocation is remembered so that it
@@ -544,6 +555,13 @@ export struct HirBuilder {
             this.map_type_ = (AType*) __ivy_alloc(this.map_cap_ * 48);
             this.map_n_ = 0;
 
+            this.nt_cap_ = ntoks + 16;
+            this.nt_name_ = (long*) __ivy_alloc(this.nt_cap_ * 8);
+            this.nt_text_ = (long*) __ivy_alloc(this.nt_cap_ * 8);
+            this.nt_type_ = (AType*) __ivy_alloc(this.nt_cap_ * 48);
+            this.nt_n_ = 0;
+            this.nt_val_ = 0;
+
             this.strs_cap_ = ntoks + 16;
             this.strs_ = (long*) __ivy_alloc(this.strs_cap_ * 8);
             this.strs_n_ = 0;
@@ -670,6 +688,9 @@ export struct HirBuilder {
             __ivy_free(this.inst_idx_);
             __ivy_free((void*)this.map_name_);
             __ivy_free(this.map_type_);
+            __ivy_free(this.nt_name_);
+            __ivy_free(this.nt_text_);
+            __ivy_free(this.nt_type_);
             long si = 0;
             while (si < this.strs_n_) {
                 unsafe {
@@ -5280,6 +5301,34 @@ export struct HirBuilder {
             fe.type = this.fold_elem_type_;
             return this.push_expr(fe);
         }
+        // H10.14 (T13): a non-type template parameter is bound to the value
+        // of its explicit argument and used as a literal.
+        long nti = this.nt_find(a.sval);
+        if (nti >= 0) {
+            unsafe {
+                const char* ntxt = (char*)this.nt_text_[nti];
+                AType nty = this.nt_type_[nti];
+                if (this.seq(ntxt, "true") || this.seq(ntxt, "false")) {
+                    HExpr nb = this.new_expr(5, a.line, a.col);
+                    nb.ival = 0;
+                    if (this.seq(ntxt, "true")) {
+                        nb.ival = 1;
+                    }
+                    nb.type = this.ty_bool();
+                    return this.push_expr(nb);
+                }
+                if (this.parse_int_text(ntxt)) {
+                    HExpr ni = this.new_expr(1, a.line, a.col);
+                    ni.ival = this.nt_val_;
+                    if (this.slen(nty.base) > 0) {
+                        ni.type = nty;
+                    } else {
+                        ni.type = this.ty_int();
+                    }
+                    return this.push_expr(ni);
+                }
+            }
+        }
         long si = this.find_sym(a.sval);
         // A4: the use-after-move check.  It fires for every identifier that
         // resolves to a variable whose move state is `MovedOut`; the
@@ -5822,32 +5871,44 @@ export struct HirBuilder {
             }
             long patIdx = this.arg_pack_pattern(ai2);
             if (patIdx >= 0) {
-                // A pack expansion: the pattern is built (the oracle
-                // reports the undeclared identifier) and one argument per
-                // pack element is spliced into the argument list.
-                long pat = this.build_expr(patIdx);
+                // H10.14 (T10): build the pattern once per pack element with
+                // the pack name bound to the element parameter (`args` ->
+                // `__args0`, ...).  The oracle built the pattern without
+                // that binding, so `f(args...)` reported an undeclared
+                // identifier and dropped the arguments.
+                AExpr pe = this.get_expr(patIdx);
                 long cnt = this.pack_expand_count(patIdx);
                 if (cnt < 0) {
                     // An unknown pack expands to nothing: the argument is
-                    // dropped (the oracle pushes no argument for it).
+                    // dropped.
                 } else {
+                    long fbase = this.pack_first_;
+                    AType savedPack = this.ty_empty();
+                    AType savedElem = this.ty_empty();
+                    savedPack.base = this.fold_pack_name_;
+                    savedElem.base = this.fold_elem_name_;
+                    AType savedElemTy = this.fold_elem_type_;
+                    this.fold_pack_name_ = pe.sval;
                     long k = 0;
                     while (k < cnt) {
-                        HExpr id = this.new_expr(8, a.line, a.col);
                         HFunction cf;
                         HParam hp;
                         unsafe {
                             cf = this.u.fns[this.cur_fn_];
-                            hp = this.u.params[cf.pstart + this.pack_first_ + k];
+                            hp = this.u.params[cf.pstart + fbase + k];
                         }
-                        id.sval = hp.name;
-                        id.type = hp.type;
+                        this.fold_elem_name_ = hp.name;
+                        this.fold_elem_type_ = hp.type;
+                        long he = this.build_expr(patIdx);
                         unsafe {
-                            this.abuf_[wrote] = this.push_expr(id);
+                            this.abuf_[wrote] = he;
                         }
                         wrote = wrote + 1;
                         k = k + 1;
                     }
+                    this.fold_pack_name_ = savedPack.base;
+                    this.fold_elem_name_ = savedElem.base;
+                    this.fold_elem_type_ = savedElemTy;
                 }
             } else {
                 long he = this.build_expr(ai2);
@@ -8279,6 +8340,98 @@ export struct HirBuilder {
         }
     }
 
+    // --- non-type template parameters (H10.14, T13) ---------------------
+
+    // Parse the text of a value template argument as an integer.  The
+    // result is left in `nt_val_`; the return value says whether the text
+    // is an integer literal at all.  Decimal, `0x` hexadecimal, an optional
+    // sign and `'` digit separators are accepted.
+    bool parse_int_text(const char* s) {
+        long n = this.slen(s);
+        if (n == 0) {
+            return false;
+        }
+        long i = 0;
+        bool neg = false;
+        unsafe {
+            if (s[0] == '-') {
+                neg = true;
+                i = 1;
+            } else if (s[0] == '+') {
+                i = 1;
+            }
+            if (i >= n) {
+                return false;
+            }
+            long base = 10;
+            if (i + 1 < n && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+                base = 16;
+                i = i + 2;
+            }
+            if (i >= n) {
+                return false;
+            }
+            long v = 0;
+            bool any = false;
+            while (i < n) {
+                char c = s[i];
+                long d = -1;
+                if (c >= '0' && c <= '9') {
+                    d = c - '0';
+                } else if (base == 16 && c >= 'a' && c <= 'f') {
+                    d = c - 'a' + 10;
+                } else if (base == 16 && c >= 'A' && c <= 'F') {
+                    d = c - 'A' + 10;
+                } else if (c == '\'') {
+                    i = i + 1;
+                    continue;
+                } else {
+                    return false;
+                }
+                v = v * base + d;
+                any = true;
+                i = i + 1;
+            }
+            if (!any) {
+                return false;
+            }
+            if (neg) {
+                v = 0 - v;
+            }
+            this.nt_val_ = v;
+            return true;
+        }
+        return false;
+    }
+
+    // Bind a non-type template parameter for the duration of an
+    // instantiation.
+    void nt_push(const char* name, const char* text, AType t) {
+        if (this.nt_n_ >= this.nt_cap_) {
+            return;
+        }
+        unsafe {
+            this.nt_name_[this.nt_n_] = (long)name;
+            this.nt_text_[this.nt_n_] = (long)text;
+            this.nt_type_[this.nt_n_] = t;
+        }
+        this.nt_n_ = this.nt_n_ + 1;
+    }
+
+    // The index of the innermost binding of `name`, or -1.
+    long nt_find(const char* name) {
+        long i = this.nt_n_ - 1;
+        while (i >= 0) {
+            unsafe {
+                if (this.seq((char*)this.nt_name_[i], name)) {
+                    return i;
+                }
+            }
+            i = i - 1;
+        }
+        return -1;
+    }
+
     // --- the template registry ------------------------------------------
 
     // The AST function index of the template named `name`, or -1.
@@ -8818,12 +8971,14 @@ export struct HirBuilder {
         }
         // The mapping: the non-variadic parameters consume the arguments
         // one to one, a variadic pack takes all the remaining ones.  A
-        // non-type parameter is never bound.
+        // non-type parameter binds the text of its value argument
+        // (H10.14, T13).
         long nonVariadic = tpl.tpl_n;
         if (variadicIdx >= 0) {
             nonVariadic = variadicIdx;
         }
         long mbase = this.map_n_;
+        long ntbase = this.nt_n_;
         long m = 0;
         while (m < nonVariadic && m < n) {
             ATemplateParam tp = this.get_tpl_param(tpl, m);
@@ -8834,9 +8989,21 @@ export struct HirBuilder {
                 if (this.slen(tp.constraint) > 0) {
                     if (this.check_constraint(tp.constraint, a, line, col) == 0) {
                         this.map_n_ = mbase;
+                        this.nt_n_ = ntbase;
                         return -1;
                     }
                 }
+            } else if (this.slen(args[m].base) > 0) {
+                // H10.14 (T13): the value must be a literal constant.
+                if (!this.parse_int_text(args[m].base) &&
+                    !this.seq(args[m].base, "true") &&
+                    !this.seq(args[m].base, "false")) {
+                    this.err_nontype_arg(line, col, tp.name);
+                    this.map_n_ = mbase;
+                    this.nt_n_ = ntbase;
+                    return -1;
+                }
+                this.nt_push(tp.name, args[m].base, tp.type);
             }
             m = m + 1;
         }
@@ -8937,6 +9104,7 @@ export struct HirBuilder {
         this.packframe_ = savedFrame;
         this.gmap_base_ = savedG;
         this.map_n_ = mbase;
+        this.nt_n_ = ntbase;
         return idx;
         }
         return -1;
@@ -9207,15 +9375,17 @@ export struct HirBuilder {
 
     // checkConstraint in hir_builder.cpp: verify that the concrete type
     // satisfies the concept.  The check runs only at instantiation time.
-    // An unknown concept name is assumed to be satisfied; a requirement
-    // that mentions a binary operator needs an arithmetic type or an
-    // operator overload; every other requirement is not checked at all.
+    // H10.14 (T12): an unknown concept name is an error (the oracle assumed
+    // it was satisfied); a requirement that mentions a binary operator
+    // needs an arithmetic type or an operator overload; every other
+    // requirement is not checked at all.
     bool check_constraint(const char* conceptName, AType concrete,
                           long line, long col) {
         long ci = this.find_concept(conceptName);
         if (ci < 0) {
-            // Unknown concept - can't check, assume satisfied.
-            return true;
+            // H10.14 (T12): the concept does not exist.
+            this.err_unknown_concept(line, col, conceptName);
+            return false;
         }
         AConcept cd = this.pa.get_concept(ci);
         long r = 0;
@@ -9304,8 +9474,10 @@ export struct HirBuilder {
             return -1;
         }
         long mbase = this.map_n_;
+        long ntbase = this.nt_n_;
         // The type mapping: the template parameters consume the arguments
-        // one to one; a non-type parameter is never bound.
+        // one to one; a non-type parameter binds its value text
+        // (H10.14, T13).
         long i = 0;
         while (i < tpl.tpl_n && i < n) {
             ATemplateParam tp = this.get_struct_tpl_param(tpl, i);
@@ -9316,9 +9488,21 @@ export struct HirBuilder {
                         // The constraint is not satisfied: the error was
                         // already reported.
                         this.map_n_ = mbase;
+                        this.nt_n_ = ntbase;
                         return -1;
                     }
                 }
+            } else if (this.slen(args[i].base) > 0) {
+                // H10.14 (T13): the value must be a literal constant.
+                if (!this.parse_int_text(args[i].base) &&
+                    !this.seq(args[i].base, "true") &&
+                    !this.seq(args[i].base, "false")) {
+                    this.err_nontype_arg(line, col, tp.name);
+                    this.map_n_ = mbase;
+                    this.nt_n_ = ntbase;
+                    return -1;
+                }
+                this.nt_push(tp.name, args[i].base, tp.type);
             }
             i = i + 1;
         }
@@ -9515,6 +9699,7 @@ export struct HirBuilder {
         this.spcfns_n_ = fnbase;
         this.gmap_base_ = savedG;
         this.map_n_ = mbase;
+        this.nt_n_ = ntbase;
         return gidx;
         }
     }
@@ -9580,6 +9765,25 @@ export struct HirBuilder {
         this.db_put("too many template arguments for '");
         this.db_put(name);
         this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // H10.14 (T12): "unknown concept 'X'"
+    void err_unknown_concept(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("unknown concept '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // H10.14 (T13): "template argument for non-type parameter 'N' must be a
+    // constant"
+    void err_nontype_arg(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("template argument for non-type parameter '");
+        this.db_put(name);
+        this.db_put("' must be a constant");
         this.diag(line, col, this.db_end());
     }
 

@@ -13120,8 +13120,25 @@ function count_after<int32_t,int>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 98 1
-selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
+@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 243 0
+function take
+  return void(int32_t x)
+  block 0
+
+function f
+  return void()
+  block 0
+    eval
+      call : void
+        int 1
+
+function pass<int32_t>
+  return void(int32_t __args0)
+  block 0
+    eval
+      call : void
+        ident __args0
+
 @@ selfhost/corpus/hir/template/03_pack_expansion.ivy 222 0
 function f
   return void()
@@ -13532,18 +13549,17 @@ function f
     alloca Box<int32_t> b
     alloca Box<Box> c
 
-@@ selfhost/corpus/hir/template/05_nontype_param.ivy 190 0
+@@ selfhost/corpus/hir/template/05_nontype_param.ivy 141 0
 function f
   return void()
   block 0
-    alloca Box<int32_t> b
+    alloca Box<5> b
 
-function Box<int32_t>::get
-  return int32_t(Box<int32_t>& this)
+function Box<5>::get
+  return int32_t(Box<5>& this)
   block 0
     ret
-      member .value : int32_t
-        this
+      int 5
 
 @@ selfhost/corpus/hir/template/05_order.ivy 128 0
 function g
@@ -13844,20 +13860,9 @@ function Box<int32_t>::get
       member .value : int32_t
         this
 
-@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 176 0
-function f
-  return void()
-  block 0
-    alloca int32_t a
-      call : int32_t
-        int 1
-
-function id<int32_t>
-  return int32_t(int32_t x)
-  block 0
-    ret
-      ident x
-
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 199 1
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: unknown concept 'UnknownConcept'
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: failed to instantiate template 'id'
 @@ selfhost/corpus/hir/template/e_alias_template_argument.ivy 417 1
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:4:35: error: cannot return value of type 'int32_t' from function returning 'MyInt'
 selfhost/corpus/hir/template/e_alias_template_argument.ivy:5:32: error: argument 1 of 'id<MyInt>' expects 'MyInt', got 'int'
@@ -20550,3 +20555,57 @@ function unwrap<int32_t>
       member .value : int32_t
         ident b
 
+@@ selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy 404 0
+function add2
+  return int32_t(int32_t a, int32_t b)
+  block 0
+    ret
+      binary '+' : int32_t
+        ident a
+        ident b
+
+function f
+  return void()
+  block 0
+    alloca int32_t r
+      call : int32_t
+        int 3
+        int 4
+
+function sum<int32_t,int32_t>
+  return int32_t(int32_t __args0, int32_t __args1)
+  block 0
+    ret
+      call : int32_t
+        ident __args0
+        ident __args1
+
+@@ selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy 205 1
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: unknown concept 'Missing'
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: failed to instantiate template 'relay'
+@@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 309 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+    alloca Arr<7> b
+    alloca int32_t c
+      call : int32_t
+        ident b
+
+function fixed<3>
+  return int32_t()
+  block 0
+    ret
+      int 3
+
+function Arr<7>::get
+  return int32_t(Arr<7>& this)
+  block 0
+    ret
+      int 7
+
+@@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 233 1
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'

@@ -10333,7 +10333,7 @@ function
     decl int32_t a =
       call
         ident count_after        int 10        int 20
-@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 365 1
+@@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 267 0
 function 
   return void take(int32_t x)
   block
@@ -10351,7 +10351,6 @@ function
     expr
       call
         ident pass        int 1
-selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
 @@ selfhost/corpus/hir/template/03_pack_expansion.ivy 189 0
 function 
   return int32_t count(Args args)
@@ -10912,7 +10911,7 @@ function
   block
     decl Box b
 
-@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 160 0
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 359 1
 function 
   return T id(T x)
   block
@@ -10924,6 +10923,8 @@ function
     decl int32_t a =
       call
         ident id        int 1
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: unknown concept 'UnknownConcept'
+selfhost/corpus/hir/template/06_unknown_concept.ivy:3:24: error: failed to instantiate template 'id'
 @@ selfhost/corpus/hir/template/e_alias_template_argument.ivy 577 1
 function 
   return T id(T x)
@@ -16857,3 +16858,67 @@ function
           ident b        int 7    decl int32_t r =
       call
         ident unwrap        ident b
+@@ selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy 365 0
+function 
+  return int32_t add2(int32_t a, int32_t b)
+  block
+    return
+      binary +
+        ident a        ident b
+function 
+  return int32_t sum(Args args)
+  block
+    return
+      call
+        ident add2        pack-expansion
+          ident args
+function 
+  return void f()
+  block
+    decl int32_t r =
+      call
+        ident sum        int 3        int 4
+@@ selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy 371 1
+function 
+  return T relay(T x)
+  block
+    return
+      ident x
+function 
+  return void f()
+  block
+    decl int32_t r =
+      call
+        ident relay        int 1
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: unknown concept 'Missing'
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy:3:27: error: failed to instantiate template 'relay'
+@@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 241 0
+function 
+  return int32_t fixed()
+  block
+    return
+      ident N
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident fixed    decl Arr b
+    decl int32_t c =
+      call
+        member . get
+          ident b
+@@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 389 1
+function 
+  return int32_t fixed()
+  block
+    return
+      ident N
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident fixed
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'

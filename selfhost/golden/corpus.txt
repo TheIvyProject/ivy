@@ -583,6 +583,7 @@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy
 selfhost/corpus/hir/template/e_long_diagnostic_message.ivy
 selfhost/corpus/hir/template/e_missing_return.ivy
 selfhost/corpus/hir/template/e_nontype_param_deduce.ivy
+selfhost/corpus/hir/template/e_nontype_type_arg.ivy
 selfhost/corpus/hir/template/e_not_a_template.ivy
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy
 selfhost/corpus/hir/template/e_template_calls_template.ivy
@@ -591,6 +592,9 @@ selfhost/corpus/hir/template/e_unsatisfied_concept.ivy
 selfhost/corpus/hir/template/h10_C10_array_mangle.ivy
 selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy
 selfhost/corpus/hir/template/h10_T1_local_T.ivy
+selfhost/corpus/hir/template/h10_T10_pack_call_expansion.ivy
+selfhost/corpus/hir/template/h10_T12_unknown_concept.ivy
+selfhost/corpus/hir/template/h10_T13_nontype_param.ivy
 selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy
 selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy
 selfhost/corpus/hir/template/h10_T4_base_class.ivy

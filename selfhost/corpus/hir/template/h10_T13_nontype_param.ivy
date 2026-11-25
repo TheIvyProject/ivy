@@ -1,0 +1,9 @@
+// H10.14 (T13): a non-type template parameter binds its explicit value in
+// both a function template and a struct template.
+template <int32 N> int32 fixed() { return N; }
+template <int32 M> struct Arr { int32 value; int32 get() { return M; } };
+void f() {
+    int32 a = fixed<3>();
+    Arr<7> b;
+    int32 c = b.get();
+}
