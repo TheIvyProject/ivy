@@ -9631,7 +9631,7 @@ function
             ident move            ident i        decl int32_t y =
           ident i
 selfhost/corpus/hir/move/52_move_for_var_in_body.ivy:5:19: error: use of moved-out variable 'i'
-@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 561 1
+@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 430 1
 function 
   return T f(T x)
   block
@@ -9646,8 +9646,7 @@ function
       call
         ident f        int 1
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
+selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int32_t>' may reach the end without returning a value
 @@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 152 0
 function 
   return int32_t f(const int32_t x [lt:a])
@@ -10161,19 +10160,18 @@ function
       int 1    decl int32_t b =
       call
         ident ref        ident a
-@@ selfhost/corpus/hir/template/01_deduce_string.ivy 316 1
+@@ selfhost/corpus/hir/template/01_deduce_string.ivy 177 0
 function 
-  return T identity(T x)
+  return int32_t keep(T x)
   block
     return
-      ident x
+      int 0
 function 
   return void f()
   block
     decl int32_t a =
       call
-        ident identity        string "hello"
-selfhost/corpus/hir/template/01_deduce_string.ivy:5:31: error: argument 1 of 'identity<char const*>' expects 'char', got 'const char*'
+        ident keep        string "hello"
 @@ selfhost/corpus/hir/template/01_deduce_struct.ivy 181 0
 function 
   return T identity(T x)
@@ -11018,12 +11016,12 @@ function
 function 
   return void f()
   block
-    decl int32_t x =
+    decl int64_t x =
       int 1    decl int32_t a =
       call
         ident two        int 1        ident x
-selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
-@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 342 1
+selfhost/corpus/hir/template/e_deduce_conflict.ivy:5:38: error: cannot deduce template arguments for 'two'
+@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 346 1
 function 
   return T withdefault(T x, int32_t y)
   block
@@ -11035,7 +11033,7 @@ function
     decl int32_t a =
       call
         ident withdefault        int 1
-selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
+selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int32_t>' missing argument 2 (parameter 'y' has no default value)
 @@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 266 1
 function 
   return T id(T x)
@@ -11065,7 +11063,7 @@ function
         ident add        ident p        ident q
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
-@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 488 1
+@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 186 0
 function 
   return T f(T x)
   block
@@ -11078,8 +11076,6 @@ function
     decl int32_t r =
       call
         ident f        int 1
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:34: error: cannot initialize variable 'y' of type 'T' with a value of type 'int32_t'
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:43: error: cannot return value of type 'T' from function returning 'int32_t'
 @@ selfhost/corpus/hir/template/e_long_diagnostic_message.ivy 1311 1
 function 
   return void f()
@@ -11139,7 +11135,7 @@ function
 
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
-@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 648 1
+@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 257 0
 function 
   return T id(T x)
   block
@@ -11157,9 +11153,6 @@ function
     decl int32_t a =
       call
         ident outer        int 1
-selfhost/corpus/hir/template/e_template_calls_template.ivy:4:35: error: cannot return value of type 'T' from function returning 'T'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:51: error: argument 1 of 'id<T>' expects 'T', got 'int32_t'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:38: error: cannot return value of type 'T' from function returning 'int32_t'
 @@ selfhost/corpus/hir/template/e_undeclared_identifier.ivy 300 1
 function 
   return void f()
@@ -16715,3 +16708,60 @@ function
 selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
 @@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
 selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name
+@@ selfhost/corpus/hir/template/h10_T1_local_T.ivy 194 0
+function 
+  return T twice(T x)
+  block
+    decl T y =
+      ident x    return
+      ident y
+function 
+  return void f()
+  block
+    decl int32_t r =
+      call
+        ident twice        int 5
+@@ selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy 257 0
+function 
+  return T id(T x)
+  block
+    return
+      ident x
+function 
+  return T relay(T x)
+  block
+    return
+      call
+        ident id        ident x
+function 
+  return void f()
+  block
+    decl int32_t r =
+      call
+        ident relay        int 9
+@@ selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy 177 0
+function 
+  return int32_t keep(T x)
+  block
+    return
+      int 0
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident keep        string "hello"
+@@ selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy 221 0
+function 
+  return T id(T x)
+  block
+    return
+      ident x
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident id        int 7    decl int32_t b =
+      call
+        ident id        int 7

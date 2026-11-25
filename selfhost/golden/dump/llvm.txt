@@ -4995,21 +4995,21 @@ define i32 @main() {
 }
 
 @.str.0 = private unnamed_addr constant [10 x i8] c"%d %d %d\0A\00"
-@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 1324 0
+@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 1348 0
 ; LLVM IR emitted by ivy
 declare i32 @printf(ptr, ...)
 define i32 @ivy_main() {
 br label %bb0
 bb0:
 %tmp.0 = getelementptr i8, ptr @.str.0, i64 0
-%tmp.1 = call i32 @"?count_after_int_@@YHH@Z"(i32 1)
-%tmp.2 = call i32 @"?count_after_int_int_@@YHHH@Z"(i32 1, i32 2)
-%tmp.3 = call i32 @"?count_after_int_int_int_@@YHHHH@Z"(i32 1, i32 2, i32 3)
+%tmp.1 = call i32 @"?count_after_int32_t_@@YHH@Z"(i32 1)
+%tmp.2 = call i32 @"?count_after_int32_t_int_@@YHHH@Z"(i32 1, i32 2)
+%tmp.3 = call i32 @"?count_after_int32_t_int_int_@@YHHHH@Z"(i32 1, i32 2, i32 3)
 %tmp.4 = call i32 @printf(ptr %tmp.0, i32 %tmp.1, i32 %tmp.2, i32 %tmp.3)
 ret i32 0
 }
 
-define i32 @"?count_after_int_@@YHH@Z"(i32 %arg0) {
+define i32 @"?count_after_int32_t_@@YHH@Z"(i32 %arg0) {
 %first.0 = alloca i32
 store i32 %arg0, ptr %first.0
 br label %bb0
@@ -5018,7 +5018,7 @@ bb0:
 ret i32 %tmp.0
 }
 
-define i32 @"?count_after_int_int_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
+define i32 @"?count_after_int32_t_int_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
 %first.0 = alloca i32
 store i32 %arg0, ptr %first.0
 %__rest0.1 = alloca i32
@@ -5029,7 +5029,7 @@ bb0:
 ret i32 %tmp.0
 }
 
-define i32 @"?count_after_int_int_int_@@YHHHH@Z"(i32 %arg0, i32 %arg1, i32 %arg2) {
+define i32 @"?count_after_int32_t_int_int_@@YHHHH@Z"(i32 %arg0, i32 %arg1, i32 %arg2) {
 %first.0 = alloca i32
 store i32 %arg0, ptr %first.0
 %__rest0.1 = alloca i32
@@ -16714,16 +16714,16 @@ ret void
 
 @@ selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy 109 1
 selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy:5:15: error: use of moved-out variable 'move'
-@@ selfhost/corpus/hir/move/33_template_named_move.ivy 285 0
+@@ selfhost/corpus/hir/move/33_template_named_move.ivy 293 0
 ; LLVM IR emitted by ivy
 define void @"?g@@YXX@Z"() {
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?move_int_@@YHH@Z"(i32 1)
+%tmp.0 = call i32 @"?move_int32_t_@@YHH@Z"(i32 1)
 ret void
 }
 
-define i32 @"?move_int_@@YHH@Z"(i32 %arg0) {
+define i32 @"?move_int32_t_@@YHH@Z"(i32 %arg0) {
 %x.0 = alloca i32
 store i32 %arg0, ptr %x.0
 br label %bb0
@@ -16802,10 +16802,9 @@ ret void
 selfhost/corpus/hir/move/51_move_in_switch_case.ivy:11:15: error: use of moved-out variable 'x'
 @@ selfhost/corpus/hir/move/52_move_for_var_in_body.ivy 96 1
 selfhost/corpus/hir/move/52_move_for_var_in_body.ivy:5:19: error: use of moved-out variable 'i'
-@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 358 1
+@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 227 1
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
+selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int32_t>' may reach the end without returning a value
 @@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 198 0
 ; LLVM IR emitted by ivy
 define i32 @"?f@@YHAAV@Z"(ptr %arg0) {
@@ -17299,7 +17298,7 @@ bb0:
 ret i8 %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 409 0
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 417 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
@@ -17307,12 +17306,12 @@ define void @"?f@@YXX@Z"() {
 br label %bb0
 bb0:
 store i32 1, ptr %tmp.0
-%tmp.1 = call i32 @"?id_int_@@YHAAV@Z"(ptr %tmp.0)
+%tmp.1 = call i32 @"?id_int32_t_@@YHAAV@Z"(ptr %tmp.0)
 store i32 %tmp.1, ptr %a.0
 ret void
 }
 
-define i32 @"?id_int_@@YHAAV@Z"(ptr %arg0) {
+define i32 @"?id_int32_t_@@YHAAV@Z"(ptr %arg0) {
 %x.0 = alloca ptr
 store ptr %arg0, ptr %x.0
 br label %bb0
@@ -17342,18 +17341,18 @@ bb0:
 ret double %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 338 0
+@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 346 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?identity_int_@@YHH@Z"(i32 1)
+%tmp.0 = call i32 @"?identity_int32_t_@@YHH@Z"(i32 1)
 store i32 %tmp.0, ptr %a.0
 ret void
 }
 
-define i32 @"?identity_int_@@YHH@Z"(i32 %arg0) {
+define i32 @"?identity_int32_t_@@YHH@Z"(i32 %arg0) {
 %x.0 = alloca i32
 store i32 %arg0, ptr %x.0
 br label %bb0
@@ -17409,8 +17408,27 @@ bb0:
 ret i32 %tmp.1
 }
 
-@@ selfhost/corpus/hir/template/01_deduce_string.ivy 135 1
-selfhost/corpus/hir/template/01_deduce_string.ivy:5:31: error: argument 1 of 'identity<char const*>' expects 'char', got 'const char*'
+@@ selfhost/corpus/hir/template/01_deduce_string.ivy 429 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.1 = call i32 @"?keep_char_const__@@YHPAV@Z"(ptr %tmp.0)
+store i32 %tmp.1, ptr %a.0
+ret void
+}
+
+define i32 @"?keep_char_const__@@YHPAV@Z"(ptr %arg0) {
+%x.0 = alloca ptr
+store ptr %arg0, ptr %x.0
+br label %bb0
+bb0:
+ret i32 0
+}
+
+@.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
 @@ selfhost/corpus/hir/template/01_deduce_struct.ivy 525 0
 ; LLVM IR emitted by ivy
 %struct.P = type { i32 }
@@ -17436,18 +17454,18 @@ bb0:
 ret %struct.P %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 402 0
+@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 418 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?pair_int_int_@@YHHH@Z"(i32 1, i32 2)
+%tmp.0 = call i32 @"?pair_int32_t_int32_t_@@YHHH@Z"(i32 1, i32 2)
 store i32 %tmp.0, ptr %a.0
 ret void
 }
 
-define i32 @"?pair_int_int_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
+define i32 @"?pair_int32_t_int32_t_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
 %a.0 = alloca i32
 store i32 %arg0, ptr %a.0
 %b.1 = alloca i32
@@ -17511,7 +17529,7 @@ bb0:
 ret i32 %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 599 0
+@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 445 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
@@ -17520,21 +17538,12 @@ br label %bb0
 bb0:
 %tmp.0 = call i32 @"?identity_int32_t_@@YHH@Z"(i32 1)
 store i32 %tmp.0, ptr %a.0
-%tmp.1 = call i32 @"?identity_int_@@YHH@Z"(i32 2)
+%tmp.1 = call i32 @"?identity_int32_t_@@YHH@Z"(i32 2)
 store i32 %tmp.1, ptr %b.1
 ret void
 }
 
 define i32 @"?identity_int32_t_@@YHH@Z"(i32 %arg0) {
-%x.0 = alloca i32
-store i32 %arg0, ptr %x.0
-br label %bb0
-bb0:
-%tmp.0 = load i32, ptr %x.0
-ret i32 %tmp.0
-}
-
-define i32 @"?identity_int_@@YHH@Z"(i32 %arg0) {
 %x.0 = alloca i32
 store i32 %arg0, ptr %x.0
 br label %bb0
@@ -17640,18 +17649,18 @@ bb0:
 ret i32 0
 }
 
-@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 405 0
+@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 413 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?count_after_int_int_@@YHHH@Z"(i32 10, i32 20)
+%tmp.0 = call i32 @"?count_after_int32_t_int_@@YHHH@Z"(i32 10, i32 20)
 store i32 %tmp.0, ptr %a.0
 ret void
 }
 
-define i32 @"?count_after_int_int_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
+define i32 @"?count_after_int32_t_int_@@YHHH@Z"(i32 %arg0, i32 %arg1) {
 %first.0 = alloca i32
 store i32 %arg0, ptr %first.0
 %__rest0.1 = alloca i32
@@ -18122,18 +18131,18 @@ store %struct.Box_int32_t_ zeroinitializer, ptr %c.1
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 332 0
+@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 340 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?TDup2_int_@@YHH@Z"(i32 1)
+%tmp.0 = call i32 @"?TDup2_int32_t_@@YHH@Z"(i32 1)
 store i32 %tmp.0, ptr %a.0
 ret void
 }
 
-define i32 @"?TDup2_int_@@YHH@Z"(i32 %arg0) {
+define i32 @"?TDup2_int32_t_@@YHH@Z"(i32 %arg0) {
 %x.0 = alloca i32
 store i32 %arg0, ptr %x.0
 br label %bb0
@@ -18813,17 +18822,37 @@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: concept 'Add
 selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: failed to deduce template arguments for 'add'
 selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
 @@ selfhost/corpus/hir/template/e_deduce_conflict.ivy 107 1
-selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
-@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
-selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
+selfhost/corpus/hir/template/e_deduce_conflict.ivy:5:38: error: cannot deduce template arguments for 'two'
+@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 157 1
+selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int32_t>' missing argument 2 (parameter 'y' has no default value)
 @@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 119 1
 selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
-@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 302 1
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:34: error: cannot initialize variable 'y' of type 'T' with a value of type 'int32_t'
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:43: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 405 0
+; LLVM IR emitted by ivy
+define void @"?g@@YXX@Z"() {
+%r.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?f_int32_t_@@YHH@Z"(i32 1)
+store i32 %tmp.0, ptr %r.0
+ret void
+}
+
+define i32 @"?f_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+%y.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+store i32 %tmp.0, ptr %y.1
+%tmp.1 = load i32, ptr %y.1
+ret i32 %tmp.1
+}
+
 @@ selfhost/corpus/hir/template/e_long_diagnostic_message.ivy 898 1
 selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:15: error: undeclared identifier 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001'
 selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:144: error: 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001' is not a template
@@ -18838,10 +18867,36 @@ selfhost/corpus/hir/template/e_not_a_template.ivy:3:27: error: 'plain' is not a 
 @@ selfhost/corpus/hir/template/e_struct_concept_fail.ivy 283 1
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
-@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 391 1
-selfhost/corpus/hir/template/e_template_calls_template.ivy:4:35: error: cannot return value of type 'T' from function returning 'T'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:51: error: argument 1 of 'id<T>' expects 'T', got 'int32_t'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:38: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 549 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?outer_int32_t_@@YHH@Z"(i32 1)
+store i32 %tmp.0, ptr %a.0
+ret void
+}
+
+define i32 @"?outer_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = call i32 @"?id_int32_t_@@YHH@Z"(i32 %tmp.0)
+ret i32 %tmp.1
+}
+
+define i32 @"?id_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+
 @@ selfhost/corpus/hir/template/e_undeclared_identifier.ivy 198 1
 selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:22: error: undeclared identifier 'nosuch'
 selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:28: error: 'nosuch' is not a template
@@ -26591,19 +26646,19 @@ define i32 @main() {
 
 @@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
 selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
-@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 499 0
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 507 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 %tmp.0 = alloca i32
 br label %bb0
 bb0:
 store i32 7, ptr %tmp.0
-%tmp.1 = call i32 @"?id_int_@@YHAAV@Z"(ptr %tmp.0)
+%tmp.1 = call i32 @"?id_int32_t_@@YHAAV@Z"(ptr %tmp.0)
 %tmp.2 = sub i32 %tmp.1, 7
 ret i32 %tmp.2
 }
 
-define i32 @"?id_int_@@YHAAV@Z"(ptr %arg0) {
+define i32 @"?id_int32_t_@@YHAAV@Z"(ptr %arg0) {
 %x.0 = alloca ptr
 store ptr %arg0, ptr %x.0
 br label %bb0
@@ -26847,7 +26902,7 @@ define i32 @main() {
   ret i32 %r
 }
 
-@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 730 0
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 738 0
 ; LLVM IR emitted by ivy
 define i32 @ivy_main() {
 %a.0 = alloca i32
@@ -26856,7 +26911,7 @@ br label %bb0
 bb0:
 %tmp.0 = call i32 @"?fixed_3_@@YHX@Z"()
 store i32 %tmp.0, ptr %a.0
-%tmp.1 = call i32 @"?id_int_@@YHH@Z"(i32 7)
+%tmp.1 = call i32 @"?id_int32_t_@@YHH@Z"(i32 7)
 store i32 %tmp.1, ptr %b.1
 %tmp.2 = load i32, ptr %a.0
 %tmp.3 = sub i32 %tmp.2, 42
@@ -26872,7 +26927,7 @@ bb0:
 ret i32 42
 }
 
-define i32 @"?id_int_@@YHH@Z"(i32 %arg0) {
+define i32 @"?id_int32_t_@@YHH@Z"(i32 %arg0) {
 %x.0 = alloca i32
 store i32 %arg0, ptr %x.0
 br label %bb0
@@ -26940,3 +26995,100 @@ define i32 @main() {
 selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
 @@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
 selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name
+@@ selfhost/corpus/hir/template/h10_T1_local_T.ivy 413 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%r.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?twice_int32_t_@@YHH@Z"(i32 5)
+store i32 %tmp.0, ptr %r.0
+ret void
+}
+
+define i32 @"?twice_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+%y.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+store i32 %tmp.0, ptr %y.1
+%tmp.1 = load i32, ptr %y.1
+ret i32 %tmp.1
+}
+
+@@ selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy 549 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%r.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?relay_int32_t_@@YHH@Z"(i32 9)
+store i32 %tmp.0, ptr %r.0
+ret void
+}
+
+define i32 @"?relay_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = call i32 @"?id_int32_t_@@YHH@Z"(i32 %tmp.0)
+ret i32 %tmp.1
+}
+
+define i32 @"?id_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+
+@@ selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy 429 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.1 = call i32 @"?keep_char_const__@@YHPAV@Z"(ptr %tmp.0)
+store i32 %tmp.1, ptr %a.0
+ret void
+}
+
+define i32 @"?keep_char_const__@@YHPAV@Z"(ptr %arg0) {
+%x.0 = alloca ptr
+store ptr %arg0, ptr %x.0
+br label %bb0
+bb0:
+ret i32 0
+}
+
+@.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
+@@ selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy 427 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+%b.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?id_int32_t_@@YHH@Z"(i32 7)
+store i32 %tmp.0, ptr %a.0
+%tmp.1 = call i32 @"?id_int32_t_@@YHH@Z"(i32 7)
+store i32 %tmp.1, ptr %b.1
+ret void
+}
+
+define i32 @"?id_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+

@@ -1156,3 +1156,7 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 0 0
 @@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 0 0
 @@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T1_local_T.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy 0 0
+@@ selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy 0 0

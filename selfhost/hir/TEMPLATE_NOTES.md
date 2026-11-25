@@ -216,10 +216,10 @@ Consequences (all verified):
 | `T` (param/return) | concrete type | base+unsigned come from the mapping |
 | `const T&` | `const <concrete>&` | const/ref taken from the *declaration* |
 | `T*` | `<concrete>*` | pointer depth taken from the declaration |
-| `T` deduced as `char const*` | `char` | the concrete type's const/pointer are **lost** (p15) |
+| `T` deduced as `char const*` | `char const*` | the concrete type's const/pointer are kept and the usage-site qualifiers are added (H10.12, T5) |
 | `Box<T>` (param type) | base `Box` + `tplArgs [int32_t]` | the specialization is **not** resolved ⇒ call always mismatches (p60) |
 | `Box<T>` (struct field type) | `Box<int32_t>` (resolved) | because `resolveTemplateStructType` runs on the cloned field (p61) |
-| local `T y;` | **not substituted** | `currentTypeMapping_` is empty during *function* template instantiation (p28, C10) |
+| local `T y;` | substituted | `currentTypeMapping_` stays active while the body is built (H10.12, T1) |
 | local `T y;` inside a **struct** template method | substituted | `currentTypeMapping_` *is* set during struct instantiation (p82) |
 
 ### 3.5 What the specialization's body looks like
@@ -289,19 +289,19 @@ function f
   return void()
   block
     decl int32_t a =
-      call 'identity<int>' : int
+      call 'identity<int32_t>' : int32_t
         int 1
 
-function identity<int>
-  return int(int x)
+function identity<int32_t>
+  return int32_t(int32_t x)
   block
     return
       ident x
 ```
-exit 0. Note the type is **`int`**, not `int32_t`: the HIR type of an integer literal is
-`int` (`hir_builder.cpp:134` `intType()`), so `identity(1)` and `identity<int32>(1)` create
-**two different specializations** (see `examples/test_template_deduction.ivy`, which
-contains both `identity(42)` → `identity<int>` and `identity<int32>(99)` → `identity<int32_t>`).
+exit 0. H10.12 (T6): an integer literal's HIR type is `int` (`hir_builder.cpp:134`
+`intType()`), but deduction normalises it to `int32_t`, so `identity(1)` and
+`identity<int32>(1)` name the **same** specialization `identity<int32_t>`.
+(Before H10.12 the deduced call was `identity<int>`.)
 
 ### C04 — variadic template
 
@@ -471,19 +471,33 @@ function id<int64_t>
 ```
 exit 0.
 
-### C10 — local declaration of `T` is NOT substituted (failing file)
+### C10 — local declaration of `T` is substituted (H10.12, T1)
 
 ```ivy
 template <typename T> T f(T x) { T y = x; return y; }
 void g() { int32 r = f<int32>(1); }
 ```
 ```
-…\C10_local_T_not_substituted.ivy:2:34: error: cannot initialize variable 'y' of type 'T' with a value of type 'int32_t'
-…\C10_local_T_not_substituted.ivy:2:43: error: cannot return value of type 'T' from function returning 'int32_t'
-```
-exit 1, no dump. **This is the single most important thing NOT to "fix" in the port.**
+function g
+  return void()
+  block
+    decl int32_t r =
+      call 'f<int32_t>' : int32_t
+        int 1
 
-### C11 — a template calling another template (failing file)
+function f<int32_t>
+  return int32_t(int32_t x)
+  block
+    decl int32_t y =
+      ident x
+    return
+      ident y
+```
+exit 0. The oracle reports `cannot initialize variable 'y' of type 'T' …`
+(`C10_local_T_not_substituted.ivy`) because `currentTypeMapping_` is empty while a function
+template is instantiated. The port keeps the mapping active for the body (H10.12).
+
+### C11 — a template calling another template (H10.12, T2)
 
 ```ivy
 template <typename T> T id(T x) { return x; }
@@ -491,15 +505,30 @@ template <typename T> T outer(T x) { return id<T>(x); }
 void f() { int32 a = outer<int32>(1); }
 ```
 ```
-…\C11_template_calls_template.ivy:4:35: error: cannot return value of type 'T' from function returning 'T'
-…\C11_template_calls_template.ivy:5:51: error: argument 1 of 'id<T>' expects 'T', got 'int32_t'
-…\C11_template_calls_template.ivy:5:38: error: cannot return value of type 'T' from function returning 'int32_t'
+function f
+  return void()
+  block
+    decl int32_t a =
+      call 'outer<int32_t>' : int32_t
+        int 1
+
+function outer<int32_t>
+  return int32_t(int32_t x)
+  block
+    return
+      call 'id<int32_t>' : int32_t
+        ident x
+
+function id<int32_t>
+  return int32_t(int32_t x)
+  block
+    return
+      ident x
 ```
-exit 1, no dump. The inner template was instantiated as `id<T>` — the explicit argument was
-**not** substituted, because function-template instantiation never sets
-`currentTypeMapping_` (only struct-template instantiation does, `hir_builder.cpp:5460-5461`).
-The same construct **inside a struct-template method works** (p76:
-`call 'id<int32_t>'`).
+exit 0. The oracle instantiates the inner call as `id<T>` (the explicit argument is not
+substituted) and reports three errors (`C11_template_calls_template.ivy`). The port
+substitutes the call-site argument with the active function-template mapping (H10.12),
+so the explicit `id<T>` becomes `id<int32_t>`.
 
 ### C12 — `if constexpr` inside a template
 
@@ -542,7 +571,7 @@ condition is false, the `else` branch is kept and the `if` branch (with
 | parameter type | `const T&` | `const <concrete>&` | p31 |
 | parameter type | `T*` | `<concrete>*` | t15 |
 | parameter type | `Box<T>` | base `Box`, `tplArgs [int32_t]`, **not resolved** | p60 |
-| local decl | `T y` | **not substituted** (`T` stays) | C10, p28 |
+| local decl | `T y` | substituted (H10.12, T1) | C10, h10_T1_local_T |
 | local decl (struct-template method) | `T y` | substituted | p82 |
 | struct field | `T v` | concrete type | C05 |
 | struct field | `Box<T> v` | resolved to `Box<int32_t>` | p61 |
@@ -569,7 +598,7 @@ condition is false, the `else` branch is kept and the `if` branch (with
 | Situation | Oracle behaviour | Evidence |
 |---|---|---|
 | no explicit args, param type is exactly a type parameter `T` | `T = arg type` (reference-ness stripped) | C03, p06 |
-| arg is an integer literal | `T = int` (the literal's HIR type) — **not** `int32_t` | C03 |
+| arg is an integer literal | `T = int32_t` (H10.12, T6: the oracle's literal type `int` is normalised) | C03, h10_T6_deduce_int32 |
 | arg is a variable of type `int32` | `T = int32_t` | t01 |
 | param is `const T&` | `T = arg type`, `isReference` stripped | p42 |
 | param is `T*` | `T = pointee type`; pointer-depth mismatch ⇒ deduction fails | `hir_builder.cpp:5289-5296` |
@@ -700,21 +729,21 @@ files** (a crash gives empty output and a non-1 exit code, which breaks the diff
 A nested `constexpr` call inside a binary expression did **not** crash in my probe (p66,
 p84) — the crash may require a different shape. **Treat it as unsafe.**
 
-### 10.2 Semantic bugs to reproduce faithfully (do NOT "fix")
+### 10.2 Semantic bugs (B1/B2/B5/B6/B11 fixed at H10.12)
 
 | # | Bug | Where | Evidence |
 |---|---|---|---|
-| B1 | A local declaration of type `T` is not substituted | `hir_builder.cpp:503-505` (`currentTypeMapping_` is empty for function templates) | C10, p28 |
-| B2 | A template calling another template with an explicit argument does not substitute the argument | same root cause | C11, p27 |
+| B1 | A local declaration of type `T` is not substituted | `hir_builder.cpp:503-505` (`currentTypeMapping_` is empty for function templates) | C10, p28 — **fixed**: mapping stays active while the body is built |
+| B2 | A template calling another template with an explicit argument does not substitute the argument | same root cause | C11, p27 — **fixed**: the call-site argument is substituted with the active mapping |
 | B3 | `sizeof`/`alignof` of a template-id type returns 4 (the fallback) instead of the real layout | `typeSize` fallback `hir_builder.cpp:480` | p48, p36 |
 | B4 | A struct-template specialization **loses its base classes** | `instantiateStructTemplate` never copies `bases` (`hir_builder.cpp:5442-5448`) | p49 |
-| B5 | The concrete type's `const`/pointer qualifiers are lost when substituting into a plain `T` parameter | `substituteType` overwrites them with the declaration's | p15 |
-| B6 | `T` deduced from an integer literal is `int`, not `int32_t` | `intType()` = `"int"` | C03 |
+| B5 | The concrete type's `const`/pointer qualifiers are lost when substituting into a plain `T` parameter | `substituteType` overwrites them with the declaration's | p15 — **fixed**: the usage-site qualifiers are added, not substituted |
+| B6 | `T` deduced from an integer literal is `int`, not `int32_t` | `intType()` = `"int"` | C03 — **fixed**: deduction normalises `int` to `int32_t` |
 | B7 | Extra template arguments are silently accepted; the mangled name contains them | `instantiateTemplate` maps only `min(#params,#args)` | p11, p80 |
 | B8 | Two templates with the same name: the second silently replaces the first (no overloading) | `templates_` is keyed by name | p53 |
 | B9 | `Box<T>` as a *parameter* type is never resolved to the specialization ⇒ every call mismatches | `instantiateTemplate` does not call `resolveTemplateStructType` on params | p60 |
 | B10 | A pack expansion in a call (`f(args...)`) is broken | the pack name is not a scope name | p85 |
-| B11 | The `currentTypeMapping_` is set during *struct* instantiation but not during *function* instantiation | `hir_builder.cpp:5460` vs `:4995` | C11 vs p76 |
+| B11 | The `currentTypeMapping_` is set during *struct* instantiation but not during *function* instantiation | `hir_builder.cpp:5460` vs `:4995` | C11 vs p76 — **fixed**: both paths set `gmap_base_` |
 | B12 | An unknown concept name is silently treated as satisfied | `hir_builder.cpp:4838-4841` | p21 |
 | B13 | A non-type template parameter is never bound | `instantiateTemplate` only maps `isTypename` params | p71, t03 |
 
@@ -736,7 +765,7 @@ the corpus can lock the accepted behaviour (see `app/H10_NOTES.md`):
   `parse_function()` accepts `<...>` after the function name.
 
 Remaining parser limitations: a non-type template parameter is still never bound
-(B13) and member-template instantiation is deferred to T6/T7.
+(B13) and member-template instantiation is deferred to the later template passes.
 
 ---
 
@@ -816,10 +845,9 @@ registered in pass 1) — this reproduces C09 / p75.
 The instantiation must be **cached by the mangled name** so a second use does not emit a
 second entry (C09).
 
-The body must be built with the substituted signature in scope, and — crucially — **without**
-a type mapping for locals (B1). The self-host `hir_builder.ivy` currently resolves an
-`AType` by base name only; the port must reproduce "the local decl keeps the literal name
-`T`" (C10) rather than substituting it.
+The body is built with the substituted signature in scope and with the same type mapping
+active, so a local declaration of `T` is substituted (H10.12, T1; the oracle keeps the
+literal `T` — C10).
 
 Diagnostics: D2, D3, D5, D6, D7, D9, D10.
 
@@ -1183,22 +1211,25 @@ the qualified form `ns::id<int32_t>` of p72 is out of reach — see 15.7).
 
 * the base name is replaced when it is a template parameter;
 * the pointer depth, the reference-ness and the const qualifier of the
-  **declaration** are re-applied to the substituted type (so `T` deduced as
-  `char const*` becomes a plain `char` — bug B5);
+  **usage site** are added to the substituted type, so `T` deduced as
+  `char const*` stays `char const*` (H10.12, T5);
 * the template arguments are substituted recursively and stored in a **new**
   list (the parser's argument list is immutable, so the port keeps its own
   chunked pool of substituted lists);
-* only the **signature** (return type + parameter types) is substituted; the
-  body is built **without** the mapping (bug B1 — the oracle does not set
-  `currentTypeMapping_` for a function template).
+* the whole instantiation — signature **and** body — runs with the mapping
+  active (H10.12, B1/B11), so a local `T` and an explicit `id<T>(x)` are
+  substituted.
 
 **Deduction** (`deduce_template_args`, line 5254) mirrors `deduceTemplateArgs`:
 
 * the only deduction is "the parameter type is exactly a type parameter" —
   there is no structural matching;
-* the argument type is taken as it is, so an integer literal deduces `int`
-  and **not** `int32_t` (bug B6): `identity(1)` and `identity<int32>(1)` are
-  two different specializations;
+* an integer literal (HIR type `int`) is normalised to `int32_t` (H10.12,
+  T6), so `identity(1)` and `identity<int32>(1)` name the same
+  specialization;
+* deduction suspends the outer function-template mapping (H10.12): a call in
+  the body of another template must see its **own** parameter `T`, not the
+  outer concrete type;
 * reference-ness is stripped; a `const T` parameter clears the const of the
   deduced type; a `T*` parameter deduces the pointee and fails on a pointer
   depth mismatch;
@@ -1247,14 +1278,14 @@ changed so that it
 
 | # | Behaviour | Where |
 |---|---|---|
-| B1 | A local declaration of type `T` is **not** substituted → `cannot initialize variable 'y' of type 'T' …` | `C10`, `F10`-style bodies |
-| B2 | A template calling another template with an explicit argument does **not** substitute the argument (`id<T>(x)` instantiates `id<T>`) → `argument 1 of 'id<T>' expects 'T', got 'int32_t'` | `C11`, `F31` |
-| B5 | The concrete type's const/pointer qualifiers are lost when substituting into a plain `T` parameter (`char const*` → `char`) | `F24`, `F36` |
-| B6 | `T` deduced from an integer literal is `int`, not `int32_t` | `C03`, `F50`, `F51` |
+| B1 | **H10.12 fixed**: a local declaration of type `T` is substituted (the oracle reports `cannot initialize variable 'y' of type 'T' …`) | `C10`, `F10`-style bodies |
+| B2 | **H10.12 fixed**: an explicit `id<T>(x)` inside a function template is substituted (`id<int32_t>`) | `C11`, `F31` |
+| B5 | **H10.12 fixed**: substituting into a plain `T` parameter keeps `char const*` instead of dropping the qualifiers | `F24`, `F36` |
+| B6 | **H10.12 fixed**: `T` deduced from an integer literal is `int32_t` | `C03`, `F50`, `F51` |
 | B7 | Extra template arguments are silently accepted; the mangled name contains them | `F12` |
 | B8 | Two templates with the same name: the second silently replaces the first | `F28` |
 | B10 | A pack expansion in a call (`f(args...)`) is broken: the pack name is not a scope name → `undeclared identifier 'args'` | `F47` |
-| B11 | The type mapping is **not** propagated into the body of a function template (it is only propagated for *struct* templates — phase 4) | `C11`, `F31`, `F40` |
+| B11 | **H10.12 fixed**: the type mapping is propagated into the body of a function template, like a struct template | `C11`, `F31`, `F40` |
 | B13 | A non-type template parameter is never bound → `undeclared identifier 'N'` in the body; an implicit call cannot deduce it | `F16`, `F17` |
 | — | A template-id **parameter** type (`Box<T>`) is never resolved to the specialization — the port substitutes the base name and the argument list but does not resolve the specialization (the mismatch itself needs the phase-4 struct specialization) | phase 4 |
 | — | The "may reach the end without returning a value" diagnostic of a specialization is reported at the call site with the mangled name | `F41` |
@@ -1362,15 +1393,15 @@ differences are exactly the cases listed in 15.7.
 |---|---|---|
 | `C01_type_param` | explicit `<int32>` | PASS |
 | `C02_uninstantiated` | a template that is never instantiated → no entry | PASS |
-| `C03_deduce` | implicit deduction → `identity<int>` | PASS |
+| `C03_deduce` | implicit deduction → `identity<int>` (oracle) | H10.12: the port deduces `identity<int32_t>` |
 | `C04_variadic` | the pack expands into `__args0`, `__args1` | PASS |
 | `C05_struct_template` | struct template | **FAIL (phase 4)** |
 | `C06_concept_ok` | a constrained parameter (the constraint is not checked in phase 3) | PASS |
 | `C07_concept_fail` | the constraint check | **FAIL (phase 4)** |
 | `C08_body_error_never_instantiated` | a body error in a template that is never instantiated → no diagnostic | PASS |
 | `C09_order_dedup` | the dump order and the de-duplication | PASS |
-| `C10_local_T_not_substituted` | bug B1 | PASS |
-| `C11_template_calls_template` | bug B2 | PASS |
+| `C10_local_T_not_substituted` | bug B1 (oracle; fixed in the port at H10.12) | oracle only |
+| `C11_template_calls_template` | bug B2 (oracle; fixed in the port at H10.12) | oracle only |
 | `C12_if_constexpr` | `if constexpr` inside a template | PASS |
 | `F04_deduce_variable` | the deduction from a variable (`int32_t`) | PASS |
 | `F05_deduce_two_params` | two deduced parameters | PASS |
@@ -2092,15 +2123,15 @@ stdout+stderr byte for byte).
 |---|---|---|
 | `C01_type_param` | explicit `<int32>` (phase 3) | PASS |
 | `C02_uninstantiated` | a template that is never instantiated | PASS |
-| `C03_deduce` | implicit deduction → `identity<int>` | PASS |
+| `C03_deduce` | implicit deduction → `identity<int>` (oracle) | H10.12: the port deduces `identity<int32_t>` |
 | `C04_variadic` | the pack expands into `__args0`, `__args1` | PASS |
 | `C05_struct_template` | **the struct template** (phase-4 scope) | PASS |
 | `C06_concept_ok` | a constrained parameter | PASS |
 | `C07_concept_fail` | **the constraint check** (phase-4 scope) | PASS |
 | `C08_body_error_never_instantiated` | a body error in an uninstantiated template | PASS |
 | `C09_order_dedup` | the dump order and the de-duplication | PASS |
-| `C10_local_T_not_substituted` | bug B1 (a function template) | PASS |
-| `C11_template_calls_template` | bug B2 (a function template) | PASS |
+| `C10_local_T_not_substituted` | bug B1 in the oracle; the port substitutes `T` from H10.12 | oracle only |
+| `C11_template_calls_template` | bug B2 in the oracle; the port substitutes the explicit argument from H10.12 | oracle only |
 | `C12_if_constexpr` | `if constexpr` inside a template | PASS |
 | `T01_struct_field` | a field of type `T` | PASS |
 | `T02_struct_methods` | the methods of a specialization | PASS |
@@ -2342,7 +2373,7 @@ Every file is self-contained (no `#include`, no path dependency) and covers
 
 | file | rule it covers |
 |---|---|
-| `02_explicit_overrides_deduction.ivy` | an explicit argument and a deduced call produce **two** specializations (`identity<int32_t>` and `identity<int>`) |
+| `02_explicit_overrides_deduction.ivy` | an explicit argument and a deduced call name the **same** specialization `identity<int32_t>` (H10.12, T6) |
 | `02_too_many_args.ivy` | extra explicit arguments are silently accepted and appear in the mangled name (bug B7) |
 | `02_too_few_args.ivy` | too few explicit arguments: the unmapped parameter keeps its literal name `U` (§8 D14) |
 | `02_unsigned_arg.ivy` | the `" unsigned"` suffix of the argument mangling (§3.1) |
@@ -2448,9 +2479,9 @@ the diagnostic, not the argument syntax.
 | `e_struct_concept_fail.ivy` | `concept ... not satisfied` **and** `variable 'b' must be initialized (uninitialized variables are not allowed)` — the struct-template **fallback** to the unmangled name |
 | `e_arity_mismatch.ivy` | `call to 'id<int32_t>' expects 1 argument(s), got 2` (§8 D5) |
 | `e_argument_type_mismatch.ivy` | `argument 1 of 'id<int32_t>' expects 'int32_t', got 'const char*'` (§8 D7) |
-| `e_local_type_param_not_substituted.ivy` | `cannot initialize variable 'y' of type 'T' ...` **and** `cannot return value of type 'T' from function returning 'int32_t'` (bug B1, §8 D8, D9) |
-| `e_template_calls_template.ivy` | `argument 1 of 'id<T>' expects 'T', got 'int32_t'` (bug B2) |
-| `e_default_argument_lost.ivy` | `call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)` (§8 D6) |
+| `e_local_type_param_not_substituted.ivy` | H10.12: a local `T` **is** substituted in a function template (`f<int32_t>`, `decl int32_t y`) |
+| `e_template_calls_template.ivy` | H10.12: `id<T>(x)` inside `outer<T>` instantiates `id<int32_t>` |
+| `e_default_argument_lost.ivy` | `call to 'withdefault<int32_t>' missing argument 2 (parameter 'y' has no default value)` (§8 D6) |
 | `e_alias_template_argument.ivy` | `argument 1 of 'id<MyInt>' expects 'MyInt', got 'int'` — an alias is not resolved in an explicit template argument |
 | `e_body_error_in_instantiated.ivy` | `undeclared identifier 'undefined_name'` (§8 D10) |
 | `e_missing_return.ivy` | `function 'noret<int32_t>' may reach the end without returning a value` (reported at the call site with the mangled name) |

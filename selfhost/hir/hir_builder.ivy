@@ -6144,8 +6144,18 @@ export struct HirBuilder {
                 unsafe {
                     AType* ded = this.alloc_types(cap);
                     if (ded != (AType*)0) {
+                        // H10.12 (T1/T2): deduction is about *this* template's
+                        // parameters.  When the call sits in the body of an
+                        // outer function template its mapping is active, and
+                        // `resolve_alias` would replace the inner parameter
+                        // name (`T`) with the outer concrete type, hiding the
+                        // parameter and failing the deduction.  Suspend the
+                        // outer mapping for the duration of the deduction.
+                        long savedG = this.gmap_base_;
+                        this.gmap_base_ = -1;
                         dedN = this.deduce_template_args(tplIdx, e.astart, e.an,
                                                          ded, cap);
+                        this.gmap_base_ = savedG;
                     }
                     if (dedN >= 0) {
                         tfi = this.instantiate_template(tplIdx, ded, dedN,
@@ -8390,8 +8400,9 @@ export struct HirBuilder {
     // substituteType in hir_builder.cpp: replace the base name of a type
     // when it is a template parameter and recurse into the template
     // arguments.  The pointer depth, the reference-ness and the const
-    // qualifier of the *declaration* are re-applied to the substituted
-    // type (so a `T` deduced as `char const*` becomes a plain `char`).
+    // qualifier of the *usage site* are added to the concrete type (T5:
+    // the oracle overwrote them, so a `T` deduced as `char const*` became
+    // a plain `char`).
     AType substitute_type(AType t, long base) {
         AType result = t;
         if (result.tpl_n > 0) {
@@ -8413,9 +8424,9 @@ export struct HirBuilder {
         if (mi >= 0) {
             AType sub;
             unsafe { sub = this.map_type_[mi]; }
-            sub.ptr_depth = result.ptr_depth;
-            sub.is_ref = result.is_ref;
-            sub.is_const = result.is_const;
+            if (result.is_const != 0) { sub.is_const = 1; }
+            if (result.is_ref != 0) { sub.is_ref = 1; }
+            sub.ptr_depth = sub.ptr_depth + result.ptr_depth;
             return sub;
         }
         return result;
@@ -8517,6 +8528,15 @@ export struct HirBuilder {
             }
             if (isTypeParam) {
                 AType d = argType;
+                // H10.12 (T6): an integer literal's HIR type is `int` (the
+                // oracle's `intType()`), but a deduced `T` is the Ivy
+                // 32-bit integer type, so the specialization is
+                // `f<int32_t>` rather than `f<int>`.
+                if (this.seq(d.base, "int") && d.ptr_depth == 0 &&
+                    d.tpl_n == 0) {
+                    d.base = "int32_t";
+                    d.is_unsigned = 0;
+                }
                 if (paramType.is_const != 0) {
                     d.is_const = 0;
                 }
@@ -8627,9 +8647,11 @@ export struct HirBuilder {
 
     // instantiateTemplate in hir_builder.cpp: build the specialization of
     // a function template.  The signature is substituted with the
-    // template-parameter mapping; the body is the template's body, built
-    // without the mapping (the oracle does not set `currentTypeMapping_`
-    // for a function template).  Returns the HIR function index.
+    // template-parameter mapping; the body is then built with that same
+    // mapping active (T1/T2/T11: the oracle only set
+    // `currentTypeMapping_` for struct templates, so a local `T` and an
+    // explicit `id<T>(x)` inside a function template were left
+    // unsubstituted).  Returns the HIR function index.
     long instantiate_template(long tplAstIdx, AType* args, long n,
                               long line, long col) {
         unsafe {
@@ -8750,9 +8772,10 @@ export struct HirBuilder {
         }
         this.finish_function(idx);
         this.add_instantiated(mangled, idx);
-        // The mapping is only used for the signature: the body of the
-        // specialization is built without it.
-        this.map_n_ = mbase;
+        // The mapping is active while the body is built, exactly like the
+        // struct-template path below.
+        long savedG = this.gmap_base_;
+        this.gmap_base_ = mbase;
         // The pack of this specialization is visible while its body is
         // built (the oracle registers it in `currentPackMapping_`).
         long savedFrame = this.packframe_;
@@ -8764,6 +8787,8 @@ export struct HirBuilder {
             this.build_body(idx, tpl, line, col);
         }
         this.packframe_ = savedFrame;
+        this.gmap_base_ = savedG;
+        this.map_n_ = mbase;
         return idx;
         }
         return -1;

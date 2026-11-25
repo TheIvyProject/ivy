@@ -646,6 +646,65 @@
   stream nên golden `--lex`/`--tokens`/`.ivm` của mọi fixture cũ giữ
   nguyên.
 
+### H10.12 - Template substitution pass 1 (T1, T2, T5, T6, T11)
+
+- **ID**: T1, T2, T5, T6, T11.
+- **Code** (`selfhost/hir/hir_builder.ivy`):
+  - **T1/T11**: `instantiate_template` lưu `gmap_base_`, đặt bằng `mbase`
+    trong lúc dựng body rồi khôi phục. `resolve_alias` nhờ đó thay `T` ở
+    khai báo local và return trong **function template** giống hệt nhánh
+    struct-template. `map_n_` vẫn được reset như cũ sau khi build.
+  - **T2**: nhánh template-id call đã thay argument tường minh bằng
+    `substitute_type(..., gmap_base_)`; khi body của function template
+    chạy với mapping active, `id<T>(x)` trong `outer<T>` được thay thành
+    `id<int32_t>(x)` (trước đây `gmap_base_` rỗng nên thành `id<T>`).
+  - **T5**: `substitute_type` **cộng** const/ref/pointer của usage site vào
+    type cụ thể thay vì ghi đè, nên `T` suy ra là `char const*` giữ nguyên
+    `char const*` (trước đây thành `char`).
+  - **T6**: `deduce_template_args` chuẩn hoá `int` (type HIR của integer
+    literal) thành `int32_t`, nên `f(1)` và `f<int32>(1)` cùng một
+    specialization `f<int32_t>`.
+  - **Hệ quả T1 (deduction)**: khi call nằm trong body của một function
+    template khác, `deduce_template_args` tạm gỡ `gmap_base_` (`-1`) rồi
+    khôi phục. Nếu không, `resolve_alias` thay tên tham số của template
+    **bên trong** (`T`) bằng type cụ thể của template ngoài, làm mất tham
+    số và báo `cannot deduce template arguments` (`04_nested_instantiation`,
+    `04_recursive`).
+- **Fixture**:
+  - Mới (`selfhost/corpus/hir/template/`):
+    - `h10_T1_local_T.ivy` - `twice<int32>` có `T y = x` + return `y`.
+    - `h10_T2_nested_explicit_arg.ivy` - `relay<T>` gọi `id<T>(x)`.
+    - `h10_T5_qualifier_substitution.ivy` - `keep("hello")` giữ `char const*`.
+    - `h10_T6_deduce_int32.ivy` - `id(7)` và `id<int32>(7)` dùng chung
+      specialization.
+  - Cập nhật nội dung (giữ tên cũ, không rename):
+    - `01_deduce_literal.ivy` → `identity<int32_t>` thay vì `int`.
+    - `01_deduce_string.ivy` → `keep("hello")` hợp lệ, giữ `char const*`.
+    - `e_local_type_param_not_substituted.ivy` → giờ **thành công** (T1).
+    - `e_template_calls_template.ivy` → giờ **thành công** (T2).
+    - `02_explicit_overrides_deduction.ivy` - hai call cùng specialization.
+    - `05_local_type_param.ivy` - comment phản ánh T11 (struct vẫn đúng).
+    - `e_deduce_conflict.ivy` - đổi tham số thứ hai sang `int64` để vẫn
+      kiểm tra xung đột sau khi literal thành `int32_t`.
+  - Golden thay đổi dây chuyền do T6 (literal → `int32_t`), nội dung không
+    đổi: `01_deduce_const_ref`, `01_deduce_two_params`,
+    `03_mixed_pack_deduced`, `05_duplicate_template_name_implicit_call`,
+    `e_default_argument_lost`, `216_variadic_fixed_pack`,
+    `h10_C15_ref_bind_temp`, `h10_P2_value_template_arg`,
+    `33_template_named_move`, `53_template_param_moved` (`T y = x` nay được
+    thay nên lộ đúng lỗi moved-out).
+- **Golden**: 4 fixture mới × 10 mode; corpus 1099 → **1103**, link
+  289 (không đổi). 21 fixture có provenance `expected:H10.12`
+  (`corpus.txt` không thêm `243_import_cpp.ivy`/`244_import_c.ivy`).
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `A31C2CFBA95EEB28EEE4EC3AF286C3AD9DCD28AF9DFCCB17C0BCDB1C8EA5FB0D`
+  (27194880 B), golden 13032 checks / 0 failures (1103 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`, 3 executable).
+- **Ghi chú**: đây là bug oracle **có chủ đích** được sửa trong H10 (hai
+  fixture `e_*` mang tên "lỗi" nhưng nay là fixture thành công; tên giữ
+  nguyên vì `corpus.txt` không cho rename). `01_deduce_pointer`,
+  `01_const_param`, `e_argument_type_mismatch` (p15) vẫn giữ hành vi cũ.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -661,7 +720,7 @@
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ✅ |
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ✅ |
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ✅ |
-| H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ☐ |
+| H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ✅ |
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ☐ |
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ☐ |
 | H10.15 | M1, M2 | `.ivm` escape | ☐ |

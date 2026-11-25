@@ -1,4 +1,5 @@
 // The same type parameter deduced twice with two different types: the
-// deduction fails.
+// deduction fails.  The literal is normalised to `int32_t` (H10.12, T6), so
+// the second argument is `int64_t` to keep the two types different.
 template <typename T> T two(T a, T b) { return a; }
-void f() { int32 x = 1; int32 a = two(1, x); }
+void f() { int64 x = 1; int32 a = two(1, x); }

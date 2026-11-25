@@ -1,0 +1,5 @@
+// H10.12 (T2): a template may call another template with an explicit type
+// argument that mentions its own parameter (`id<T>(x)`).
+template <typename T> T id(T x) { return x; }
+template <typename T> T relay(T x) { return id<T>(x); }
+void f() { int32 r = relay<int32>(9); }

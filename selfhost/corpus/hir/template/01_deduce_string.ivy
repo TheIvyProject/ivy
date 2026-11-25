@@ -1,5 +1,4 @@
-// A string literal deduces `char const*`, but the substitution into a plain
-// `T` parameter drops the const and the pointer qualifiers, so the call
-// reports an argument type mismatch.
-template <typename T> T identity(T x) { return x; }
-void f() { int32 a = identity("hello"); }
+// H10.12 (T5): a string literal deduces `char const*`; substituting it into a
+// plain `T` parameter keeps the const and the pointer qualifiers.
+template <typename T> int32 keep(T x) { return 0; }
+void f() { int32 a = keep("hello"); }

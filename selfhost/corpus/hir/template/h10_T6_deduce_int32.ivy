@@ -1,0 +1,4 @@
+// H10.12 (T6): an integer literal deduces `int32_t`, so the deduced call and
+// the explicit `id<int32>` share one specialization.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id(7); int32 b = id<int32>(7); }

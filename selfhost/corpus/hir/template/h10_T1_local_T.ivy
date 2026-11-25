@@ -1,0 +1,4 @@
+// H10.12 (T1): a local declaration of type `T` and the return of type `T`
+// are substituted with the concrete argument type.
+template <typename T> T twice(T x) { T y = x; return y; }
+void f() { int32 r = twice<int32>(5); }

@@ -1,5 +1,4 @@
-// Inside a struct template the type mapping IS active, so a local
-// declaration of the parameter type is substituted (the opposite of a
-// function template).
+// H10.12 (T11): inside a struct template the type mapping is active, so a
+// local declaration of the parameter type is substituted there too.
 template <typename T> struct Box { T value; T get() { T local = this.value; return local; } };
 void f() { Box<int32> b; }

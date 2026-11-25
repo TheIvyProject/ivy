@@ -59,17 +59,17 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 
 | ID | Oracle bug | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|
-| **T1** (B1) | Khai báo local kiểu `T` trong function template **không** được thay thế | `hir_builder.cpp:503-505` (`currentTypeMapping_` rỗng cho function template) | `selfhost/hir/hir_builder.ivy` | C10, p28 |
-| **T2** (B2) | Template gọi template khác với argument tường minh **không** thay thế argument | cùng gốc T1 | `hir_builder.ivy` | C11, p27 |
+| **T1** (B1) | Khai báo local kiểu `T` trong function template **không** được thay thế | `hir_builder.cpp:503-505` (`currentTypeMapping_` rỗng cho function template) | **H10.12**: `instantiate_template` giữ `gmap_base_` trong lúc build body, nên `resolve_alias` thay `T` ở local/return y như struct template | `TEMPLATE_NOTES.md` §3 (C10), `H10_NOTES.md` H10.12, `h10_T1_local_T` |
+| **T2** (B2) | Template gọi template khác với argument tường minh **không** thay thế argument | cùng gốc T1 | **H10.12**: explicit arg ở call site được thay bằng mapping đang active, `id<T>(x)` → `id<int32_t>` | `TEMPLATE_NOTES.md` §3 (C11), `H10_NOTES.md` H10.12, `h10_T2_nested_explicit_arg` |
 | **T3** (B3) | `sizeof`/`alignof` của template-id trả **4** (fallback) thay vì layout thật | `hir_builder.cpp:480` (`typeSize` fallback) | `hir_builder.ivy` | p48, p36 |
 | **T4** (B4) | Struct-template specialization **mất base class** | `hir_builder.cpp:5442-5448` | `hir_builder.ivy` | p49 |
-| **T5** (B5) | `const`/pointer qualifier của type cụ thể bị mất khi thay vào tham số `T` | `substituteType` | `hir_builder.ivy` | p15 |
-| **T6** (B6) | `T` suy ra từ integer literal là `int`, không phải `int32_t` | `intType()` = `"int"` | `hir_builder.ivy` | C03 |
+| **T5** (B5) | `const`/pointer qualifier của type cụ thể bị mất khi thay vào tham số `T` | `substituteType` | **H10.12**: `substitute_type` cộng qualifier của usage site vào type cụ thể (giữ const/pointer) thay vì ghi đè | `TEMPLATE_NOTES.md` §5, `H10_NOTES.md` H10.12, `h10_T5_qualifier_substitution` |
+| **T6** (B6) | `T` suy ra từ integer literal là `int`, không phải `int32_t` | `intType()` = `"int"` | **H10.12**: `deduce_template_args` chuẩn hoá `int` (type của literal) thành `int32_t`, nên specialization là `f<int32_t>` | `TEMPLATE_NOTES.md` §3 (C03), `H10_NOTES.md` H10.12, `h10_T6_deduce_int32` |
 | **T7** (B7) | Template argument thừa được chấp nhận im lặng; tên mangled chứa chúng | `instantiateTemplate` map `min(#params,#args)` | `hir_builder.ivy` | p11, p80 |
 | **T8** (B8) | Hai template cùng tên: cái sau **thay** cái trước (không overload) | `templates_` key theo tên | `hir_builder.ivy` | p53 |
 | **T9** (B9) | `Box<T>` là **kiểu tham số** không bao giờ resolve → mọi call mismatch | `instantiateTemplate` không gọi `resolveTemplateStructType` trên param | `hir_builder.ivy` | p60 |
 | **T10** (B10) | Pack expansion trong call (`f(args...)`) hỏng | pack name không phải scope name | `hir_builder.ivy` | p85 |
-| **T11** (B11) | `currentTypeMapping_` được set khi instantiate **struct** nhưng không khi **function** | `hir_builder.cpp:5460` vs `:4995` | `hir_builder.ivy` | C11 vs p76 |
+| **T11** (B11) | `currentTypeMapping_` được set khi instantiate **struct** nhưng không khi **function** | `hir_builder.cpp:5460` vs `:4995` | **H10.12**: function-template instantiation set `gmap_base_` giống struct; nhánh struct không đổi | `TEMPLATE_NOTES.md` §3 (C11 vs p76), `H10_NOTES.md` H10.12, `05_struct_calls_template` |
 | **T12** (B12) | Concept name không tồn tại được coi là **thỏa** im lặng | `hir_builder.cpp:4838-4841` | `hir_builder.ivy` | p21 |
 | **T13** (B13) | Non-type template parameter **không** bao giờ được bind | `instantiateTemplate` chỉ map param `isTypename` | `hir_builder.ivy` | p71, t03 |
 

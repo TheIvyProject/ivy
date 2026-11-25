@@ -1,4 +1,5 @@
-// Implicit deduction: an integer literal deduces the type `int` (not
-// `int32_t`), so the specialization is named `identity<int>`.
+// H10.12 (T6): implicit deduction from an integer literal deduces `int32_t`
+// (not the literal's HIR type `int`), so the specialization is
+// `identity<int32_t>`.
 template <typename T> T identity(T x) { return x; }
 void f() { int32 a = identity(1); }

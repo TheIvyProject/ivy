@@ -1,0 +1,4 @@
+// H10.12 (T5): substitution into a plain `T` parameter keeps the concrete
+// type's const and pointer qualifiers (`char const*`, not `char`).
+template <typename T> int32 keep(T x) { return 0; }
+void f() { int32 a = keep("hello"); }

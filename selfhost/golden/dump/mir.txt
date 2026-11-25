@@ -3404,7 +3404,7 @@ function count_args<int,int,int>
     ret
       int 3
 
-@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 638 0
+@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 662 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3426,20 +3426,20 @@ function main
     ret
       int 0
 
-function count_after<int>
-  return int(int first)
+function count_after<int32_t>
+  return int(int32_t first)
   block 0
     ret
       int 0
 
-function count_after<int,int>
-  return int(int first, int __rest0)
+function count_after<int32_t,int>
+  return int(int32_t first, int __rest0)
   block 0
     ret
       int 1
 
-function count_after<int,int,int>
-  return int(int first, int __rest0, int __rest1)
+function count_after<int32_t,int,int>
+  return int(int32_t first, int __rest0, int __rest1)
   block 0
     ret
       int 2
@@ -12396,16 +12396,16 @@ function f
 
 @@ selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy 109 1
 selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy:5:15: error: use of moved-out variable 'move'
-@@ selfhost/corpus/hir/move/33_template_named_move.ivy 150 0
+@@ selfhost/corpus/hir/move/33_template_named_move.ivy 166 0
 function g
   return void()
   block 0
     eval
-      call : int
+      call : int32_t
         int 1
 
-function move<int>
-  return int(int x)
+function move<int32_t>
+  return int32_t(int32_t x)
   block 0
     ret
       ident x
@@ -12481,10 +12481,9 @@ function f
 selfhost/corpus/hir/move/51_move_in_switch_case.ivy:11:15: error: use of moved-out variable 'x'
 @@ selfhost/corpus/hir/move/52_move_for_var_in_body.ivy 96 1
 selfhost/corpus/hir/move/52_move_for_var_in_body.ivy:5:19: error: use of moved-out variable 'i'
-@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 358 1
+@@ selfhost/corpus/hir/move/53_template_param_moved.ivy 227 1
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
-selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
+selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int32_t>' may reach the end without returning a value
 @@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 168 0
 function f
   return int32_t(const int32_t& x [lt:a])
@@ -12872,16 +12871,16 @@ function identity<char>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 167 0
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 183 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int
+      call : int32_t
         int 1
 
-function id<int>
-  return int(const int& x)
+function id<int32_t>
+  return int32_t(const int32_t& x)
   block 0
     ret
       ident x
@@ -12900,16 +12899,16 @@ function identity<double>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 166 0
+@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 182 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int
+      call : int32_t
         int 1
 
-function identity<int>
-  return int(int x)
+function identity<int32_t>
+  return int32_t(int32_t x)
   block 0
     ret
       ident x
@@ -12949,8 +12948,20 @@ function ref<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_string.ivy 135 1
-selfhost/corpus/hir/template/01_deduce_string.ivy:5:31: error: argument 1 of 'identity<char const*>' expects 'char', got 'const char*'
+@@ selfhost/corpus/hir/template/01_deduce_string.ivy 206 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+        string "hello" [lt: static]
+
+function keep<char const*>
+  return int32_t(const char* x)
+  block 0
+    ret
+      int 0
+
 @@ selfhost/corpus/hir/template/01_deduce_struct.ivy 169 0
 function f
   return void()
@@ -12966,17 +12977,17 @@ function identity<P>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 187 0
+@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 211 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int
+      call : int32_t
         int 1
         int 2
 
-function pair<int,int>
-  return int(int a, int b)
+function pair<int32_t,int32_t>
+  return int32_t(int32_t a, int32_t b)
   block 0
     ret
       ident a
@@ -13018,7 +13029,7 @@ function identity<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 310 0
+@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 238 0
 function f
   return void()
   block 0
@@ -13026,17 +13037,11 @@ function f
       call : int32_t
         int 1
     alloca int32_t b
-      call : int
+      call : int32_t
         int 2
 
 function identity<int32_t>
   return int32_t(int32_t x)
-  block 0
-    ret
-      ident x
-
-function identity<int>
-  return int(int x)
   block 0
     ret
       ident x
@@ -13112,7 +13117,7 @@ function count_after<int32_t,int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 212 0
+@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 220 0
 function f
   return void()
   block 0
@@ -13121,8 +13126,8 @@ function f
         int 10
         int 20
 
-function count_after<int,int>
-  return int32_t(int first, int __rest0)
+function count_after<int32_t,int>
+  return int32_t(int32_t first, int __rest0)
   block 0
     ret
       int 0
@@ -13442,16 +13447,16 @@ function f
     alloca Box<int32_t> b
     alloca Box<int32_t> c
 
-@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 163 0
+@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 179 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int
+      call : int32_t
         int 1
 
-function TDup2<int>
-  return int(int x)
+function TDup2<int32_t>
+  return int32_t(int32_t x)
   block 0
     ret
       ident x
@@ -13855,17 +13860,30 @@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: concept 'Add
 selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:31: error: failed to deduce template arguments for 'add'
 selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
 @@ selfhost/corpus/hir/template/e_deduce_conflict.ivy 107 1
-selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
-@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
-selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
+selfhost/corpus/hir/template/e_deduce_conflict.ivy:5:38: error: cannot deduce template arguments for 'two'
+@@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 157 1
+selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int32_t>' missing argument 2 (parameter 'y' has no default value)
 @@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 119 1
 selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
-@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 302 1
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:34: error: cannot initialize variable 'y' of type 'T' with a value of type 'int32_t'
-selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy:3:43: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_local_type_param_not_substituted.ivy 210 0
+function g
+  return void()
+  block 0
+    alloca int32_t r
+      call : int32_t
+        int 1
+
+function f<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    alloca int32_t y
+      ident x
+    ret
+      ident y
+
 @@ selfhost/corpus/hir/template/e_long_diagnostic_message.ivy 898 1
 selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:15: error: undeclared identifier 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001'
 selfhost/corpus/hir/template/e_long_diagnostic_message.ivy:6:144: error: 'aVeryLongNameThatIsNotDeclaredAnywhereInThisTranslationUnitAtAll_0000000000000000000000000000000000000000000000000000000000000001' is not a template
@@ -13880,10 +13898,27 @@ selfhost/corpus/hir/template/e_not_a_template.ivy:3:27: error: 'plain' is not a 
 @@ selfhost/corpus/hir/template/e_struct_concept_fail.ivy 283 1
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_struct_concept_fail.ivy:6:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
-@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 391 1
-selfhost/corpus/hir/template/e_template_calls_template.ivy:4:35: error: cannot return value of type 'T' from function returning 'T'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:51: error: argument 1 of 'id<T>' expects 'T', got 'int32_t'
-selfhost/corpus/hir/template/e_template_calls_template.ivy:5:38: error: cannot return value of type 'T' from function returning 'int32_t'
+@@ selfhost/corpus/hir/template/e_template_calls_template.ivy 284 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+        int 1
+
+function outer<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      call : int32_t
+        ident x
+
+function id<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      ident x
+
 @@ selfhost/corpus/hir/template/e_undeclared_identifier.ivy 198 1
 selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:22: error: undeclared identifier 'nosuch'
 selfhost/corpus/hir/template/e_undeclared_identifier.ivy:4:28: error: 'nosuch' is not a template
@@ -20082,18 +20117,18 @@ function main
 
 @@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
 selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
-@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 201 0
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 221 0
 function main
   return int32_t()
   block 0
     ret
-      binary '-' : int
-        call : int
+      binary '-' : int32_t
+        call : int32_t
           int 7
         int 7
 
-function id<int>
-  return int(const int& x)
+function id<int32_t>
+  return int32_t(const int32_t& x)
   block 0
     ret
       ident x
@@ -20253,14 +20288,14 @@ function main
         member .v : Box<int32_t>
           ident w
 
-@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 443 0
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 459 0
 function main
   return int32_t()
   block 0
     alloca int32_t a
       call : int32_t
     alloca int32_t b
-      call : int
+      call : int32_t
         int 7
     ret
       binary '-' : int32_t
@@ -20277,8 +20312,8 @@ function fixed<3>
     ret
       int 42
 
-function id<int>
-  return int(int x)
+function id<int32_t>
+  return int32_t(int32_t x)
   block 0
     ret
       ident x
@@ -20320,3 +20355,71 @@ function main
 selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
 @@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
 selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name
+@@ selfhost/corpus/hir/template/h10_T1_local_T.ivy 214 0
+function f
+  return void()
+  block 0
+    alloca int32_t r
+      call : int32_t
+        int 5
+
+function twice<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    alloca int32_t y
+      ident x
+    ret
+      ident y
+
+@@ selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy 284 0
+function f
+  return void()
+  block 0
+    alloca int32_t r
+      call : int32_t
+        int 9
+
+function relay<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      call : int32_t
+        ident x
+
+function id<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      ident x
+
+@@ selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy 206 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+        string "hello" [lt: static]
+
+function keep<char const*>
+  return int32_t(const char* x)
+  block 0
+    ret
+      int 0
+
+@@ selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy 232 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+        int 7
+    alloca int32_t b
+      call : int32_t
+        int 7
+
+function id<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      ident x
+
