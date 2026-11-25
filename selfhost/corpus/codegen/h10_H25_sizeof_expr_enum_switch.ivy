@@ -1,0 +1,24 @@
+// H25: `sizeof(<expression>)` folds from the operand's type, and a `switch`
+// accepts an enum condition (the oracle rejected both after parsing).
+enum class Color { Red, Green, Blue };
+
+struct Pair {
+    int32 a;
+    int64 b;
+};
+
+int32 main() {
+    Pair p;
+    int64 n = sizeof(p);
+    int64 m = sizeof(p.a);
+    Color c = Color::Green;
+    switch (c) {
+        case Color::Red:
+            return 1;
+        case Color::Green:
+            break;
+        default:
+            return 3;
+    }
+    return n + m - 20;
+}

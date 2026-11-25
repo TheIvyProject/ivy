@@ -4898,26 +4898,31 @@ function
       member . x
         index
           ident a          int 1
-@@ selfhost/corpus/hir/borrow/01_param_lt_leading_form.ivy 89 0
+@@ selfhost/corpus/hir/borrow/01_param_lt_leading_form.ivy 132 0
 function 
-  return const int32_t first(const int32_t x)
+  return const int32_t first(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident x
-@@ selfhost/corpus/hir/borrow/01_param_lt_ptr.ivy 63 0
+@@ selfhost/corpus/hir/borrow/01_param_lt_ptr.ivy 85 0
 function 
-  return int32_t f(int32_t* p)
+  return int32_t f(int32_t* p [lt:a])
+  lifetimes: a
   (declaration only)
 
-@@ selfhost/corpus/hir/borrow/01_param_lt_ref.ivy 77 0
+@@ selfhost/corpus/hir/borrow/01_param_lt_ref.ivy 99 0
 function 
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:a])
+  lifetimes: a
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/01_param_lt_shared.ivy 94 0
+@@ selfhost/corpus/hir/borrow/01_param_lt_shared.ivy 123 0
 function 
-  return int32_t f(const int32_t x, const int32_t y)
+  return int32_t f(const int32_t x [lt:a], const int32_t y [lt:a])
+  lifetimes: a
   block
     return
       int 1
@@ -4927,44 +4932,55 @@ function
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/02_lt_list_multiple.ivy 62 0
+@@ selfhost/corpus/hir/borrow/02_lt_list_multiple.ivy 79 0
 function 
   return int32_t f()
+  lifetimes: a b
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/02_lt_list_single.ivy 62 0
+@@ selfhost/corpus/hir/borrow/02_lt_list_single.ivy 77 0
 function 
   return int32_t f()
+  lifetimes: a
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/02_lt_list_used_by_params.ivy 94 0
+@@ selfhost/corpus/hir/borrow/02_lt_list_used_by_params.ivy 125 0
 function 
-  return int32_t f(const int32_t x, const int32_t y)
+  return int32_t f(const int32_t x [lt:a], const int32_t y [lt:b])
+  lifetimes: a b
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/03_ret_lt_by_value.ivy 62 0
+@@ selfhost/corpus/hir/borrow/03_ret_lt_by_value.ivy 98 0
 function 
   return int32_t f()
+  lifetimes: a
+  return lifetime: a
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/03_ret_lt_leading_form.ivy 85 0
+@@ selfhost/corpus/hir/borrow/03_ret_lt_leading_form.ivy 128 0
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident x
-@@ selfhost/corpus/hir/borrow/03_ret_lt_ptr_return.ivy 54 0
+@@ selfhost/corpus/hir/borrow/03_ret_lt_ptr_return.ivy 90 0
 function 
   return int32_t* f()
+  lifetimes: a
+  return lifetime: a
   (declaration only)
 
-@@ selfhost/corpus/hir/borrow/03_ret_lt_ref.ivy 85 0
+@@ selfhost/corpus/hir/borrow/03_ret_lt_ref.ivy 128 0
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident x
@@ -4998,15 +5014,17 @@ function [[ivy::lt_def(a)]][[ivy::lt_ret(a)]]
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/05_prec_declared_list_native_first.ivy 127 0
+@@ selfhost/corpus/hir/borrow/05_prec_declared_list_native_first.ivy 149 0
 function [[ivy::lt_def(b)]]
-  return int32_t f(const int32_t x, const int32_t y [[ivy::lt(b)]])
+  return int32_t f(const int32_t x [lt:a], const int32_t y [[ivy::lt(b)]])
+  lifetimes: a
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/05_prec_dup_native_and_legacy.ivy 191 1
+@@ selfhost/corpus/hir/borrow/05_prec_dup_native_and_legacy.ivy 213 1
 function [[ivy::lt_def(a)]]
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:a])
+  lifetimes: a
   block
     return
       int 1
@@ -5017,21 +5035,25 @@ function [[ivy::lt_def(a)]]
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/05_prec_param_native_wins.ivy 92 0
+@@ selfhost/corpus/hir/borrow/05_prec_param_native_wins.ivy 116 0
 function 
-  return int32_t f(const int32_t x [[ivy::lt(b)]])
+  return int32_t f(const int32_t x [lt:a] [[ivy::lt(b)]])
+  lifetimes: a b
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/05_prec_return_legacy_wins.ivy 113 0
+@@ selfhost/corpus/hir/borrow/05_prec_return_legacy_wins.ivy 156 0
 function [[ivy::lt_ret(b)]][[ivy::lt_def(b)]]
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: b
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/06_dump_constexpr.ivy 62 0
+@@ selfhost/corpus/hir/borrow/06_dump_constexpr.ivy 77 0
 function 
   return int32_t f()
+  lifetimes: a
   block
     return
       int 1
@@ -5040,22 +5062,27 @@ function [extern "C"] [[ivy::lt_def(a)]]
   return int32_t g(const int32_t x [[ivy::lt(a)]])
   (declaration only)
 
-@@ selfhost/corpus/hir/borrow/06_dump_fn_lifetimes_and_params.ivy 102 0
+@@ selfhost/corpus/hir/borrow/06_dump_fn_lifetimes_and_params.ivy 154 0
 function 
-  return const int32_t f(const int32_t x, const int32_t y)
+  return const int32_t f(const int32_t x [lt:a], const int32_t y [lt:b])
+  lifetimes: a b
+  return lifetime: a
   block
     return
       ident x
 @@ selfhost/corpus/hir/borrow/06_dump_method_param_lt.ivy 115 1
 selfhost/corpus/hir/borrow/06_dump_method_param_lt.ivy:4:15: error: lifetime '$a' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/06_dump_prototype_only.ivy 74 0
+@@ selfhost/corpus/hir/borrow/06_dump_prototype_only.ivy 117 0
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   (declaration only)
 
-@@ selfhost/corpus/hir/borrow/06_dump_template_fn.ivy 155 0
+@@ selfhost/corpus/hir/borrow/06_dump_template_fn.ivy 177 0
 function 
-  return int32_t pick(const int32_t x)
+  return int32_t pick(const int32_t x [lt:a])
+  lifetimes: a
   block
     return
       int 1
@@ -5064,37 +5091,42 @@ function
   block
     return
       int 1
-@@ selfhost/corpus/hir/borrow/e_01_lt_list_empty_with_param.ivy 197 1
+@@ selfhost/corpus/hir/borrow/e_01_lt_list_empty_with_param.ivy 204 1
 function 
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:a])
   block
     return
       int 1
 selfhost/corpus/hir/borrow/e_01_lt_list_empty_with_param.ivy:2:6: error: lifetime '$a' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/e_01_undeclared_param_lt.ivy 192 1
+@@ selfhost/corpus/hir/borrow/e_01_undeclared_param_lt.ivy 214 1
 function 
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:b])
+  lifetimes: a
   block
     return
       int 1
 selfhost/corpus/hir/borrow/e_01_undeclared_param_lt.ivy:2:6: error: lifetime '$b' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt.ivy 205 1
+@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt.ivy 248 1
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: b
   block
     return
       ident x
 selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt.ivy:2:1: error: return lifetime '$b' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt_no_list.ivy 213 1
+@@ selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt_no_list.ivy 234 1
 function 
   return const int32_t f(const int32_t x)
+  return lifetime: b
   block
     return
       ident x
 selfhost/corpus/hir/borrow/e_02_undeclared_ret_lt_no_list.ivy:1:1: error: return lifetime '$b' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/e_03_lt_on_byvalue_param.ivy 203 1
+@@ selfhost/corpus/hir/borrow/e_03_lt_on_byvalue_param.ivy 225 1
 function 
-  return int32_t f(int32_t x)
+  return int32_t f(int32_t x [lt:a])
+  lifetimes: a
   block
     return
       ident x
@@ -5157,18 +5189,21 @@ function
 
 selfhost/corpus/hir/borrow/e_10_ptr_ret_no_lt.ivy:1:1: error: raw pointer return type requires an unsafe block
 selfhost/corpus/hir/borrow/e_10_ptr_ret_no_lt.ivy:1:1: error: function 'f' returns a pointer but has no return lifetime — use `lifetime<$a>` and annotate the return type with $a
-@@ selfhost/corpus/hir/borrow/e_11_diag_order.ivy 439 1
+@@ selfhost/corpus/hir/borrow/e_11_diag_order.ivy 489 1
 function 
-  return const int32_t bad(int32_t p, const int32_t q)
+  return const int32_t bad(int32_t p [lt:a], const int32_t q [lt:b])
+  lifetimes: a
+  return lifetime: c
   block
     return
       ident q
 selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:1: error: return lifetime '$c' is not declared in lifetime<...>
 selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:8: error: lifetime annotation requires a reference or pointer parameter
 selfhost/corpus/hir/borrow/e_11_diag_order.ivy:2:20: error: lifetime '$b' is not declared in lifetime<...>
-@@ selfhost/corpus/hir/borrow/e_12_tpl_param_lt_order.ivy 328 1
+@@ selfhost/corpus/hir/borrow/e_12_tpl_param_lt_order.ivy 357 1
 function 
-  return int32_t f(Box x, const int32_t y)
+  return int32_t f(Box x [lt:a], const int32_t y [lt:b])
+  lifetimes: a
   block
     return
       int 1
@@ -8913,9 +8948,14 @@ function
 @@ selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy 257 1
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:3:13: error: array size must be an integer constant (variable-length arrays are not supported)
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:4:1: error: expected ']' after array size
-@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 238 1
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:4:22: error: expected type after 'sizeof(' (sizeof(expression) is not supported)
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:5:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 124 0
+function 
+  return void f()
+  block
+    decl int32_t a =
+      int 1    decl int32_t b =
+      sizeof(expr)
+        ident a
 @@ selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy 197 1
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:3:23: error: expected type after 'alignof('
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:4:1: error: expected ';' after declaration
@@ -9608,9 +9648,10 @@ function
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
 selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
-@@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 130 0
+@@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 152 0
 function 
-  return int32_t f(const int32_t x)
+  return int32_t f(const int32_t x [lt:a])
+  lifetimes: a
   block
     expr
       call
@@ -14016,9 +14057,11 @@ function
       int 1    decl int32_t y =
       call
         ident move        ident x
-@@ selfhost/corpus/mir/cfg/06_lt_native_syntax.ivy 85 0
+@@ selfhost/corpus/mir/cfg/06_lt_native_syntax.ivy 128 0
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident x
@@ -14368,16 +14411,20 @@ function
         return
           int 0
 selfhost/corpus/mir/lifetime/61c_nextcase_to_default.ivy:6:13: error: nextcase target 'two' is not a case label in this switch
-@@ selfhost/corpus/mir/lifetime/80_lt_mismatch.ivy 222 1
+@@ selfhost/corpus/mir/lifetime/80_lt_mismatch.ivy 267 1
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a b
+  return lifetime: b
   block
     return
       ident x
 selfhost/corpus/mir/lifetime/80_lt_mismatch.ivy:4:5: error: returned reference has lifetime '$a' but the function declares lifetime '$b'
-@@ selfhost/corpus/mir/lifetime/80b_lt_match_ok.ivy 85 0
+@@ selfhost/corpus/mir/lifetime/80b_lt_match_ok.ivy 128 0
 function 
-  return const int32_t f(const int32_t x)
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident x
@@ -14393,13 +14440,15 @@ function
       call
         ident g
 selfhost/corpus/mir/lifetime/80c_unknown_ret_plain.ivy:4:5: error: returned reference has unknown lifetime; annotate the function with lifetime<$a> and tie the return to a parameter
-@@ selfhost/corpus/mir/lifetime/80d_unknown_ret_annotated.ivy 316 1
+@@ selfhost/corpus/mir/lifetime/80d_unknown_ret_annotated.ivy 359 1
 function 
   return const int32_t g()
   (declaration only)
 
 function 
-  return const int32_t f(const int32_t p)
+  return const int32_t f(const int32_t p [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       call
@@ -14610,9 +14659,11 @@ function
   return int f(int x)
   (declaration only)
 
-@@ selfhost/corpus/parser/decl/11_lifetime.ivy 59 0
+@@ selfhost/corpus/parser/decl/11_lifetime.ivy 95 0
 function 
   return const int32_t f()
+  lifetimes: a
+  return lifetime: a
   (declaration only)
 
 @@ selfhost/corpus/parser/decl/12_ptr_ret.ivy 120 1
@@ -16312,7 +16363,7 @@ function
         member . println
           ident io        string "{} {} {} {}"        int 1        float 2        int 3        float 0    return
       int 0
-@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1029 0
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1072 0
 function [extern "C"] 
   return void* __ivy_alloc(unsigned long long n)
   (declaration only)
@@ -16322,7 +16373,9 @@ function [extern "C"]
   (declaration only)
 
 function 
-  return const int32_t peek(const int32_t p)
+  return const int32_t peek(const int32_t p [lt:a])
+  lifetimes: a
+  return lifetime: a
   block
     return
       ident p
@@ -16413,9 +16466,10 @@ function
           binary -
             ident n            int 5          member . id
             ident k        int 9
-@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 419 0
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 448 0
 function 
-  return int32_t first(const int32_t a, const int32_t b)
+  return int32_t first(const int32_t a [lt:a], const int32_t b [lt:a])
+  lifetimes: a
   block
     decl const int32_t r =
       ident a    decl int32_t v =
@@ -16431,3 +16485,151 @@ function
       binary -
         call
           ident first          ident x          ident y        int 3
+@@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 421 1
+function 
+  return int32_t bad()
+  block
+    expr
+      assign =
+        int 1        int 2    return
+      int 0
+function 
+  return int32_t after()
+  block
+    return
+      int 7
+function 
+  return int32_t main()
+  block
+    return
+      binary +
+        call
+          ident bad        call
+          ident after
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 196 0
+function 
+  return T id(const T x)
+  block
+    return
+      ident x
+function 
+  return int32_t main()
+  block
+    return
+      binary -
+        call
+          ident id          int 7        int 7
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 284 0
+function 
+  return int32_t pick(int32_t x)
+  block
+    return
+      int 1
+function 
+  return int32_t pick(float64_t x)
+  block
+    return
+      int 2
+function 
+  return int32_t main()
+  block
+    return
+      binary -
+        call
+          ident pick          float 1.5        int 2
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 331 0
+function 
+  return const int32_t pick(const int32_t x [lt:a])
+  lifetimes: a
+  return lifetime: a
+  block
+    return
+      ident x
+function 
+  return int32_t main()
+  block
+    decl int32_t v =
+      int 5    decl const int32_t r =
+      call
+        ident pick        ident v    return
+      binary -
+        ident r        int 5
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 345 0
+function [[ivy::lt_ret(a)]]
+  return const int32_t f(const int32_t x [lt:a])
+  lifetimes: a b
+  return lifetime: b
+  block
+    return
+      ident x
+function 
+  return int32_t main()
+  block
+    decl int32_t v =
+      int 4    decl const int32_t r =
+      call
+        ident f        ident v    return
+      binary -
+        ident r        int 4
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 369 0
+function 
+  return int32_t runtime_value()
+  block
+    return
+      int 3
+function 
+  return int32_t sq(int32_t x)
+  block
+    return
+      binary *
+        ident x        ident x
+function 
+  return int32_t main()
+  block
+    decl int32_t v =
+      call
+        ident runtime_value    return
+      binary -
+        call
+          ident sq          ident v        int 9
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 270 0
+function 
+  return int32_t move(int32_t x)
+  block
+    return
+      binary +
+        ident x        int 1
+function 
+  return int32_t main()
+  block
+    decl int32_t a =
+      int 3    return
+      binary -
+        call
+          ident move          ident a        int 4
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 560 0
+function 
+  return int32_t main()
+  block
+    decl Pair p
+    decl int64_t n =
+      sizeof(expr)
+        ident p    decl int64_t m =
+      sizeof(expr)
+        member . a
+          ident p    decl Color c =
+      member . Green
+        ident Color    switch
+      ident c      case
+        member . Red
+          ident Color        return
+          int 1      case
+        member . Green
+          ident Color        break
+      default
+        return
+          int 3    return
+      binary -
+        binary +
+          ident n          ident m        int 20

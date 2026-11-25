@@ -1,0 +1,13 @@
+// H20: the `--ast` dump keeps the native lifetime declaration, the native
+// return lifetime and the parameter's native lifetime annotation.  The oracle's
+// dumpAst dropped all three (they were only visible in the HIR dump).
+lifetime<$a>
+fn pick(const int32& $a x) -> const int32& $a {
+    return x;
+}
+
+int32 main() {
+    int32 v = 5;
+    const int32& r = pick(v);
+    return r - 5;
+}

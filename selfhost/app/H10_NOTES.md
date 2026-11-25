@@ -535,6 +535,59 @@
   lifetime" (regression H5.2). H28 in `[lt: ...]` cho `move` là **deviation
   cố ý** so với oracle (xem `ORACLE_BUGS.md`).
 
+### H10.10 - HIR/dump + quirk còn lại
+
+- **ID**: H20, H21, H23, H24, H25, C9, C12, C15.
+- **Code**:
+  - `selfhost/parsing/ast.ivy`: `emit()` in `lifetimes:` (native list),
+    `return lifetime:` và `[lt:a]` của param (cùng format HIR dump); nhánh
+    `sizeof` in `sizeof(expr)` + operand khi `flag=1`.
+  - `selfhost/parsing/parser.ivy`: nhận `sizeof(<expression>)` (kind 18,
+    `flag=1`, operand ở `a`) thay vì lỗi "sizeof(expression) is not
+    supported".
+  - `selfhost/hir/hir_builder.ivy`: `sizeof(expr)` fold `type_size` từ type
+    của operand (build operand nhưng không đánh giá); `is_switch_integral`
+    nhận enum.
+  - `selfhost/codegen/emitter.ivy`: `find_call_target` phân loại float bằng
+    `is_float_base` (type thật) thay `is_fp_ir`; non-lvalue bound vào ref
+    param được materialize (`arg_is_lvalue`/`materialize_arg`); `emit()`
+    dừng vòng definition ngay sau function lỗi và `lower_block` dừng sau
+    instruction lỗi; `consteval` được emit như function thường.
+  - `selfhost/hir/hir.ivy`: cập nhật comment `is_consteval` (flag vẫn giữ
+    trong MIR nhưng không còn dùng để skip).
+- **Fixture** (`selfhost/corpus/codegen/`):
+  - `h10_H20_ast_lifetime.ivy` - `--ast` in native lifetime/return/param;
+    chạy trả 0.
+  - `h10_H21_legacy_ret_wins.ivy` - legacy `[[ivy::lt_ret(a)]]` thắng
+    native `$b`; HIR `return lifetime: a`; chạy trả 0.
+  - `h10_H23_consteval_emit.ivy` - `consteval sq` có call không fold
+    (`runtime_value()`) nên cần definition; chạy trả 0.
+  - `h10_H24_move_overload.ivy` - `move` do người dùng định nghĩa là call
+    thật; chạy trả 0.
+  - `h10_H25_sizeof_expr_enum_switch.ivy` - `sizeof(p)`/`sizeof(p.a)` và
+    `switch` trên `enum class`; chạy trả 0.
+  - `h10_C9_fp_overload.ivy` - `pick(1.5)` chọn overload `float64` thay vì
+    fallback `int32`; chạy trả 0.
+  - `h10_C12_emit_stops.ivy` - lỗi not-assignable ở `bad()`, không emit
+    `after()`; exit 1.
+  - `h10_C15_ref_bind_temp.ivy` - literal bind vào `const T&` được
+    materialize (trước đây rơi vào not-assignable); chạy trả 0.
+- **Golden**: 8 fixture mới × 10 mode; corpus 1085 → 1093, link 275 → 283.
+  Re-baseline toàn bộ vì H20 đổi `dump/ast.txt` của mọi fixture có lifetime;
+  C9 đổi `llvm`/`compile` của fixture overload float; H23 đổi `llvm`/`compile`
+  của `30_consteval_call`; C15 đổi `hir/template/01_deduce_const_ref` từ lỗi
+  sang object/link/run thành công. Provenance `expected:H10.10` cho
+  47 record.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `A8BB3DA9AF04BE4A6B45D32CD84DB7213D8A05AA8DC1EA63C8AA9CA35CB90595`
+  (27 186 176 B), golden **12908 checks / 0 failures** (1093 fixture).
+  `check_repro.ps1` → **PASS** (83 artifacts: 42 object, 38 `.ivm`, 3 exe;
+  stage1 cùng SHA `A8BB3DA9…CB90595`).
+- **Ghi chú**: `is_fp_ir` vẫn dùng cho cast (`emit_cast`); chỉ overload
+  resolution đổi. `materialize_arg` đặt temp ở entry block
+  (`cap_phase_=3`) như nhánh struct-call của `lower_lvalue`. C12/C15 chỉ
+  quan sát được qua exit/stderr vì IR không in khi lỗi.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -548,7 +601,7 @@
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ✅ |
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ✅ |
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ✅ |
-| H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ☐ |
+| H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ✅ |
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ☐ |
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ☐ |
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ☐ |

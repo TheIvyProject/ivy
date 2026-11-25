@@ -3154,14 +3154,19 @@ export struct Parser {
         if (this.kw("sizeof")) {
             this.next();
             this.expect("(", "expected '(' after 'sizeof'");
+            // H10.10 (H25): also accept `sizeof(<expression>)`.  The oracle
+            // rejected it after parsing with
+            // `sizeof(expression) is not supported`; the HIR folds the size
+            // of the operand's type instead.
             if (this.is_type_start() == 0) {
-                this.error_at(this.peek(0),
-                              "expected type after 'sizeof(' (sizeof(expression) is not supported)");
-                this.synchronize();
-                AExpr e0 = this.fresh(18);
-                e0.line = t.line;
-                e0.col = t.col;
-                return this.push_expr(e0);
+                long ex = this.parse_expr();
+                this.expect(")", "expected ')' after sizeof expression");
+                AExpr e = this.fresh(18);
+                e.a = ex;
+                e.flag = 1;
+                e.line = t.line;
+                e.col = t.col;
+                return this.push_expr(e);
             }
             AType ty = this.parse_type();
             this.expect(")", "expected ')' after sizeof type");

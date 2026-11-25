@@ -1,4 +1,4 @@
-// `sizeof` of an expression is not supported.
+// H25: `sizeof` of an expression is supported (folded from its type).
 void f() {
     int32 a = 1;
     int32 b = sizeof(a);

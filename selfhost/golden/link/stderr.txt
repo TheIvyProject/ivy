@@ -269,3 +269,10 @@ ef
 @@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H16_return_local.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 0 0
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 0 0

@@ -1,0 +1,11 @@
+// C15: a non-lvalue bound to a reference parameter is materialized into an
+// entry-block temporary.  The oracle fell through to `lowerLValue`, reported
+// `expression is not assignable [nodeIdx=...]` and lowered the `null` literal.
+template <typename T>
+T id(const T& x) {
+    return x;
+}
+
+int32 main() {
+    return id(7) - 7;
+}

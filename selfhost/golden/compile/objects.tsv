@@ -320,7 +320,7 @@ selfhost/corpus/hir/constexpr/26_constexpr_call_body_call.ivy	87A86A90848BB09BFF
 selfhost/corpus/hir/constexpr/27_constexpr_call_local_decl.ivy	D18E2B81ACD84893D6BAD42003FF880F8C50FD4545BD162D0AB4F6374CC10350	664	-	0
 selfhost/corpus/hir/constexpr/28_constexpr_call_if.ivy	B96D32AF1B8ADC670E978FCC38B636E86A8B3B5AADB4D05D256817FB8DF4D174	667	-	0
 selfhost/corpus/hir/constexpr/29_constexpr_call_ternary.ivy	9694B0656D4B528109A9CC89DE077327186016C76DEEBF1F7260B2B3BEE7DC01	660	-	0
-selfhost/corpus/hir/constexpr/30_consteval_call.ivy	60B1C8CDF5556F10E260926D351C4E5A2B6BAF105FA7736C2EF513D37A0FD110	547	-	0
+selfhost/corpus/hir/constexpr/30_consteval_call.ivy	612E65444B64869FDCD779ED5096E47BA86DF97E2F7C611801E2C531DD1F509B	645	-	0
 selfhost/corpus/hir/constexpr/31_constexpr_call_enum_arg.ivy	A81C83FD2BA3D909A67B868DF5D18A2D08B8D1A680FEEF775E3F61C897CAC8C4	642	-	0
 selfhost/corpus/hir/constexpr/32_constexpr_call_char_arg.ivy	BADBB71A7268248E95D8E88818F07FE68DCE7DA8B8AA6B4EF1B1B7B1EFC147D9	664	-	0
 selfhost/corpus/hir/constexpr/33_constexpr_call_bool_arg.ivy	1ECDD23692CC8D8EDC6E96F370E39A5D41308476B748EB14488C8E52591A50A3	667	-	0
@@ -354,7 +354,7 @@ selfhost/corpus/hir/constexpr/60_switch_constexpr_call.ivy	139F0FFA43CFB605B4DFD
 selfhost/corpus/hir/constexpr/61_constexpr_float_many.ivy	FFB0EE73A94556A2BB9AF9632E6ABFCA11758615101B85D9020F25F6D7B041F1	78186	-	0
 selfhost/corpus/hir/constexpr/62_constexpr_call_float_not.ivy	-	0	-	0
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy	-	0	-	0
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy	-	0	-	0
+selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy	FE53D675A401557B1E1A9DF662707ED40A28559D270C677822331BB0123D2A8B	554	-	0
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy	-	0	-	0
 selfhost/corpus/hir/constexpr/e_05_enum_value_not_const.ivy	-	0	-	0
 selfhost/corpus/hir/constexpr/e_06_enum_value_undefined.ivy	-	0	-	0
@@ -454,7 +454,7 @@ selfhost/corpus/hir/template/01_const_param.ivy	D0CB96045655F1C4516D2FCA9DE77FBF
 selfhost/corpus/hir/template/01_deduce_array.ivy	CB60786617B13829181C453796B85FE002CB435F45E80C5CD553E2E217198CAB	713	-	0
 selfhost/corpus/hir/template/01_deduce_bool.ivy	C698227C290918D4689176C2E80B2DBC94F43FFE0905C09CCFEAE97CFA6A97D2	686	-	0
 selfhost/corpus/hir/template/01_deduce_char.ivy	92C26201E01CB5231D1C525EFCBA0B5AC1F7CF7738F0966B902788D5BD722E2E	681	-	0
-selfhost/corpus/hir/template/01_deduce_const_ref.ivy	-	0	-	0
+selfhost/corpus/hir/template/01_deduce_const_ref.ivy	3E056526979584789D1470EF9258E8E4E1D3EC27D9364AF5E4C3F5E03ED5D47F	677	-	0
 selfhost/corpus/hir/template/01_deduce_double.ivy	70657E7C9C94E665C6349F60F2199B03E61D2A6B66DE089C736B04FAABFCF0D8	838	-	0
 selfhost/corpus/hir/template/01_deduce_literal.ivy	DE141D80EAD999033D490A2251A0DB13F05BA0062414C37CACA7E5F43FC41682	679	-	0
 selfhost/corpus/hir/template/01_deduce_pointer.ivy	CFD523CD84594BA9322A22D01A376B2D833CDD373E7BB10D6008D9C14A28ED50	696	-	0
@@ -611,7 +611,7 @@ selfhost/corpus/hir/type/60_inherit_field.ivy	91AB9808BDA9C22FA2EBF01E6C12BA9CAF
 selfhost/corpus/hir/type/61_inherit_upcast.ivy	6690FFF722F37F41E187089E1D816ED6C1D9B82E212DD07ED4C1B5C8C9159C74	687	-	0
 selfhost/corpus/hir/type/62_static_cast.ivy	E3B39B84FA61603C5774E13E48713D0BE733115AC2E8F8B56FE38B8A7DD9EE0E	615	-	0
 selfhost/corpus/hir/type/63_static_cast_pointer_to_int.ivy	718BB6003FE3FD0983569CE3A2723091492AC672917FD7B27A6B103EB2E15CA5	564	-	0
-selfhost/corpus/hir/type/64_overload_resolution.ivy	65CFFD94DCFC4B3E3F9ED71CFF36E3C1161D985BFDDB36AA92EBFEAAA711A993	801	-	0
+selfhost/corpus/hir/type/64_overload_resolution.ivy	CB3D102D383132518564369BEE737738609AB0011CD5FDB17CD52DFAECC95F1E	940	-	0
 selfhost/corpus/hir/type/65_ptr_void.ivy	A948C3AFE62827DED1F95BC9991C815E5AF61A728B4464BEB48C60848CB31BBA	568	-	0
 selfhost/corpus/hir/type/66_ref_rvalue.ivy	-	0	-	0
 selfhost/corpus/hir/type/67_default_args.ivy	FB2B5BC6A3F301EAAD8CDAC531FCE3C99DCFA60C3DE9FE965CFFF36A09A76120	716	-	0
@@ -1083,3 +1083,11 @@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy	FDB5D00F20A5ACA901A3B0253E2B0D
 selfhost/corpus/codegen/h10_H15_ret_type.ivy	C17053F0BDBA0DFAD8F4204DA71774DB1CCA6723C8E4DEDA7899134375307592	1205	-	0
 selfhost/corpus/codegen/h10_H16_return_local.ivy	743E174E3CFE3DEFDC6BE3CA78024E5A28FB28BD9376624D53B2EF9F2CCF3B17	1396	-	0
 selfhost/corpus/codegen/h10_H28_move_lifetime.ivy	C2C046746AB5B4B363922850E6506A38C94BB019CE0A0C00B7D3F0873EE6B695	812	-	0
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy	-	0	-	0
+selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy	32EBA6DC90592E02C913F9C5C5CABB6318D72B55207C5BFE3A6388B8F732A955	763	-	0
+selfhost/corpus/codegen/h10_C9_fp_overload.ivy	E9322822A7581F041CD438A3854FACEB60E3F73685B2F674F00A9DEDD2463A0A	1009	-	0
+selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy	508F0C6B64B6A36574717D4ED0FC516F63FF719AA43B96182259E785F5F0CBBE	778	-	0
+selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy	F01EE8CD8CD068BC535B14D2178BCF89F14BDCFE978EBB428CABEC280A60391F	775	-	0
+selfhost/corpus/codegen/h10_H23_consteval_emit.ivy	6BDECC41AAF765A31203205F2FDA3D5F755F4FB6C635248FC2864CA76D423675	822	-	0
+selfhost/corpus/codegen/h10_H24_move_overload.ivy	458D135EC697F0AB2C8A924DF89D10AA41600D209908D439BF8EEC882AC1490A	758	-	0
+selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy	378673D7512AD25C5547906907C5B5A7DDDA180DC7E58B9BDEA18C26ECB6F7AD	715	-	0

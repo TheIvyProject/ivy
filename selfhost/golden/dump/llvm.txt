@@ -12110,8 +12110,18 @@ store i32 1, ptr %a.0
 ret void
 }
 
-@@ selfhost/corpus/hir/constexpr/30_consteval_call.ivy 125 0
+@@ selfhost/corpus/hir/constexpr/30_consteval_call.ivy 302 0
 ; LLVM IR emitted by ivy
+define i32 @"?twice@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = mul i32 %tmp.0, 2
+ret i32 %tmp.1
+}
+
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
 br label %bb0
@@ -16472,9 +16482,19 @@ ret void
 @@ selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy 257 1
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:3:13: error: array size must be an integer constant (variable-length arrays are not supported)
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:4:1: error: expected ']' after array size
-@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 238 1
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:4:22: error: expected type after 'sizeof(' (sizeof(expression) is not supported)
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:5:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 198 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+%b.1 = alloca i32
+br label %bb0
+bb0:
+store i32 1, ptr %a.0
+%tmp.0 = trunc i64 4 to i32
+store i32 %tmp.0, ptr %b.1
+ret void
+}
+
 @@ selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy 197 1
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:3:23: error: expected type after 'alignof('
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:4:1: error: expected ';' after declaration
@@ -17279,14 +17299,16 @@ bb0:
 ret i8 %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 492 1
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 409 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
 %a.0 = alloca i32
+%tmp.0 = alloca i32
 br label %bb0
 bb0:
-%tmp.0 = call i32 @"?id_int_@@YHAAV@Z"(ptr null)
-store i32 %tmp.0, ptr %a.0
+store i32 1, ptr %tmp.0
+%tmp.1 = call i32 @"?id_int_@@YHAAV@Z"(ptr %tmp.0)
+store i32 %tmp.1, ptr %a.0
 ret void
 }
 
@@ -17300,7 +17322,6 @@ bb0:
 ret i32 %tmp.1
 }
 
-selfhost/corpus/hir/template/01_deduce_const_ref.ivy:4:25: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
 @@ selfhost/corpus/hir/template/01_deduce_double.ivy 381 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
@@ -20239,7 +20260,7 @@ store i32 %tmp.1, ptr %a.2
 ret void
 }
 
-@@ selfhost/corpus/hir/type/64_overload_resolution.ivy 614 0
+@@ selfhost/corpus/hir/type/64_overload_resolution.ivy 580 0
 ; LLVM IR emitted by ivy
 define i32 @"?f@@YHH@Z"(i32 %arg0) {
 %a.0 = alloca i32
@@ -20266,9 +20287,8 @@ br label %bb0
 bb0:
 %tmp.0 = call i32 @"?f@@YHH@Z"(i32 1)
 store i32 %tmp.0, ptr %a.0
-%tmp.1 = fptosi double 1.500000 to i32
-%tmp.2 = call double @"?f@@YHH@Z"(i32 %tmp.1)
-store double %tmp.2, ptr %b.1
+%tmp.1 = call double @"?f@@YNN@Z"(double 1.500000)
+store double %tmp.1, ptr %b.1
 ret void
 }
 
@@ -26561,6 +26581,239 @@ store i32 4, ptr %y.1
 %tmp.0 = call i32 @"?first@@YHAAVAAV@Z"(ptr %x.0, ptr %y.1)
 %tmp.1 = sub i32 %tmp.0, 3
 ret i32 %tmp.1
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 499 0
+; LLVM IR emitted by ivy
+define i32 @ivy_main() {
+%tmp.0 = alloca i32
+br label %bb0
+bb0:
+store i32 7, ptr %tmp.0
+%tmp.1 = call i32 @"?id_int_@@YHAAV@Z"(ptr %tmp.0)
+%tmp.2 = sub i32 %tmp.1, 7
+ret i32 %tmp.2
+}
+
+define i32 @"?id_int_@@YHAAV@Z"(ptr %arg0) {
+%x.0 = alloca ptr
+store ptr %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %x.0
+%tmp.1 = load i32, ptr %tmp.0
+ret i32 %tmp.1
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 512 0
+; LLVM IR emitted by ivy
+define i32 @"?pick@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+ret i32 1
+}
+
+define i32 @"?pick@@YHN@Z"(double %arg0) {
+%x.0 = alloca double
+store double %arg0, ptr %x.0
+br label %bb0
+bb0:
+ret i32 2
+}
+
+define i32 @ivy_main() {
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?pick@@YHN@Z"(double 1.500000)
+%tmp.1 = sub i32 %tmp.0, 2
+ret i32 %tmp.1
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 564 0
+; LLVM IR emitted by ivy
+define ptr @"?pick@@YAAVAAV@Z"(ptr %arg0) {
+%x.0 = alloca ptr
+store ptr %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %x.0
+ret ptr %tmp.0
+}
+
+define i32 @ivy_main() {
+%v.0 = alloca i32
+%r.1 = alloca ptr
+br label %bb0
+bb0:
+store i32 5, ptr %v.0
+%tmp.0 = call ptr @"?pick@@YAAVAAV@Z"(ptr %v.0)
+store ptr %tmp.0, ptr %r.1
+%tmp.1 = load ptr, ptr %r.1
+%tmp.2 = load i32, ptr %tmp.1
+%tmp.3 = sub i32 %tmp.2, 5
+ret i32 %tmp.3
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 558 0
+; LLVM IR emitted by ivy
+define ptr @"?f@@YAAVAAV@Z"(ptr %arg0) {
+%x.0 = alloca ptr
+store ptr %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %x.0
+ret ptr %tmp.0
+}
+
+define i32 @ivy_main() {
+%v.0 = alloca i32
+%r.1 = alloca ptr
+br label %bb0
+bb0:
+store i32 4, ptr %v.0
+%tmp.0 = call ptr @"?f@@YAAVAAV@Z"(ptr %v.0)
+store ptr %tmp.0, ptr %r.1
+%tmp.1 = load ptr, ptr %r.1
+%tmp.2 = load i32, ptr %tmp.1
+%tmp.3 = sub i32 %tmp.2, 4
+ret i32 %tmp.3
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 661 0
+; LLVM IR emitted by ivy
+define i32 @"?runtime_value@@YHX@Z"() {
+br label %bb0
+bb0:
+ret i32 3
+}
+
+define i32 @"?sq@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = load i32, ptr %x.0
+%tmp.2 = mul i32 %tmp.0, %tmp.1
+ret i32 %tmp.2
+}
+
+define i32 @ivy_main() {
+%v.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?runtime_value@@YHX@Z"()
+store i32 %tmp.0, ptr %v.0
+%tmp.1 = load i32, ptr %v.0
+%tmp.2 = call i32 @"?sq@@YHH@Z"(i32 %tmp.1)
+%tmp.3 = sub i32 %tmp.2, 9
+ret i32 %tmp.3
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 510 0
+; LLVM IR emitted by ivy
+define i32 @"?move@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = add i32 %tmp.0, 1
+ret i32 %tmp.1
+}
+
+define i32 @ivy_main() {
+%a.0 = alloca i32
+br label %bb0
+bb0:
+store i32 3, ptr %a.0
+%tmp.0 = load i32, ptr %a.0
+%tmp.1 = call i32 @"?move@@YHH@Z"(i32 %tmp.0)
+%tmp.2 = sub i32 %tmp.1, 4
+ret i32 %tmp.2
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 777 0
+; LLVM IR emitted by ivy
+%struct.Pair = type { i32, i64 }
+
+define i32 @ivy_main() {
+%p.0 = alloca %struct.Pair
+%n.1 = alloca i64
+%m.2 = alloca i64
+%c.3 = alloca i32
+br label %bb0
+bb0:
+store %struct.Pair zeroinitializer, ptr %p.0
+store i64 16, ptr %n.1
+store i64 4, ptr %m.2
+store i32 1, ptr %c.3
+%tmp.0 = load i32, ptr %c.3
+switch i32 %tmp.0, label %bb4 [
+    i32 0, label %bb2
+    i32 1, label %bb3
+  ]
+bb1:
+%tmp.1 = load i64, ptr %n.1
+%tmp.2 = load i64, ptr %m.2
+%tmp.3 = add i64 %tmp.1, %tmp.2
+%tmp.4 = sext i32 20 to i64
+%tmp.5 = sub i64 %tmp.3, %tmp.4
+%tmp.6 = trunc i64 %tmp.5 to i32
+ret i32 %tmp.6
+bb2:
+ret i32 1
+bb3:
+br label %bb1
+br label %bb1
+bb4:
+ret i32 3
 }
 
 ; C1: C entry point — calls ivy_main()

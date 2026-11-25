@@ -1,0 +1,14 @@
+// H21: a legacy `[[ivy::lt_ret(a)]]` wins over the native return lifetime
+// `$b` on the declaration.  The HIR dump reports `return lifetime: a` and the
+// declared list still contains both names.
+lifetime<$a, $b>
+[[ivy::lt_ret(a)]]
+fn f(const int32& $a x) -> const int32& $b {
+    return x;
+}
+
+int32 main() {
+    int32 v = 4;
+    const int32& r = f(v);
+    return r - 4;
+}

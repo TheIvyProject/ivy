@@ -1835,15 +1835,12 @@ export struct Emitter {
                                     long tb = this.int_bits(pt.base);
                                     if (fb > 0 && tb > 0) {
                                         // int -> int widening is compatible
-                                    } else if (this.is_fp_ir(at.base) &&
-                                               this.is_fp_ir(pt.base)) {
-                                        // float -> float widening.  H8.2: the
-                                        // oracle classifies the *base spelling*
-                                        // (`isFpType(a.base)`, codegen.cpp:1517),
-                                        // so `double` (a float literal) does not
-                                        // match a `float64_t` parameter and the
-                                        // name-only fallback picks the first
-                                        // overload of that name.
+                                    } else if (this.is_float_base(at.base) &&
+                                               this.is_float_base(pt.base)) {
+                                        // float -> float widening.  H10.10
+                                        // (C9): classify the *actual* type
+                                        // (`float64` is a float too), not just
+                                        // the oracle's LLVM spelling table.
                                     } else {
                                         ok = 0;
                                     }
@@ -3149,7 +3146,11 @@ export struct Emitter {
                 if (j < callee.pn) {
                     MParam p = this.mu->params[callee.pstart + j];
                     if (p.type.is_ref != 0) {
-                        v = this.lower_lvalue(ai);
+                        if (this.arg_is_lvalue(a)) {
+                            v = this.lower_lvalue(ai);
+                        } else {
+                            v = this.materialize_arg(a, ai);
+                        }
                         ty = "ptr";
                     } else if (a.type.array_size > 0 && p.type.ptr_depth > 0) {
                         v = this.lower_lvalue(ai);
@@ -3305,8 +3306,13 @@ export struct Emitter {
                     if (p.type.is_ref != 0) {
                         // H6.2h: pass by reference - emit the address of the
                         // lvalue and pass it as `ptr` (CodeGen::lowerExpr's
-                        // Call branch for a reference parameter).
-                        v = this.lower_lvalue(ai);
+                        // Call branch for a reference parameter).  H10.10
+                        // (C15): a non-lvalue is materialized instead.
+                        if (this.arg_is_lvalue(a)) {
+                            v = this.lower_lvalue(ai);
+                        } else {
+                            v = this.materialize_arg(a, ai);
+                        }
                         ty = "ptr";
                     } else if (a.type.array_size > 0) {
                         // H6.2p / H8.2: array-to-pointer decay, unconditional
@@ -4460,6 +4466,50 @@ export struct Emitter {
         return this.imm(0);
     }
 
+    // H10.10 (C15): whether an argument expression is an lvalue accepted by
+    // lower_lvalue.  A non-lvalue bound to a reference parameter is
+    // materialized into a temporary instead of falling through to the
+    // oracle's not-assignable path.
+    bool arg_is_lvalue(MExpr e) {
+        if (e.kind == 6 || e.kind == 7 || e.kind == 12 || e.kind == 13) {
+            return true;
+        }
+        if (e.kind == 8 && this.streq(e.sval, "*")) {
+            return true;
+        }
+        if (e.kind == 11) {
+            if (e.type.is_ref != 0) {
+                return true;
+            }
+            return this.find_struct(e.type.base) >= 0;
+        }
+        return false;
+    }
+
+    // H10.10 (C15): store a value expression into an entry-block temporary
+    // and return its address, for binding to a reference parameter.
+    VRef materialize_arg(MExpr e, long idx) {
+        unsafe {
+        VRef val = this.lower_expr(idx);
+        const char* ty = this.llvm_type(e.type, 1);
+        VRef slot = this.new_temp();
+        this.cap_phase_ = 3;
+        this.emit_val(slot);
+        this.ps(" = alloca ");
+        this.ps(ty);
+        this.nl();
+        this.cap_phase_ = 2;
+        this.ps("store ");
+        this.ps(ty);
+        this.ps(" ");
+        this.emit_val(val);
+        this.ps(", ptr ");
+        this.emit_val(slot);
+        this.nl();
+        return slot;
+        }
+    }
+
     VRef lower_lvalue(long idx) {
         if (idx < 0) {
             this.fail(0, 0, "internal: missing lvalue");
@@ -4833,6 +4883,12 @@ export struct Emitter {
                 inst = this.mu->insts[i];
             }
             this.lower_inst(inst);
+            // H10.10 (C15): once an instruction fails, do not lower the rest
+            // of the block (the oracle kept going after the not-assignable
+            // fallthrough).
+            if (this.failed_ != 0) {
+                return;
+            }
             last_kind = inst.kind;
             i = inst.next;
         }
@@ -5437,7 +5493,7 @@ export struct Emitter {
             unsafe {
                 func = this.mu->fns[fi];
             }
-            if (func.is_extern_c == 0 && func.has_body == 0 && func.is_consteval == 0) {
+            if (func.is_extern_c == 0 && func.has_body == 0) {
                 this.emit_declaration(fi);
                 if (this.failed_ != 0) {
                     return 1;
@@ -5473,11 +5529,17 @@ export struct Emitter {
             unsafe {
                 func = this.mu->fns[fi];
             }
-            if (func.has_body != 0 && func.is_consteval == 0) {
+            // H10.10 (H23): a `consteval` function is emitted like any other
+            // function.  The oracle skipped it here and in the definition
+            // loop (`codegen.cpp:2674/2695`), so a call whose arguments were
+            // not folded referenced an undefined symbol.
+            if (func.has_body != 0) {
                 this.lower_function(fi);
-                // H8.2: the oracle keeps lowering the remaining functions
-                // after an error (`error()` only sets `hadError_`); the
-                // failure is reported once at the end of `emit()`.
+                // H10.10 (C12): stop after the first lowering error instead
+                // of emitting the remaining functions.
+                if (this.failed_ != 0) {
+                    return 1;
+                }
             }
             fi = fi + 1;
         }

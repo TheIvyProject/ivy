@@ -1,0 +1,14 @@
+// C9: overload resolution classifies the actual argument type, not the
+// oracle's LLVM spelling table.  `1.5` has type `double`, so it matches the
+// `float64` parameter instead of falling back to the first overload.
+int32 pick(int32 x) {
+    return 1;
+}
+
+int32 pick(float64 x) {
+    return 2;
+}
+
+int32 main() {
+    return pick(1.5) - 2;
+}

@@ -1,0 +1,15 @@
+// H23: a `consteval` function whose argument is not a compile-time constant
+// needs a runtime definition.  The oracle skipped consteval in both the
+// declare and definition loops, so the call referenced an undefined symbol.
+int32 runtime_value() {
+    return 3;
+}
+
+consteval int32 sq(int32 x) {
+    return x * x;
+}
+
+int32 main() {
+    int32 v = runtime_value();
+    return sq(v) - 9;
+}

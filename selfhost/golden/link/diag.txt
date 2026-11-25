@@ -557,3 +557,19 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 31 0
+ivy: '<OUT>\app.exe' generated

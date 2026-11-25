@@ -534,7 +534,14 @@ export struct AstDumper {
             return;
         }
         if (e.kind == 18) {
-            io::println("sizeof({})", e.type.base);
+            // H10.10 (H25): `sizeof(<expression>)` keeps the operand in
+            // `a` (flag 1).  The HIR folds it from the operand's type.
+            if (e.flag != 0) {
+                io::println("sizeof(expr)");
+                this.dump_expr(e.a, depth + 1);
+            } else {
+                io::println("sizeof({})", e.type.base);
+            }
             return;
         }
         if (e.kind == 19) {
@@ -842,6 +849,16 @@ export struct AstDumper {
                 io::print(" ");
                 io::print(p.name);
             }
+            // H10.10 (H20): the native `$a` lifetime of the parameter.  The
+            // legacy `[[ivy::lt(a)]]` form is an attribute and is printed by
+            // dump_attrs below; the oracle's dumpAst dropped the native form.
+            if (p.lt_names.n > 0) {
+                unsafe {
+                    io::print(" [lt:");
+                    io::print(p.lt_names.items[0].name);
+                    io::print("]");
+                }
+            }
             if (p.nattrs > 0) {
                 io::print(" ");
                 this.dump_attrs(p.attrs, p.nattrs);
@@ -849,6 +866,26 @@ export struct AstDumper {
             j = j + 1;
         }
         io::println(")");
+        // H10.10 (H20): the native `lifetime<$a, $b>` declaration and the
+        // native return lifetime (`-> T $b`).  The legacy lt_def/lt_ret
+        // attributes are already printed on the `function` line above.
+        if (f.lt_names.n > 0) {
+            io::print("  lifetimes:");
+            long k = 0;
+            while (k < f.lt_names.n) {
+                unsafe {
+                    io::print(" ");
+                    io::print(f.lt_names.items[k].name);
+                }
+                k = k + 1;
+            }
+            io::println("");
+        }
+        if (f.ret_lts.n > 0) {
+            unsafe {
+                io::println("  return lifetime: {}", f.ret_lts.items[0].name);
+            }
+        }
         if (f.body >= 0) {
             this.dump_stmt(f.body, 1);
         } else {

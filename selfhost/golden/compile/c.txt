@@ -741,9 +741,8 @@ selfhost/corpus/hir/constexpr/62_constexpr_call_float_not.ivy:0:0: error: LLVM I
 @@ selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy 257 1
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:3:13: error: array size must be an integer constant (variable-length arrays are not supported)
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:4:1: error: expected ']' after array size
-@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 238 1
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:4:22: error: expected type after 'sizeof(' (sizeof(expression) is not supported)
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:5:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy 197 1
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:3:23: error: expected type after 'alignof('
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:4:1: error: expected ';' after declaration
@@ -957,8 +956,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/01_deduce_char.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 129 1
-selfhost/corpus/hir/template/01_deduce_const_ref.ivy:4:25: error: expression is not assignable [nodeIdx=0 type.base=int isRef=0]
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/01_deduce_double.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/01_deduce_literal.ivy 31 0
@@ -2478,4 +2477,20 @@ ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_H16_return_local.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 31 0
 ivy: '<OUT>\out.obj' generated

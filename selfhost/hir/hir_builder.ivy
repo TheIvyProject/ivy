@@ -5004,6 +5004,11 @@ export struct HirBuilder {
             this.seq(t.base, "unsigned long long")) {
             return true;
         }
+        // H10.10 (H25): an enum value is integral too (the oracle rejected
+        // `switch` on an enum after parsing).
+        if (this.is_enum_name(t.base)) {
+            return true;
+        }
         return this.has_sub(t.base, "int") || this.has_sub(t.base, "char");
     }
 
@@ -6334,7 +6339,24 @@ export struct HirBuilder {
         }
         if (a.kind == 18) {
             // 8.3: sizeof(type) folds to an integer literal at build time.
-            AType t = this.resolve_alias(a.type);
+            // H10.10 (H25): sizeof(expression) folds from the operand's type
+            // (the operand is built but never evaluated).
+            AType t;
+            if (a.flag != 0 && a.a >= 0) {
+                long ei = this.build_expr(a.a);
+                if (ei >= 0) {
+                    HExpr ie;
+                    unsafe {
+                        ie = this.u.exprs[ei];
+                    }
+                    t = ie.type;
+                } else {
+                    t = this.ty_dummy();
+                }
+            } else {
+                t = a.type;
+            }
+            t = this.resolve_alias(t);
             HExpr e = this.new_expr(1, a.line, a.col);
             e.ival = this.type_size(t);
             e.type = this.ty_int64();

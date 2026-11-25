@@ -1,0 +1,14 @@
+// C12: the first lowering error stops the module.  No function after `bad`
+// is emitted, so the only diagnostic is the not-assignable left-hand side.
+int32 bad() {
+    1 = 2;
+    return 0;
+}
+
+int32 after() {
+    return 7;
+}
+
+int32 main() {
+    return bad() + after();
+}

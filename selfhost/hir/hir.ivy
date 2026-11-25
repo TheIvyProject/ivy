@@ -140,8 +140,9 @@ export struct HFunction {
     long pstart;        // first HParam index
     long pn;            // HParam count
     long is_constexpr;  // `constexpr` / `consteval` function
-    // H8.2: `consteval` is distinct from `constexpr` in codegen: a consteval
-    // function has no runtime representation (the oracle skips it in the
+    // H8.2: `consteval` is distinct from `constexpr` in codegen.  H10.10
+    // (H23): the flag is kept in MIR, but the emitter now emits the function
+    // so an unfolded call has a definition (the oracle skipped it in the
     // declare/definition loops, codegen.cpp:2674/2695).
     long is_consteval;
     long lt_start;      // first lifetime name index (-1 when absent)

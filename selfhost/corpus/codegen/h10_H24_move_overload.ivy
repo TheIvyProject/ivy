@@ -1,0 +1,11 @@
+// H24: a user-defined `move` overload is a real call, not the builtin
+// pass-through.  The pass-through only applies when no callee with an MIR
+// entry matches (see the hir/move fixtures).
+int32 move(int32 x) {
+    return x + 1;
+}
+
+int32 main() {
+    int32 a = 3;
+    return move(a) - 4;
+}

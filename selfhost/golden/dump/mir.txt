@@ -12196,9 +12196,15 @@ function f
 @@ selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy 257 1
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:3:13: error: array size must be an integer constant (variable-length arrays are not supported)
 selfhost/corpus/hir/constexpr/e_01_array_size_not_const.ivy:4:1: error: expected ']' after array size
-@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 238 1
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:4:22: error: expected type after 'sizeof(' (sizeof(expression) is not supported)
-selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy:5:1: error: expected ';' after declaration
+@@ selfhost/corpus/hir/constexpr/e_02_sizeof_expression.ivy 104 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      int 1
+    alloca int32_t b
+      int 4
+
 @@ selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy 197 1
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:3:23: error: expected type after 'alignof('
 selfhost/corpus/hir/constexpr/e_03_alignof_no_type.ivy:4:1: error: expected ';' after declaration
@@ -20073,4 +20079,162 @@ function main
     ret
       member .y : int32_t
         ident p
+
+@@ selfhost/corpus/codegen/h10_C12_emit_stops.ivy 106 1
+selfhost/corpus/codegen/h10_C12_emit_stops.ivy:4:5: error: left-hand side of assignment is not assignable
+@@ selfhost/corpus/codegen/h10_C15_ref_bind_temp.ivy 201 0
+function main
+  return int32_t()
+  block 0
+    ret
+      binary '-' : int
+        call : int
+          int 7
+        int 7
+
+function id<int>
+  return int(const int& x)
+  block 0
+    ret
+      ident x
+
+@@ selfhost/corpus/codegen/h10_C9_fp_overload.ivy 284 0
+function pick
+  return int32_t(int32_t x)
+  block 0
+    ret
+      int 1
+
+function pick
+  return int32_t(float64_t x)
+  block 0
+    ret
+      int 2
+
+function main
+  return int32_t()
+  block 0
+    ret
+      binary '-' : int32_t
+        call : int32_t
+          float 1.5
+        int 2
+
+@@ selfhost/corpus/codegen/h10_H20_ast_lifetime.ivy 376 0
+function pick
+  return const int32_t&(const int32_t& x [lt:a])
+  lifetimes: a
+  return lifetime: a
+  block 0
+    ret
+      ident x [lt: a]
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t v
+      int 5
+    alloca const int32_t& r
+      call : const int32_t& [lt: a]
+        ident v
+    ret
+      binary '-' : const int32_t
+        ident r [lt: a]
+        int 5
+
+@@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy 375 0
+function f
+  return const int32_t&(const int32_t& x [lt:a])
+  lifetimes: a b
+  return lifetime: a
+  block 0
+    ret
+      ident x [lt: a]
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t v
+      int 4
+    alloca const int32_t& r
+      call : const int32_t& [lt: a]
+        ident v
+    ret
+      binary '-' : const int32_t
+        ident r [lt: a]
+        int 4
+
+@@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 367 0
+function runtime_value
+  return int32_t()
+  block 0
+    ret
+      int 3
+
+function sq
+  return int32_t(int32_t x)
+  block 0
+    ret
+      binary '*' : int32_t
+        ident x
+        ident x
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t v
+      call : int32_t
+    ret
+      binary '-' : int32_t
+        call : int32_t
+          ident v
+        int 9
+
+@@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 285 0
+function move
+  return int32_t(int32_t x)
+  block 0
+    ret
+      binary '+' : int32_t
+        ident x
+        int 1
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t a
+      int 3
+    ret
+      binary '-' : int32_t
+        call : int32_t
+          ident a
+        int 4
+
+@@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 373 0
+function main
+  return int32_t()
+  block 0
+    alloca Pair p
+    alloca int64_t n
+      int 16
+    alloca int64_t m
+      int 4
+    alloca Color c
+      int 1
+  block 1
+    ret
+      binary '-' : int64_t
+        binary '+' : int64_t
+          ident n
+          ident m
+        int 20
+  block 2
+    ret
+      int 1
+  block 3
+    jump
+    jump
+  block 4
+    ret
+      int 3
 
