@@ -718,12 +718,25 @@ p84) — the crash may require a different shape. **Treat it as unsafe.**
 | B12 | An unknown concept name is silently treated as satisfied | `hir_builder.cpp:4838-4841` | p21 |
 | B13 | A non-type template parameter is never bound | `instantiateTemplate` only maps `isTypename` params | p71, t03 |
 
-### 10.3 Parser limitations that the port inherits for free
+### 10.3 Parser limitations of the oracle (fixed in the port at H10.11)
+
+The C++ oracle has these parser gaps; the self-host port closed them in H10.11 so
+the corpus can lock the accepted behaviour (see `app/H10_NOTES.md`):
 
 * `>>` is a single token ⇒ nested template-ids cannot parse (`lexer.cpp:115`).
+  *Port:* `close_template_args()` splits `>>` virtually (`gt_split_`), so
+  `A<B<C>>` parses while the token stream is unchanged.
 * A template argument must be a **type** ⇒ value arguments and `f<>()` are parse errors.
+  *Port:* value arguments keep their raw text in `AType.base`; `f<>()` is accepted
+  (deduction decides the rest).
 * A member function template is not a struct member ⇒ parse error.
+  *Port:* `parse_struct_members()` keeps it as an `AFunction` with `tpl_n > 0`.
 * `template <> …` explicit specialization is not parsed.
+  *Port:* `parse_struct()` keeps `<...>` in `AStruct.spec_args`, and
+  `parse_function()` accepts `<...>` after the function name.
+
+Remaining parser limitations: a non-type template parameter is still never bound
+(B13) and member-template instantiation is deferred to T6/T7.
 
 ---
 

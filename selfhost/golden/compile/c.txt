@@ -1134,8 +1134,8 @@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initi
 selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
 @@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
 selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
-@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 108 1
-selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:4:33: error: unexpected token in expression
+@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 119 1
+selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
@@ -2494,3 +2494,15 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 31 0
 ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 119 1
+selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name

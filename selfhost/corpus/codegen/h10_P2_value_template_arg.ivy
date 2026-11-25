@@ -1,0 +1,10 @@
+// H10.11 (P2): a template argument may be a value (`fixed<3>`) and an empty
+// explicit argument list is allowed (`id<>(7)` deduces `T`).
+template <int32 N> int32 fixed() { return 42; }
+template <typename T> T id(T x) { return x; }
+
+int32 main() {
+    int32 a = fixed<3>();
+    int32 b = id<>(7);
+    return a - 42 + b - 7;
+}

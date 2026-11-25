@@ -18816,8 +18816,8 @@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initi
 selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
 @@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
 selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
-@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 108 1
-selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:4:33: error: unexpected token in expression
+@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 119 1
+selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
@@ -26822,3 +26822,121 @@ define i32 @main() {
   ret i32 %r
 }
 
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 686 0
+; LLVM IR emitted by ivy
+%struct.Box_int32_t_ = type { i32 }
+%struct.Wrap_Box_ = type { %struct.Box_int32_t_ }
+
+define i32 @ivy_main() {
+%w.0 = alloca %struct.Wrap_Box_
+br label %bb0
+bb0:
+store %struct.Wrap_Box_ zeroinitializer, ptr %w.0
+%tmp.0 = getelementptr %struct.Wrap_Box_, ptr %w.0, i32 0, i32 0
+%tmp.1 = getelementptr %struct.Box_int32_t_, ptr %tmp.0, i32 0, i32 0
+store i32 7, ptr %tmp.1
+%tmp.2 = getelementptr %struct.Wrap_Box_, ptr %w.0, i32 0, i32 0
+%tmp.3 = getelementptr %struct.Box_int32_t_, ptr %tmp.2, i32 0, i32 0
+%tmp.4 = load i32, ptr %tmp.3
+ret i32 %tmp.4
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 730 0
+; LLVM IR emitted by ivy
+define i32 @ivy_main() {
+%a.0 = alloca i32
+%b.1 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?fixed_3_@@YHX@Z"()
+store i32 %tmp.0, ptr %a.0
+%tmp.1 = call i32 @"?id_int_@@YHH@Z"(i32 7)
+store i32 %tmp.1, ptr %b.1
+%tmp.2 = load i32, ptr %a.0
+%tmp.3 = sub i32 %tmp.2, 42
+%tmp.4 = load i32, ptr %b.1
+%tmp.5 = add i32 %tmp.3, %tmp.4
+%tmp.6 = sub i32 %tmp.5, 7
+ret i32 %tmp.6
+}
+
+define i32 @"?fixed_3_@@YHX@Z"() {
+br label %bb0
+bb0:
+ret i32 42
+}
+
+define i32 @"?id_int_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 480 0
+; LLVM IR emitted by ivy
+%struct.S = type { i32 }
+
+define i32 @ivy_main() {
+%s.0 = alloca %struct.S
+br label %bb0
+bb0:
+store %struct.S zeroinitializer, ptr %s.0
+%tmp.0 = getelementptr %struct.S, ptr %s.0, i32 0, i32 0
+store i32 5, ptr %tmp.0
+%tmp.1 = getelementptr %struct.S, ptr %s.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %tmp.1
+%tmp.3 = sub i32 %tmp.2, 5
+ret i32 %tmp.3
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 439 0
+; LLVM IR emitted by ivy
+define i32 @"?pick@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+%tmp.1 = add i32 %tmp.0, 1
+ret i32 %tmp.1
+}
+
+define i32 @ivy_main() {
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?pick@@YHH@Z"(i32 41)
+%tmp.1 = sub i32 %tmp.0, 42
+ret i32 %tmp.1
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 119 1
+selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name

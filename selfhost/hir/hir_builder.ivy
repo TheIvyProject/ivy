@@ -583,7 +583,7 @@ export struct HirBuilder {
 
             this.spc_cap_ = ntoks + 16;
             this.spc_name_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
-            this.spc_rec_ = (AStruct*) __ivy_alloc(this.spc_cap_ * 96);
+            this.spc_rec_ = (AStruct*) __ivy_alloc(this.spc_cap_ * 112);
             this.spc_size_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
             this.spc_align_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
             this.spc_poly_ = (long*) __ivy_alloc(this.spc_cap_ * 8);
@@ -1962,6 +1962,8 @@ export struct HirBuilder {
             empty.col = 0;
             unsafe { empty.tpl_params = (ATemplateParam*)0; }
             empty.tpl_n = 0;
+            unsafe { empty.spec_args = (AType*)0; }
+            empty.spec_n = 0;
             return empty;
         }
         if (gidx < n) {
@@ -1986,6 +1988,8 @@ export struct HirBuilder {
         empty.col = 0;
         unsafe { empty.tpl_params = (ATemplateParam*)0; }
         empty.tpl_n = 0;
+        unsafe { empty.spec_args = (AType*)0; }
+        empty.spec_n = 0;
         return empty;
     }
 
@@ -3926,6 +3930,13 @@ export struct HirBuilder {
                 AFunction mf;
                 unsafe {
                     mf = sd.methods[j];
+                }
+                // H10.11 (P3): a member function template is kept in the AST
+                // but is not built as an ordinary method.  Instantiating it is
+                // deferred to the member-template pass (T6/T7).
+                if (mf.tpl_n > 0) {
+                    j = j + 1;
+                    continue;
                 }
                 this.build_method_signature(sd, mf);
                 j = j + 1;
@@ -9129,6 +9140,8 @@ export struct HirBuilder {
         rec.col = tpl.col;
         rec.tpl_params = (ATemplateParam*)0;
         rec.tpl_n = 0;
+        rec.spec_args = (AType*)0;
+        rec.spec_n = 0;
         AField* flds = (AField*)0;
         if (nf > 0) {
             flds = (AField*) __ivy_alloc((unsigned long long)(nf * 72));

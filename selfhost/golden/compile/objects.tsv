@@ -1091,3 +1091,9 @@ selfhost/corpus/codegen/h10_H21_legacy_ret_wins.ivy	F01EE8CD8CD068BC535B14D2178B
 selfhost/corpus/codegen/h10_H23_consteval_emit.ivy	6BDECC41AAF765A31203205F2FDA3D5F755F4FB6C635248FC2864CA76D423675	822	-	0
 selfhost/corpus/codegen/h10_H24_move_overload.ivy	458D135EC697F0AB2C8A924DF89D10AA41600D209908D439BF8EEC882AC1490A	758	-	0
 selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy	378673D7512AD25C5547906907C5B5A7DDDA180DC7E58B9BDEA18C26ECB6F7AD	715	-	0
+selfhost/corpus/codegen/h10_P1_nested_template_id.ivy	646300405C124E4D5B65669F3E9EE01B8024608E1872579C80B90EB9D9B45BF8	635	-	0
+selfhost/corpus/codegen/h10_P2_value_template_arg.ivy	1422EADF48227AD2E303919852F0B61AA782CFADC77A36EF55C8CC2442C3B112	838	-	0
+selfhost/corpus/codegen/h10_P3_member_function_template.ivy	80548ECBFCC25EC065580571C3D0B76E996454260F62E31FFA61BCF35CF779C7	635	-	0
+selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy	4E172E0BD5F9AF9D07B072B4718E4C083FA35CCD2FA4A719EBFE1DD6EE26D030	758	-	0
+selfhost/corpus/codegen/h10_P5_removed_t.ivy	-	0	-	0
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy	-	0	-	0

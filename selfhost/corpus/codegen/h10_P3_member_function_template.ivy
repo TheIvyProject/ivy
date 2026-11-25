@@ -1,0 +1,12 @@
+// H10.11 (P3): a member function template is kept as a member of the struct
+// (its own template parameters do not leak into the struct).
+struct S {
+    int32 v;
+    template <typename U> U id(U x) { return x; }
+};
+
+int32 main() {
+    S s;
+    s.v = 5;
+    return s.v - 5;
+}

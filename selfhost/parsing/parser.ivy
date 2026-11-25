@@ -48,7 +48,7 @@ export struct AParamList {
 };
 
 // sizeof fields: pointers are 8 bytes on the target. Pools use fixed record
-// sizes (AAttr 40, AParam 128, AFunction 248, AExpr 168, AStruct 96,
+// sizes (AAttr 40, AParam 128, AFunction 248, AExpr 168, AStruct 112,
 // ATemplateParam 96, AConcept 48, AType 48, ALifetime 8, ALegacyLifetime 40)
 // so `__ivy_alloc` can be used.
 export struct Parser {
@@ -278,11 +278,19 @@ export struct Parser {
     long sv_b_;
     long sv_diag_;
     long sv_source_failed_;
+    long sv_gt_;
+
+    // H10.11 (P1): 1 while a `>>` token is being split into the two `>`
+    // tokens that close two nested template-argument lists.  The split is
+    // virtual (no token is rewritten), so a speculative parse can restore
+    // `pos_` and `gt_split_` together and see the original `>>` again.
+    long gt_split_;
 
     void setup(Token* input, long in_count, char* arena, long src_len) {
         this.toks_ = input;
         this.n_ = in_count;
         this.pos_ = 0;
+        this.gt_split_ = 0;
         this.failed_ = 0;
         this.cnumber_ = 0;
         this.in_unsafe_ = 0;
@@ -386,7 +394,7 @@ export struct Parser {
         this.mi_n_ = 0;
         this.tnames_ = (long*) __ivy_alloc(this.tn_cap_ * 8);
         this.tpnames_ = (long*) __ivy_alloc(this.tp_cap_ * 8);
-        this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 96);
+        this.stpool_ = (AStruct*) __ivy_alloc(this.st_cap_ * 112);
         this.fldpool_ = (AField*) __ivy_alloc(this.fld_cap_ * 72);
         this.mpool_ = (AFunction*) __ivy_alloc(this.m_cap_ * 248);
         this.enpool_ = (AEnum*) __ivy_alloc(this.en_cap_ * 96);
@@ -580,7 +588,26 @@ export struct Parser {
         return t;
     }
 
+    // The synthetic `>` that a split `>>` stands for.
+    Token split_gt_tok() {
+        Token t;
+        unsafe {
+            t = this.toks_[this.pos_];
+            t.kind = (char*)">";
+        }
+        t.off = t.off + 1;
+        t.col = t.col + 1;
+        t.len = 1;
+        return t;
+    }
+
     Token peek(long k) {
+        if (this.gt_split_ > 0) {
+            if (k <= 1) {
+                return this.split_gt_tok();
+            }
+            k = k - 1;
+        }
         if (this.pos_ + k < this.n_) {
             unsafe {
                 return this.toks_[this.pos_ + k];
@@ -601,6 +628,15 @@ export struct Parser {
     }
 
     Token next() {
+        if (this.gt_split_ > 0) {
+            // Consume the second `>` of the split `>>` (and the token).
+            Token t = this.split_gt_tok();
+            this.gt_split_ = 0;
+            if (this.pos_ < this.n_) {
+                this.pos_ = this.pos_ + 1;
+            }
+            return t;
+        }
         Token t = this.peek(0);
         if (this.pos_ < this.n_) {
             this.pos_ = this.pos_ + 1;
@@ -2906,44 +2942,49 @@ export struct Parser {
                 // followed by a call the position is restored and `<` is left
                 // to the binary-operator parser.
                 long save = this.pos_;
+                long saveGt = this.gt_split_;
                 long mark = this.argst_n_;
                 long nargs = 0;
                 this.next();
                 long ok = 1;
-                if (this.is_type_start() != 0) {
-                    while (!this.at(">") && !this.at("eof")) {
-                        if (this.is_type_start() == 0) {
-                            ok = 0;
-                            break;
-                        }
+                while (!this.at(">") && !this.at(">>") && !this.at("eof")) {
+                    if (this.is_type_start() != 0) {
                         AType ta = this.parse_type();
                         this.push_arg(ta);
                         nargs = nargs + 1;
-                        if (this.at(",")) {
-                            this.next();
-                        } else {
-                            break;
-                        }
+                    } else if (this.is_value_arg_start() != 0) {
+                        AType ta = this.parse_template_value_arg();
+                        this.push_arg(ta);
+                        nargs = nargs + 1;
+                    } else {
+                        ok = 0;
+                        break;
                     }
-                    if (ok != 0 && this.at(">")) {
+                    if (this.at(",")) {
                         this.next();
-                        if (this.at("(")) {
-                            this.next();
-                            long astart2 = this.parse_call_args();
-                            AExpr e = this.fresh(13);
-                            e.a = lhs;
-                            e.astart = astart2;
-                            e.an = this.ca_n_ - astart2;
-                            e.tpl_args = this.take_args(mark, nargs);
-                            e.tpl_n = nargs;
-                            e.line = start.line;
-                            e.col = start.col;
-                            lhs = this.push_expr(e);
-                            continue;
-                        }
+                    } else {
+                        break;
+                    }
+                }
+                if (ok != 0 && (this.at(">") || this.at(">>"))) {
+                    this.close_template_args();
+                    if (this.at("(")) {
+                        this.next();
+                        long astart2 = this.parse_call_args();
+                        AExpr e = this.fresh(13);
+                        e.a = lhs;
+                        e.astart = astart2;
+                        e.an = this.ca_n_ - astart2;
+                        e.tpl_args = this.take_args(mark, nargs);
+                        e.tpl_n = nargs;
+                        e.line = start.line;
+                        e.col = start.col;
+                        lhs = this.push_expr(e);
+                        continue;
                     }
                 }
                 this.pos_ = save;
+                this.gt_split_ = saveGt;
                 this.argst_n_ = mark;
                 break;
             } else if (this.at("[")) {
@@ -3291,6 +3332,7 @@ export struct Parser {
             // the correct precedence (the speculative parse may have emitted
             // diagnostics, which the oracle discards).
             long fsave = this.pos_;
+            long fsaveGt = this.gt_split_;
             long fdiag = this.diags_.count();
             long ffailed = this.failed_;
             long finner = this.parse_unary();
@@ -3316,6 +3358,7 @@ export struct Parser {
                 // Not a fold: reparse the whole parenthesized content as a
                 // full conditional expression.
                 this.pos_ = fsave;
+                this.gt_split_ = fsaveGt;
                 this.diags_.truncate(fdiag);
                 this.failed_ = ffailed;
                 long full = this.parse_conditional();
@@ -3324,6 +3367,7 @@ export struct Parser {
             }
             // No fold operator ahead: reparse uniformly for precedence.
             this.pos_ = fsave;
+            this.gt_split_ = fsaveGt;
             this.diags_.truncate(fdiag);
             this.failed_ = ffailed;
             long content = this.parse_conditional();
@@ -3612,6 +3656,7 @@ export struct Parser {
         // Range-based for: `for (T x : range)` / `for (T& x : range)`.
         if (this.is_type_start() != 0) {
             long save = this.pos_;
+            long saveGt = this.gt_split_;
             AType type = this.parse_type();
             long is_ref = type.is_ref;
             if (this.at("identifier") && this.kind_eq(this.peek(1), ":")) {
@@ -3628,6 +3673,7 @@ export struct Parser {
                 return this.push_stmt(s);
             }
             this.pos_ = save;
+            this.gt_split_ = saveGt;
         }
 
         long init = -1;
@@ -4068,6 +4114,13 @@ export struct Parser {
                 return;
             }
             const char* name = this.intern_tok(this.next());
+            // H10.11 (P4): `template <> int32 f<int32>(...)`.  The explicit
+            // arguments select the specialization; the HIR registers this as
+            // an ordinary overload of the name (the non-template overload
+            // wins the resolution).
+            if (this.at("<")) {
+                this.parse_template_args();
+            }
             this.expect("(", this.fn_name_msg(name));
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
@@ -4089,6 +4142,10 @@ export struct Parser {
                 return;
             }
             const char* name = this.intern_tok(this.next());
+            // H10.11 (P4): explicit specialization of an `fn` template.
+            if (this.at("<")) {
+                this.parse_template_args();
+            }
             this.expect("(", this.fn_name_msg(name));
             AParamList pl = this.parse_params();
             this.expect(")", "expected ')' to close parameter list");
@@ -4343,6 +4400,46 @@ export struct Parser {
                                         mstart.line, mstart.col);
                 continue;
             }
+            // H10.11 (P3): a member function template,
+            // `template <typename U> U get(U x) { ... }`.  The method keeps
+            // its own template parameter list; the HIR builds no body for it
+            // (member-template instantiation is T6/T7 territory), so the
+            // parameter names are popped again after the declaration.
+            if (this.kw("template")) {
+                long savedTp = this.tp_n_;
+                this.next();
+                ATemplateParamList mtpl = this.parse_template_params(true);
+                if (this.is_type_start() == 0) {
+                    this.error_at(this.peek(0), "expected a return type after 'template <...>'");
+                    this.synchronize();
+                    this.tp_n_ = savedTp;
+                    break;
+                }
+                AType ftype = this.parse_type();
+                if (!this.at("identifier")) {
+                    this.error_at(this.peek(0), "expected method name after 'template <...>'");
+                    this.synchronize();
+                    this.tp_n_ = savedTp;
+                    break;
+                }
+                Token nametok = this.peek(0);
+                const char* member = this.intern_tok(this.next());
+                this.expect("(", "expected '(' after method name");
+                AParamList pl = this.parse_params();
+                this.expect(")", "expected ')' to close method parameter list");
+                long body = this.parse_method_tail();
+                const char* qn = this.intern_join3(bare, "::", member);
+                this.push_method_record(qn, ftype, pl, body,
+                                        is_virtual != 0 ? 1 : this.pure_virtual_,
+                                        this.pure_virtual_, this.is_override_,
+                                        nametok.line, nametok.col);
+                unsafe {
+                    this.mpool_[this.m_n_ - 1].tpl_params = mtpl.items;
+                    this.mpool_[this.m_n_ - 1].tpl_n = mtpl.n;
+                }
+                this.tp_n_ = savedTp;
+                continue;
+            }
             if (this.is_type_start() == 0) {
                 this.error_at(this.peek(0), "expected field or method declaration in struct body");
                 this.synchronize();
@@ -4416,6 +4513,16 @@ export struct Parser {
             return;
         }
         const char* bare = this.intern_tok(this.next());
+        // H10.11 (P4): the specialization arguments of
+        // `template <> struct Box<int32> { ... };`.  They are kept on the
+        // struct record so a later pass can match the specialization.
+        AType* specArgs = (AType*)0;
+        long specN = 0;
+        if (this.at("<")) {
+            ATypeList sl = this.parse_template_args();
+            specArgs = sl.items;
+            specN = sl.n;
+        }
         if (this.kw("final")) {
             this.error_at(this.peek(0), "'final' is not supported in the Ivy subset");
             this.next();
@@ -4464,6 +4571,8 @@ export struct Parser {
         sd.col = sstart.col;
         sd.tpl_params = tpl.items;
         sd.tpl_n = tpl.n;
+        sd.spec_args = specArgs;
+        sd.spec_n = specN;
         this.push_struct(sd);
       }
     }
@@ -4620,19 +4729,81 @@ export struct Parser {
         }
     }
 
+    // H10.11 (P1): `>>` is a single token, so a nested template-id
+    // (`A<B<C>>`) would stop the inner list at `>>`.  Closing a list when the
+    // next token is `>>` sets `gt_split_`, which makes the next `>` virtual
+    // (the second half of the pair); the outer list then consumes the real
+    // token normally.  `>>=`/`>=` are not split: they cannot close a
+    // template-argument list.
+    void close_template_args() {
+        if (this.gt_split_ == 0 && this.at(">>")) {
+            this.gt_split_ = 1;
+            return;
+        }
+        this.expect(">", "expected '>' to close template argument list");
+    }
+
+    // H10.11 (P2): a template argument may be a value (`f<3>`, `Array<T, 4>`)
+    // instead of a type.  The value is kept as an `AType` whose base is the
+    // raw source text of the argument: the HIR only uses it for mangling and
+    // for a non-type template parameter (which is not bound yet, T13).
+    bool is_value_arg_start() {
+        Token t = this.peek(0);
+        if (this.kind_eq(t, "integer") || this.kind_eq(t, "float") ||
+            this.kind_eq(t, "string") || this.kind_eq(t, "char")) {
+            return true;
+        }
+        if (this.kw("true") || this.kw("false") || this.kw("nullptr")) {
+            return true;
+        }
+        if (this.at("-")) {
+            Token n = this.peek(1);
+            return this.kind_eq(n, "integer") || this.kind_eq(n, "float");
+        }
+        return false;
+    }
+
+    AType parse_template_value_arg() {
+        AType t = this.empty_type();
+        long first = this.peek(0).off;
+        long last = first;
+        long depth = 0;
+        while (!this.at("eof")) {
+            if (depth == 0 && (this.at(",") || this.at(">") || this.at(">>") ||
+                               this.at(")") || this.at("]") || this.at("}"))) {
+                break;
+            }
+            if (this.at("(") || this.at("[") || this.at("{")) {
+                depth = depth + 1;
+            } else if (this.at(")") || this.at("]") || this.at("}")) {
+                depth = depth - 1;
+            }
+            Token tk = this.next();
+            last = tk.off + tk.len;
+        }
+        if (last > first) {
+            t.base = this.intern(first, last - first);
+        }
+        return t;
+    }
+
     // parseTemplateArgs in parser.cpp: the argument list of a template-id
     // type (`Box<int32>`).  The leading `<` has been seen but not consumed.
     ATypeList parse_template_args() {
         this.next();  // '<'
         long mark = this.argst_n_;
         long n = 0;
-        while (!this.at(">") && !this.at("eof")) {
-            if (this.is_type_start() == 0) {
-                this.error_at(this.peek(0), "expected a type in template argument list");
+        while (!this.at(">") && !this.at(">>") && !this.at("eof")) {
+            AType a;
+            if (this.is_type_start() != 0) {
+                a = this.parse_type();
+            } else if (this.is_value_arg_start() != 0) {
+                a = this.parse_template_value_arg();
+            } else {
+                this.error_at(this.peek(0), "expected a type or a value in template argument list");
                 this.synchronize();
                 break;
             }
-            AType a = this.parse_type();
             this.push_arg(a);
             n = n + 1;
             if (this.at(",")) {
@@ -4641,7 +4812,7 @@ export struct Parser {
                 break;
             }
         }
-        this.expect(">", "expected '>' to close template argument list");
+        this.close_template_args();
         ATypeList l;
         l.items = this.take_args(mark, n);
         l.n = n;
@@ -4943,9 +5114,11 @@ export struct Parser {
         this.sv_ll_ = this.ll_n_;
         this.sv_b_ = this.b_n_;
         this.sv_diag_ = this.diags_.count();
+        this.sv_gt_ = this.gt_split_;
         this.toks_ = toks;
         this.n_ = n;
         this.pos_ = 0;
+        this.gt_split_ = 0;
         this.src_ = arena;
         this.failed_ = 0;
         this.in_unsafe_ = 0;
@@ -4980,6 +5153,7 @@ export struct Parser {
         this.lt_n_ = this.sv_lt_;
         this.ll_n_ = this.sv_ll_;
         this.b_n_ = this.sv_b_;
+        this.gt_split_ = this.sv_gt_;
         this.diags_.truncate(this.sv_diag_);
         return src_failed;
     }

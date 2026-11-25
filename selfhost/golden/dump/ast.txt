@@ -11036,8 +11036,19 @@ function
       call
         ident withdefault        int 1
 selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
-@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 108 1
-selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:4:33: error: unexpected token in expression
+@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 266 1
+function 
+  return T id(T x)
+  block
+    return
+      ident x
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident id
+selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 447 1
 function 
   return T add(T a, T b)
@@ -16633,3 +16644,74 @@ function
       binary -
         binary +
           ident n          ident m        int 20
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 219 0
+function 
+  return int32_t main()
+  block
+    decl Wrap w
+    expr
+      assign =
+        member . v
+          member . v
+            ident w        int 7    return
+      member . v
+        member . v
+          ident w
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 413 0
+function 
+  return int32_t fixed()
+  block
+    return
+      int 42
+function 
+  return T id(T x)
+  block
+    return
+      ident x
+function 
+  return int32_t main()
+  block
+    decl int32_t a =
+      call
+        ident fixed    decl int32_t b =
+      call
+        ident id        int 7    return
+      binary -
+        binary +
+          binary -
+            ident a            int 42          ident b        int 7
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 204 0
+function 
+  return int32_t main()
+  block
+    decl S s
+    expr
+      assign =
+        member . v
+          ident s        int 5    return
+      binary -
+        member . v
+          ident s        int 5
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 302 0
+function 
+  return T pick(T x)
+  block
+    return
+      ident x
+function 
+  return int32_t pick(int32_t x)
+  block
+    return
+      binary +
+        ident x        int 1
+function 
+  return int32_t main()
+  block
+    return
+      binary -
+        call
+          ident pick          int 41        int 42
+@@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 119 1
+selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name

@@ -1,0 +1,3 @@
+// H10.11 (P5): the deprecated `_t` spelling stays removed (policy kept).
+// The parser reports the removal instead of normalizing the name.
+int32_t a = 1;

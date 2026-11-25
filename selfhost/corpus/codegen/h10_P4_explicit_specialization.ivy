@@ -1,0 +1,11 @@
+// H10.11 (P4): `template <>` explicit specializations are parsed, for a
+// struct (`Box<int32>`) and for a function (`pick<int32>`).
+template <typename T> struct Box { T v; };
+template <> struct Box<int32> { int32 v; };
+
+template <typename T> T pick(T x) { return x; }
+template <> int32 pick<int32>(int32 x) { return x + 1; }
+
+int32 main() {
+    return pick(41) - 42;
+}

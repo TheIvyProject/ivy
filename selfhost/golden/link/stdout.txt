@@ -484,3 +484,7 @@ guard 9
 @@ selfhost/corpus/codegen/h10_H23_consteval_emit.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H24_move_overload.ivy 0 0
 @@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 0 0
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 0 7
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 0 0
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 0 0
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 0 0

@@ -1,4 +1,5 @@
-// An explicit template argument list that is empty (`f<>()`) is rejected by
-// the parser: an explicit template argument must be a type.
-template <typename... Args> int32 count_args(Args... args) { return 0; }
-void f() { int32 a = count_args<>(); }
+// H10.11 (P2): an explicit but empty template argument list (`f<>()`) is
+// accepted by the parser now; deduction still fails when a parameter needs an
+// argument, so the fixture stays an error case.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id<>(); }

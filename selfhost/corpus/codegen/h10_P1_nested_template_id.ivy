@@ -1,0 +1,10 @@
+// H10.11 (P1): a nested template-id ends with `>>`, which the lexer emits as
+// one token.  The parser splits it into the two closing `>` tokens.
+template <typename T> struct Box { T v; };
+template <typename T> struct Wrap { T v; };
+
+int32 main() {
+    Wrap<Box<int32>> w;
+    w.v.v = 7;
+    return w.v.v;
+}

@@ -279,6 +279,12 @@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy
 selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy
 selfhost/corpus/codegen/h10_H28_move_lifetime.ivy
 selfhost/corpus/codegen/h10_H29_pointer_store.ivy
+selfhost/corpus/codegen/h10_P1_nested_template_id.ivy
+selfhost/corpus/codegen/h10_P2_value_template_arg.ivy
+selfhost/corpus/codegen/h10_P3_member_function_template.ivy
+selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy
+selfhost/corpus/codegen/h10_P5_removed_t.ivy
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy
 selfhost/corpus/codegen/h10_R1_float_format.ivy
 selfhost/corpus/codegen/h10_R2_format_stress.ivy
 selfhost/corpus/hir/borrow/01_param_lt_leading_form.ivy

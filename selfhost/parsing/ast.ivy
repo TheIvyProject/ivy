@@ -235,6 +235,12 @@ export struct AStruct {
     long col;
     ATemplateParam* tpl_params;
     long tpl_n;
+    // H10.11 (P4): the arguments of an explicit specialization,
+    // `template <> struct Box<int32> { ... };`.  The name stays `Box`; the
+    // argument list identifies which specialization this is.  `spec_n == 0`
+    // for every ordinary struct and for a template definition.
+    AType* spec_args;
+    long spec_n;
 };
 
 // An enum definition. `enumerators` points into a contiguous run of the

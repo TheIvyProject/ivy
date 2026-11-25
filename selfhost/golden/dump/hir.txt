@@ -14183,8 +14183,8 @@ selfhost/corpus/hir/template/e_concept_deduce_fail.ivy:6:22: error: cannot initi
 selfhost/corpus/hir/template/e_deduce_conflict.ivy:4:38: error: cannot deduce template arguments for 'two'
 @@ selfhost/corpus/hir/template/e_default_argument_lost.ivy 153 1
 selfhost/corpus/hir/template/e_default_argument_lost.ivy:4:33: error: call to 'withdefault<int>' missing argument 2 (parameter 'y' has no default value)
-@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 108 1
-selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:4:33: error: unexpected token in expression
+@@ selfhost/corpus/hir/template/e_empty_template_argument_list.ivy 119 1
+selfhost/corpus/hir/template/e_empty_template_argument_list.ivy:5:24: error: cannot deduce template arguments for 'id'
 @@ selfhost/corpus/hir/template/e_failed_to_instantiate.ivy 249 1
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: concept 'Addable' not satisfied: type 'P' does not support operator '+'
 selfhost/corpus/hir/template/e_failed_to_instantiate.ivy:6:25: error: failed to instantiate template 'add'
@@ -20924,3 +20924,87 @@ function main
           ident m
         int 20
 
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 238 0
+function main
+  return int32_t()
+  block
+    decl Wrap<Box> w
+    expr
+      assign '=' : int32_t
+        member . v
+          member . v
+            ident w
+        int 7
+    return
+      member . v
+        member . v
+          ident w
+
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 467 0
+function main
+  return int32_t()
+  block
+    decl int32_t a =
+      call 'fixed<3>' : int32_t
+    decl int32_t b =
+      call 'id<int>' : int
+        int 7
+    return
+      binary '-' : int32_t
+        binary '+' : int32_t
+          binary '-' : int32_t
+            ident a
+            int 42
+          ident b
+        int 7
+
+function fixed<3>
+  return int32_t()
+  block
+    return
+      int 42
+
+function id<int>
+  return int(int x)
+  block
+    return
+      ident x
+
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 231 0
+function main
+  return int32_t()
+  block
+    decl S s
+    expr
+      assign '=' : int32_t
+        member . v
+          ident s
+        int 5
+    return
+      binary '-' : int32_t
+        member . v
+          ident s
+        int 5
+
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 261 0
+function pick
+  return int32_t(int32_t x)
+  block
+    return
+      binary '+' : int32_t
+        ident x
+        int 1
+
+function main
+  return int32_t()
+  block
+    return
+      binary '-' : int32_t
+        call 'pick' : int32_t
+          int 41
+        int 42
+
+@@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 119 1
+selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name

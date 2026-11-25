@@ -588,6 +588,64 @@
   (`cap_phase_=3`) như nhánh struct-call của `lower_lvalue`. C12/C15 chỉ
   quan sát được qua exit/stderr vì IR không in khi lỗi.
 
+### H10.11 - Lexer/parser template surface (P1-P5, P7)
+
+- **ID**: P1, P2, P3, P4, P5, P7.
+- **Code**:
+  - `selfhost/parsing/parser.ivy`:
+    - **P1**: `close_template_args()` tách `>>` **ảo** (`gt_split_`):
+      `peek(0)`/`at(">")` thấy `>` còn `next()` tiêu thụ nửa còn lại,
+      không rewrite token. `peek/next` xử lý `gt_split_`; 4 điểm parse
+      speculative (template-id call, fold, range-for) lưu/khôi phục
+      `gt_split_` cùng `pos_`, nên `--lex`/`--tokens` không đổi.
+    - **P2**: `is_value_arg_start()`/`parse_template_value_arg()` nhận
+      value argument (integer/float/string/char/bool/nullptr/số âm), giữ
+      text thô của argument trong `AType.base`; `parse_template_args()`
+      dùng cả hai nhánh; nhánh template-id call nhận danh sách rỗng
+      (`f<>()`), khi đó HIR rơi về deduction như oracle.
+    - **P3**: `parse_struct_members()` nhận `template <...> T name(...)`
+      và gắn `tpl_params`/`tpl_n` vào `AFunction` của method; tên tham số
+      template được pop sau khai báo.
+    - **P4**: `parse_struct()` giữ argument của `template <> struct S<...>`
+      (`AStruct.spec_args/spec_n`); `parse_function()`/`parse_fn_trailing()`
+      nhận `<...>` sau tên hàm (`template <> int32 f<int32>(...)`).
+    - **P5/P7**: không sửa logic (policy `_t` bị loại bỏ và chain C-style
+      mutually exclusive đã đúng từ H8.2); thêm fixture khoá hành vi.
+  - `selfhost/parsing/ast.ivy`: `AStruct.spec_args`/`spec_n`.
+  - `selfhost/hir/hir_builder.ivy`: khởi tạo `spec_args/spec_n` ở các
+    `AStruct` dựng tay; bỏ qua method có `tpl_n > 0` khi dựng struct
+    thường (instantiate member template để pass T6/T7).
+- **Fixture** (`selfhost/corpus/codegen/`):
+  - `h10_P1_nested_template_id.ivy` - `Wrap<Box<int32>>` qua `>>`; chạy
+    trả 7.
+  - `h10_P2_value_template_arg.ivy` - `fixed<3>()` + `id<>(7)`; chạy trả 0.
+  - `h10_P3_member_function_template.ivy` - method template trong struct;
+    chạy trả 0 (method không gọi).
+  - `h10_P4_explicit_specialization.ivy` - `template <>` cho struct và
+    function; `pick(41)` chọn overload chuyên biệt; chạy trả 0.
+  - `h10_P5_removed_t.ivy` - `int32_t` báo "is removed"; exit 1.
+  - `h10_P7_cstyle_chain_exclusive.ivy` - `int long` báo "expected
+    function name" (không cộng dồn type); exit 1.
+  - `hir/template/e_empty_template_argument_list.ivy` - vẫn là fixture lỗi,
+    nhưng lý do đổi: `<>` giờ parse được, chẩn đoán còn lại là
+    `cannot deduce template arguments for 'id'`.
+- **Golden**: 6 fixture mới × 10 mode; corpus 1093 → 1099, link
+  283 → 289. Fixture cũ duy nhất đổi record là
+  `e_empty_template_argument_list` (nội dung mới, vì P2). Provenance
+  `expected:H10.11` cho 7 record (mỗi fixture 1 dòng manifest).
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `6D7DAD7EB575E7293306535E2345924D06753DC0CFA78BF25AE93C14D21C4841`
+  (27194368 B), golden 12988 checks / 0 failures (1099 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`,
+  3 executable).
+- **Ghi chú**: value argument chỉ giữ text để mangle; binding non-type
+  parameter là T13 (H10.14). Member-template instantiation để T6/T7.
+  Argument của explicit struct specialization được giữ nhưng HIR hiện
+  vẫn instantiate generic (pass T xử lý); explicit function
+  specialization hoạt động như overload thường. `>>` ảo không đổi token
+  stream nên golden `--lex`/`--tokens`/`.ivm` của mọi fixture cũ giữ
+  nguyên.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -602,7 +660,7 @@
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ✅ |
 | H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ✅ |
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ✅ |
-| H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ☐ |
+| H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ✅ |
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ☐ |
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ☐ |
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ☐ |

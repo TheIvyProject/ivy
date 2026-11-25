@@ -573,3 +573,15 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_H25_sizeof_expr_enum_switch.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_P1_nested_template_id.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_P2_value_template_arg.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_P3_member_function_template.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_P4_explicit_specialization.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_P5_removed_t.ivy 119 1
+selfhost/corpus/codegen/h10_P5_removed_t.ivy:3:1: error: _t-suffixed type 'int32_t' is removed — use 'int32' instead
+@@ selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy 93 1
+selfhost/corpus/codegen/h10_P7_cstyle_chain_exclusive.ivy:4:5: error: expected function name

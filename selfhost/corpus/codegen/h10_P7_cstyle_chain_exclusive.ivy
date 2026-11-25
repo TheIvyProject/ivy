@@ -1,0 +1,4 @@
+// H10.11 (P7): the C-style type chain is mutually exclusive, so the second
+// keyword (`long`) is not folded into the type `int`.
+#pragma ivy cnumber
+int long x = 0;
