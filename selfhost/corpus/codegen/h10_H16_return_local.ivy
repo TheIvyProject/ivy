@@ -1,0 +1,35 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Guard {
+    int32 id;
+    Guard(int32 v) : id(v) {}
+    ~Guard() {
+        printf("guard %d\n", this.id);
+    }
+};
+
+// H16: NRVO and the `__ret` temporary compare the full type, not just the
+// base name.  `keep` returns the local itself (same type: no temp, the dtor
+// is skipped); `narrow` returns a `const int32` local from an `int32`
+// function, so the value is copied into an `int32` temp and the guard's
+// destructor runs.
+fn keep() -> Guard {
+    Guard r(9);
+    return r;
+}
+
+fn narrow(int32 a) -> int32 {
+    Guard g(2);
+    const int32 c = a;
+    return c;
+}
+
+int32 main() {
+    Guard k = keep();
+    int32 n = narrow(5);
+    return n - 5 + k.id - 9;
+}

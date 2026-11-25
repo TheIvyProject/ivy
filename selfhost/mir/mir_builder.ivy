@@ -2264,29 +2264,43 @@ export struct MirBuilder {
             this.set_arg(argstart + j, mi);
             j = j + 1;
         }
-        // The `move()` builtin: the result borrows the lifetime of its
-        // argument.  Every other call gets the Unknown lifetime (the
-        // oracle sets it unconditionally, mir_builder.cpp:603).
-        //
-        // Oracle quirk: mir_builder.cpp assigns `out->lifetime` from the
-        // argument *after* `std::move`-ing it into `call.args`, so the
-        // moved-from unique_ptr is null and the assignment never runs.
-        // The `move()` call therefore keeps the default (None) lifetime,
-        // which is why the MIR dump prints `call : T*` with no `[lt: ...]`.
-        this.lt_kind_ = 4;
+        // H14: a call result keeps the callee's declared return lifetime
+        // (the oracle's `call.returnLifetime`, mir_builder.cpp:595-602) and
+        // falls back to Unknown only for a pointer/reference result without
+        // one.  The oracle then overwrote the result with Unknown on the
+        // next line (its `// virtual: unknown` comment); that assignment is
+        // now limited to virtual dispatch, which is what the comment says.
+        // A non-pointer, non-reference result has no lifetime at all.
+        long retlt = 0;
+        long is_virtual = 0;
+        long is_ptr = 0;
+        long is_ref = 0;
+        unsafe {
+            retlt = (long) this.ep[idx].retlt;
+            is_virtual = this.ep[idx].flag;
+            is_ptr = this.ep[idx].type.ptr_depth > 0 ? 1 : 0;
+            is_ref = this.ep[idx].type.is_ref != 0 ? 1 : 0;
+        }
+        this.lt_kind_ = 0;
         this.lt_name_ = "";
         bool is_move = false;
         unsafe {
             is_move = this.seq(this.ep[idx].sval, "move") && an == 1;
         }
         if (is_move) {
-            // Bug-compat: the call keeps the None lifetime (see above).
-            this.lt_kind_ = 0;
+            // H28: the builtin borrows its operand's lifetime.  The oracle
+            // assigned `out->lifetime` from the argument *after* moving it
+            // into `call.args`; the moved-from pointer was null, so the
+            // call always kept None.  Copy the operand's lifetime instead.
             long ai = -1;
             unsafe {
                 ai = this.mu.args[argstart];
             }
             if (ai >= 0) {
+                unsafe {
+                    this.lt_kind_ = this.mu.exprs[ai].lt;
+                    this.lt_name_ = this.mu.exprs[ai].ltname;
+                }
                 // B3: the operand is moved out (only a bare identifier is
                 // tracked; unsafe bypasses the check).
                 long ak = 0;
@@ -2314,6 +2328,33 @@ export struct MirBuilder {
                         this.mark_moved_out(reinterpret_cast<const char*>(anm));
                     }
                 }
+            }
+        } else if (is_virtual != 0) {
+            // The oracle's comment says this assignment is for virtual
+            // dispatch; it is now limited to that case.
+            this.lt_kind_ = 4;
+            this.lt_name_ = "";
+        } else if (is_ptr != 0 || is_ref != 0) {
+            // Only values that carry a lifetime (pointers and references)
+            // take the pointer-style rule: a declared return lifetime is
+            // Named, an unannotated one is opaque (Unknown).  The oracle's
+            // guard tested `pointerDepth > 0` only, but the safe subset
+            // returns references, and the lifetime checker relies on the
+            // unknown result to diagnose `return g()` (80c/80d).  Plain
+            // values have no lifetime at all (None).
+            bool named = false;
+            unsafe {
+                named = retlt != 0 &&
+                        this.slen(reinterpret_cast<const char*>(retlt)) > 0;
+            }
+            if (named) {
+                this.lt_kind_ = 1;
+                unsafe {
+                    this.lt_name_ = reinterpret_cast<const char*>(retlt);
+                }
+            } else {
+                this.lt_kind_ = 4;
+                this.lt_name_ = "";
             }
         }
         long i = this.add_expr(11);

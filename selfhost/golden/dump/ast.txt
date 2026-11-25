@@ -16312,3 +16312,122 @@ function
         member . println
           ident io        string "{} {} {} {}"        int 1        float 2        int 3        float 0    return
       int 0
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1029 0
+function [extern "C"] 
+  return void* __ivy_alloc(unsigned long long n)
+  (declaration only)
+
+function [extern "C"] 
+  return void __ivy_free(void* p)
+  (declaration only)
+
+function 
+  return const int32_t peek(const int32_t p)
+  block
+    return
+      ident p
+function 
+  return int32_t five()
+  block
+    return
+      int 5
+function 
+  return int32_t main()
+  block
+    decl int32_t x =
+      int 7    decl const int32_t r =
+      call
+        ident peek        ident x    decl int32_t n =
+      call
+        ident five    unsafe
+      block
+        decl int32_t* raw =
+          C-cast<int32_t>(
+            call
+              ident __ivy_alloc              int 4          )
+        expr
+          assign =
+            prefix *
+              ident raw            ident n        decl int32_t v =
+          binary +
+            ident r            prefix *
+              ident raw        expr
+          call
+            ident __ivy_free            ident raw        return
+          binary -
+            ident v            int 12
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 454 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return int64_t widen(int32_t a)
+  block
+    decl Guard g =
+      call
+        ident Guard        int 1    return
+      ident a
+function 
+  return int32_t main()
+  block
+    decl int64_t v =
+      call
+        ident widen        int 3    if
+      binary ==
+        ident v        int 3      then
+      block
+        return
+          int 0    return
+      int 1
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 697 0
+function [extern "C"] 
+  return int printf(const char* fmt)
+  (declaration only)
+
+function 
+  return Guard keep()
+  block
+    decl Guard r =
+      call
+        ident Guard        int 9    return
+      ident r
+function 
+  return int32_t narrow(int32_t a)
+  block
+    decl Guard g =
+      call
+        ident Guard        int 2    decl const int32_t c =
+      ident a    return
+      ident c
+function 
+  return int32_t main()
+  block
+    decl Guard k =
+      call
+        ident keep    decl int32_t n =
+      call
+        ident narrow        int 5    return
+      binary -
+        binary +
+          binary -
+            ident n            int 5          member . id
+            ident k        int 9
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 419 0
+function 
+  return int32_t first(const int32_t a, const int32_t b)
+  block
+    decl const int32_t r =
+      ident a    decl int32_t v =
+      call
+        ident move        ident r    return
+      ident v
+function 
+  return int32_t main()
+  block
+    decl int32_t x =
+      int 3    decl int32_t y =
+      int 4    return
+      binary -
+        call
+          ident first          ident x          ident y        int 3

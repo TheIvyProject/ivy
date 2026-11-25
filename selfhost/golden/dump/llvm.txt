@@ -26312,3 +26312,260 @@ declare void @__ivy_write_newline(i32)
 @.str.0 = private unnamed_addr constant [6 x i8] c"{} {}\00"
 @.str.1 = private unnamed_addr constant [12 x i8] c"{} {} {} {}\00"
 @.str.2 = private unnamed_addr constant [2 x i8] c" \00"
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1212 0
+; LLVM IR emitted by ivy
+declare ptr @__ivy_alloc(i64)
+declare void @__ivy_free(ptr)
+define ptr @"?peek@@YAAVAAV@Z"(ptr %arg0) {
+%p.0 = alloca ptr
+store ptr %arg0, ptr %p.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %p.0
+ret ptr %tmp.0
+}
+
+define i32 @"?five@@YHX@Z"() {
+br label %bb0
+bb0:
+ret i32 5
+}
+
+define i32 @ivy_main() {
+%x.0 = alloca i32
+%r.1 = alloca ptr
+%n.2 = alloca i32
+%raw.3 = alloca ptr
+%v.4 = alloca i32
+br label %bb0
+bb0:
+store i32 7, ptr %x.0
+%tmp.0 = call ptr @"?peek@@YAAVAAV@Z"(ptr %x.0)
+store ptr %tmp.0, ptr %r.1
+%tmp.1 = call i32 @"?five@@YHX@Z"()
+store i32 %tmp.1, ptr %n.2
+%tmp.2 = sext i32 4 to i64
+%tmp.3 = call ptr @__ivy_alloc(i64 %tmp.2)
+store ptr %tmp.3, ptr %raw.3
+%tmp.4 = load ptr, ptr %raw.3
+%tmp.5 = load i32, ptr %n.2
+store i32 %tmp.5, ptr %tmp.4
+%tmp.6 = load ptr, ptr %r.1
+%tmp.7 = load i32, ptr %tmp.6
+%tmp.8 = load ptr, ptr %raw.3
+%tmp.9 = load i32, ptr %tmp.8
+%tmp.10 = add i32 %tmp.7, %tmp.9
+store i32 %tmp.10, ptr %v.4
+%tmp.11 = load ptr, ptr %raw.3
+call void @__ivy_free(ptr %tmp.11)
+%tmp.12 = load i32, ptr %v.4
+%tmp.13 = sub i32 %tmp.12, 12
+ret i32 %tmp.13
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 1665 0
+; LLVM IR emitted by ivy
+%struct.Guard = type { i32 }
+
+declare i32 @printf(ptr, ...)
+define void @"?0Guard@@AEXAAVH@Z"(ptr %arg0, i32 %arg1) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+%v.1 = alloca i32
+store i32 %arg1, ptr %v.1
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Guard, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %v.1
+store i32 %tmp.2, ptr %tmp.1
+ret void
+}
+
+define void @"?1Guard@@AEXAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.1 = load ptr, ptr %this.0
+%tmp.2 = getelementptr %struct.Guard, ptr %tmp.1, i32 0, i32 0
+%tmp.3 = load i32, ptr %tmp.2
+%tmp.4 = call i32 @printf(ptr %tmp.0, i32 %tmp.3)
+ret void
+}
+
+define i64 @"?widen@@Y_JH@Z"(i32 %arg0) {
+%a.0 = alloca i32
+store i32 %arg0, ptr %a.0
+%g.1 = alloca %struct.Guard
+%__ret.2 = alloca i64
+br label %bb0
+bb0:
+store %struct.Guard zeroinitializer, ptr %g.1
+call void @"?0Guard@@AEXAAVH@Z"(ptr %g.1, i32 1)
+%tmp.0 = load i32, ptr %a.0
+%tmp.1 = sext i32 %tmp.0 to i64
+store i64 %tmp.1, ptr %__ret.2
+call void @"?1Guard@@AEXAAV@Z"(ptr %g.1)
+%tmp.2 = load i64, ptr %__ret.2
+ret i64 %tmp.2
+}
+
+define i32 @ivy_main() {
+%v.0 = alloca i64
+br label %bb0
+bb0:
+%tmp.0 = call i64 @"?widen@@Y_JH@Z"(i32 3)
+store i64 %tmp.0, ptr %v.0
+%tmp.1 = load i64, ptr %v.0
+%tmp.2 = sext i32 3 to i64
+%tmp.3 = icmp eq i64 %tmp.1, %tmp.2
+br i1 %tmp.3, label %bb2, label %bb1
+bb1:
+ret i32 1
+bb2:
+ret i32 0
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@.str.0 = private unnamed_addr constant [10 x i8] c"guard %d\0A\00"
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 2254 0
+; LLVM IR emitted by ivy
+%struct.Guard = type { i32 }
+
+declare i32 @printf(ptr, ...)
+define void @"?0Guard@@AEXAAVH@Z"(ptr %arg0, i32 %arg1) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+%v.1 = alloca i32
+store i32 %arg1, ptr %v.1
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Guard, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %v.1
+store i32 %tmp.2, ptr %tmp.1
+ret void
+}
+
+define void @"?1Guard@@AEXAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = getelementptr i8, ptr @.str.0, i64 0
+%tmp.1 = load ptr, ptr %this.0
+%tmp.2 = getelementptr %struct.Guard, ptr %tmp.1, i32 0, i32 0
+%tmp.3 = load i32, ptr %tmp.2
+%tmp.4 = call i32 @printf(ptr %tmp.0, i32 %tmp.3)
+ret void
+}
+
+define %struct.Guard @"?keep@@YHX@Z"() {
+%r.0 = alloca %struct.Guard
+br label %bb0
+bb0:
+store %struct.Guard zeroinitializer, ptr %r.0
+call void @"?0Guard@@AEXAAVH@Z"(ptr %r.0, i32 9)
+%tmp.0 = load %struct.Guard, ptr %r.0
+ret %struct.Guard %tmp.0
+}
+
+define i32 @"?narrow@@YHH@Z"(i32 %arg0) {
+%a.0 = alloca i32
+store i32 %arg0, ptr %a.0
+%g.1 = alloca %struct.Guard
+%c.2 = alloca i32
+%__ret.3 = alloca i32
+br label %bb0
+bb0:
+store %struct.Guard zeroinitializer, ptr %g.1
+call void @"?0Guard@@AEXAAVH@Z"(ptr %g.1, i32 2)
+%tmp.0 = load i32, ptr %a.0
+store i32 %tmp.0, ptr %c.2
+%tmp.1 = load i32, ptr %c.2
+store i32 %tmp.1, ptr %__ret.3
+call void @"?1Guard@@AEXAAV@Z"(ptr %g.1)
+%tmp.2 = load i32, ptr %__ret.3
+ret i32 %tmp.2
+}
+
+define i32 @ivy_main() {
+%k.0 = alloca %struct.Guard
+%n.1 = alloca i32
+%__ret.2 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call %struct.Guard @"?keep@@YHX@Z"()
+store %struct.Guard %tmp.0, ptr %k.0
+%tmp.1 = call i32 @"?narrow@@YHH@Z"(i32 5)
+store i32 %tmp.1, ptr %n.1
+%tmp.2 = load i32, ptr %n.1
+%tmp.3 = sub i32 %tmp.2, 5
+%tmp.4 = getelementptr %struct.Guard, ptr %k.0, i32 0, i32 0
+%tmp.5 = load i32, ptr %tmp.4
+%tmp.6 = add i32 %tmp.3, %tmp.5
+%tmp.7 = sub i32 %tmp.6, 9
+store i32 %tmp.7, ptr %__ret.2
+call void @"?1Guard@@AEXAAV@Z"(ptr %k.0)
+%tmp.8 = load i32, ptr %__ret.2
+ret i32 %tmp.8
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+
+@.str.0 = private unnamed_addr constant [10 x i8] c"guard %d\0A\00"
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 746 0
+; LLVM IR emitted by ivy
+define i32 @"?first@@YHAAVAAV@Z"(ptr %arg0, ptr %arg1) {
+%a.0 = alloca ptr
+store ptr %arg0, ptr %a.0
+%b.1 = alloca ptr
+store ptr %arg1, ptr %b.1
+%r.2 = alloca ptr
+%v.3 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %a.0
+store ptr %tmp.0, ptr %r.2
+%tmp.1 = load ptr, ptr %r.2
+%tmp.2 = load i32, ptr %tmp.1
+store i32 %tmp.2, ptr %v.3
+%tmp.3 = load i32, ptr %v.3
+ret i32 %tmp.3
+}
+
+define i32 @ivy_main() {
+%x.0 = alloca i32
+%y.1 = alloca i32
+br label %bb0
+bb0:
+store i32 3, ptr %x.0
+store i32 4, ptr %y.1
+%tmp.0 = call i32 @"?first@@YHAAVAAV@Z"(ptr %x.0, ptr %y.1)
+%tmp.1 = sub i32 %tmp.0, 3
+ret i32 %tmp.1
+}
+
+; C1: C entry point — calls ivy_main()
+define i32 @main() {
+  %r = call i32 @ivy_main()
+  ret i32 %r
+}
+

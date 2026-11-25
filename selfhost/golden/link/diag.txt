@@ -549,3 +549,11 @@ ivy: '<OUT>\app.exe' generated
 ivy: '<OUT>\app.exe' generated
 @@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 31 0
 ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 31 0
+ivy: '<OUT>\app.exe' generated
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 31 0
+ivy: '<OUT>\app.exe' generated

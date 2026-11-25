@@ -30,6 +30,10 @@ export struct HExpr {
     // H6.2y: for a call (12), the bare method name when the call is a
     // virtual dispatch (`flag` = 1, `ival` = vtable slot); "" otherwise.
     const char* msval;
+    // H10.9 (H14): for a call (12), the callee's declared return lifetime
+    // (the oracle's `call.returnLifetime`, taken from the resolved target);
+    // "" when the call has no target or the target declares none.
+    const char* retlt;
 };
 
 // Statement kinds (mirror dumpHirStmt in src/app/main.cpp):

@@ -470,3 +470,10 @@ A—B
 62 31.0
 63 31.5
 1 2.0 3 0.0
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 9 0
+guard 1
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 18 0
+guard 2
+guard 9
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 0 0

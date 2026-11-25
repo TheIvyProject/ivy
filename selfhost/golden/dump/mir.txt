@@ -219,7 +219,7 @@ function main
             ident a
             int 0
 
-@@ selfhost/corpus/codegen/101_struct_array_float.ivy 347 0
+@@ selfhost/corpus/codegen/101_struct_array_float.ivy 333 0
 function main
   return int32_t()
   block 0
@@ -231,7 +231,7 @@ function main
           int 0
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         member .x : float64_t
           index : V
@@ -258,12 +258,12 @@ function main
         int 1
         int 0
 
-@@ selfhost/corpus/codegen/103_print_ref.ivy 295 0
+@@ selfhost/corpus/codegen/103_print_ref.ivy 267 0
 function show
   return void(int32_t& r)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident r
 
@@ -273,17 +273,17 @@ function main
     alloca int32_t x
       int 7
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
     ret
       int 0
 
-@@ selfhost/corpus/codegen/104_print_ref_float.ivy 303 0
+@@ selfhost/corpus/codegen/104_print_ref_float.ivy 275 0
 function show
   return void(float64_t& r)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident r
 
@@ -293,17 +293,17 @@ function main
     alloca float64_t x
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
     ret
       int 0
 
-@@ selfhost/corpus/codegen/105_print_ref_char.ivy 294 0
+@@ selfhost/corpus/codegen/105_print_ref_char.ivy 266 0
 function show
   return void(int8_t& r)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident r
 
@@ -313,7 +313,7 @@ function main
     alloca int8_t x
       int 65
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
     ret
       int 0
@@ -327,7 +327,7 @@ function main
     ret
       ident c
 
-@@ selfhost/corpus/codegen/107_enum_param_return.ivy 201 0
+@@ selfhost/corpus/codegen/107_enum_param_return.ivy 187 0
 function id
   return Color(Color c)
   block 0
@@ -340,7 +340,7 @@ function main
     alloca Color c
       int 2
     ret
-      call : Color [lt: unknown]
+      call : Color
         ident c
 
 @@ selfhost/corpus/codegen/108_enum_scoped.ivy 96 0
@@ -352,7 +352,7 @@ function main
     ret
       ident m
 
-@@ selfhost/corpus/codegen/109_enum_scoped_param.ivy 167 0
+@@ selfhost/corpus/codegen/109_enum_scoped_param.ivy 153 0
 function pick
   return Mode(Mode m)
   block 0
@@ -363,10 +363,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : Mode [lt: unknown]
+      call : Mode
         int 0
 
-@@ selfhost/corpus/codegen/11_two_functions.ivy 245 0
+@@ selfhost/corpus/codegen/11_two_functions.ivy 231 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -379,7 +379,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
         int 3
 
@@ -392,7 +392,7 @@ function main
     ret
       ident s
 
-@@ selfhost/corpus/codegen/111_enum_underlying_u16.ivy 162 0
+@@ selfhost/corpus/codegen/111_enum_underlying_u16.ivy 148 0
 function id
   return Big(Big b)
   block 0
@@ -403,10 +403,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : Big [lt: unknown]
+      call : Big
         int 4
 
-@@ selfhost/corpus/codegen/112_enum_underlying_u8.ivy 169 0
+@@ selfhost/corpus/codegen/112_enum_underlying_u8.ivy 155 0
 function pick
   return Tiny(Tiny t)
   block 0
@@ -417,7 +417,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : Tiny [lt: unknown]
+      call : Tiny
         int 201
 
 @@ selfhost/corpus/codegen/113_enum_array.ivy 265 0
@@ -457,14 +457,14 @@ function main
       member .c : Color
         ident s
 
-@@ selfhost/corpus/codegen/115_enum_print.ivy 185 0
+@@ selfhost/corpus/codegen/115_enum_print.ivy 171 0
 function main
   return int32_t()
   block 0
     alloca Color c
       int 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident c
     ret
@@ -479,7 +479,7 @@ function main
     ret
       ident f
 
-@@ selfhost/corpus/codegen/117_enum_multi_param.ivy 216 0
+@@ selfhost/corpus/codegen/117_enum_multi_param.ivy 202 0
 function mix
   return Color(Color c, Mode m, int32_t n)
   block 0
@@ -490,12 +490,12 @@ function main
   return int32_t()
   block 0
     ret
-      call : Color [lt: unknown]
+      call : Color
         int 1
         int 1
         int 2
 
-@@ selfhost/corpus/codegen/118_enum_in_struct_param.ivy 274 0
+@@ selfhost/corpus/codegen/118_enum_in_struct_param.ivy 260 0
 function get
   return int32_t(S s)
   block 0
@@ -512,10 +512,10 @@ function main
         ident s
       int 1
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident s
 
-@@ selfhost/corpus/codegen/119_enum_return.ivy 168 0
+@@ selfhost/corpus/codegen/119_enum_return.ivy 154 0
 function next
   return Color(Color c)
   block 0
@@ -526,10 +526,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : Color [lt: unknown]
+      call : Color
         int 0
 
-@@ selfhost/corpus/codegen/12_recursion.ivy 512 0
+@@ selfhost/corpus/codegen/12_recursion.ivy 470 0
 function fib
   return int32_t(int32_t n)
   block 0
@@ -540,11 +540,11 @@ function fib
   block 1
     ret
       binary '+' : int32_t
-        call : int32_t [lt: unknown]
+        call : int32_t
           binary '-' : int32_t
             ident n
             int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           binary '-' : int32_t
             ident n
             int 2
@@ -556,7 +556,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 10
 
 @@ selfhost/corpus/codegen/120_enum_scoped_array.ivy 261 0
@@ -579,7 +579,7 @@ function main
         ident a
         int 1
 
-@@ selfhost/corpus/codegen/121_enum_struct_print.ivy 372 0
+@@ selfhost/corpus/codegen/121_enum_struct_print.ivy 358 0
 function main
   return int32_t()
   block 0
@@ -593,7 +593,7 @@ function main
         ident s
       int 4
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {}" [lt: static]
         member .c : Color
           ident s
@@ -602,20 +602,20 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/122_enum_scoped_print.ivy 184 0
+@@ selfhost/corpus/codegen/122_enum_scoped_print.ivy 170 0
 function main
   return int32_t()
   block 0
     alloca Mode m
       int 1
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident m
     ret
       int 0
 
-@@ selfhost/corpus/codegen/123_enum_struct_return.ivy 365 0
+@@ selfhost/corpus/codegen/123_enum_struct_return.ivy 323 0
 function make
   return S()
   block 0
@@ -635,12 +635,12 @@ function main
   return int32_t()
   block 0
     alloca S s
-      call : S [lt: unknown]
+      call : S
     ret
-      member .c : Color [lt: unknown]
-        ident s [lt: unknown]
+      member .c : Color
+        ident s
 
-@@ selfhost/corpus/codegen/124_enum_param_i8.ivy 170 0
+@@ selfhost/corpus/codegen/124_enum_param_i8.ivy 156 0
 function pick
   return Small(Small s)
   block 0
@@ -651,7 +651,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : Small [lt: unknown]
+      call : Small
         int 1
 
 @@ selfhost/corpus/codegen/125_enum_unused.ivy 97 0
@@ -696,7 +696,7 @@ function main
         ident a
         int 1
 
-@@ selfhost/corpus/codegen/129_enum_scoped_underlying.ivy 156 0
+@@ selfhost/corpus/codegen/129_enum_scoped_underlying.ivy 142 0
 function id
   return M(M m)
   block 0
@@ -707,10 +707,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : M [lt: unknown]
+      call : M
         int 2
 
-@@ selfhost/corpus/codegen/13_void_call.ivy 248 0
+@@ selfhost/corpus/codegen/13_void_call.ivy 234 0
 function hello
   return void(int32_t x)
   block 0
@@ -723,19 +723,19 @@ function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         int 4
     ret
       int 0
 
-@@ selfhost/corpus/codegen/130_enum_scoped_underlying_print.ivy 181 0
+@@ selfhost/corpus/codegen/130_enum_scoped_underlying_print.ivy 167 0
 function main
   return int32_t()
   block 0
     alloca M m
       int 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident m
     ret
@@ -764,7 +764,7 @@ function main
           ident a
           int 1
 
-@@ selfhost/corpus/codegen/132_enum_two_params.ivy 189 0
+@@ selfhost/corpus/codegen/132_enum_two_params.ivy 175 0
 function both
   return int32_t(A a, B b)
   block 0
@@ -775,11 +775,11 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 1
 
-@@ selfhost/corpus/codegen/133_enum_float_field.ivy 380 0
+@@ selfhost/corpus/codegen/133_enum_float_field.ivy 366 0
 function main
   return int32_t()
   block 0
@@ -793,7 +793,7 @@ function main
         ident s
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {}" [lt: static]
         member .c : Color
           ident s
@@ -907,7 +907,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/14_extern_c.ivy 183 0
+@@ selfhost/corpus/codegen/14_extern_c.ivy 169 0
 function abs [extern "C"]
   return int32_t(int32_t x)
 
@@ -915,11 +915,11 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         prefix '-' : int
           int 7
 
-@@ selfhost/corpus/codegen/140_new_float.ivy 460 0
+@@ selfhost/corpus/codegen/140_new_float.ivy 446 0
 function main
   return int32_t()
   block 0
@@ -933,7 +933,7 @@ function main
       delete
         ident p [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v [lt: unknown]
     ret [unsafe]
@@ -941,7 +941,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/141_new_float32.ivy 461 0
+@@ selfhost/corpus/codegen/141_new_float32.ivy 447 0
 function main
   return int32_t()
   block 0
@@ -955,7 +955,7 @@ function main
       delete
         ident p [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v [lt: unknown]
     ret [unsafe]
@@ -1136,7 +1136,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/15_params.ivy 385 0
+@@ selfhost/corpus/codegen/15_params.ivy 371 0
 function mix
   return int32_t(int32_t a, int32_t b, int32_t c)
   block 0
@@ -1155,7 +1155,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
         int 3
@@ -1265,9 +1265,7 @@ function main
       member .x : int32_t
         ident p
 
-@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 0 -1073741819
-@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 0 -1073741819
-@@ selfhost/corpus/codegen/158_struct_float_field_init.ivy 306 0
+@@ selfhost/corpus/codegen/158_struct_float_field_init.ivy 292 0
 function main
   return int32_t()
   block 0
@@ -1276,7 +1274,7 @@ function main
         int 3
         float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {}" [lt: static]
         member .x : int32_t
           ident p
@@ -1299,7 +1297,7 @@ function main
       member .y : int32_t
         ident p
 
-@@ selfhost/corpus/codegen/16_nested_call.ivy 440 0
+@@ selfhost/corpus/codegen/16_nested_call.ivy 398 0
 function inc
   return int32_t(int32_t x)
   block 0
@@ -1320,13 +1318,12 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+      call : int32_t
+        call : int32_t
           int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 2
 
-@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 0 -1073741819
 @@ selfhost/corpus/codegen/161_struct_enum_field_init.ivy 161 0
 function main
   return int32_t()
@@ -1366,7 +1363,7 @@ function main
         member .y : int32_t
           ident p
 
-@@ selfhost/corpus/codegen/164_printf_basic.ivy 226 0
+@@ selfhost/corpus/codegen/164_printf_basic.ivy 212 0
 function printf [extern "C"]
   return int32_t(const char* fmt)
 
@@ -1374,13 +1371,13 @@ function main
   return int32_t()
   block 0
     eval
-      call : int32_t [lt: unknown]
+      call : int32_t
         string "n = %d\n" [lt: static]
         int 42
     ret
       int 0
 
-@@ selfhost/corpus/codegen/165_printf_multi.ivy 350 0
+@@ selfhost/corpus/codegen/165_printf_multi.ivy 336 0
 function printf [extern "C"]
   return int32_t(const char* fmt)
 
@@ -1392,7 +1389,7 @@ function main
     alloca float64_t f
       float 1.5
     eval
-      call : int32_t [lt: unknown]
+      call : int32_t
         string "%d %s %f\n" [lt: static]
         ident a
         string "hi" [lt: static]
@@ -1400,7 +1397,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/166_puts.ivy 204 0
+@@ selfhost/corpus/codegen/166_puts.ivy 190 0
 function puts [extern "C"]
   return int32_t(const char* s)
 
@@ -1408,7 +1405,7 @@ function main
   return int32_t()
   block 0
     eval
-      call : int32_t [lt: unknown]
+      call : int32_t
         string "hello" [lt: static]
     ret
       int 0
@@ -1423,7 +1420,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/168_ptr_arg.ivy 425 0
+@@ selfhost/corpus/codegen/168_ptr_arg.ivy 397 0
 function use [extern "C"]
   return void(int32_t* p)
 
@@ -1436,10 +1433,10 @@ function main
       prefix '&' : int32_t* [lt: local]
         ident x
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident q [lt: local]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         prefix '&' : int32_t* [lt: local]
           ident x
     ret
@@ -1504,12 +1501,12 @@ function main
     ret [unsafe]
       int 6
 
-@@ selfhost/corpus/codegen/17_print_str.ivy 138 0
+@@ selfhost/corpus/codegen/17_print_str.ivy 124 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "hi" [lt: static]
     ret
       int 0
@@ -1524,7 +1521,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/171_variadic_zero.ivy 152 0
+@@ selfhost/corpus/codegen/171_variadic_zero.ivy 138 0
 function f [extern "C"]
   return int32_t()
 
@@ -1532,7 +1529,7 @@ function main
   return int32_t()
   block 0
     eval
-      call : int32_t [lt: unknown]
+      call : int32_t
     ret
       int 0
 
@@ -1576,7 +1573,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/174_overload_count_call.ivy 581 0
+@@ selfhost/corpus/codegen/174_overload_count_call.ivy 525 0
 function add
   return int(int a, int b)
   block 0
@@ -1599,18 +1596,18 @@ function main
   return int()
   block 0
     alloca int r1
-      call : int [lt: unknown]
+      call : int
         int 1
         int 2
     alloca int r2
-      call : int [lt: unknown]
+      call : int
         int 1
         int 2
         int 3
     ret
       binary '+' : int
-        ident r1 [lt: unknown]
-        ident r2 [lt: unknown]
+        ident r1
+        ident r2
 
 @@ selfhost/corpus/codegen/175_cstyle_numeric.ivy 749 0
 function main
@@ -1786,15 +1783,15 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/18_println_mix.ivy 194 0
+@@ selfhost/corpus/codegen/18_println_mix.ivy 166 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "hi" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         int 42
     ret
       int 0
@@ -1942,7 +1939,7 @@ function main
         ident a
         ident b
 
-@@ selfhost/corpus/codegen/183_cstyle_control_flow.ivy 1121 0
+@@ selfhost/corpus/codegen/183_cstyle_control_flow.ivy 1079 0
 function conv
   return int32_t(int32_t v)
   block 0
@@ -1992,12 +1989,12 @@ function main
         ident s
   block 4
     ret
-      call : int32_t [lt: unknown]
-        ident s [lt: unknown]
+      call : int32_t
+        ident s
   block 5
     store [unsafe]
       ident s
-      call : int32_t [lt: unknown]
+      call : int32_t
         C-cast : int32_t
           int 1
         C-cast : int32_t
@@ -2036,7 +2033,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 660 0
+@@ selfhost/corpus/codegen/185_ivy_print_types.ivy 534 0
 function main
   return int32_t()
   block 0
@@ -2045,67 +2042,67 @@ function main
     alloca int32_t x
       int 5
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
     eval
-      call : void [lt: unknown]
+      call : void
         bool true
     eval
-      call : void [lt: unknown]
+      call : void
         float 3.14
     eval
-      call : void [lt: unknown]
+      call : void
         char 'A'
     eval
-      call : void [lt: unknown]
+      call : void
         string "s" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
     eval
-      call : void [lt: unknown]
+      call : void
     eval
-      call : void [lt: unknown]
+      call : void
     eval
-      call : void [lt: unknown]
+      call : void
         int 1
         int 2
         int 3
     ret
       int 0
 
-@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 640 0
+@@ selfhost/corpus/codegen/186_ivy_print_explicit.ivy 500 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         int 42
     eval
-      call : void [lt: unknown]
+      call : void
         float 3.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "hi" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         char 'A'
     eval
-      call : void [lt: unknown]
+      call : void
         int 7
     eval
-      call : void [lt: unknown]
+      call : void
         float 2.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "bye" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         char 'Z'
     eval
-      call : void [lt: unknown]
+      call : void
     eval
-      call : void [lt: unknown]
+      call : void
     ret
       int 0
 
@@ -2118,24 +2115,24 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/188_io_write_file.ivy 494 0
+@@ selfhost/corpus/codegen/188_io_write_file.ivy 438 0
 function main
   return int32_t()
   block 0
     alloca int32_t a [unsafe]
-      call : int [lt: unknown]
+      call : int
         string "a.txt" [lt: static]
         string "x" [lt: static]
         int 1
     alloca int32_t b [unsafe]
-      call : int [lt: unknown]
+      call : int
         string "b.txt" [lt: static]
         string "y" [lt: static]
     alloca int32_t c [unsafe]
-      call : int [lt: unknown]
+      call : int
         string "c.txt" [lt: static]
     alloca int32_t d [unsafe]
-      call : int [lt: unknown]
+      call : int
     ret
       int 0
 
@@ -2152,19 +2149,19 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/19_print_int_var.ivy 155 0
+@@ selfhost/corpus/codegen/19_print_int_var.ivy 141 0
 function main
   return int32_t()
   block 0
     alloca int32_t x
       int 42
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
     ret
       int 0
 
-@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 247 0
+@@ selfhost/corpus/codegen/190_ivy_print_decl_order.ivy 219 0
 function puts [extern "C"]
   return int(const char* s)
 
@@ -2172,15 +2169,15 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "x" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         int 1
     ret
       int 0
 
-@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 240 0
+@@ selfhost/corpus/codegen/191_ivy_print_enum.ivy 212 0
 function main
   return int32_t()
   block 0
@@ -2189,15 +2186,15 @@ function main
     alloca Small s
       int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident c
     eval
-      call : void [lt: unknown]
+      call : void
         ident s
     ret
       int 0
 
-@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 909 0
+@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 829 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block 0
@@ -2206,7 +2203,7 @@ function Logger::Logger
         this
       ident v
     eval
-      call : int [lt: unknown]
+      call : int
         string "ctor %d\n" [lt: static]
         member .id : int32_t
           this
@@ -2215,7 +2212,7 @@ function Logger::~Logger
   return void(Logger& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "dtor %d\n" [lt: static]
         member .id : int32_t
           this
@@ -2228,26 +2225,26 @@ function main
   block 0
     alloca Logger a
     eval
-      call : void [lt: unknown]
+      call : void
         ident a
         int 1
     alloca Logger b
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
         int 2
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
-    alloca int __ret
+    alloca int32_t __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident a
     ret
       ident __ret
 
-@@ selfhost/corpus/codegen/193_ctor_overload.ivy 733 0
+@@ selfhost/corpus/codegen/193_ctor_overload.ivy 705 0
 function Pair::Pair
   return void(Pair& this)
   block 0
@@ -2277,11 +2274,11 @@ function main
   block 0
     alloca Pair p
     eval
-      call : void [lt: unknown]
+      call : void
         ident p
     alloca Pair q
     eval
-      call : void [lt: unknown]
+      call : void
         ident q
         int 3
         int 4
@@ -2319,7 +2316,7 @@ function main
         member .b : int32_t
           ident p
 
-@@ selfhost/corpus/codegen/195_raii_break.ivy 1212 0
+@@ selfhost/corpus/codegen/195_raii_break.ivy 1142 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block 0
@@ -2332,7 +2329,7 @@ function Logger::~Logger
   return void(Logger& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "dtor %d\n" [lt: static]
         member .id : int32_t
           this
@@ -2356,7 +2353,7 @@ function test
   block 2
     alloca Logger loop
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
         ident i
     store
@@ -2378,12 +2375,12 @@ function test
       ident sum
   block 5
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
     jump
   block 6
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
     jump
     jump
@@ -2392,9 +2389,9 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/codegen/196_raii_continue.ivy 1212 0
+@@ selfhost/corpus/codegen/196_raii_continue.ivy 1142 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block 0
@@ -2407,7 +2404,7 @@ function Logger::~Logger
   return void(Logger& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "dtor %d\n" [lt: static]
         member .id : int32_t
           this
@@ -2431,7 +2428,7 @@ function test
   block 2
     alloca Logger loop
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
         ident i
     condbranch
@@ -2453,12 +2450,12 @@ function test
         ident sum
         ident i
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
     jump
   block 6
     eval
-      call : void [lt: unknown]
+      call : void
         ident loop
     jump
     jump
@@ -2467,9 +2464,9 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/codegen/197_dtor_return_temp.ivy 675 0
+@@ selfhost/corpus/codegen/197_dtor_return_temp.ivy 633 0
 function Guard::Guard
   return void(Guard& this, int32_t v)
   block 0
@@ -2491,7 +2488,7 @@ function compute
   block 0
     alloca Guard g
     eval
-      call : void [lt: unknown]
+      call : void
         ident g
         int 5
     alloca int32_t __ret
@@ -2500,7 +2497,7 @@ function compute
           ident g
         int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident g
     ret
       ident __ret
@@ -2509,9 +2506,9 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/codegen/198_dtor_nrvo.ivy 498 0
+@@ selfhost/corpus/codegen/198_dtor_nrvo.ivy 470 0
 function Box::Box
   return void(Box& this, int32_t x)
   block 0
@@ -2533,7 +2530,7 @@ function make
   block 0
     alloca Box b
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
         int 9
     ret
@@ -2543,11 +2540,11 @@ function main
   return int32_t()
   block 0
     eval
-      call : Box [lt: unknown]
+      call : Box
     ret
       int 0
 
-@@ selfhost/corpus/codegen/199_operator_binary.ivy 2332 0
+@@ selfhost/corpus/codegen/199_operator_binary.ivy 2052 0
 function Vec2::operator+
   return Vec2(Vec2& this, Vec2 other)
   block 0
@@ -2612,49 +2609,49 @@ function main
         ident b
       int 4
     alloca Vec2 c
-      call : Vec2 [lt: unknown]
+      call : Vec2
         ident a
         ident b
     eval
-      call : int [lt: unknown]
+      call : int
         string "c = (%d, %d)\n" [lt: static]
-        member .x : int32_t [lt: unknown]
-          ident c [lt: unknown]
-        member .y : int32_t [lt: unknown]
-          ident c [lt: unknown]
+        member .x : int32_t
+          ident c
+        member .y : int32_t
+          ident c
     alloca Vec2 d
-      call : Vec2 [lt: unknown]
-        call : Vec2 [lt: unknown]
+      call : Vec2
+        call : Vec2
           ident a
           ident b
-        ident c [lt: unknown]
+        ident c
     eval
-      call : int [lt: unknown]
+      call : int
         string "d = (%d, %d)\n" [lt: static]
-        member .x : int32_t [lt: unknown]
-          ident d [lt: unknown]
-        member .y : int32_t [lt: unknown]
-          ident d [lt: unknown]
+        member .x : int32_t
+          ident d
+        member .y : int32_t
+          ident d
     alloca bool eq
-      call : bool [lt: unknown]
+      call : bool
         ident a
         ident b
     eval
-      call : int [lt: unknown]
+      call : int
         string "a == b? %d\n" [lt: static]
-        ident eq [lt: unknown]
+        ident eq
     alloca bool eq2
-      call : bool [lt: unknown]
+      call : bool
         ident a
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "a == a? %d\n" [lt: static]
-        ident eq2 [lt: unknown]
+        ident eq2
     ret
       int 0
 
-@@ selfhost/corpus/codegen/20_print_format.ivy 243 0
+@@ selfhost/corpus/codegen/20_print_format.ivy 229 0
 function main
   return int32_t()
   block 0
@@ -2663,14 +2660,14 @@ function main
     alloca int32_t b
       int 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "x={} y={}" [lt: static]
         ident a
         ident b
     ret
       int 0
 
-@@ selfhost/corpus/codegen/200_operator_unary.ivy 916 0
+@@ selfhost/corpus/codegen/200_operator_unary.ivy 832 0
 function Vec2::operator-
   return Vec2(Vec2& this)
   block 0
@@ -2706,19 +2703,19 @@ function main
         ident a
       int 7
     alloca Vec2 n
-      call : Vec2 [lt: unknown]
+      call : Vec2
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "-a = (%d, %d)\n" [lt: static]
-        member .x : int32_t [lt: unknown]
-          ident n [lt: unknown]
-        member .y : int32_t [lt: unknown]
-          ident n [lt: unknown]
+        member .x : int32_t
+          ident n
+        member .y : int32_t
+          ident n
     ret
       int 0
 
-@@ selfhost/corpus/codegen/201_operator_index.ivy 1327 0
+@@ selfhost/corpus/codegen/201_operator_index.ivy 1229 0
 function Vec3::operator[]
   return int32_t(Vec3& this, int32_t i)
   block 0
@@ -2764,33 +2761,33 @@ function main
         ident a
       int 30
     eval
-      call : int [lt: unknown]
+      call : int
         string "a[0]=%d a[1]=%d a[2]=%d\n" [lt: static]
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
           int 0
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
           int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
           int 2
     alloca int32_t s
       binary '+' : int32_t
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
           int 0
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
           int 2
     eval
-      call : int [lt: unknown]
+      call : int
         string "s=%d\n" [lt: static]
         ident s
     ret
       int 0
 
-@@ selfhost/corpus/codegen/202_operator_call.ivy 1042 0
+@@ selfhost/corpus/codegen/202_operator_call.ivy 1000 0
 function Vec3::operator()
   return int32_t(Vec3& this)
   block 0
@@ -2833,16 +2830,16 @@ function main
         ident a
       int 3
     alloca int32_t mag
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "|a|^2 = %d\n" [lt: static]
-        ident mag [lt: unknown]
+        ident mag
     ret
       int 0
 
-@@ selfhost/corpus/codegen/203_operator_call_arg.ivy 578 0
+@@ selfhost/corpus/codegen/203_operator_call_arg.ivy 536 0
 function Scale::operator()
   return int32_t(Scale& this, int32_t v)
   block 0
@@ -2864,17 +2861,17 @@ function main
         ident s
       int 7
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident s
         int 6
     eval
-      call : int [lt: unknown]
+      call : int
         string "s(6) = %d\n" [lt: static]
-        ident r [lt: unknown]
+        ident r
     ret
       int 0
 
-@@ selfhost/corpus/codegen/204_operator_call_multi.ivy 669 0
+@@ selfhost/corpus/codegen/204_operator_call_multi.ivy 627 0
 function Adder::operator()
   return int32_t(Adder& this, int32_t a, int32_t b)
   block 0
@@ -2898,18 +2895,18 @@ function main
         ident f
       int 100
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident f
         int 10
         int 20
     eval
-      call : int [lt: unknown]
+      call : int
         string "f(10, 20) = %d\n" [lt: static]
-        ident r [lt: unknown]
+        ident r
     ret
       int 0
 
-@@ selfhost/corpus/codegen/205_operator_index_ref.ivy 1105 0
+@@ selfhost/corpus/codegen/205_operator_index_ref.ivy 1077 0
 function Arr::operator[]
   return int32_t&(Arr& this, int32_t i)
   block 0
@@ -2952,7 +2949,7 @@ function main
         int 1
       int 43
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         call : int32_t& [lt: unknown]
           ident a
@@ -2961,7 +2958,7 @@ function main
           ident a
           int 1
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         member .v0 : int32_t
           ident a
@@ -2970,7 +2967,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/206_operator_call_result.ivy 1764 0
+@@ selfhost/corpus/codegen/206_operator_call_result.ivy 1610 0
 function Vec2::operator+
   return Vec2(Vec2& this, Vec2 other)
   block 0
@@ -3041,28 +3038,28 @@ function main
         ident b
       int 2
     alloca Vec2 c
-      call : Vec2 [lt: unknown]
-        call : Vec2 [lt: unknown]
+      call : Vec2
+        call : Vec2
         ident b
     eval
-      call : int [lt: unknown]
+      call : int
         string "c = (%d, %d)\n" [lt: static]
-        member .x : int32_t [lt: unknown]
-          ident c [lt: unknown]
-        member .y : int32_t [lt: unknown]
-          ident c [lt: unknown]
+        member .x : int32_t
+          ident c
+        member .y : int32_t
+          ident c
     eval
-      call : int [lt: unknown]
+      call : int
         string "(b + c)[1] = %d\n" [lt: static]
-        call : int32_t [lt: unknown]
-          call : Vec2 [lt: unknown]
+        call : int32_t
+          call : Vec2
             ident b
-            ident c [lt: unknown]
+            ident c
           int 1
     ret
       int 0
 
-@@ selfhost/corpus/codegen/207_template_struct_basic.ivy 696 0
+@@ selfhost/corpus/codegen/207_template_struct_basic.ivy 654 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3071,15 +3068,15 @@ function main
   block 0
     alloca Box<int32_t> a
     eval
-      call : void [lt: unknown]
+      call : void
         ident a
         int 7
     eval
-      call : int [lt: unknown]
+      call : int
         string "a.value=%d a.get()=%d\n" [lt: static]
         member .value : int32_t
           ident a
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
     ret
       int 0
@@ -3099,7 +3096,7 @@ function Box<int32_t>::set
         this
       ident v
 
-@@ selfhost/corpus/codegen/208_template_struct_two_params.ivy 872 0
+@@ selfhost/corpus/codegen/208_template_struct_two_params.ivy 830 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3116,11 +3113,11 @@ function main
         ident p
       int 31
     eval
-      call : int [lt: unknown]
+      call : int
         string "p.sum()=%d p.swap()=%d\n" [lt: static]
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident p
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident p
     ret
       int 0
@@ -3142,7 +3139,7 @@ function Pair<int32_t,int32_t>::swap
       member .second : int32_t
         this
 
-@@ selfhost/corpus/codegen/209_template_struct_method_call.ivy 950 0
+@@ selfhost/corpus/codegen/209_template_struct_method_call.ivy 852 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3158,16 +3155,16 @@ function main
     store
       member .value : int32_t
         ident b
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "a=%d b=%d twice=%d\n" [lt: static]
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident b
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident b
     ret
       int 0
@@ -3184,25 +3181,25 @@ function Box<int32_t>::twice
   block 0
     ret
       binary '+' : int32_t
-        call : int32_t [lt: unknown]
+        call : int32_t
           this
-        call : int32_t [lt: unknown]
+        call : int32_t
           this
 
-@@ selfhost/corpus/codegen/21_eprint.ivy 210 0
+@@ selfhost/corpus/codegen/21_eprint.ivy 182 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "e" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "f" [lt: static]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/210_template_struct_int64.ivy 487 0
+@@ selfhost/corpus/codegen/210_template_struct_int64.ivy 459 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3215,9 +3212,9 @@ function main
         ident a
       int 5000000000
     eval
-      call : int [lt: unknown]
+      call : int
         string "a=%lld\n" [lt: static]
-        call : int64_t [lt: unknown]
+        call : int64_t
           ident a
     ret
       int 0
@@ -3229,7 +3226,7 @@ function Box<int64_t>::get
       member .value : int64_t
         this
 
-@@ selfhost/corpus/codegen/211_template_struct_agg.ivy 524 0
+@@ selfhost/corpus/codegen/211_template_struct_agg.ivy 496 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3240,11 +3237,11 @@ function main
       init-list : Box<int32_t> (1)
         int 5
     eval
-      call : int [lt: unknown]
+      call : int
         string "a.value=%d a.get()=%d\n" [lt: static]
         member .value : int32_t
           ident a
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
     ret
       int 0
@@ -3256,7 +3253,7 @@ function Box<int32_t>::get
       member .value : int32_t
         this
 
-@@ selfhost/corpus/codegen/212_template_struct_nested.ivy 821 0
+@@ selfhost/corpus/codegen/212_template_struct_nested.ivy 779 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3270,13 +3267,13 @@ function main
           ident w
       int 9
     eval
-      call : int [lt: unknown]
+      call : int
         string "w.inner.value=%d w.outer().value=%d\n" [lt: static]
         member .value : int32_t
           member .inner : Box<int32_t>
             ident w
-        member .value : int32_t [lt: unknown]
-          call : Box<int32_t> [lt: unknown]
+        member .value : int32_t
+          call : Box<int32_t>
             ident w
     ret
       int 0
@@ -3295,7 +3292,7 @@ function Wrap<Box>::outer
       member .inner : Box<int32_t>
         this
 
-@@ selfhost/corpus/codegen/213_template_struct_assign.ivy 600 0
+@@ selfhost/corpus/codegen/213_template_struct_assign.ivy 558 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3312,11 +3309,11 @@ function main
       ident b
       ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "a=%d b=%d\n" [lt: static]
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident a
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident b
     ret
       int 0
@@ -3328,7 +3325,7 @@ function Box<int32_t>::get
       member .value : int32_t
         this
 
-@@ selfhost/corpus/codegen/214_template_struct_param.ivy 764 0
+@@ selfhost/corpus/codegen/214_template_struct_param.ivy 722 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3342,13 +3339,13 @@ function main
       int 13
     alloca Box<int32_t> b
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "b=%d\n" [lt: static]
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident b
     ret
       int 0
@@ -3369,7 +3366,7 @@ function Box<int32_t>::copy
       member .value : int32_t
         ident o
 
-@@ selfhost/corpus/codegen/215_variadic_sizeof.ivy 634 0
+@@ selfhost/corpus/codegen/215_variadic_sizeof.ivy 578 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3377,12 +3374,12 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d %d\n" [lt: static]
-        call : int [lt: unknown]
-        call : int [lt: unknown]
+        call : int
+        call : int
           int 1
-        call : int [lt: unknown]
+        call : int
           int 1
           int 2
           int 3
@@ -3407,7 +3404,7 @@ function count_args<int,int,int>
     ret
       int 3
 
-@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 694 0
+@@ selfhost/corpus/codegen/216_variadic_fixed_pack.ivy 638 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3415,14 +3412,14 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d %d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 1
-        call : int [lt: unknown]
+        call : int
           int 1
           int 2
-        call : int [lt: unknown]
+        call : int
           int 1
           int 2
           int 3
@@ -3447,7 +3444,7 @@ function count_after<int,int,int>
     ret
       int 2
 
-@@ selfhost/corpus/codegen/217_variadic_fold_sum.ivy 1502 0
+@@ selfhost/corpus/codegen/217_variadic_fold_sum.ivy 1418 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3455,25 +3452,25 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 1
           int 2
           int 3
           int 4
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 1
           int 2
           int 3
           int 4
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 10
           int 1
           int 2
@@ -3517,7 +3514,7 @@ function sum_from<int,int,int>
           ident __args1
         ident __args2
 
-@@ selfhost/corpus/codegen/218_variadic_fold_logic.ivy 1150 0
+@@ selfhost/corpus/codegen/218_variadic_fold_logic.ivy 1066 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3525,31 +3522,31 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
             bool true
             bool true
           int 1
           int 0
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
             bool true
             bool false
           int 1
           int 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
             bool false
             bool true
           int 1
           int 0
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
             bool false
             bool false
           int 1
@@ -3573,7 +3570,7 @@ function any_true<bool,bool>
         ident __args0
         ident __args1
 
-@@ selfhost/corpus/codegen/219_variadic_comma.ivy 687 0
+@@ selfhost/corpus/codegen/219_variadic_comma.ivy 617 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3581,7 +3578,7 @@ function print_int
   return void(int x)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
         ident x
 
@@ -3589,7 +3586,7 @@ function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         int 11
         int 22
         int 33
@@ -3602,30 +3599,30 @@ function print_all<int,int,int>
     eval
       binary ',' : int
         binary ',' : int
-          call : void [lt: unknown]
+          call : void
             ident __args0
-          call : void [lt: unknown]
+          call : void
             ident __args1
-        call : void [lt: unknown]
+        call : void
           ident __args2
 
-@@ selfhost/corpus/codegen/22_string_escape.ivy 304 0
+@@ selfhost/corpus/codegen/22_string_escape.ivy 262 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "a\nb\t\"q\"\\end" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "\x41" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "\101" [lt: static]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/220_variadic_mixed.ivy 510 0
+@@ selfhost/corpus/codegen/220_variadic_mixed.ivy 482 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3633,9 +3630,9 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%lld\n" [lt: static]
-        call : long long [lt: unknown]
+        call : long long
           int 1
           int 2
           int 3
@@ -3652,7 +3649,7 @@ function lsum<int,int,int>
           ident __args1
         ident __args2
 
-@@ selfhost/corpus/codegen/221_variadic_empty.ivy 700 0
+@@ selfhost/corpus/codegen/221_variadic_empty.ivy 630 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3660,18 +3657,18 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
           int 1
           int 0
         ternary ?: : int
-          call : bool [lt: unknown]
+          call : bool
           int 1
           int 0
     ret
@@ -3695,7 +3692,7 @@ function any_true<>
     ret
       bool false
 
-@@ selfhost/corpus/codegen/222_variadic_binary_init.ivy 1061 0
+@@ selfhost/corpus/codegen/222_variadic_binary_init.ivy 977 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3703,20 +3700,20 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 10
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 10
           int 1
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        call : int [lt: unknown]
+        call : int
           int 10
           int 1
           int 2
@@ -3750,7 +3747,7 @@ function sum_from<int,int,int>
           ident __args1
         ident __args2
 
-@@ selfhost/corpus/codegen/223_structured_binding_two.ivy 541 0
+@@ selfhost/corpus/codegen/223_structured_binding_two.ivy 527 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3770,7 +3767,7 @@ function main
       member .y : int32_t
         ident __sb_0
     eval
-      call : int [lt: unknown]
+      call : int
         string "x = %d, y = %d\n" [lt: static]
         ident x
         ident y
@@ -3779,7 +3776,7 @@ function main
         ident x
         ident y
 
-@@ selfhost/corpus/codegen/224_structured_binding_three.ivy 1089 0
+@@ selfhost/corpus/codegen/224_structured_binding_three.ivy 1061 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3803,7 +3800,7 @@ function main
       member .b : int32_t
         ident __sb_0
     eval
-      call : int [lt: unknown]
+      call : int
         string "r = %d, g = %d, b = %d\n" [lt: static]
         ident r
         ident g
@@ -3825,7 +3822,7 @@ function main
       member .b : int32_t
         ident __sb_1
     eval
-      call : int [lt: unknown]
+      call : int
         string "r2 = %d, g2 = %d, b2 = %d\n" [lt: static]
         ident r2
         ident g2
@@ -3833,7 +3830,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/225_structured_binding_call.ivy 802 0
+@@ selfhost/corpus/codegen/225_structured_binding_call.ivy 718 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3856,17 +3853,17 @@ function main
   return int32_t()
   block 0
     alloca Point __sb_0
-      call : Point [lt: unknown]
+      call : Point
         int 3
         int 4
     alloca int32_t a
-      member .x : int32_t [lt: unknown]
-        ident __sb_0 [lt: unknown]
+      member .x : int32_t
+        ident __sb_0
     alloca int32_t b
-      member .y : int32_t [lt: unknown]
-        ident __sb_0 [lt: unknown]
+      member .y : int32_t
+        ident __sb_0
     eval
-      call : int [lt: unknown]
+      call : int
         string "a = %d, b = %d\n" [lt: static]
         ident a
         ident b
@@ -3875,7 +3872,7 @@ function main
         ident a
         ident b
 
-@@ selfhost/corpus/codegen/226_structured_binding_mixed.ivy 594 0
+@@ selfhost/corpus/codegen/226_structured_binding_mixed.ivy 580 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3899,7 +3896,7 @@ function main
       member .b : bool
         ident __sb_0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %.2f %d\n" [lt: static]
         ident i
         ident f
@@ -3907,7 +3904,7 @@ function main
     ret
       ident i
 
-@@ selfhost/corpus/codegen/227_structured_binding_nested.ivy 796 0
+@@ selfhost/corpus/codegen/227_structured_binding_nested.ivy 782 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -3938,7 +3935,7 @@ function main
       member .tail : int32_t
         ident __sb_0
     eval
-      call : int [lt: unknown]
+      call : int
         string "in.a = %d, in.b = %d, tail = %d\n" [lt: static]
         member .a : int32_t
           ident in
@@ -3948,7 +3945,7 @@ function main
     ret
       ident tail
 
-@@ selfhost/corpus/codegen/228_range_for_value.ivy 993 0
+@@ selfhost/corpus/codegen/228_range_for_value.ivy 979 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -4004,13 +4001,13 @@ function main
     jump
   block 4
     eval
-      call : int [lt: unknown]
+      call : int
         string "sum = %d\n" [lt: static]
         ident sum
     ret
       ident sum
 
-@@ selfhost/corpus/codegen/229_range_for_ref.ivy 1478 0
+@@ selfhost/corpus/codegen/229_range_for_ref.ivy 1464 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -4086,7 +4083,7 @@ function main
     jump
   block 8
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d %d\n" [lt: static]
         index : int32_t
           ident arr
@@ -4274,7 +4271,7 @@ function main
   block 8
     jump
 
-@@ selfhost/corpus/codegen/232_range_for_struct_range.ivy 1962 0
+@@ selfhost/corpus/codegen/232_range_for_struct_range.ivy 1920 0
 function Buf::len
   return unsigned uint64_t(Buf& this)
   block 0
@@ -4321,7 +4318,7 @@ function main
     condbranch
       binary '<' : bool
         ident __rfi0
-        call : unsigned uint64_t [lt: unknown]
+        call : unsigned uint64_t
           ident b
   block 2
     alloca int32_t x
@@ -4347,7 +4344,7 @@ function main
     condbranch
       binary '<' : bool
         ident __rfi1
-        call : unsigned uint64_t [lt: unknown]
+        call : unsigned uint64_t
           ident b
   block 6
     alloca int32_t& x
@@ -4367,7 +4364,7 @@ function main
     jump
   block 8
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         member .v0 : int32_t
           ident b
@@ -4565,19 +4562,19 @@ function main
         int 1
         int 0
 
-@@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 760 0
+@@ selfhost/corpus/codegen/235_inherit_virtual_dtor.ivy 704 0
 function Base::~Base
   return void(Base& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "base dtor\n" [lt: static]
 
 function Derived::~Derived
   return void(Derived& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "derived dtor\n" [lt: static]
 
 function printf [extern "C"]
@@ -4602,15 +4599,15 @@ function main
         ident b
       int 3
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
     ret
       int 0
 
-@@ selfhost/corpus/codegen/236_inherit_pure_virtual.ivy 993 0
+@@ selfhost/corpus/codegen/236_inherit_pure_virtual.ivy 951 0
 function Shape::area
   return int(Shape& this)
 
@@ -4653,26 +4650,26 @@ function main
       virtual_call 'area' slot=0 : int [lt: unknown]
         ident sh
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
         ident a [lt: unknown]
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident sh
     eval
-      call : void [lt: unknown]
+      call : void
         ident s
     ret
       ident __ret
 
-@@ selfhost/corpus/codegen/237_inherit_extra_slot.ivy 1025 0
+@@ selfhost/corpus/codegen/237_inherit_extra_slot.ivy 969 0
 function Base::base_only
   return void(Base& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "base only\n" [lt: static]
 
 function Base::~Base
@@ -4683,7 +4680,7 @@ function Derived::extra
   return void(Derived& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "extra\n" [lt: static]
 
 function Derived::~Derived
@@ -4716,15 +4713,15 @@ function main
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
     ret
       ident __ret
 
-@@ selfhost/corpus/codegen/238_inherit_virtual_args.ivy 1132 0
+@@ selfhost/corpus/codegen/238_inherit_virtual_args.ivy 1090 0
 function Base::calc
   return int(Base& this, int a, int b)
   block 0
@@ -4775,26 +4772,26 @@ function main
         int 3
         int 4
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
         ident v [lt: unknown]
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
     ret
       ident __ret
 
-@@ selfhost/corpus/codegen/239_inherit_multiple.ivy 1408 0
+@@ selfhost/corpus/codegen/239_inherit_multiple.ivy 1310 0
 function A::fa
   return void(A& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "fa\n" [lt: static]
 
 function A::~A
@@ -4805,7 +4802,7 @@ function B::fb
   return void(B& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "fb\n" [lt: static]
 
 function B::~B
@@ -4816,14 +4813,14 @@ function C::fa
   return void(C& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "C::fa\n" [lt: static]
 
 function C::fb
   return void(C& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "C::fb\n" [lt: static]
 
 function C::~C
@@ -4855,7 +4852,7 @@ function main
       virtual_call 'fa' slot=0 : void [lt: unknown]
         ident ra
     eval
-      call : void [lt: unknown]
+      call : void
         ident ra
     alloca B& rb
       ident obj
@@ -4863,12 +4860,12 @@ function main
       virtual_call 'fb' slot=0 : void [lt: unknown]
         ident rb
     eval
-      call : void [lt: unknown]
+      call : void
         ident rb
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident obj
     ret
       ident __ret
@@ -4890,12 +4887,12 @@ function main
         ident a
         ident i
 
-@@ selfhost/corpus/codegen/240_inherit_base_method.ivy 1008 0
+@@ selfhost/corpus/codegen/240_inherit_base_method.ivy 938 0
 function Base::shared
   return void(Base& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "shared %d\n" [lt: static]
         member .x : int
           this
@@ -4904,7 +4901,7 @@ function Base::virt
   return void(Base& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "base virt\n" [lt: static]
 
 function Base::~Base
@@ -4915,7 +4912,7 @@ function Derived::virt
   return void(Derived& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "derived virt\n" [lt: static]
 
 function Derived::~Derived
@@ -4938,17 +4935,17 @@ function main
         ident d
       int 22
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
     ret
       ident __ret
 
-@@ selfhost/corpus/codegen/241_move_scalar.ivy 780 0
+@@ selfhost/corpus/codegen/241_move_scalar.ivy 766 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -4982,7 +4979,7 @@ function main
         call : int
           ident q
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d %d %d\n" [lt: static]
         ident b
         ident a
@@ -4995,7 +4992,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/242_move_struct.ivy 463 0
+@@ selfhost/corpus/codegen/242_move_struct.ivy 449 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -5015,7 +5012,7 @@ function main
       call : P
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         member .x : int
           ident b
@@ -5024,7 +5021,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/243_move_call_arg.ivy 446 0
+@@ selfhost/corpus/codegen/243_move_call_arg.ivy 404 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -5042,17 +5039,17 @@ function main
     alloca int a
       int 5
     alloca int b
-      call : int [lt: unknown]
+      call : int
         call : int
           ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        ident b [lt: unknown]
+        ident b
     ret
       int 0
 
-@@ selfhost/corpus/codegen/244_move_return.ivy 404 0
+@@ selfhost/corpus/codegen/244_move_return.ivy 362 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -5069,16 +5066,16 @@ function main
     alloca int a
       int 7
     alloca int b
-      call : int [lt: unknown]
+      call : int
         ident a
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        ident b [lt: unknown]
+        ident b
     ret
       int 0
 
-@@ selfhost/corpus/codegen/245_move_pointer.ivy 727 0
+@@ selfhost/corpus/codegen/245_move_pointer.ivy 755 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -5100,20 +5097,20 @@ function main
         ident p [lt: unknown]
       int 9
     alloca int* q [unsafe]
-      call : int*
+      call : int* [lt: unknown]
         ident p [lt: unknown]
     eval [unsafe]
-      call : int [lt: unknown]
+      call : int
         string "%d\n" [lt: static]
-        prefix '*' : int
-          ident q
+        prefix '*' : int [lt: unknown]
+          ident q [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
-        ident q
+      call : void
+        ident q [lt: unknown]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/246_move_cond.ivy 623 0
+@@ selfhost/corpus/codegen/246_move_cond.ivy 609 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -5141,7 +5138,7 @@ function main
           ident b
         int 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "%d %d\n" [lt: static]
         ident c
         ident d
@@ -5153,30 +5150,30 @@ function main
       int 1
     jump
 
-@@ selfhost/corpus/codegen/247_std_math.ivy 2722 0
+@@ selfhost/corpus/codegen/247_std_math.ivy 2568 0
 function main
   return int()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         prefix '-' : int
           int 7
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 25
         int 1
         int 9
     alloca double d
-      call : double [lt: unknown]
+      call : double
         float 9
     condbranch
       binary '!=' : bool
-        ident a [lt: unknown]
+        ident a
         int 7
   block 1
     condbranch
       binary '!=' : bool
-        ident b [lt: unknown]
+        ident b
         int 9
   block 2
     ret
@@ -5185,21 +5182,21 @@ function main
     condbranch
       binary '||' : bool
         binary '<' : bool
-          ident d [lt: unknown]
+          ident d
           float 2.9
         binary '>' : bool
-          ident d [lt: unknown]
+          ident d
           float 3.1
   block 4
     ret
       int 2
   block 5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {} {}" [lt: static]
-        ident a [lt: unknown]
-        ident b [lt: unknown]
-        ident d [lt: unknown]
+        ident a
+        ident b
+        ident d
     ret
       int 0
   block 6
@@ -5305,7 +5302,7 @@ function math::max
 function math::clamp
   return double(double val, double lo, double hi)
 
-@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 4009 0
+@@ selfhost/corpus/codegen/248_std_unique_ptr.ivy 3869 0
 function __ivy_alloc [extern "C"]
   return void*(unsigned long long n)
 
@@ -5320,7 +5317,7 @@ function main
   block 0
     alloca unique_ptr<int32_t> p [unsafe]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident p
         new : int32_t* [lt: unknown]
           int 5
@@ -5333,11 +5330,11 @@ function main
         int 5
   block 1
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident p
     alloca unique_ptr<int32_t> q
     eval
-      call : void [lt: unknown]
+      call : void
         ident q
     condbranch [unsafe]
       binary '!=' : bool
@@ -5349,18 +5346,18 @@ function main
     alloca int __ret [unsafe]
       int 1
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident p
     ret [unsafe]
       ident __ret
   block 3
     eval
-      call : void [lt: unknown]
+      call : void
         string "unique_ptr ok" [lt: static]
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident q
     ret
       ident __ret
@@ -5368,7 +5365,7 @@ function main
     alloca int __ret [unsafe]
       int 2
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident q
     ret [unsafe]
       ident __ret
@@ -5416,7 +5413,7 @@ function unique_ptr<int32_t>::~unique_ptr
   block 1
   block 2
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member .raw_ : int32_t*
           this
     store [unsafe]
@@ -5463,7 +5460,7 @@ function unique_ptr<int32_t>::reset
       ident p [lt: unknown]
   block 2
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member .raw_ : int32_t*
           this
     jump [unsafe]
@@ -5485,12 +5482,12 @@ function unique_ptr<int32_t>::operator*
             this
   block 2
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         string "unique_ptr dereference of null" [lt: static]
         int 0
     jump [unsafe]
 
-@@ selfhost/corpus/codegen/249_std_vector.ivy 7593 0
+@@ selfhost/corpus/codegen/249_std_vector.ivy 7355 0
 function __ivy_alloc [extern "C"]
   return void*(unsigned long long n)
 
@@ -5508,23 +5505,23 @@ function main
   block 0
     alloca vector<int32_t> v
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
         int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
         int 2
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
         int 3
     condbranch
       binary '!=' : bool
-        call : unsigned uint64_t [lt: unknown]
+        call : unsigned uint64_t
           ident v
         int 3
   block 1
@@ -5538,7 +5535,7 @@ function main
     alloca int __ret
       int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
     ret
       ident __ret
@@ -5557,7 +5554,7 @@ function main
     alloca int __ret
       int 2
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
     ret
       ident __ret
@@ -5565,7 +5562,7 @@ function main
     condbranch
       binary '<' : bool
         ident __rfi0
-        call : unsigned uint64_t [lt: unknown]
+        call : unsigned uint64_t
           ident v
   block 6
     alloca int32_t x
@@ -5590,7 +5587,7 @@ function main
         int 24
   block 9
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {}" [lt: static]
         call : int32_t& [lt: unknown]
           ident v
@@ -5599,7 +5596,7 @@ function main
     alloca int __ret
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
     ret
       ident __ret
@@ -5607,7 +5604,7 @@ function main
     alloca int __ret
       int 3
     eval
-      call : void [lt: unknown]
+      call : void
         ident v
     ret
       ident __ret
@@ -5664,7 +5661,7 @@ function vector<int32_t>::vector
               ident other
             int 4
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member .data_ : int32_t*
           this
         member .data_ : int32_t*
@@ -5679,7 +5676,7 @@ function vector<int32_t>::~vector
   return void(vector<int32_t>& this)
   block 0
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member .data_ : int32_t*
           this
     store [unsafe]
@@ -5723,7 +5720,7 @@ function vector<int32_t>::push
             this
           int 4
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident slot
         prefix '&' : int32_t*
           ident value
@@ -5765,7 +5762,7 @@ function vector<int32_t>::push
     jump [unsafe]
   block 5
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member .data_ : int32_t*
           this
     store [unsafe]
@@ -5779,7 +5776,7 @@ function vector<int32_t>::push
     jump [unsafe]
   block 6
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident buf [lt: unknown]
         member .data_ : int32_t*
           this
@@ -5836,7 +5833,7 @@ function vector<int32_t>::operator[]
           ident slot
   block 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "vector index out of range" [lt: static]
         int 0
     jump
@@ -6161,7 +6158,7 @@ function main
         member .x : int32_t
           ident p
 
-@@ selfhost/corpus/codegen/37_struct_param.ivy 427 0
+@@ selfhost/corpus/codegen/37_struct_param.ivy 413 0
 function sum
   return int32_t(Point p)
   block 0
@@ -6185,10 +6182,10 @@ function main
         ident p
       int 2
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident p
 
-@@ selfhost/corpus/codegen/38_struct_return.ivy 385 0
+@@ selfhost/corpus/codegen/38_struct_return.ivy 343 0
 function make
   return Point()
   block 0
@@ -6208,12 +6205,12 @@ function main
   return int32_t()
   block 0
     alloca Point p
-      call : Point [lt: unknown]
+      call : Point
     ret
-      member .x : int32_t [lt: unknown]
-        ident p [lt: unknown]
+      member .x : int32_t
+        ident p
 
-@@ selfhost/corpus/codegen/39_struct_param_return.ivy 940 0
+@@ selfhost/corpus/codegen/39_struct_param_return.ivy 898 0
 function add
   return Point(Point a, Point b)
   block 0
@@ -6259,14 +6256,14 @@ function main
         ident b
       int 4
     alloca Point c
-      call : Point [lt: unknown]
+      call : Point
         ident a
         ident b
     ret
-      member .x : int32_t [lt: unknown]
-        ident c [lt: unknown]
+      member .x : int32_t
+        ident c
 
-@@ selfhost/corpus/codegen/40_struct_nested_param.ivy 491 0
+@@ selfhost/corpus/codegen/40_struct_nested_param.ivy 477 0
 function get
   return int32_t(Outer o)
   block 0
@@ -6292,7 +6289,7 @@ function main
           ident o
       int 2
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident o
 
 @@ selfhost/corpus/codegen/41_struct_arrow_nullptr.ivy 393 0
@@ -6356,7 +6353,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/44_ref_param.ivy 293 0
+@@ selfhost/corpus/codegen/44_ref_param.ivy 279 0
 function bump
   return int32_t(int32_t& r)
   block 0
@@ -6374,10 +6371,10 @@ function main
     alloca int32_t x
       int 1
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
-@@ selfhost/corpus/codegen/45_ref_swap.ivy 472 0
+@@ selfhost/corpus/codegen/45_ref_swap.ivy 458 0
 function swap
   return void(int32_t& a, int32_t& b)
   block 0
@@ -6398,7 +6395,7 @@ function main
     alloca int32_t y
       int 2
     eval
-      call : void [lt: unknown]
+      call : void
         ident x
         ident y
     ret
@@ -6408,7 +6405,7 @@ function main
           int 10
         ident y
 
-@@ selfhost/corpus/codegen/46_ref_forward.ivy 408 0
+@@ selfhost/corpus/codegen/46_ref_forward.ivy 380 0
 function inner
   return int32_t(int32_t& r)
   block 0
@@ -6424,7 +6421,7 @@ function outer
   return int32_t(int32_t& r)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident r
 
 function main
@@ -6433,10 +6430,10 @@ function main
     alloca int32_t x
       int 1
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
-@@ selfhost/corpus/codegen/47_struct_ref_param.ivy 428 0
+@@ selfhost/corpus/codegen/47_struct_ref_param.ivy 414 0
 function sum
   return int32_t(Point& p)
   block 0
@@ -6460,7 +6457,7 @@ function main
         ident q
       int 2
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident q
 
 @@ selfhost/corpus/codegen/48_ref_local.ivy 216 0
@@ -6479,7 +6476,7 @@ function main
     ret
       ident r
 
-@@ selfhost/corpus/codegen/49_ref_mixed.ivy 281 0
+@@ selfhost/corpus/codegen/49_ref_mixed.ivy 267 0
 function add
   return int32_t(int32_t& a, int32_t b)
   block 0
@@ -6494,7 +6491,7 @@ function main
     alloca int32_t x
       int 4
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
         int 5
 
@@ -6556,7 +6553,7 @@ function main
     ret
       ident x
 
-@@ selfhost/corpus/codegen/53_ref_call_arg.ivy 409 0
+@@ selfhost/corpus/codegen/53_ref_call_arg.ivy 395 0
 function bump
   return int32_t(int32_t& r)
   block 0
@@ -6580,7 +6577,7 @@ function main
     alloca int32_t x
       int 1
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         call : int32_t& [lt: unknown]
           ident x
 
@@ -6729,18 +6726,18 @@ function main
     ret
       ident j
 
-@@ selfhost/corpus/codegen/61_float_print.ivy 285 0
+@@ selfhost/corpus/codegen/61_float_print.ivy 257 0
 function main
   return int32_t()
   block 0
     alloca float64_t x
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident x
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}\n" [lt: static]
         ident x
     ret
@@ -6809,7 +6806,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/65_float32_sig.ivy 300 0
+@@ selfhost/corpus/codegen/65_float32_sig.ivy 286 0
 function addf
   return float32_t(float32_t a, float32_t b)
   block 0
@@ -6822,13 +6819,13 @@ function main
   return int32_t()
   block 0
     alloca float32_t x
-      call : float32_t [lt: unknown]
+      call : float32_t
         float 1.5
         float 2.25
     ret
       int 0
 
-@@ selfhost/corpus/codegen/66_float_ret.ivy 370 0
+@@ selfhost/corpus/codegen/66_float_ret.ivy 328 0
 function half
   return float64_t(float64_t x)
   block 0
@@ -6841,12 +6838,12 @@ function main
   return int32_t()
   block 0
     alloca float64_t y
-      call : float64_t [lt: unknown]
+      call : float64_t
         float 5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
-        ident y [lt: unknown]
+        ident y
     ret
       int 0
 
@@ -6869,7 +6866,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/68_struct_float_param.ivy 585 0
+@@ selfhost/corpus/codegen/68_struct_float_param.ivy 543 0
 function sum
   return float64_t(Vec v)
   block 0
@@ -6893,16 +6890,16 @@ function main
         ident a
       float 2.25
     alloca float64_t s
-      call : float64_t [lt: unknown]
+      call : float64_t
         ident a
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
-        ident s [lt: unknown]
+        ident s
     ret
       int 0
 
-@@ selfhost/corpus/codegen/69_struct_float_ret.ivy 538 0
+@@ selfhost/corpus/codegen/69_struct_float_ret.ivy 482 0
 function make
   return Vec(float64_t x, float64_t y)
   block 0
@@ -6922,14 +6919,14 @@ function main
   return int32_t()
   block 0
     alloca Vec a
-      call : Vec [lt: unknown]
+      call : Vec
         float 1.5
         float 2.25
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
-        member .x : float64_t [lt: unknown]
-          ident a [lt: unknown]
+        member .x : float64_t
+          ident a
     ret
       int 0
 
@@ -6975,7 +6972,7 @@ function main
     ret
       ident r
 
-@@ selfhost/corpus/codegen/71_float_mangle.ivy 324 0
+@@ selfhost/corpus/codegen/71_float_mangle.ivy 310 0
 function mix
   return float64_t(float64_t a, int32_t b, float32_t c)
   block 0
@@ -6988,7 +6985,7 @@ function main
   return int32_t()
   block 0
     alloca float64_t r
-      call : float64_t [lt: unknown]
+      call : float64_t
         float 1.5
         int 2
         float 3.25
@@ -7009,14 +7006,14 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/73_float32_print.ivy 193 0
+@@ selfhost/corpus/codegen/73_float32_print.ivy 179 0
 function main
   return int32_t()
   block 0
     alloca float32_t x
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident x
     ret
@@ -7223,7 +7220,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/82_ternary_arg.ivy 439 0
+@@ selfhost/corpus/codegen/82_ternary_arg.ivy 411 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -7238,7 +7235,7 @@ function main
     alloca int32_t a
       int 1
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         ternary ?: : int
           binary '!=' : bool
             ident a
@@ -7247,9 +7244,9 @@ function main
           int 20
         int 5
     ret
-      ident r [lt: unknown]
+      ident r
 
-@@ selfhost/corpus/codegen/83_ternary_ret.ivy 308 0
+@@ selfhost/corpus/codegen/83_ternary_ret.ivy 294 0
 function pick
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -7265,11 +7262,11 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
         int 2
 
-@@ selfhost/corpus/codegen/84_ternary_call.ivy 574 0
+@@ selfhost/corpus/codegen/84_ternary_call.ivy 518 0
 function f
   return int32_t(int32_t x)
   block 0
@@ -7292,18 +7289,18 @@ function main
     alloca int32_t a
       int 1
     alloca int32_t r
-      ternary ?: : int32_t [lt: unknown]
+      ternary ?: : int32_t
         binary '!=' : bool
           ident a
           int 0
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 10
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 20
     ret
-      ident r [lt: unknown]
+      ident r
 
-@@ selfhost/corpus/codegen/85_shortcircuit_call.ivy 448 0
+@@ selfhost/corpus/codegen/85_shortcircuit_call.ivy 420 0
 function f
   return int32_t()
   block 0
@@ -7322,10 +7319,10 @@ function main
     alloca bool r
       binary '&&' : bool
         binary '!=' : bool
-          call : int32_t [lt: unknown]
+          call : int32_t
           int 0
         binary '!=' : bool
-          call : int32_t [lt: unknown]
+          call : int32_t
           int 0
     ret
       ternary ?: : int
@@ -7333,7 +7330,7 @@ function main
         int 1
         int 0
 
-@@ selfhost/corpus/codegen/86_switch_basic.ivy 254 0
+@@ selfhost/corpus/codegen/86_switch_basic.ivy 240 0
 function f
   return int32_t(int32_t x)
   block 0
@@ -7352,10 +7349,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
-@@ selfhost/corpus/codegen/87_switch_expr.ivy 253 0
+@@ selfhost/corpus/codegen/87_switch_expr.ivy 239 0
 function f
   return int32_t(int32_t x)
   block 0
@@ -7374,10 +7371,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
-@@ selfhost/corpus/codegen/88_switch_nodefault.ivy 243 0
+@@ selfhost/corpus/codegen/88_switch_nodefault.ivy 229 0
 function f
   return int32_t(int32_t x)
   block 0
@@ -7395,10 +7392,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
-@@ selfhost/corpus/codegen/89_switch_default_first.ivy 253 0
+@@ selfhost/corpus/codegen/89_switch_default_first.ivy 239 0
 function f
   return int32_t(int32_t x)
   block 0
@@ -7417,10 +7414,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
-@@ selfhost/corpus/codegen/90_switch_i8.ivy 250 0
+@@ selfhost/corpus/codegen/90_switch_i8.ivy 236 0
 function f
   return int32_t(int8_t c)
   block 0
@@ -7439,10 +7436,10 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
-@@ selfhost/corpus/codegen/91_switch_nested.ivy 318 0
+@@ selfhost/corpus/codegen/91_switch_nested.ivy 304 0
 function f
   return int32_t(int32_t x, int32_t y)
   block 0
@@ -7465,7 +7462,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
 
@@ -7559,7 +7556,7 @@ function main
     ret
       int 1
 
-@@ selfhost/corpus/codegen/95_float_array.ivy 301 0
+@@ selfhost/corpus/codegen/95_float_array.ivy 287 0
 function main
   return int32_t()
   block 0
@@ -7570,7 +7567,7 @@ function main
         int 0
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         index : float64_t
           ident a
@@ -7578,7 +7575,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/96_float32_array.ivy 301 0
+@@ selfhost/corpus/codegen/96_float32_array.ivy 287 0
 function main
   return int32_t()
   block 0
@@ -7589,7 +7586,7 @@ function main
         int 0
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         index : float32_t
           ident a
@@ -8271,7 +8268,7 @@ function f
     alloca double v5
       float 1e-100
 
-@@ selfhost/corpus/hir/constexpr/23_constexpr_call_no_args.ivy 159 0
+@@ selfhost/corpus/hir/constexpr/23_constexpr_call_no_args.ivy 145 0
 function three
   return int32_t()
   block 0
@@ -8282,9 +8279,9 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/hir/constexpr/24_constexpr_call_nonconst_arg.ivy 237 0
+@@ selfhost/corpus/hir/constexpr/24_constexpr_call_nonconst_arg.ivy 223 0
 function sq
   return int32_t(int32_t x)
   block 0
@@ -8297,15 +8294,15 @@ function f
   return void(int32_t v)
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident v
 
-@@ selfhost/corpus/hir/constexpr/25_constexpr_call_before_def.ivy 232 0
+@@ selfhost/corpus/hir/constexpr/25_constexpr_call_before_def.ivy 218 0
 function caller
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
 function later
@@ -8316,7 +8313,7 @@ function later
         ident x
         int 1
 
-@@ selfhost/corpus/hir/constexpr/26_constexpr_call_body_call.ivy 340 0
+@@ selfhost/corpus/hir/constexpr/26_constexpr_call_body_call.ivy 312 0
 function inner
   return int32_t(int32_t x)
   block 0
@@ -8329,17 +8326,17 @@ function outer
   return int32_t(int32_t x)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
-@@ selfhost/corpus/hir/constexpr/27_constexpr_call_local_decl.ivy 261 0
+@@ selfhost/corpus/hir/constexpr/27_constexpr_call_local_decl.ivy 247 0
 function sq
   return int32_t(int32_t x)
   block 0
@@ -8354,7 +8351,7 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 @@ selfhost/corpus/hir/constexpr/28_constexpr_call_if.ivy 286 0
@@ -8428,7 +8425,7 @@ function f
     alloca int32_t a
       int 16
 
-@@ selfhost/corpus/hir/constexpr/32_constexpr_call_char_arg.ivy 182 0
+@@ selfhost/corpus/hir/constexpr/32_constexpr_call_char_arg.ivy 168 0
 function ident
   return int32_t(char c)
   block 0
@@ -8439,7 +8436,7 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         char 'a'
 
 @@ selfhost/corpus/hir/constexpr/33_constexpr_call_bool_arg.ivy 272 0
@@ -8553,7 +8550,7 @@ function f
     alloca bool d
       int 0
 
-@@ selfhost/corpus/hir/constexpr/37_constexpr_call_div_zero.ivy 255 0
+@@ selfhost/corpus/hir/constexpr/37_constexpr_call_div_zero.ivy 241 0
 function div
   return int32_t(int32_t x)
   block 0
@@ -8566,12 +8563,12 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 0
     alloca int32_t b
       int 5
 
-@@ selfhost/corpus/hir/constexpr/38_constexpr_call_loop.ivy 547 0
+@@ selfhost/corpus/hir/constexpr/38_constexpr_call_loop.ivy 533 0
 function sum
   return int32_t(int32_t x)
   block 0
@@ -8605,10 +8602,10 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
-@@ selfhost/corpus/hir/constexpr/39_constexpr_call_stmts.ivy 338 0
+@@ selfhost/corpus/hir/constexpr/39_constexpr_call_stmts.ivy 324 0
 function add
   return int32_t(int32_t x)
   block 0
@@ -8627,7 +8624,7 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 @@ selfhost/corpus/hir/constexpr/40_if_constexpr_true.ivy 127 0
@@ -8819,7 +8816,7 @@ function f
     alloca int32_t a
       int 5
 
-@@ selfhost/corpus/hir/constexpr/54_constexpr_call_if_else.ivy 360 0
+@@ selfhost/corpus/hir/constexpr/54_constexpr_call_if_else.ivy 346 0
 function pick
   return int32_t(int32_t x)
   block 0
@@ -8841,11 +8838,11 @@ function f
     alloca int32_t a
       int 1
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         prefix '-' : int
           int 1
 
-@@ selfhost/corpus/hir/constexpr/55_constexpr_call_const_local.ivy 272 0
+@@ selfhost/corpus/hir/constexpr/55_constexpr_call_const_local.ivy 258 0
 function use_const
   return int32_t(int32_t x)
   block 0
@@ -8860,7 +8857,7 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 @@ selfhost/corpus/hir/constexpr/56_constexpr_call_if_constexpr.ivy 193 0
@@ -8961,7 +8958,7 @@ function f
     jump
     jump
 
-@@ selfhost/corpus/hir/constexpr/61_constexpr_float_many.ivy 53666 0
+@@ selfhost/corpus/hir/constexpr/61_constexpr_float_many.ivy 48066 0
 function g0
   return float64_t()
   block 0
@@ -11366,805 +11363,805 @@ function f
   return void()
   block 0
     alloca float64_t r0
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r1
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r2
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r3
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r4
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r5
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r6
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r7
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r8
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r9
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r10
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r11
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r12
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r13
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r14
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r15
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r16
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r17
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r18
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r19
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r20
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r21
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r22
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r23
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r24
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r25
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r26
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r27
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r28
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r29
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r30
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r31
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r32
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r33
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r34
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r35
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r36
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r37
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r38
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r39
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r40
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r41
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r42
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r43
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r44
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r45
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r46
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r47
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r48
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r49
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r50
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r51
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r52
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r53
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r54
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r55
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r56
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r57
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r58
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r59
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r60
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r61
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r62
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r63
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r64
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r65
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r66
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r67
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r68
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r69
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r70
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r71
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r72
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r73
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r74
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r75
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r76
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r77
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r78
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r79
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r80
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r81
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r82
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r83
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r84
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r85
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r86
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r87
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r88
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r89
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r90
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r91
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r92
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r93
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r94
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r95
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r96
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r97
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r98
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r99
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r100
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r101
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r102
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r103
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r104
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r105
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r106
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r107
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r108
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r109
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r110
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r111
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r112
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r113
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r114
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r115
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r116
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r117
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r118
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r119
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r120
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r121
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r122
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r123
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r124
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r125
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r126
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r127
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r128
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r129
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r130
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r131
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r132
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r133
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r134
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r135
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r136
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r137
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r138
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r139
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r140
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r141
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r142
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r143
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r144
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r145
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r146
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r147
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r148
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r149
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r150
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r151
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r152
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r153
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r154
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r155
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r156
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r157
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r158
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r159
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r160
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r161
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r162
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r163
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r164
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r165
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r166
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r167
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r168
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r169
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r170
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r171
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r172
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r173
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r174
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r175
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r176
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r177
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r178
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r179
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r180
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r181
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r182
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r183
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r184
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r185
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r186
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r187
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r188
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r189
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r190
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r191
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r192
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r193
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r194
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r195
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r196
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r197
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r198
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r199
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r200
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r201
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r202
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r203
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r204
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r205
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r206
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r207
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r208
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r209
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r210
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r211
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r212
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r213
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r214
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r215
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r216
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r217
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r218
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r219
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r220
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r221
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r222
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r223
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r224
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r225
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r226
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r227
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r228
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r229
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r230
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r231
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r232
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r233
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r234
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r235
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r236
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r237
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r238
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r239
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r240
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r241
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r242
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r243
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r244
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r245
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r246
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r247
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r248
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r249
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r250
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r251
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r252
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r253
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r254
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r255
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r256
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r257
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r258
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r259
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r260
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r261
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r262
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r263
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r264
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r265
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r266
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r267
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r268
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r269
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r270
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r271
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r272
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r273
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r274
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r275
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r276
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r277
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r278
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r279
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r280
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r281
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r282
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r283
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r284
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r285
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r286
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r287
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r288
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r289
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r290
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r291
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r292
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r293
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r294
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r295
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r296
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r297
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r298
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r299
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r300
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r301
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r302
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r303
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r304
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r305
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r306
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r307
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r308
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r309
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r310
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r311
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r312
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r313
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r314
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r315
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r316
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r317
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r318
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r319
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r320
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r321
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r322
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r323
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r324
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r325
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r326
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r327
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r328
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r329
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r330
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r331
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r332
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r333
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r334
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r335
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r336
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r337
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r338
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r339
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r340
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r341
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r342
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r343
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r344
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r345
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r346
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r347
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r348
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r349
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r350
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r351
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r352
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r353
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r354
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r355
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r356
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r357
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r358
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r359
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r360
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r361
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r362
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r363
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r364
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r365
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r366
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r367
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r368
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r369
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r370
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r371
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r372
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r373
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r374
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r375
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r376
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r377
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r378
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r379
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r380
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r381
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r382
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r383
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r384
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r385
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r386
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r387
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r388
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r389
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r390
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r391
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r392
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r393
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r394
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r395
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r396
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r397
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r398
-      call : float64_t [lt: unknown]
+      call : float64_t
     alloca float64_t r399
-      call : float64_t [lt: unknown]
+      call : float64_t
 
 @@ selfhost/corpus/hir/constexpr/62_constexpr_call_float_not.ivy 455 0
 function not_float
@@ -12329,7 +12326,7 @@ function f
         ident s
       int 1
 
-@@ selfhost/corpus/hir/move/17_assign_lhs_bypass_nested_call.ivy 325 0
+@@ selfhost/corpus/hir/move/17_assign_lhs_bypass_nested_call.ivy 311 0
 function f
   return int32_t(int32_t q)
   block 0
@@ -12348,7 +12345,7 @@ function g
     store
       index : int32_t
         ident a
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident x
       int 1
 
@@ -12393,12 +12390,12 @@ function f
 
 @@ selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy 109 1
 selfhost/corpus/hir/move/32_builtin_beats_local_named_move.ivy:5:15: error: use of moved-out variable 'move'
-@@ selfhost/corpus/hir/move/33_template_named_move.ivy 164 0
+@@ selfhost/corpus/hir/move/33_template_named_move.ivy 150 0
 function g
   return void()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         int 1
 
 function move<int>
@@ -12482,13 +12479,13 @@ selfhost/corpus/hir/move/52_move_for_var_in_body.ivy:5:19: error: use of moved-o
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:11: error: use of moved-out variable 'x'
 selfhost/corpus/hir/move/53_template_param_moved.ivy:5:5: error: cannot initialize variable 'y' of type 'T' with a value of type 'int'
 selfhost/corpus/hir/move/53_template_param_moved.ivy:8:6: error: function 'f<int>' may reach the end without returning a value
-@@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 160 0
+@@ selfhost/corpus/hir/move/54_lifetime_param_moved.ivy 168 0
 function f
   return int32_t(const int32_t& x [lt:a])
   lifetimes: a
   block 0
     eval
-      call : const int32_t&
+      call : const int32_t& [lt: a]
         ident x [lt: a]
     ret
       int 0
@@ -12525,7 +12522,7 @@ function f
 
 @@ selfhost/corpus/hir/move/60_move_as_call_argument.ivy 97 1
 selfhost/corpus/hir/move/60_move_as_call_argument.ivy:8:15: error: use of moved-out variable 'x'
-@@ selfhost/corpus/hir/name/01_locals.ivy 440 0
+@@ selfhost/corpus/hir/name/01_locals.ivy 426 0
 function sum
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -12548,7 +12545,7 @@ function f
     store
       ident a
       binary '+' : int32_t
-        call : int32_t [lt: unknown]
+        call : int32_t
           ident b
           ident c
         ident d
@@ -12588,7 +12585,7 @@ function f
     jump
   block 4
 
-@@ selfhost/corpus/hir/name/03_calls.ivy 378 0
+@@ selfhost/corpus/hir/name/03_calls.ivy 336 0
 function twice
   return int32_t(int32_t x)
   block 0
@@ -12601,15 +12598,15 @@ function quad
   return int32_t(int32_t x)
   block 0
     ret
-      call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+      call : int32_t
+        call : int32_t
           ident x
 
 function g
   return void()
   block 0
     alloca int32_t y
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 @@ selfhost/corpus/hir/name/04_struct.ivy 260 0
@@ -12643,7 +12640,7 @@ function f
       member ->v : int32_t
         ident p
 
-@@ selfhost/corpus/hir/name/06_method.ivy 739 0
+@@ selfhost/corpus/hir/name/06_method.ivy 669 0
 function Counter::set
   return void(Counter& this, int32_t n)
   block 0
@@ -12664,22 +12661,22 @@ function f
   block 0
     alloca Counter c
     eval
-      call : void [lt: unknown]
+      call : void
         ident c
         int 4
     alloca int32_t x
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident c
     alloca Counter* p [unsafe]
       nullptr
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         member ->set : Counter
           ident p
         int 5
     store [unsafe]
-      ident x [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident x
+      call : int32_t
         member ->get : Counter
           ident p
 
@@ -12752,15 +12749,15 @@ function f
         ident a
         ident b
 
-@@ selfhost/corpus/hir/name/11_builtins.ivy 275 0
+@@ selfhost/corpus/hir/name/11_builtins.ivy 247 0
 function f
   return void()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "a" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "b" [lt: static]
     alloca int32_t x
       int 1
@@ -12812,12 +12809,12 @@ function f
     alloca int32_t a
       int 1
 
-@@ selfhost/corpus/hir/template/01_const_param.ivy 196 0
+@@ selfhost/corpus/hir/template/01_const_param.ivy 182 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function id<int32_t>
@@ -12826,13 +12823,13 @@ function id<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_array.ivy 214 0
+@@ selfhost/corpus/hir/template/01_deduce_array.ivy 200 0
 function f
   return void()
   block 0
     alloca int32_t xs
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident xs
 
 function arr<int32_t>
@@ -12841,12 +12838,12 @@ function arr<int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/01_deduce_bool.ivy 185 0
+@@ selfhost/corpus/hir/template/01_deduce_bool.ivy 171 0
 function f
   return void()
   block 0
     alloca bool b
-      call : bool [lt: unknown]
+      call : bool
         bool true
 
 function identity<bool>
@@ -12855,12 +12852,12 @@ function identity<bool>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_char.ivy 184 0
+@@ selfhost/corpus/hir/template/01_deduce_char.ivy 170 0
 function f
   return void()
   block 0
     alloca char c
-      call : char [lt: unknown]
+      call : char
         char 'a'
 
 function identity<char>
@@ -12869,12 +12866,12 @@ function identity<char>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 181 0
+@@ selfhost/corpus/hir/template/01_deduce_const_ref.ivy 167 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
 function id<int>
@@ -12883,12 +12880,12 @@ function id<int>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_double.ivy 195 0
+@@ selfhost/corpus/hir/template/01_deduce_double.ivy 181 0
 function f
   return void()
   block 0
     alloca double d
-      call : double [lt: unknown]
+      call : double
         float 1.5
 
 function identity<double>
@@ -12897,12 +12894,12 @@ function identity<double>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 180 0
+@@ selfhost/corpus/hir/template/01_deduce_literal.ivy 166 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
 function identity<int>
@@ -12911,7 +12908,7 @@ function identity<int>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_pointer.ivy 344 0
+@@ selfhost/corpus/hir/template/01_deduce_pointer.ivy 330 0
 function f
   return void()
   block 0
@@ -12921,7 +12918,7 @@ function f
       prefix '&' : int32_t* [lt: local]
         ident v
     alloca int32_t q [unsafe]
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident p [lt: local]
 
 function first<int32_t>
@@ -12930,14 +12927,14 @@ function first<int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/01_deduce_ref.ivy 227 0
+@@ selfhost/corpus/hir/template/01_deduce_ref.ivy 213 0
 function f
   return void()
   block 0
     alloca int32_t a
       int 1
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident a
 
 function ref<int32_t>
@@ -12948,13 +12945,13 @@ function ref<int32_t>
 
 @@ selfhost/corpus/hir/template/01_deduce_string.ivy 135 1
 selfhost/corpus/hir/template/01_deduce_string.ivy:5:31: error: argument 1 of 'identity<char const*>' expects 'char', got 'const char*'
-@@ selfhost/corpus/hir/template/01_deduce_struct.ivy 183 0
+@@ selfhost/corpus/hir/template/01_deduce_struct.ivy 169 0
 function f
   return void()
   block 0
     alloca P p
     alloca P q
-      call : P [lt: unknown]
+      call : P
         ident p
 
 function identity<P>
@@ -12963,12 +12960,12 @@ function identity<P>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 201 0
+@@ selfhost/corpus/hir/template/01_deduce_two_params.ivy 187 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
         int 2
 
@@ -12978,14 +12975,14 @@ function pair<int,int>
     ret
       ident a
 
-@@ selfhost/corpus/hir/template/01_deduce_variable.ivy 231 0
+@@ selfhost/corpus/hir/template/01_deduce_variable.ivy 217 0
 function f
   return void()
   block 0
     alloca int32_t a
       int 1
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident a
 
 function identity<int32_t>
@@ -13001,12 +12998,12 @@ function f
     alloca int32_t a
       int 1
 
-@@ selfhost/corpus/hir/template/01_type_param_explicit.ivy 196 0
+@@ selfhost/corpus/hir/template/01_type_param_explicit.ivy 182 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function identity<int32_t>
@@ -13015,15 +13012,15 @@ function identity<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 338 0
+@@ selfhost/corpus/hir/template/02_explicit_overrides_deduction.ivy 310 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca int32_t b
-      call : int [lt: unknown]
+      call : int
         int 2
 
 function identity<int32_t>
@@ -13038,12 +13035,12 @@ function identity<int>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/02_no_arguments.ivy 167 0
+@@ selfhost/corpus/hir/template/02_no_arguments.ivy 153 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
 
 function zero<int32_t>
   return int32_t()
@@ -13053,12 +13050,12 @@ function zero<int32_t>
 
 @@ selfhost/corpus/hir/template/02_too_few_args.ivy 116 1
 selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
-@@ selfhost/corpus/hir/template/02_too_many_args.ivy 204 0
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 190 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function identity<int32_t,int32_t>
@@ -13067,12 +13064,12 @@ function identity<int32_t,int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 240 0
+@@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 226 0
 function f
   return void()
   block 0
     alloca unsigned uint32_t a
-      call : unsigned uint32_t [lt: unknown]
+      call : unsigned uint32_t
         int 1
 
 function id<uint32_t unsigned>
@@ -13081,12 +13078,12 @@ function id<uint32_t unsigned>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/03_empty_pack_deduced.ivy 166 0
+@@ selfhost/corpus/hir/template/03_empty_pack_deduced.ivy 152 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
 
 function count_args<>
   return int32_t()
@@ -13094,12 +13091,12 @@ function count_args<>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/03_mixed_pack.ivy 242 0
+@@ selfhost/corpus/hir/template/03_mixed_pack.ivy 228 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 10
         int 20
 
@@ -13109,12 +13106,12 @@ function count_after<int32_t,int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 226 0
+@@ selfhost/corpus/hir/template/03_mixed_pack_deduced.ivy 212 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 10
         int 20
 
@@ -13126,12 +13123,12 @@ function count_after<int,int>
 
 @@ selfhost/corpus/hir/template/03_pack_call_expansion.ivy 98 1
 selfhost/corpus/hir/template/03_pack_call_expansion.ivy:4:60: error: undeclared identifier 'args'
-@@ selfhost/corpus/hir/template/03_pack_expansion.ivy 236 0
+@@ selfhost/corpus/hir/template/03_pack_expansion.ivy 222 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
 
@@ -13141,12 +13138,12 @@ function count<int32_t,int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/04_call_before_declaration.ivy 193 0
+@@ selfhost/corpus/hir/template/04_call_before_declaration.ivy 179 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function later<int32_t>
@@ -13168,12 +13165,12 @@ function cst<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/04_export_template.ivy 190 0
+@@ selfhost/corpus/hir/template/04_export_template.ivy 176 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function id<int32_t>
@@ -13182,12 +13179,12 @@ function id<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/04_if_constexpr.ivy 275 0
+@@ selfhost/corpus/hir/template/04_if_constexpr.ivy 261 0
 function g
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function f<int32_t>
@@ -13202,19 +13199,19 @@ function f<int32_t>
     ret
       int 2
 
-@@ selfhost/corpus/hir/template/04_nested_instantiation.ivy 312 0
+@@ selfhost/corpus/hir/template/04_nested_instantiation.ivy 284 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function outer<int32_t>
   return int32_t(int32_t x)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
 function id<int32_t>
@@ -13223,12 +13220,12 @@ function id<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/04_order_and_dedup.ivy 559 0
+@@ selfhost/corpus/hir/template/04_order_and_dedup.ivy 517 0
 function a
   return void()
   block 0
     alloca int32_t v
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function b
@@ -13241,14 +13238,14 @@ function c
   return void()
   block 0
     alloca int32_t v
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 function d
   return void()
   block 0
     alloca int32_t v
-      call : int64_t [lt: unknown]
+      call : int64_t
         int 4
 
 function id<int32_t>
@@ -13263,7 +13260,7 @@ function id<int64_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/04_overload_wins.ivy 331 0
+@@ selfhost/corpus/hir/template/04_overload_wins.ivy 303 0
 function a
   return int32_t(int32_t x)
   block 0
@@ -13274,10 +13271,10 @@ function f
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca int32_t s
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
 function a<int32_t>
@@ -13293,35 +13290,35 @@ function f
     alloca int32_t a
       int 1
 
-@@ selfhost/corpus/hir/template/04_prototype_only.ivy 158 0
+@@ selfhost/corpus/hir/template/04_prototype_only.ivy 144 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function id<int32_t>
   return int32_t(int32_t x)
 
-@@ selfhost/corpus/hir/template/04_recursive.ivy 228 0
+@@ selfhost/corpus/hir/template/04_recursive.ivy 200 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function rec<int32_t>
   return int32_t(int32_t x)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
 @@ selfhost/corpus/hir/template/04_same_name_templates.ivy 146 1
 selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
-@@ selfhost/corpus/hir/template/04_template_calls_function.ivy 313 0
+@@ selfhost/corpus/hir/template/04_template_calls_function.ivy 285 0
 function helper
   return int32_t(int32_t x)
   block 0
@@ -13332,22 +13329,22 @@ function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function call_helper<int32_t>
   return int32_t(int32_t x)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident x
 
-@@ selfhost/corpus/hir/template/04_template_in_method.ivy 314 0
+@@ selfhost/corpus/hir/template/04_template_in_method.ivy 286 0
 function S::f
   return int32_t(S& this)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function h
@@ -13355,7 +13352,7 @@ function h
   block 0
     alloca S s
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident s
 
 function g<int32_t>
@@ -13364,18 +13361,18 @@ function g<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/04_two_specializations.ivy 412 0
+@@ selfhost/corpus/hir/template/04_two_specializations.ivy 370 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca int32_t b
-      call : int64_t [lt: unknown]
+      call : int64_t
         int 2
     alloca int32_t c
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
 
 function id<int32_t>
@@ -13439,12 +13436,12 @@ function f
     alloca Box<int32_t> b
     alloca Box<int32_t> c
 
-@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 177 0
+@@ selfhost/corpus/hir/template/05_duplicate_template_name_implicit_call.ivy 163 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
 function TDup2<int>
@@ -13493,13 +13490,13 @@ function Box<int32_t>::get
     ret
       ident local
 
-@@ selfhost/corpus/hir/template/05_method_call.ivy 262 0
+@@ selfhost/corpus/hir/template/05_method_call.ivy 248 0
 function f
   return void()
   block 0
     alloca Box<int32_t> b
     alloca int32_t v
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident b
 
 function Box<int32_t>::get
@@ -13587,7 +13584,7 @@ function f
   return void(Box<int32_t> b)
   block 0
 
-@@ selfhost/corpus/hir/template/05_pass_specialization.ivy 176 0
+@@ selfhost/corpus/hir/template/05_pass_specialization.ivy 162 0
 function take
   return void(Box<int32_t> b)
   block 0
@@ -13597,7 +13594,7 @@ function f
   block 0
     alloca Box<int32_t> b
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
 
 @@ selfhost/corpus/hir/template/05_return_type.ivy 94 0
@@ -13617,15 +13614,15 @@ function f
     alloca int32_t a
       int 4
 
-@@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 104 0
+@@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 90 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
-@@ selfhost/corpus/hir/template/05_struct_calls_template.ivy 311 0
+@@ selfhost/corpus/hir/template/05_struct_calls_template.ivy 297 0
 function f
   return void()
   block 0
@@ -13635,7 +13632,7 @@ function Box<int32_t>::get
   return int32_t(Box<int32_t>& this)
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         member .value : int32_t
           this
 
@@ -13672,12 +13669,12 @@ function Box<int32_t>::set
         this
       ident v
 
-@@ selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy 104 0
+@@ selfhost/corpus/hir/template/05_struct_template_wins_over_function_template.ivy 90 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
 @@ selfhost/corpus/hir/template/05_template_and_plain_struct.ivy 81 0
@@ -13705,12 +13702,12 @@ function f
   block 0
     alloca Box<int32_t,int64_t> b
 
-@@ selfhost/corpus/hir/template/06_concept_bool.ivy 207 0
+@@ selfhost/corpus/hir/template/06_concept_bool.ivy 193 0
 function f
   return void()
   block 0
     alloca bool r
-      call : bool [lt: unknown]
+      call : bool
         bool true
         bool false
 
@@ -13724,13 +13721,13 @@ function add<bool>
 selfhost/corpus/hir/template/06_concept_equality.ivy:5:25: error: concept 'Eq' not satisfied: type 'P' does not support operator '=='
 selfhost/corpus/hir/template/06_concept_equality.ivy:5:25: error: failed to instantiate template 'id'
 selfhost/corpus/hir/template/06_concept_equality.ivy:5:17: error: cannot initialize variable 'r' of type 'P' with a value of type 'int'
-@@ selfhost/corpus/hir/template/06_concept_in_method.ivy 368 0
+@@ selfhost/corpus/hir/template/06_concept_in_method.ivy 354 0
 function f
   return void()
   block 0
     alloca Box<int32_t> b
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
 
@@ -13747,13 +13744,13 @@ function add<int32_t>
     ret
       ident a
 
-@@ selfhost/corpus/hir/template/06_concept_member_unchecked.ivy 177 0
+@@ selfhost/corpus/hir/template/06_concept_member_unchecked.ivy 163 0
 function f
   return void()
   block 0
     alloca P p
     alloca P r
-      call : P [lt: unknown]
+      call : P
         ident p
 
 function id<P>
@@ -13762,12 +13759,12 @@ function id<P>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/06_concept_satisfied.ivy 261 0
+@@ selfhost/corpus/hir/template/06_concept_satisfied.ivy 247 0
 function f
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
         int 4
 
@@ -13779,13 +13776,13 @@ function add<int32_t>
         ident a
         ident b
 
-@@ selfhost/corpus/hir/template/06_concept_sizeof_unchecked.ivy 177 0
+@@ selfhost/corpus/hir/template/06_concept_sizeof_unchecked.ivy 163 0
 function f
   return void()
   block 0
     alloca P p
     alloca P r
-      call : P [lt: unknown]
+      call : P
         ident p
 
 function id<P>
@@ -13794,12 +13791,12 @@ function id<P>
     ret
       ident x
 
-@@ selfhost/corpus/hir/template/06_concept_two_requirements.ivy 190 0
+@@ selfhost/corpus/hir/template/06_concept_two_requirements.ivy 176 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function id<int32_t>
@@ -13821,12 +13818,12 @@ function Box<int32_t>::get
       member .value : int32_t
         this
 
-@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 190 0
+@@ selfhost/corpus/hir/template/06_unknown_concept.ivy 176 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function id<int32_t>
@@ -14462,7 +14459,7 @@ function f
     alloca int32_t& b
       ident r
 
-@@ selfhost/corpus/hir/type/34_call_return_type.ivy 307 0
+@@ selfhost/corpus/hir/type/34_call_return_type.ivy 279 0
 function f
   return int32_t(int32_t a)
   block 0
@@ -14479,12 +14476,12 @@ function h
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca float64_t b
-      call : float64_t [lt: unknown]
+      call : float64_t
 
-@@ selfhost/corpus/hir/type/35_call_arg_convert.ivy 266 0
+@@ selfhost/corpus/hir/type/35_call_arg_convert.ivy 238 0
 function f
   return float64_t(float64_t a)
   block 0
@@ -14495,13 +14492,13 @@ function g
   return void()
   block 0
     alloca float64_t b
-      call : float64_t [lt: unknown]
+      call : float64_t
         int 1
     alloca float64_t c
-      call : float64_t [lt: unknown]
+      call : float64_t
         float 2.5
 
-@@ selfhost/corpus/hir/type/36_call_method.ivy 268 0
+@@ selfhost/corpus/hir/type/36_call_method.ivy 254 0
 function Counter::get
   return int32_t(Counter& this, int32_t n)
   block 0
@@ -14514,11 +14511,11 @@ function f
   block 0
     alloca Counter c
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident c
         int 1
 
-@@ selfhost/corpus/hir/type/37_call_enum_arg.ivy 180 0
+@@ selfhost/corpus/hir/type/37_call_enum_arg.ivy 166 0
 function f
   return int32_t(int32_t a)
   block 0
@@ -14529,10 +14526,10 @@ function g
   return void()
   block 0
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 0
 
-@@ selfhost/corpus/hir/type/38_call_pointer_arg.ivy 301 0
+@@ selfhost/corpus/hir/type/38_call_pointer_arg.ivy 287 0
 function f
   return int32_t(int32_t* a)
 
@@ -14545,10 +14542,10 @@ function g
       prefix '&' : int32_t* [lt: local]
         ident x
     alloca int32_t b [unsafe]
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident p [lt: local]
 
-@@ selfhost/corpus/hir/type/39_call_void_result.ivy 126 0
+@@ selfhost/corpus/hir/type/39_call_void_result.ivy 112 0
 function g
   return void()
   block 0
@@ -14557,7 +14554,7 @@ function f
   return void()
   block 0
     alloca void a
-      call : void [lt: unknown]
+      call : void
 
 @@ selfhost/corpus/hir/type/40_if_numeric.ivy 169 0
 function f
@@ -14914,7 +14911,7 @@ function f
       member .b : int32_t
         ident d
 
-@@ selfhost/corpus/hir/type/61_inherit_upcast.ivy 224 0
+@@ selfhost/corpus/hir/type/61_inherit_upcast.ivy 210 0
 function g
   return void(Base& r)
   block 0
@@ -14927,7 +14924,7 @@ function f
   block 0
     alloca Derived d
     eval
-      call : void [lt: unknown]
+      call : void
         ident d
 
 @@ selfhost/corpus/hir/type/62_static_cast.ivy 513 0
@@ -14965,7 +14962,7 @@ function f
       static_cast : int32_t [lt: local]
         ident p [lt: local]
 
-@@ selfhost/corpus/hir/type/64_overload_resolution.ivy 334 0
+@@ selfhost/corpus/hir/type/64_overload_resolution.ivy 306 0
 function f
   return int32_t(int32_t a)
   block 0
@@ -14982,10 +14979,10 @@ function g
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca float64_t b
-      call : float64_t [lt: unknown]
+      call : float64_t
         float 1.5
 
 @@ selfhost/corpus/hir/type/65_ptr_void.ivy 221 0
@@ -15002,7 +14999,7 @@ function f
 
 @@ selfhost/corpus/hir/type/66_ref_rvalue.ivy 117 1
 selfhost/corpus/hir/type/66_ref_rvalue.ivy:6:5: error: binding a reference to a temporary value (dangling reference)
-@@ selfhost/corpus/hir/type/67_default_args.ivy 336 0
+@@ selfhost/corpus/hir/type/67_default_args.ivy 308 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -15015,11 +15012,11 @@ function f
   return void()
   block 0
     alloca int32_t x
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
     alloca int32_t y
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 3
 
@@ -15034,7 +15031,7 @@ function f
         bool true
         int 2
 
-@@ selfhost/corpus/hir/type/69_operator_overload.ivy 593 0
+@@ selfhost/corpus/hir/type/69_operator_overload.ivy 579 0
 function Vec::operator+
   return Vec(Vec& this, Vec o)
   block 0
@@ -15064,11 +15061,11 @@ function f
     alloca Vec a
     alloca Vec b
     alloca Vec c
-      call : Vec [lt: unknown]
+      call : Vec
         ident a
         ident b
 
-@@ selfhost/corpus/hir/type/70_inherited_members.ivy 429 0
+@@ selfhost/corpus/hir/type/70_inherited_members.ivy 401 0
 function Base::get
   return int32_t(Base& this)
   block 0
@@ -15088,10 +15085,10 @@ function f
     alloca Derived d
     alloca Base e
     alloca int32_t x
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident d
     alloca Base y
-      call : Base [lt: unknown]
+      call : Base
         ident d
         ident e
 
@@ -15217,7 +15214,7 @@ selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:11:6: error: '
 selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:11:5: error: left-hand side of assignment is not assignable
 selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:13:6: error: struct 'Point' has no member 'w'
 selfhost/corpus/hir/type/e_54_multi_member_assign_diagnostics.ivy:13:5: error: left-hand side of assignment is not assignable
-@@ selfhost/corpus/interp/01_int_ops.ivy 384 0
+@@ selfhost/corpus/interp/01_int_ops.ivy 370 0
 function main
   return int32_t()
   block 0
@@ -15228,7 +15225,7 @@ function main
           int 3
         int 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "int={}" [lt: static]
         ident v
     condbranch
@@ -15502,7 +15499,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/09_calls.ivy 355 0
+@@ selfhost/corpus/interp/09_calls.ivy 341 0
 function f
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -15516,7 +15513,7 @@ function main
   block 0
     condbranch
       binary '==' : bool
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 2
           int 3
         int 5
@@ -15527,7 +15524,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/10_recursion.ivy 533 0
+@@ selfhost/corpus/interp/10_recursion.ivy 505 0
 function fact
   return int32_t(int32_t n)
   block 0
@@ -15539,7 +15536,7 @@ function fact
     ret
       binary '*' : int32_t
         ident n
-        call : int32_t [lt: unknown]
+        call : int32_t
           binary '-' : int32_t
             ident n
             int 1
@@ -15552,7 +15549,7 @@ function main
   block 0
     condbranch
       binary '==' : bool
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 5
         int 120
   block 1
@@ -15562,7 +15559,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/11_cfg.ivy 600 0
+@@ selfhost/corpus/interp/11_cfg.ivy 586 0
 function main
   return int32_t()
   block 0
@@ -15588,7 +15585,7 @@ function main
     jump
   block 3
     eval
-      call : void [lt: unknown]
+      call : void
         string "sum={}" [lt: static]
         ident sum
     condbranch
@@ -15602,7 +15599,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/12_switch.ivy 471 0
+@@ selfhost/corpus/interp/12_switch.ivy 443 0
 function pick
   return int32_t(int32_t x)
   block 0
@@ -15620,11 +15617,11 @@ function main
     condbranch
       binary '&&' : bool
         binary '==' : bool
-          call : int32_t [lt: unknown]
+          call : int32_t
             int 2
           int 20
         binary '==' : bool
-          call : int32_t [lt: unknown]
+          call : int32_t
             int 9
           int 90
   block 1
@@ -15634,12 +15631,12 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/13_call_order.ivy 863 0
+@@ selfhost/corpus/interp/13_call_order.ivy 779 0
 function mark
   return int32_t(int32_t v)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v
     ret
@@ -15663,16 +15660,16 @@ function main
   return int32_t()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+      call : int32_t
+        call : int32_t
           int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 2
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 3
     condbranch
       binary '==' : bool
-        ident r [lt: unknown]
+        ident r
         int 123
   block 1
     ret
@@ -15681,37 +15678,37 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/14_io_streams.ivy 248 0
+@@ selfhost/corpus/interp/14_io_streams.ivy 220 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "out={}" [lt: static]
         int 7
     eval
-      call : void [lt: unknown]
+      call : void
         string "err={}" [lt: static]
         int 8
     ret
       int 0
 
-@@ selfhost/corpus/interp/15_io_format.ivy 251 0
+@@ selfhost/corpus/interp/15_io_format.ivy 223 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "value={}" [lt: static]
         int 7
     eval
-      call : void [lt: unknown]
+      call : void
         string "literal" [lt: static]
         int 7
     ret
       int 0
 
-@@ selfhost/corpus/interp/16_c_output.ivy 559 0
+@@ selfhost/corpus/interp/16_c_output.ivy 503 0
 function puts [extern "C"]
   return int(const char* s)
 
@@ -15722,18 +15719,18 @@ function main
   return int32_t()
   block 0
     alloca int32_t r1
-      call : int [lt: unknown]
+      call : int
         string "p" [lt: static]
     alloca int32_t r2
-      call : int [lt: unknown]
+      call : int
         char '!'
     condbranch
       binary '&&' : bool
         binary '==' : bool
-          ident r1 [lt: unknown]
+          ident r1
           int 2
         binary '==' : bool
-          ident r2 [lt: unknown]
+          ident r2
           int 33
   block 1
     ret
@@ -15966,7 +15963,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/interp/24_exit.ivy 249 0
+@@ selfhost/corpus/interp/24_exit.ivy 221 0
 function exit [extern "C"]
   return void(int code)
 
@@ -15974,10 +15971,10 @@ function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "before" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         int 7
     ret
       int 0
@@ -16208,7 +16205,7 @@ function c
     ret
       ident y
 
-@@ selfhost/corpus/mir/cfg/01_return_call.ivy 145 0
+@@ selfhost/corpus/mir/cfg/01_return_call.ivy 131 0
 function g
   return int32_t()
   block 0
@@ -16219,7 +16216,7 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
 @@ selfhost/corpus/mir/cfg/01_return_local.ivy 96 0
 function f
@@ -16555,7 +16552,7 @@ function f
         ident a
         ident b
 
-@@ selfhost/corpus/mir/cfg/04_call_as_argument.ivy 209 0
+@@ selfhost/corpus/mir/cfg/04_call_as_argument.ivy 181 0
 function g
   return int32_t(int32_t a)
   block 0
@@ -16566,19 +16563,19 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+      call : int32_t
+        call : int32_t
           int 1
 
-@@ selfhost/corpus/mir/cfg/04_call_builtin.ivy 115 0
+@@ selfhost/corpus/mir/cfg/04_call_builtin.ivy 101 0
 function f
   return void()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "hello" [lt: static]
 
-@@ selfhost/corpus/mir/cfg/04_call_in_condition.ivy 216 0
+@@ selfhost/corpus/mir/cfg/04_call_in_condition.ivy 202 0
 function g
   return bool()
   block 0
@@ -16589,7 +16586,7 @@ function f
   return bool()
   block 0
     condbranch
-      call : bool [lt: unknown]
+      call : bool
   block 1
     ret
       bool false
@@ -16597,7 +16594,7 @@ function f
     ret
       bool true
 
-@@ selfhost/corpus/mir/cfg/04_call_many_args.ivy 474 0
+@@ selfhost/corpus/mir/cfg/04_call_many_args.ivy 460 0
 function g
   return int32_t(int32_t a, int32_t b, int32_t c, int32_t d, int32_t e)
   block 0
@@ -16616,14 +16613,14 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
         int 3
         int 4
         int 5
 
-@@ selfhost/corpus/mir/cfg/04_call_method_local_struct.ivy 292 0
+@@ selfhost/corpus/mir/cfg/04_call_method_local_struct.ivy 278 0
 function Point::getx
   return int32_t(Point& this)
   block 0
@@ -16640,10 +16637,10 @@ function f
         ident p
       int 3
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident p
 
-@@ selfhost/corpus/mir/cfg/04_call_method_this.ivy 297 0
+@@ selfhost/corpus/mir/cfg/04_call_method_this.ivy 283 0
 function Counter::get
   return int32_t(Counter& this)
   block 0
@@ -16660,10 +16657,10 @@ function f
         ident c
       int 5
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident c
 
-@@ selfhost/corpus/mir/cfg/04_call_nested_arg_last.ivy 502 0
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_last.ivy 474 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -16686,14 +16683,14 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 3
           int 4
 
-@@ selfhost/corpus/mir/cfg/04_call_nested_arg_pos1.ivy 297 0
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_pos1.ivy 269 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -16706,13 +16703,13 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 2
           int 3
 
-@@ selfhost/corpus/mir/cfg/04_call_nested_arg_two_levels.ivy 411 0
+@@ selfhost/corpus/mir/cfg/04_call_nested_arg_two_levels.ivy 355 0
 function add
   return int32_t(int32_t a, int32_t b)
   block 0
@@ -16725,17 +16722,17 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+      call : int32_t
+        call : int32_t
           int 1
-          call : int32_t [lt: unknown]
+          call : int32_t
             int 2
             int 3
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 4
           int 5
 
-@@ selfhost/corpus/mir/cfg/04_call_no_args.ivy 146 0
+@@ selfhost/corpus/mir/cfg/04_call_no_args.ivy 132 0
 function g
   return int32_t()
   block 0
@@ -16746,9 +16743,9 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/mir/cfg/04_call_one_arg.ivy 170 0
+@@ selfhost/corpus/mir/cfg/04_call_one_arg.ivy 156 0
 function g
   return int32_t(int32_t x)
   block 0
@@ -16759,10 +16756,10 @@ function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
-@@ selfhost/corpus/mir/cfg/04_call_recursive.ivy 320 0
+@@ selfhost/corpus/mir/cfg/04_call_recursive.ivy 306 0
 function fact
   return int32_t(int32_t n)
   block 0
@@ -16774,7 +16771,7 @@ function fact
     ret
       binary '*' : int32_t
         ident n
-        call : int32_t [lt: unknown]
+        call : int32_t
           binary '-' : int32_t
             ident n
             int 1
@@ -16782,12 +16779,12 @@ function fact
     ret
       int 1
 
-@@ selfhost/corpus/mir/cfg/04_call_template.ivy 251 0
+@@ selfhost/corpus/mir/cfg/04_call_template.ivy 237 0
 function f
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
 
@@ -17109,7 +17106,7 @@ function f
     jump
   block 3
 
-@@ selfhost/corpus/mir/cfg/06_lt_call_unknown.ivy 155 0
+@@ selfhost/corpus/mir/cfg/06_lt_call_unknown.ivy 141 0
 function g
   return int32_t()
   block 0
@@ -17120,7 +17117,7 @@ function f
   return void()
   block 0
     alloca int32_t x
-      call : int32_t [lt: unknown]
+      call : int32_t
 
 @@ selfhost/corpus/mir/cfg/06_lt_deref_propagates.ivy 264 0
 function f
@@ -17268,7 +17265,7 @@ function f
     jump
     jump
 
-@@ selfhost/corpus/mir/cfg/07_long_function.ivy 1880 0
+@@ selfhost/corpus/mir/cfg/07_long_function.ivy 1334 0
 function g
   return int32_t(int32_t x)
   block 0
@@ -17282,86 +17279,86 @@ function f
       int 0
     store
       ident r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 2
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 3
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 4
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 5
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 6
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 7
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 8
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 9
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 10
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 11
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 12
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 13
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 14
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 15
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 16
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 17
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 18
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 19
     store
-      ident r [lt: unknown]
-      call : int32_t [lt: unknown]
+      ident r
+      call : int32_t
         int 20
 
-@@ selfhost/corpus/mir/cfg/07_many_locals_and_calls.ivy 1312 0
+@@ selfhost/corpus/mir/cfg/07_many_locals_and_calls.ivy 1088 0
 function g
   return int32_t(int32_t x)
   block 0
@@ -17374,52 +17371,52 @@ function f
   return void()
   block 0
     alloca int32_t a01
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca int32_t a02
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
     alloca int32_t a03
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
     alloca int32_t a04
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 4
     alloca int32_t a05
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 5
     alloca int32_t a06
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 6
     alloca int32_t a07
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 7
     alloca int32_t a08
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 8
     alloca int32_t a09
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 9
     alloca int32_t a10
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 10
     alloca int32_t a11
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 11
     alloca int32_t a12
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 12
     alloca int32_t a13
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 13
     alloca int32_t a14
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 14
     alloca int32_t a15
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 15
     alloca int32_t a16
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 16
 
 @@ selfhost/corpus/mir/cfg/07_many_parameters.ivy 266 0
@@ -17629,7 +17626,7 @@ function f
         ident p
       int 1
 
-@@ selfhost/corpus/parser/aggregate/04_dtor.ivy 232 0
+@@ selfhost/corpus/parser/aggregate/04_dtor.ivy 218 0
 function Res::~Res
   return void(Res& this)
   block 0
@@ -17643,7 +17640,7 @@ function f
         ident r
       int 0
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
 
 @@ selfhost/corpus/parser/aggregate/05_enum.ivy 69 0
@@ -18289,7 +18286,7 @@ function f
   block 2
     jump
 
-@@ selfhost/corpus/parser/stmt/16_directinit_call_pos1.ivy 331 0
+@@ selfhost/corpus/parser/stmt/16_directinit_call_pos1.ivy 303 0
 function Pair::Pair
   return void(Pair& this, int32_t x, int32_t y)
   block 0
@@ -18305,13 +18302,13 @@ function h
   block 0
     alloca Pair p
     eval
-      call : void [lt: unknown]
+      call : void
         ident p
         int 1
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 2
 
-@@ selfhost/corpus/parser/stmt/17_directinit_call_last.ivy 364 0
+@@ selfhost/corpus/parser/stmt/17_directinit_call_last.ivy 336 0
 function Triple::Triple
   return void(Triple& this, int32_t x, int32_t y, int32_t z)
   block 0
@@ -18327,14 +18324,14 @@ function h
   block 0
     alloca Triple t
     eval
-      call : void [lt: unknown]
+      call : void
         ident t
         int 1
         int 2
-        call : int32_t [lt: unknown]
+        call : int32_t
           int 3
 
-@@ selfhost/corpus/parser/stmt/18_directinit_nested_call.ivy 477 0
+@@ selfhost/corpus/parser/stmt/18_directinit_nested_call.ivy 435 0
 function Triple::Triple
   return void(Triple& this, int32_t x, int32_t y, int32_t z)
   block 0
@@ -18356,20 +18353,20 @@ function h
   block 0
     alloca Triple t
     eval
-      call : void [lt: unknown]
+      call : void
         ident t
         int 1
-        call : int32_t [lt: unknown]
-          call : int32_t [lt: unknown]
+        call : int32_t
+          call : int32_t
             int 2
         int 3
 
-@@ selfhost/corpus/parser/template/01_fn_typename.ivy 196 0
+@@ selfhost/corpus/parser/template/01_fn_typename.ivy 182 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
 
 function identity<int32_t>
@@ -18378,12 +18375,12 @@ function identity<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/parser/template/02_fn_class.ivy 190 0
+@@ selfhost/corpus/parser/template/02_fn_class.ivy 176 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
 
 function id<int32_t>
@@ -18392,12 +18389,12 @@ function id<int32_t>
     ret
       ident x
 
-@@ selfhost/corpus/parser/template/03_fn_two_params.ivy 226 0
+@@ selfhost/corpus/parser/template/03_fn_two_params.ivy 212 0
 function f
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
         int 4
 
@@ -18431,12 +18428,12 @@ function f
   return void()
   block 0
 
-@@ selfhost/corpus/parser/template/08_constrained_fn.ivy 261 0
+@@ selfhost/corpus/parser/template/08_constrained_fn.ivy 247 0
 function f
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 3
         int 4
 
@@ -18466,12 +18463,12 @@ function f
   block 0
     alloca Holder<int32_t> h
 
-@@ selfhost/corpus/parser/template/12_fn_trailing.ivy 196 0
+@@ selfhost/corpus/parser/template/12_fn_trailing.ivy 182 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 7
 
 function identity<int32_t>
@@ -18494,12 +18491,12 @@ function id<int32_t>
       ident x
 
 @@ selfhost/corpus/parser/template/14_fn_const.ivy 0 0
-@@ selfhost/corpus/parser/template/15_two_params_constraint.ivy 228 0
+@@ selfhost/corpus/parser/template/15_two_params_constraint.ivy 214 0
 function f
   return void()
   block 0
     alloca int32_t r
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
         int 2
 
@@ -18837,7 +18834,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 2093 0
+@@ selfhost/corpus/codegen/h10_C19_record_across_call.ivy 2023 0
 function make
   return Pair(int64_t base)
   block 0
@@ -18895,7 +18892,7 @@ function main
         ident pad3
       int 6
     alloca Pair got
-      call : Pair [lt: unknown]
+      call : Pair
         int 7
     condbranch
       binary '!=' : bool
@@ -18941,8 +18938,8 @@ function main
   block 9
     condbranch
       binary '!=' : bool
-        member .a : int64_t [lt: unknown]
-          ident got [lt: unknown]
+        member .a : int64_t
+          ident got
         int 7
   block 10
     ret
@@ -18950,8 +18947,8 @@ function main
   block 11
     condbranch
       binary '!=' : bool
-        member .b : int64_t [lt: unknown]
-          ident got [lt: unknown]
+        member .b : int64_t
+          ident got
         int 8
   block 12
     ret
@@ -18963,7 +18960,7 @@ function main
     ret
       int 7
 
-@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1207 0
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1099 0
 function Res::Res
   return void(Res& this, int32_t v_)
   block 0
@@ -18976,7 +18973,7 @@ function Res::~Res
   return void(Res& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "dtor %d\n" [lt: static]
         member .v : int32_t
           this
@@ -18989,7 +18986,7 @@ function pick
   block 0
     alloca Res r
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
         int 1
     alloca int32_t inner
@@ -19004,15 +19001,15 @@ function pick
         ident inner
         int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
     ret
       ident __ret
   block 2
-    alloca int __ret
+    alloca int32_t __ret
       int 10
     eval
-      call : void [lt: unknown]
+      call : void
         ident r
     ret
       ident __ret
@@ -19021,17 +19018,17 @@ function main
   return int32_t()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 4
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 0
     ret
       binary '+' : int32_t
-        ident a [lt: unknown]
-        ident b [lt: unknown]
+        ident a
+        ident b
 
-@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 1264 0
+@@ selfhost/corpus/codegen/h10_H18_two_returns.ivy 1138 0
 function Box::Box
   return void(Box& this, int32_t x)
   block 0
@@ -19044,7 +19041,7 @@ function Box::~Box
   return void(Box& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "box %d\n" [lt: static]
         member .v : int32_t
           this
@@ -19057,12 +19054,12 @@ function pick
   block 0
     alloca Box b
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
         int 7
   block 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
   block 2
     alloca int32_t __ret
@@ -19071,7 +19068,7 @@ function pick
           ident b
         int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
     ret
       ident __ret
@@ -19082,7 +19079,7 @@ function pick
           ident b
         int 2
     eval
-      call : void [lt: unknown]
+      call : void
         ident b
     ret
       ident __ret0
@@ -19091,17 +19088,17 @@ function main
   return int32_t()
   block 0
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 1
     alloca int32_t b
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 2
     ret
       binary '+' : int32_t
-        ident a [lt: unknown]
-        ident b [lt: unknown]
+        ident a
+        ident b
 
-@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 1252 0
+@@ selfhost/corpus/codegen/h10_C4_break_nested.ivy 1182 0
 function G::G
   return void(G& this, int32_t v)
   block 0
@@ -19114,7 +19111,7 @@ function G::~G
   return void(G& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "bye %d\n" [lt: static]
         member .id : int32_t
           this
@@ -19138,7 +19135,7 @@ function run
   block 2
     alloca G g
     eval
-      call : void [lt: unknown]
+      call : void
         ident g
         ident i
     condbranch
@@ -19160,7 +19157,7 @@ function run
         ident n
         int 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident g
     jump
   block 6
@@ -19172,7 +19169,7 @@ function run
     jump
   block 8
     eval
-      call : void [lt: unknown]
+      call : void
         ident g
     jump
     jump
@@ -19181,9 +19178,9 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
 
-@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 695 0
+@@ selfhost/corpus/codegen/h10_H26_agg_ctor_dtor.ivy 667 0
 function Pair::Pair
   return void(Pair& this)
   block 0
@@ -19196,14 +19193,14 @@ function Pair::Pair
         this
       int 2
     eval
-      call : int [lt: unknown]
+      call : int
         string "ctor\n" [lt: static]
 
 function Pair::~Pair
   return void(Pair& this)
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "dtor\n" [lt: static]
 
 function printf [extern "C"]
@@ -19250,7 +19247,7 @@ function unsafe_escape
 
 @@ selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy 134 1
 selfhost/corpus/mir/lifetime/h10_H19_use_after_destroy.ivy:12:5: error: binding a reference to a temporary value (dangling reference)
-@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 1481 0
+@@ selfhost/corpus/codegen/h10_C1_slot_shadow.ivy 1453 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -19282,7 +19279,7 @@ function main
         ident x
         int 1
     eval
-      call : int [lt: unknown]
+      call : int
         string "%lld %lld\n" [lt: static]
         member .kind : int64_t
           ident x
@@ -19330,7 +19327,7 @@ function main
   block 7
     condbranch
       binary '!=' : bool
-        call : int64_t [lt: unknown]
+        call : int64_t
           int 7
         int 8
   block 8
@@ -19343,7 +19340,7 @@ function main
     ret
       int 5
 
-@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 1130 0
+@@ selfhost/corpus/codegen/h10_C18_zero_init_decl.ivy 1102 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -19351,11 +19348,11 @@ function main
   return int32_t()
   block 0
     eval
-      call : int [lt: unknown]
+      call : int
         string "before\n" [lt: static]
     alloca Pair p
     eval
-      call : int [lt: unknown]
+      call : int
         string "%lld %lld\n" [lt: static]
         member .a : int64_t
           ident p
@@ -19412,7 +19409,7 @@ function main
     ret
       int 3
 
-@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1202 0
+@@ selfhost/corpus/codegen/h10_H29_pointer_store.ivy 1160 0
 function printf [extern "C"]
   return int(const char* fmt)
 
@@ -19447,21 +19444,21 @@ function main
         ident pp [lt: unknown]
         int 1
     eval [unsafe]
-      call : int [lt: unknown]
+      call : int
         string "%lld\n" [lt: static]
         prefix '*' : int64_t [lt: unknown]
           ident q [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         ident p [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         C-cast : void* [lt: unknown]
           ident pp [lt: unknown]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 588 0
+@@ selfhost/corpus/codegen/h10_C16_new_arg_string.ivy 560 0
 function strlen [extern "C"]
   return int32_t(const char* s)
 
@@ -19471,14 +19468,14 @@ function main
     alloca int32_t* p [unsafe]
       new : int32_t* [lt: unknown]
         binary '+' : int32_t
-          call : int32_t [lt: unknown]
+          call : int32_t
             string "hi" [lt: static]
           int 3
     alloca int32_t v [unsafe]
       prefix '*' : int32_t [lt: unknown]
         ident p [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v [lt: unknown]
     eval [unsafe]
@@ -19487,7 +19484,7 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 1003 0
+@@ selfhost/corpus/codegen/h10_C17_alloc_decl_once.ivy 961 0
 function one
   return int32_t()
   block 0
@@ -19527,17 +19524,17 @@ function main
   block 0
     alloca int32_t v
       binary '+' : int32_t
-        call : int32_t [lt: unknown]
-        call : int32_t [lt: unknown]
+        call : int32_t
+        call : int32_t
           int 2
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 513 0
+@@ selfhost/corpus/codegen/h10_C3_new_struct_args.ivy 499 0
 function main
   return int32_t()
   block 0
@@ -19552,7 +19549,7 @@ function main
         member ->y : int32_t [lt: unknown]
           ident p [lt: unknown]
     eval [unsafe]
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident v
     eval [unsafe]
@@ -19561,28 +19558,28 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 284 0
+@@ selfhost/corpus/codegen/h10_C5_string_dedup.ivy 242 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "hi" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "hi" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "" [lt: static]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_C2_print_ref.ivy 544 0
+@@ selfhost/corpus/codegen/h10_C2_print_ref.ivy 488 0
 function show_int
   return void(int32_t& r)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident r
 
@@ -19590,7 +19587,7 @@ function show_float
   return void(float64_t& r)
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "{}" [lt: static]
         ident r
 
@@ -19602,10 +19599,10 @@ function main
     alloca float64_t f
       float 1.5
     eval
-      call : void [lt: unknown]
+      call : void
         ident i
     eval
-      call : void [lt: unknown]
+      call : void
         ident f
     ret
       int 0
@@ -19619,13 +19616,13 @@ function main
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy 216 0
+@@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy 202 0
 function f
   return void()
   block 0
     alloca int32_t xs
     alloca int32_t a
-      call : int32_t [lt: unknown]
+      call : int32_t
         ident xs
 
 function first<int32_t>
@@ -19634,15 +19631,15 @@ function first<int32_t>
     ret
       int 0
 
-@@ selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy 104 0
+@@ selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy 90 0
 function f
   return void()
   block 0
     alloca int32_t a
-      call : int [lt: unknown]
+      call : int
         int 1
 
-@@ selfhost/corpus/codegen/h10_C13_switch_continue.ivy 649 0
+@@ selfhost/corpus/codegen/h10_C13_switch_continue.ivy 635 0
 function f
   return int32_t(int32_t n)
   block 0
@@ -19686,7 +19683,7 @@ function main
   return int32_t()
   block 0
     ret
-      call : int32_t [lt: unknown]
+      call : int32_t
         int 4
 
 @@ selfhost/corpus/codegen/h10_C14_negative_zero.ivy 323 0
@@ -19713,15 +19710,15 @@ function main
     ret
       int 1
 
-@@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 216 0
+@@ selfhost/corpus/codegen/h10_C20_octal_escape.ivy 188 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "A\101B" [lt: static]
     eval
-      call : void [lt: unknown]
+      call : void
         string "\1" [lt: static]
     ret
       int 0
@@ -19740,60 +19737,60 @@ function main
       member .x : int32_t
         ident u
 
-@@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 141 0
+@@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 127 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         string "A—B" [lt: static]
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 795 0
+@@ selfhost/corpus/codegen/h10_R1_float_format.ivy 683 0
 function main
   return int32_t()
   block 0
     eval
-      call : void [lt: unknown]
+      call : void
         float 2
     eval
-      call : void [lt: unknown]
+      call : void
         float 0
     eval
-      call : void [lt: unknown]
+      call : void
         float 1
     eval
-      call : void [lt: unknown]
+      call : void
         float 100
     eval
-      call : void [lt: unknown]
+      call : void
         float 2.5
     alloca float64_t third
       binary '/' : double
         float 1
         float 3
     eval
-      call : void [lt: unknown]
+      call : void
         ident third
     alloca float64_t big
       binary '*' : double
         float 1e+20
         float 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident big
     alloca float64_t small
       binary '*' : double
         float 1e-05
         float 1
     eval
-      call : void [lt: unknown]
+      call : void
         ident small
     ret
       int 0
 
-@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 673 0
+@@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 645 0
 function main
   return int32_t()
   block 0
@@ -19813,7 +19810,7 @@ function main
         ident fi
         float 0.5
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {}" [lt: static]
         ident i
         ident x
@@ -19825,7 +19822,7 @@ function main
     jump
   block 3
     eval
-      call : void [lt: unknown]
+      call : void
         string "{} {} {} {}" [lt: static]
         int 1
         float 2
@@ -19833,4 +19830,247 @@ function main
         float 0
     ret
       int 0
+
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1067 0
+function __ivy_alloc [extern "C"]
+  return void*(unsigned long long n)
+
+function __ivy_free [extern "C"]
+  return void(void* p)
+
+function peek
+  return const int32_t&(const int32_t& p [lt:a])
+  lifetimes: a
+  return lifetime: a
+  block 0
+    ret
+      ident p [lt: a]
+
+function five
+  return int32_t()
+  block 0
+    ret
+      int 5
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t x
+      int 7
+    alloca const int32_t& r
+      call : const int32_t& [lt: a]
+        ident x
+    alloca int32_t n
+      call : int32_t
+    alloca int32_t* raw [unsafe]
+      C-cast : int32_t* [lt: unknown]
+        call : void* [lt: unknown]
+          int 4
+    store [unsafe]
+      prefix '*' : int32_t [lt: unknown]
+        ident raw [lt: unknown]
+      ident n
+    alloca int32_t v [unsafe]
+      binary '+' : const int32_t
+        ident r [lt: a]
+        prefix '*' : int32_t [lt: unknown]
+          ident raw [lt: unknown]
+    eval [unsafe]
+      call : void
+        ident raw [lt: unknown]
+    ret [unsafe]
+      binary '-' : int32_t
+        ident v
+        int 12
+
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 835 0
+function Guard::Guard
+  return void(Guard& this, int32_t v)
+  block 0
+    store
+      member .id : int32_t
+        this
+      ident v
+
+function Guard::~Guard
+  return void(Guard& this)
+  block 0
+    eval
+      call : int
+        string "guard %d\n" [lt: static]
+        member .id : int32_t
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function widen
+  return int64_t(int32_t a)
+  block 0
+    alloca Guard g
+    eval
+      call : void
+        ident g
+        int 1
+    alloca int64_t __ret
+      ident a
+    eval
+      call : void
+        ident g
+    ret
+      ident __ret
+
+function main
+  return int32_t()
+  block 0
+    alloca int64_t v
+      call : int64_t
+        int 3
+    condbranch
+      binary '==' : bool
+        ident v
+        int 3
+  block 1
+    ret
+      int 1
+  block 2
+    ret
+      int 0
+
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 1209 0
+function Guard::Guard
+  return void(Guard& this, int32_t v)
+  block 0
+    store
+      member .id : int32_t
+        this
+      ident v
+
+function Guard::~Guard
+  return void(Guard& this)
+  block 0
+    eval
+      call : int
+        string "guard %d\n" [lt: static]
+        member .id : int32_t
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+
+function keep
+  return Guard()
+  block 0
+    alloca Guard r
+    eval
+      call : void
+        ident r
+        int 9
+    ret
+      ident r
+
+function narrow
+  return int32_t(int32_t a)
+  block 0
+    alloca Guard g
+    eval
+      call : void
+        ident g
+        int 2
+    alloca const int32_t c
+      ident a
+    alloca int32_t __ret
+      ident c
+    eval
+      call : void
+        ident g
+    ret
+      ident __ret
+
+function main
+  return int32_t()
+  block 0
+    alloca Guard k
+      call : Guard
+    alloca int32_t n
+      call : int32_t
+        int 5
+    alloca int32_t __ret
+      binary '-' : int32_t
+        binary '+' : int32_t
+          binary '-' : int32_t
+            ident n
+            int 5
+          member .id : int32_t
+            ident k
+        int 9
+    eval
+      call : void
+        ident k
+    ret
+      ident __ret
+
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 487 0
+function first
+  return int32_t(const int32_t& a [lt:a], const int32_t& b [lt:a])
+  lifetimes: a
+  block 0
+    alloca const int32_t& r
+      ident a [lt: a]
+    alloca int32_t v
+      call : const int32_t& [lt: a]
+        ident r [lt: a]
+    ret
+      ident v [lt: a]
+
+function main
+  return int32_t()
+  block 0
+    alloca int32_t x
+      int 3
+    alloca int32_t y
+      int 4
+    ret
+      binary '-' : int32_t
+        call : int32_t
+          ident x
+          ident y
+        int 3
+
+@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 203 0
+function main
+  return int32_t()
+  block 0
+    alloca P p
+      init-list : P (3)
+        int 1
+        int 0 [lt: unknown]
+        int 0 [lt: unknown]
+    ret
+      member .z : int32_t
+        ident p
+
+@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 189 0
+function main
+  return int32_t()
+  block 0
+    alloca P p
+      init-list : P (2)
+        int 0 [lt: unknown]
+        int 0 [lt: unknown]
+    ret
+      member .x : int32_t
+        ident p
+
+@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 175 0
+function main
+  return int32_t()
+  block 0
+    alloca P p
+      init-list : P (2)
+        int 0 [lt: unknown]
+        int 5
+    ret
+      member .y : int32_t
+        ident p
 

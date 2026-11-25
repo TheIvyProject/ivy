@@ -482,6 +482,59 @@
   `ORACLE_BUGS.md`). `--run` vẫn dùng formatter `%g` 6 chữ số của
   interpreter (không đổi); runtime được kiểm qua link/run.
 
+### H10.9 - Lifetime IR: call, `__ret`, return/NRVO, `move`
+
+- **Bug**:
+  - **H14** — mọi call bị gán `Unknown` vô điều kiện, kể cả `peek(x)` có
+    `lifetime<$a>` trả `const int32& $a` (MIR in `call : const int32_t&`
+    không kèm `[lt: a]`) và call trả giá trị thường.
+  - **H15** — temp `__ret` lấy type của **biểu thức return** thay vì return
+    type: `fn widen(int32)->int64 { return a; }` khai báo `int32_t __ret`.
+  - **H16** — `return <local>` chỉ so **base** type, nên local `int32` trả từ
+    hàm `int64` vẫn bị coi là cùng kiểu (không sinh `__ret`), và NRVO nhận
+    nhầm khi chỉ khác base.
+  - **H28** — `move(x)` luôn `None` vì oracle đọc lifetime từ argument **sau**
+    khi `std::move` nó vào `call.args` (con trỏ đã null).
+- **Sửa**:
+  - `selfhost/hir/hir.ivy`: thêm `HExpr.retlt` (lifetime trả về của callee).
+  - `selfhost/hir/hir_builder.ivy`: `fn_retlt(hf)` trả `return_lifetime` hoặc
+    `""`; gán `retlt` ở **mọi** đường tạo call (method, method qua biến, free
+    function, extern, template, `build_call_simple`); `build_return` khai báo
+    `__ret` (và ident thay thế) bằng `rt` thay vì `ve.type`; NRVO
+    (`mark_returned_local`) và `plain_local` dùng `same_type(ve.type, rt)`
+    thay vì so `base` (vẫn loại `is_ref`).
+  - `selfhost/mir/mir_builder.ivy` `ex_call`: bỏ gán `Unknown` vô điều kiện;
+    virtual → `Unknown`; pointer **hoặc reference** → `Named` nếu callee có
+    `lt_ret`, ngược lại `Unknown`; giá trị thường → `None`. `move(x)` copy
+    `lt`/`ltname` của operand sau khi mark moved-out.
+- **Fixture** (`selfhost/corpus/codegen/`):
+  - `h10_H14_call_lifetime.ivy` — `peek` trả `const int32& $a` → `[lt: a]`,
+    `five()` → không lifetime, `__ivy_alloc` (pointer không khai báo) →
+    `Unknown`; chạy trả 0.
+  - `h10_H15_ret_type.ivy` — `widen` trả `int64` nên `__ret` là `int64`;
+    dtor `Guard` chạy; chạy trả 0.
+  - `h10_H16_return_local.ivy` — `keep()` NRVO (không temp, bỏ dtor) và
+    `narrow()` trả `const int32` từ hàm `int32` (có temp, dtor chạy).
+  - `h10_H28_move_lifetime.ivy` — `move(r)` giữ `[lt: a]`; chạy trả 0.
+- **Golden**: 4 fixture mới × 10 mode; corpus 1081 → 1085, link 271 → 275.
+  Full re-baseline là bắt buộc vì H14 đổi MIR của gần như mọi call:
+  `dump/mir.txt` 264 record đổi, `dump/hir.txt` 5 (H15/H16 và exit code),
+  `dump/{ast,llvm}.txt`, `compile/*`, `link/*` thêm 4 record. Phụ: port không
+  còn crash `0xC0000005` trên `156/157/160` (`--hir`/`--mir` exit 0), nên
+  `golden/exceptions.txt` chỉ còn header và 3 fixture đó được đóng băng
+  output. Provenance `expected:H10.9` cho 276 record.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA
+  `D9D63C74162CA5354990CBAEE97F086E278A7A1083FBF4E180081EE61CA63912`
+  (27 180 544 B), golden **12798 checks / 0 failures** (1085 fixture).
+  `check_repro.ps1` → **PASS** (83 artifacts: 42 object, 38 `.ivm`, 3 exe;
+  stage1 cùng SHA `D9D63C74…682B69E`).
+- **Ghi chú**: điều kiện pointer **hoặc reference** (không chỉ `ptr_depth`)
+  là cần thiết vì subset trả raw pointer bằng reference; nếu chỉ xét
+  `ptr_depth` thì `80c/80d` mất diagnostic "returned reference has unknown
+  lifetime" (regression H5.2). H28 in `[lt: ...]` cho `move` là **deviation
+  cố ý** so với oracle (xem `ORACLE_BUGS.md`).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -494,7 +547,7 @@
 | H10.6 | C2, C7, C8, C10, C11 | IR/ABI: ref arg, IR self-reject, `nullptr`, mangling | ✅ |
 | H10.7 | H22, C14, C20, C13, C6 | Literal/format IR (em dash, `-0.0`, octal, label rỗng) | ✅ |
 | H10.8 | R1, R2, R3 | Runtime `fmt_float`, buffer dùng chung, `_gcvt` | ✅ |
-| H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ☐ |
+| H10.9 | H14, H15, H16, H28 | Lifetime IR: call result, `__ret`, return/NRVO, `move` | ✅ |
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ☐ |
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ☐ |
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ☐ |

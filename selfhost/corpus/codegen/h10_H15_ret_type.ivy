@@ -1,0 +1,28 @@
+#pragma ivy cnumber
+
+extern "C" {
+    int printf(const char* fmt, ...);
+}
+
+struct Guard {
+    int32 id;
+    Guard(int32 v) : id(v) {}
+    ~Guard() {
+        printf("guard %d\n", this.id);
+    }
+};
+
+// H15: the `__ret` temporary takes the function's return type, not the type
+// of the returned expression.
+fn widen(int32 a) -> int64 {
+    Guard g(1);
+    return a;
+}
+
+int32 main() {
+    int64 v = widen(3);
+    if (v == 3) {
+        return 0;
+    }
+    return 1;
+}

@@ -2464,6 +2464,7 @@ export struct HirBuilder {
         HExpr call = this.new_expr(12, line, col);
         call.sval = hf.name;
         call.type = hf.ret;
+        call.retlt = this.fn_retlt(hf);
         long run = this.u.a_n;
         HExpr self = this.new_expr(8, line, col);
         self.sval = name;
@@ -2574,6 +2575,7 @@ export struct HirBuilder {
         HExpr call = this.new_expr(12, line, col);
         call.sval = hf.name;
         call.type = hf.ret;
+        call.retlt = this.fn_retlt(hf);
         long run = this.u.a_n;
         HExpr self = this.new_expr(8, line, col);
         self.sval = var;
@@ -2871,6 +2873,7 @@ export struct HirBuilder {
         e.col = col;
         e.fval = 0.0;
         e.msval = "";
+        e.retlt = "";
         return e;
     }
 
@@ -4865,7 +4868,7 @@ export struct HirBuilder {
             }
             if (rt.is_ref == 0 && rt.ptr_depth == 0 && !this.seq(rt.base, "void") &&
                 ve.kind == 8 && ve.type.is_ref == 0 &&
-                this.seq(ve.type.base, rt.base) != 0) {
+                this.same_type(ve.type, rt) != 0) {
                 this.mark_returned_local(ve.sval);
             }
         }
@@ -4897,24 +4900,30 @@ export struct HirBuilder {
             }
             long by_value = (rt.is_ref == 0 && rt.ptr_depth == 0 &&
                              !this.seq(rt.base, "void")) ? 1 : 0;
+            // H10.9 (H16): "plain local" compares the full type, not just the
+            // base name, so an `int32_t` local returned as `int64_t` still
+            // gets the `__ret` temporary (and an exactly matching local keeps
+            // NRVO).
             long plain_local = (ve.kind == 8 && ve.type.is_ref == 0 &&
-                                this.seq(ve.type.base, rt.base) != 0) ? 1 : 0;
+                                this.same_type(ve.type, rt) != 0) ? 1 : 0;
             if (by_value != 0 && plain_local == 0) {
                 this.synth_ret_name();
                 unsafe {
                     const char* tn = reinterpret_cast<const char*>(this.retnm_);
-                    this.declare(tn, ve.type, a.line, a.col);
-                    this.record_dtor_var(tn, ve.type);
+                    // H10.9 (H15): the temporary has the function's return
+                    // type, not the type of the returned expression.
+                    this.declare(tn, rt, a.line, a.col);
+                    this.record_dtor_var(tn, rt);
                     this.mark_returned_local(tn);
                     HStmt d = this.new_stmt(2, a.line, a.col);
-                    d.type = ve.type;
+                    d.type = rt;
                     d.sval = tn;
                     d.a = val;
                     temp_decl = this.push_stmt(d);
                     temp_count = 1;
                     HExpr id = this.new_expr(8, a.line, a.col);
                     id.sval = tn;
-                    id.type = ve.type;
+                    id.type = rt;
                     val = this.push_expr(id);
                 }
             }
@@ -5633,6 +5642,18 @@ export struct HirBuilder {
         return actual;
     }
 
+    // H10.9 (H14): the callee's return lifetime as the HIR call node stores
+    // it (`call.returnLifetime` in the oracle).  A declaration without a
+    // lifetime keeps the empty string rather than NULL.
+    const char* fn_retlt(HFunction hf) {
+        unsafe {
+            if (hf.return_lifetime != (char*)0) {
+                return hf.return_lifetime;
+            }
+        }
+        return "";
+    }
+
     long build_call(AExpr a) {
         HExpr e = this.new_expr(12, a.line, a.col);
         AExpr ca = this.get_expr(a.a);
@@ -5724,6 +5745,7 @@ export struct HirBuilder {
                     }
                     e.sval = hf.name;
                     e.type = hf.ret;
+                    e.retlt = this.fn_retlt(hf);
                     // H6.2y: virtual dispatch through a reference/pointer.
                     // The slot comes from the *static* type's vtable.
                     if (hf.is_virtual != 0 && was_ref_or_ptr != 0) {
@@ -6000,6 +6022,7 @@ export struct HirBuilder {
                                     HFunction hf;
                                     hf = this.u.fns[ci];
                                     e.sval = hf.name;
+                                    e.retlt = this.fn_retlt(hf);
                                     AType st = this.ty_empty();
                                     st.base = spec;
                                     e.type = st;
@@ -6061,6 +6084,7 @@ export struct HirBuilder {
                 }
                 e.sval = hf.name;
                 e.type = hf.ret;
+                e.retlt = this.fn_retlt(hf);
                 e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
                 long folded = this.try_fold_constexpr_call(fi, e.astart, e.an,
                                                           a.line, a.col);
@@ -6077,6 +6101,7 @@ export struct HirBuilder {
                 }
                 e.sval = hf.name;
                 e.type = hf.ret;
+                e.retlt = this.fn_retlt(hf);
                 e.an = this.check_call(fi, e.astart, e.an, a.line, a.col);
                 // --- constexpr folding ---
                 long folded = this.try_fold_constexpr_call(fi, e.astart, e.an,
@@ -6129,6 +6154,7 @@ export struct HirBuilder {
                 }
                 e.sval = hf.name;
                 e.type = hf.ret;
+                e.retlt = this.fn_retlt(hf);
                 e.an = this.check_call(tfi, e.astart, e.an, a.line, a.col);
                 long folded = this.try_fold_constexpr_call(tfi, e.astart, e.an,
                                                           a.line, a.col);
@@ -6577,6 +6603,7 @@ export struct HirBuilder {
         HExpr e = this.new_expr(12, line, col);
         e.sval = hf.name;
         e.type = hf.ret;
+        e.retlt = this.fn_retlt(hf);
         e.astart = start;
         e.an = n;
         long idx = this.push_expr(e);

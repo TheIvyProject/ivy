@@ -1,0 +1,17 @@
+#pragma ivy cnumber
+
+// H28: `move(x)` keeps the operand's lifetime.  The oracle read the lifetime
+// from the argument after moving it into the call, so the result was always
+// None.
+lifetime<$a>
+fn first(const int32& $a a, const int32& $a b) -> int32 {
+    const int32& r = a;
+    int32 v = move(r);
+    return v;
+}
+
+int32 main() {
+    int32 x = 3;
+    int32 y = 4;
+    return first(x, y) - 3;
+}

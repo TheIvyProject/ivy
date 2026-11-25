@@ -265,3 +265,7 @@ ef
 @@ selfhost/corpus/codegen/h10_H22_em_dash.ivy 0 0
 @@ selfhost/corpus/codegen/h10_R1_float_format.ivy 0 0
 @@ selfhost/corpus/codegen/h10_R2_format_stress.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 0 0
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 0 0

@@ -1,0 +1,31 @@
+#pragma ivy cnumber
+
+extern "C" {
+    void* __ivy_alloc(unsigned long long n);
+    void __ivy_free(void* p);
+}
+
+// H14: a call keeps the lifetime the callee declares.  `peek` returns a
+// reference tied to `$a`, `five` returns a plain value (no lifetime) and
+// `__ivy_alloc` returns an unannotated pointer (Unknown).
+lifetime<$a>
+fn peek(const int32& $a p) -> const int32& $a {
+    return p;
+}
+
+fn five() -> int32 {
+    return 5;
+}
+
+int32 main() {
+    int32 x = 7;
+    const int32& r = peek(x);
+    int32 n = five();
+    unsafe {
+        int32* raw = (int32*)__ivy_alloc(4);
+        *raw = n;
+        int32 v = r + *raw;
+        __ivy_free(raw);
+        return v - 12;
+    }
+}

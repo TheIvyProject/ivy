@@ -1320,8 +1320,6 @@ function main
       member . x
         ident p
 
-@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 0 -1073741819
-@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 0 -1073741819
 @@ selfhost/corpus/codegen/158_struct_float_field_init.ivy 274 0
 function main
   return int32_t()
@@ -1382,7 +1380,6 @@ function main
         call 'inc' : int32_t
           int 2
 
-@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 0 -1073741819
 @@ selfhost/corpus/codegen/161_struct_enum_field_init.ivy 153 0
 function main
   return int32_t()
@@ -2298,7 +2295,7 @@ function main
     return
       int 0
 
-@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 998 0
+@@ selfhost/corpus/codegen/192_ctor_dtor.ivy 1002 0
 function Logger::Logger
   return void(Logger& this, int32_t v)
   block
@@ -2346,7 +2343,7 @@ function main
         call 'Logger::~Logger' : void
           ident b
     block
-      decl int __ret =
+      decl int32_t __ret =
         int 0
       expr
         call 'Logger::~Logger' : void
@@ -19474,7 +19471,7 @@ function main
     return
       int 15
 
-@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1380 0
+@@ selfhost/corpus/codegen/h10_H17_nested_return.ivy 1384 0
 function Res::Res
   return void(Res& this, int32_t v_)
   block
@@ -19516,7 +19513,7 @@ function pick
             int 0
           block
             block
-              decl int __ret =
+              decl int32_t __ret =
                 int 10
               expr
                 call 'Res::~Res' : void
@@ -20503,4 +20500,261 @@ function main
         float 0
     return
       int 0
+
+@@ selfhost/corpus/codegen/h10_H14_call_lifetime.ivy 1114 0
+function __ivy_alloc [extern "C"]
+  return void*(unsigned long long n)
+  (declaration only)
+
+function __ivy_free [extern "C"]
+  return void(void* p)
+  (declaration only)
+
+function peek
+  return const int32_t&(const int32_t& p [lt:a])
+  lifetimes: a
+  return lifetime: a
+  block
+    return
+      ident p
+
+function five
+  return int32_t()
+  block
+    return
+      int 5
+
+function main
+  return int32_t()
+  block
+    decl int32_t x =
+      int 7
+    decl const int32_t& r =
+      call 'peek' : const int32_t&
+        ident x
+    decl int32_t n =
+      call 'five' : int32_t
+    unsafe
+      block
+        decl int32_t* raw =
+          C-cast
+            call '__ivy_alloc' : void*
+              int 4
+        expr
+          assign '=' : int32_t
+            prefix '*' : int32_t
+              ident raw
+            ident n
+        decl int32_t v =
+          binary '+' : const int32_t
+            ident r
+            prefix '*' : int32_t
+              ident raw
+        expr
+          call '__ivy_free' : void
+            ident raw
+        return
+          binary '-' : int32_t
+            ident v
+            int 12
+
+@@ selfhost/corpus/codegen/h10_H15_ret_type.ivy 940 0
+function Guard::Guard
+  return void(Guard& this, int32_t v)
+  block
+    expr
+      assign '=' : int32_t
+        member . id
+          this
+        ident v
+
+function Guard::~Guard
+  return void(Guard& this)
+  block
+    expr
+      call 'printf' : int
+        string "guard %d\n"
+        member . id
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function widen
+  return int64_t(int32_t a)
+  block
+    block
+      decl Guard g
+      expr
+        call 'Guard::Guard' : void
+          ident g
+          int 1
+    block
+      decl int64_t __ret =
+        ident a
+      expr
+        call 'Guard::~Guard' : void
+          ident g
+      return
+        ident __ret
+
+function main
+  return int32_t()
+  block
+    decl int64_t v =
+      call 'widen' : int64_t
+        int 3
+    if
+      binary '==' : bool
+        ident v
+        int 3
+      block
+        return
+          int 0
+    return
+      int 1
+
+@@ selfhost/corpus/codegen/h10_H16_return_local.ivy 1406 0
+function Guard::Guard
+  return void(Guard& this, int32_t v)
+  block
+    expr
+      assign '=' : int32_t
+        member . id
+          this
+        ident v
+
+function Guard::~Guard
+  return void(Guard& this)
+  block
+    expr
+      call 'printf' : int
+        string "guard %d\n"
+        member . id
+          this
+
+function printf [extern "C"]
+  return int(const char* fmt)
+  (declaration only)
+
+function keep
+  return Guard()
+  block
+    block
+      decl Guard r
+      expr
+        call 'Guard::Guard' : void
+          ident r
+          int 9
+    return
+      ident r
+
+function narrow
+  return int32_t(int32_t a)
+  block
+    block
+      decl Guard g
+      expr
+        call 'Guard::Guard' : void
+          ident g
+          int 2
+    decl const int32_t c =
+      ident a
+    block
+      decl int32_t __ret =
+        ident c
+      expr
+        call 'Guard::~Guard' : void
+          ident g
+      return
+        ident __ret
+
+function main
+  return int32_t()
+  block
+    decl Guard k =
+      call 'keep' : Guard
+    decl int32_t n =
+      call 'narrow' : int32_t
+        int 5
+    block
+      decl int32_t __ret =
+        binary '-' : int32_t
+          binary '+' : int32_t
+            binary '-' : int32_t
+              ident n
+              int 5
+            member . id
+              ident k
+          int 9
+      expr
+        call 'Guard::~Guard' : void
+          ident k
+      return
+        ident __ret
+
+@@ selfhost/corpus/codegen/h10_H28_move_lifetime.ivy 472 0
+function first
+  return int32_t(const int32_t& a [lt:a], const int32_t& b [lt:a])
+  lifetimes: a
+  block
+    decl const int32_t& r =
+      ident a
+    decl int32_t v =
+      call 'move' : const int32_t&
+        ident r
+    return
+      ident v
+
+function main
+  return int32_t()
+  block
+    decl int32_t x =
+      int 3
+    decl int32_t y =
+      int 4
+    return
+      binary '-' : int32_t
+        call 'first' : int32_t
+          ident x
+          ident y
+        int 3
+
+@@ selfhost/corpus/codegen/156_struct_partial_init.ivy 179 0
+function main
+  return int32_t()
+  block
+    decl P p =
+      init-list : P (3)
+        int 1
+        <zero-init>
+        <zero-init>
+    return
+      member . z
+        ident p
+
+@@ selfhost/corpus/codegen/157_struct_empty_init.ivy 165 0
+function main
+  return int32_t()
+  block
+    decl P p =
+      init-list : P (2)
+        <zero-init>
+        <zero-init>
+    return
+      member . x
+        ident p
+
+@@ selfhost/corpus/codegen/160_struct_designated_init.ivy 159 0
+function main
+  return int32_t()
+  block
+    decl P p =
+      init-list : P (2)
+        <zero-init>
+        int 5
+    return
+      member . y
+        ident p
 
