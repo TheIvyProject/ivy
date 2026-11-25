@@ -93,7 +93,8 @@ produces errors prints diagnostics only.
     `a + b`; a struct needs a real `operator+` overload. (C06, C07, p21, p09)
 11. **Too many explicit template arguments are silently accepted**; **too few** leave the
     unmapped parameter type as the literal parameter name (`U`) and produce a cascade of
-    type errors. (p11, p14, t12)
+    type errors. (p11, p14, t12) — **too many fixed at H10.13**: `too many template
+    arguments for 'X'`; too few is unchanged.
 12. **Non-type template parameters are unusable**: the parser accepts `template <int32 N>` but
     the call site cannot pass a value (`f<3>(x)` is a parse error) and `N` is never bound
     (using `N` in the body ⇒ `undeclared identifier 'N'`). (p04, p71, t03, t04)
@@ -217,7 +218,7 @@ Consequences (all verified):
 | `const T&` | `const <concrete>&` | const/ref taken from the *declaration* |
 | `T*` | `<concrete>*` | pointer depth taken from the declaration |
 | `T` deduced as `char const*` | `char const*` | the concrete type's const/pointer are kept and the usage-site qualifiers are added (H10.12, T5) |
-| `Box<T>` (param type) | base `Box` + `tplArgs [int32_t]` | the specialization is **not** resolved ⇒ call always mismatches (p60) |
+| `Box<T>` (param type) | `Box<int32_t>` (resolved) | H10.13, T9; the oracle kept base `Box` + `tplArgs [int32_t]` unresolved and the call always mismatched (p60) |
 | `Box<T>` (struct field type) | `Box<int32_t>` (resolved) | because `resolveTemplateStructType` runs on the cloned field (p61) |
 | local `T y;` | substituted | `currentTypeMapping_` stays active while the body is built (H10.12, T1) |
 | local `T y;` inside a **struct** template method | substituted | `currentTypeMapping_` *is* set during struct instantiation (p82) |
@@ -570,18 +571,18 @@ condition is false, the `else` branch is kept and the `if` branch (with
 | parameter type | `T` | concrete type | C01 |
 | parameter type | `const T&` | `const <concrete>&` | p31 |
 | parameter type | `T*` | `<concrete>*` | t15 |
-| parameter type | `Box<T>` | base `Box`, `tplArgs [int32_t]`, **not resolved** | p60 |
+| parameter type | `Box<T>` | resolved to `Box<int32_t>` (H10.13, T9) | p60 |
 | local decl | `T y` | substituted (H10.12, T1) | C10, h10_T1_local_T |
 | local decl (struct-template method) | `T y` | substituted | p82 |
 | struct field | `T v` | concrete type | C05 |
 | struct field | `Box<T> v` | resolved to `Box<int32_t>` | p61 |
-| struct base list | `T` | **base list is dropped entirely** | p49 |
+| struct base list | `T` | substituted and kept (H10.13, T4) | p49, h10_T4_base_class |
 | method `this` | implicit | `SpecName&` | C05 |
 | default argument | `= <expr>` | **not substituted** (the default expr is cloned at the call site) | UNKNOWN (not probed) |
 | `sizeof(T)` | | 4 (fallback) | p30, p48 |
-| `alignof(T)` | | 4 (fallback) | p48 |
-| `sizeof(T)` where T = a struct | | 4 (the specialization is *not* resolved) | p48 |
-| `sizeof(Box<int32>)` | | 4 (wrong: the real size is 8) | p48 |
+| `alignof(T)` | | real alignment (H10.13, T3) | p48, h10_T3_sizeof_template_id |
+| `sizeof(T)` where T = a struct | | resolved to the specialization (H10.13, T3) | p48 |
+| `sizeof(Box<int32>)` | | resolved to the specialization (H10.13, T3) | p48, 05_sizeof_template_id |
 | non-type param `N` | | never bound ⇒ `undeclared identifier 'N'` | p71 |
 | variadic pack | `Args... args` | expands to N params `__args0…` | C04 |
 | pack in `sizeof...(args)` | | pack element count | p62 |
@@ -669,9 +670,9 @@ whenever any diagnostic is produced; exit code 1.
 | D10 | unknown name in an instantiated body | `undeclared identifier 'N'` / `undeclared identifier 'value'` | the identifier | p71, p07 |
 | D11 | fold over an unknown pack | `fold expression references unknown parameter pack` | the fold | `hir_builder.cpp:3934` (not triggered in a corpus file) |
 | D12 | template-id on a plain struct in a *type* position | *no diagnostic* — the args are ignored | — | p79 |
-| D13 | too many template arguments | *no diagnostic* | — | p11, p80 |
+| D13 | too many template arguments | `too many template arguments for 'X'` (H10.13; the oracle stayed silent) | the template-id | p11, p80 |
 | D14 | too few template arguments | *no diagnostic of its own*; a cascade of D7b/D9/D8 | — | p14, t12 |
-| D15 | redefinition of a specialization | *no diagnostic* (the second template silently replaces the first) | — | p53, p78 |
+| D15 | two function templates with the same name | an overload set: the explicit template-argument count and the call arity select the candidate (H10.13; the oracle kept the last one) | the call | p53, p78 |
 
 Parse-level diagnostics (from the parser, not the HIR builder):
 
@@ -729,19 +730,19 @@ files** (a crash gives empty output and a non-1 exit code, which breaks the diff
 A nested `constexpr` call inside a binary expression did **not** crash in my probe (p66,
 p84) — the crash may require a different shape. **Treat it as unsafe.**
 
-### 10.2 Semantic bugs (B1/B2/B5/B6/B11 fixed at H10.12)
+### 10.2 Semantic bugs (B1/B2/B5/B6/B11 fixed at H10.12; B3/B4/B7/B8/B9 at H10.13)
 
 | # | Bug | Where | Evidence |
 |---|---|---|---|
 | B1 | A local declaration of type `T` is not substituted | `hir_builder.cpp:503-505` (`currentTypeMapping_` is empty for function templates) | C10, p28 — **fixed**: mapping stays active while the body is built |
 | B2 | A template calling another template with an explicit argument does not substitute the argument | same root cause | C11, p27 — **fixed**: the call-site argument is substituted with the active mapping |
-| B3 | `sizeof`/`alignof` of a template-id type returns 4 (the fallback) instead of the real layout | `typeSize` fallback `hir_builder.cpp:480` | p48, p36 |
-| B4 | A struct-template specialization **loses its base classes** | `instantiateStructTemplate` never copies `bases` (`hir_builder.cpp:5442-5448`) | p49 |
+| B3 | `sizeof`/`alignof` of a template-id type returns 4 (the fallback) instead of the real layout | `typeSize` fallback `hir_builder.cpp:480` | p48, p36 — **fixed**: `sizeof`/`alignof` resolve the template-id first |
+| B4 | A struct-template specialization **loses its base classes** | `instantiateStructTemplate` never copies `bases` (`hir_builder.cpp:5442-5448`) | p49 — **fixed**: the bases are substituted, laid out and exported |
 | B5 | The concrete type's `const`/pointer qualifiers are lost when substituting into a plain `T` parameter | `substituteType` overwrites them with the declaration's | p15 — **fixed**: the usage-site qualifiers are added, not substituted |
 | B6 | `T` deduced from an integer literal is `int`, not `int32_t` | `intType()` = `"int"` | C03 — **fixed**: deduction normalises `int` to `int32_t` |
-| B7 | Extra template arguments are silently accepted; the mangled name contains them | `instantiateTemplate` maps only `min(#params,#args)` | p11, p80 |
-| B8 | Two templates with the same name: the second silently replaces the first (no overloading) | `templates_` is keyed by name | p53 |
-| B9 | `Box<T>` as a *parameter* type is never resolved to the specialization ⇒ every call mismatches | `instantiateTemplate` does not call `resolveTemplateStructType` on params | p60 |
+| B7 | Extra template arguments are silently accepted; the mangled name contains them | `instantiateTemplate` maps only `min(#params,#args)` | p11, p80 — **fixed**: `too many template arguments for 'X'` |
+| B8 | Two templates with the same name: the second silently replaces the first (no overloading) | `templates_` is keyed by name | p53 — **fixed**: every declaration is kept and the explicit/arity match selects one |
+| B9 | `Box<T>` as a *parameter* type is never resolved to the specialization ⇒ every call mismatches | `instantiateTemplate` does not call `resolveTemplateStructType` on params | p60 — **fixed**: substituted return/parameter/pack types are resolved |
 | B10 | A pack expansion in a call (`f(args...)`) is broken | the pack name is not a scope name | p85 |
 | B11 | The `currentTypeMapping_` is set during *struct* instantiation but not during *function* instantiation | `hir_builder.cpp:5460` vs `:4995` | C11 vs p76 — **fixed**: both paths set `gmap_base_` |
 | B12 | An unknown concept name is silently treated as satisfied | `hir_builder.cpp:4838-4841` | p21 |
@@ -864,7 +865,7 @@ Diagnostics: D2, D3, D5, D6, D7, D9, D10.
 
 Sub-tasks / pitfalls:
 
-* the specialization's **base list is dropped** (B4) — reproduce it;
+* the specialization's base list is substituted and kept (H10.13, T4; the oracle dropped it, B4);
 * the specialization's methods are built **by the struct instantiation**, not by pass 2b
   (pass 2b only walks the original AST structs) — so the method bodies are built at
   instantiation time, in the order the struct is instantiated (p75);
@@ -1242,8 +1243,10 @@ the qualified form `ns::id<int32_t>` of p72 is out of reach — see 15.7).
 
 **Explicit arguments.** The explicit arguments **replace** the deduction
 (the oracle does not mix them): the mapping is built from the first
-`min(#fixed-params, #args)` arguments. Extra arguments are silently accepted
-and still appear in the mangled name (bug B7); too few arguments leave the
+`min(#fixed-params, #args)` arguments. Extra arguments were silently accepted
+and still appeared in the mangled name (bug B7); **fixed at H10.13**: a
+non-variadic template rejects them with `too many template arguments for 'X'`.
+Too few arguments leave the
 unmapped parameter's type as the literal parameter name (`U`) and the
 subsequent call check reports it (bug "unmapped param name leaks").
 
@@ -1282,12 +1285,12 @@ changed so that it
 | B2 | **H10.12 fixed**: an explicit `id<T>(x)` inside a function template is substituted (`id<int32_t>`) | `C11`, `F31` |
 | B5 | **H10.12 fixed**: substituting into a plain `T` parameter keeps `char const*` instead of dropping the qualifiers | `F24`, `F36` |
 | B6 | **H10.12 fixed**: `T` deduced from an integer literal is `int32_t` | `C03`, `F50`, `F51` |
-| B7 | Extra template arguments are silently accepted; the mangled name contains them | `F12` |
-| B8 | Two templates with the same name: the second silently replaces the first | `F28` |
+| B7 | **H10.13 fixed**: extra template arguments are rejected with `too many template arguments for 'X'` (the oracle silently accepted them and mangled them into the name) | `F12` |
+| B8 | **H10.13 fixed**: two function templates with the same name form an overload set (the oracle kept the last one) | `F28` |
 | B10 | A pack expansion in a call (`f(args...)`) is broken: the pack name is not a scope name → `undeclared identifier 'args'` | `F47` |
 | B11 | **H10.12 fixed**: the type mapping is propagated into the body of a function template, like a struct template | `C11`, `F31`, `F40` |
 | B13 | A non-type template parameter is never bound → `undeclared identifier 'N'` in the body; an implicit call cannot deduce it | `F16`, `F17` |
-| — | A template-id **parameter** type (`Box<T>`) is never resolved to the specialization — the port substitutes the base name and the argument list but does not resolve the specialization (the mismatch itself needs the phase-4 struct specialization) | phase 4 |
+| — | **H10.13 fixed**: a template-id **parameter** type (`Box<T>`) is resolved to the specialization after substitution | phase 4 |
 | — | The "may reach the end without returning a value" diagnostic of a specialization is reported at the call site with the mangled name | `F41` |
 | — | The `constexpr` flag and the `extern "C"` flag are inherited by the specialization | `F27` |
 | — | A template declaration without a body produces a specialization with *"(declaration only)"* | `F26` |
@@ -1942,9 +1945,9 @@ All of it lives in `selfhost/hir/hir_builder.ivy`.
 **Registration (pass 1b).** `build_structs` (line 2482) walks the AST
 structs. A struct/class whose `tpl_n > 0` is **not** built: it is put into
 the struct-template registry (`register_struct_template`, line 5914) and
-its methods are never registered as HIR functions. A **second** template
-with the same name **replaces** the first one (the oracle keys
-`structTemplates_` by name) — no diagnostic (bug D15). A struct template
+its methods are never registered as HIR functions. **Every** template
+declaration with the same name is kept (H10.13, T8): a duplicate is an
+overload set, not a replacement. A struct template
 never occupies the struct registry, so a template and a plain struct may
 share a name without a "redefinition of struct" diagnostic.
 
@@ -1995,17 +1998,15 @@ each (`Box<int32_t>::get` twice).
 **`this`.** The implicit `this` parameter of a specialization method has
 the type `<SpecName>&` (e.g. `Box<int32_t>& this`).
 
-**Base classes are lost (bug B4).** The clone never copies the base list,
-so the specialization has no bases: an inherited field is *not* found
-(`struct 'Derived<int32_t>' has no member 'x'`), the base's methods are not
-inherited and the base's constructor is not inherited either. Reproduced
-faithfully (T03, T28, T29).
+**Base classes are kept (bug B4, fixed at H10.13).** The substitution copies
+the base list into the specialization, so an inherited field is found, the
+base's methods are inherited and `Derived&` binds to `Base&`. The base's
+constructor is still not inherited. See `h10_T4_base_class`.
 
-**`sizeof` / `alignof` of a template-id = 4 (bug B3).** `sizeof(Box<int32>)`
-and `alignof(Box<int32>)` fold to **4**, because the *type* `Box<int32>` is
-never resolved to the specialization before the size is computed (the
-template name is not in the struct registry). `sizeof` of a *variable* of
-the specialization type does use the real layout. Reproduced (T07).
+**`sizeof` / `alignof` of a template-id (bug B3, fixed at H10.13).**
+`sizeof(Box<int32>)` and `alignof(Box<int32>)` resolve the specialization
+first and fold to its real layout; `sizeof(T)` inside a template does the
+same. See `h10_T3_sizeof_template_id`.
 
 **The type mapping IS active during a struct instantiation (bug B11, the
 other half).** Unlike a function template, the mapping of a struct
@@ -2194,10 +2195,10 @@ are byte-identical; `examples/test_variadic.ivy` differs because of the
 
 | # | Phase 1–3 said | Reality | Resolution |
 |---|---|---|---|
-| D1 | §14 rule 14: "the oracle **loses base classes** on specializations (reproduce that bug) — verify empirically whether base substitution happens at all and what the oracle prints" | Confirmed: the base list is dropped entirely; an inherited field is reported as missing (`struct 'Derived<int32_t>' has no member 'x'`), the base's methods and constructor are not inherited | Reproduced (T03, T28, T29) |
-| D2 | §14 rule 14: "`sizeof`/`alignof` of a template-id = **4** (oracle fallback)" | Confirmed: `sizeof(Box<int32>)` = 4, `alignof(Box<int32>)` = 4. `sizeof` of a *variable* of the specialization type uses the real layout | Reproduced (T07) |
+| D1 | §14 rule 14: "the oracle **loses base classes** on specializations (reproduce that bug) — verify empirically whether base substitution happens at all and what the oracle prints" | Confirmed: the base list is dropped entirely; an inherited field is reported as missing (`struct 'Derived<int32_t>' has no member 'x'`), the base's methods and constructor are not inherited | Reproduced (T03, T28, T29) — **fixed H10.13**: bases are substituted, laid out and exported |
+| D2 | §14 rule 14: "`sizeof`/`alignof` of a template-id = **4** (oracle fallback)" | Confirmed: `sizeof(Box<int32>)` = 4, `alignof(Box<int32>)` = 4. `sizeof` of a *variable* of the specialization type uses the real layout | Reproduced (T07) — **fixed H10.13**: the template-id is resolved first |
 | D3 | §1 rule 5 / §3.1: "the struct specialization name = the same mangling as functions" | Confirmed, including the quirk that a nested template-id argument is mangled by its base name only (`Box<Box>`) | Reproduced (T14) |
-| D4 | §8 D9: "the parameter type `Box<T>` is never resolved to the specialization ⇒ every call mismatches" (bug B9) | Confirmed for **function** templates: `instantiateTemplate` does not resolve the parameter types. A **struct** template *does* resolve them (its parameter types go through `resolveTemplateStructType`) | Reproduced (phase 3 for functions, phase 4 for structs) |
+| D4 | §8 D9: "the parameter type `Box<T>` is never resolved to the specialization ⇒ every call mismatches" (bug B9) | Confirmed for **function** templates: `instantiateTemplate` does not resolve the parameter types. A **struct** template *does* resolve them (its parameter types go through `resolveTemplateStructType`) | Reproduced (phase 3 for functions, phase 4 for structs) — **fixed H10.13**: substituted return/param/pack types are resolved |
 | D5 | §10.2 B11: "the `currentTypeMapping_` is set during *struct* instantiation but not during *function* instantiation" | Confirmed **and** extended: the mapping of a struct template is also applied to the explicit template arguments of a template-id **call** made inside one of its methods (`id<T>(x)` → `id<int32_t>`) | Reproduced (T05) |
 | D6 | §8 D15: "redefinition of a specialization → *no diagnostic*" | Confirmed for struct templates (the second template replaces the first). The port's duplicate-struct check now **skips** the struct templates, so a template and a plain struct may share a name | Reproduced (T11, T25, T31, T32) |
 | D7 | §8 D12: "a template-id on a plain struct in a type position → the arguments are ignored" | Confirmed: `Box<int32>` on a plain `struct Box` keeps the type `Box` | Reproduced (phase 2/3) |
@@ -2374,7 +2375,7 @@ Every file is self-contained (no `#include`, no path dependency) and covers
 | file | rule it covers |
 |---|---|
 | `02_explicit_overrides_deduction.ivy` | an explicit argument and a deduced call name the **same** specialization `identity<int32_t>` (H10.12, T6) |
-| `02_too_many_args.ivy` | extra explicit arguments are silently accepted and appear in the mangled name (bug B7) |
+| `02_too_many_args.ivy` | extra explicit arguments are rejected with `too many template arguments for 'id'` (H10.13, T7) |
 | `02_too_few_args.ivy` | too few explicit arguments: the unmapped parameter keeps its literal name `U` (§8 D14) |
 | `02_unsigned_arg.ivy` | the `" unsigned"` suffix of the argument mangling (§3.1) |
 | `02_no_arguments.ivy` | a template without function parameters, instantiated with an explicit argument |
@@ -2404,7 +2405,7 @@ the diagnostic, not the argument syntax.
 | `04_prototype_only.ivy` | a template declared without a body ⇒ the specialization is dumped as `(declaration only)` |
 | `04_prototype_never_instantiated.ivy` | a template declaration that is never used produces no entry |
 | `04_constexpr_template.ivy` | a `constexpr` template: the call is folded |
-| `04_same_name_templates.ivy` | two templates with the same name: the second replaces the first (bug B8) |
+| `04_same_name_templates.ivy` | two function templates with the same name form an overload set; the one-argument call selects the one-parameter template (H10.13, T8) |
 | `04_order_and_dedup.ivy` | the dump order and the de-duplication (§1 rule 4) |
 | `04_two_specializations.ivy` | two specializations of one template; the repeated one is emitted once |
 | `04_if_constexpr.ivy` | `if constexpr`: the discarded branch is not checked (`sizeof(T)` folds to 4) |
@@ -2421,11 +2422,11 @@ the diagnostic, not the argument syntax.
 | `05_struct_field.ivy` | a field of the template parameter type |
 | `05_struct_methods.ivy` | the methods of a specialization: `Box<int32_t>::get`, `this` is `Box<int32_t>&` (§1 rule 5) |
 | `05_class_ctor.ivy` | a class template with a constructor ⇒ `Holder<int32_t>::Holder` |
-| `05_base_dropped.ivy` | the base list of a specialization is dropped (bug B4) |
-| `05_base_field_lost.ivy` | an inherited field is not found (bug B4) |
-| `05_base_ctor_not_inherited.ivy` | the base constructor is not inherited (bug B4) |
+| `05_base_dropped.ivy` | the base list of a specialization is substituted and kept (H10.13, T4) |
+| `05_base_field_lost.ivy` | an inherited field is found (H10.13, T4) |
+| `05_base_ctor_not_inherited.ivy` | the base list is kept, but the base constructor is still not inherited (T4) |
 | `05_explicit_too_few_args.ivy` | too few explicit arguments on a struct template |
-| `05_explicit_too_many_args.ivy` | too many explicit arguments on a struct template |
+| `05_explicit_too_many_args.ivy` | too many explicit arguments on a struct template → `too many template arguments for 'Box'` (H10.13, T7) |
 | `05_nested_specialization.ivy` | `Box<Box<int32> >` is mangled `Box<Box>` (the argument is mangled by its base name only) |
 | `05_template_redefinition.ivy` | the redefinition of a struct template: **no** diagnostic (§8 D15) |
 | `05_template_and_plain_struct.ivy` | a struct template and a plain struct with the same name may coexist |
@@ -2433,7 +2434,7 @@ the diagnostic, not the argument syntax.
 | `05_method_call.ivy` | a method call on a specialization |
 | `05_local_type_param.ivy` | a local `T` **is** substituted inside a struct-template method (bug B11, the other half) |
 | `05_struct_calls_template.ivy` | a method calls `id<T>(...)` ⇒ `id<int32_t>` (bug B11) |
-| `05_sizeof_template_id.ivy` | `sizeof`/`alignof` of a template-id = 4 (bug B3) |
+| `05_sizeof_template_id.ivy` | `sizeof`/`alignof` of a template-id resolve the specialization (H10.13, T3) |
 | `05_field_in_struct.ivy` | a template-id as a field of a plain struct (pass 1b) |
 | `05_param_type.ivy` | a template-id as a parameter type |
 | `05_param_type_order.ivy` | a specialization created while a signature is built precedes that function |

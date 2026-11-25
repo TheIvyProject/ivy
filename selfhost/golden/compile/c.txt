@@ -983,8 +983,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/02_too_few_args.ivy 116 1
 selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
-@@ selfhost/corpus/hir/template/02_too_many_args.ivy 31 0
-ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 106 1
+selfhost/corpus/hir/template/02_too_many_args.ivy:4:30: error: too many template arguments for 'identity'
 @@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/03_empty_pack_deduced.ivy 31 0
@@ -1017,8 +1017,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/04_recursive.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 146 1
-selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
+@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/04_template_calls_function.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/04_template_in_method.ivy 31 0
@@ -1031,8 +1031,8 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_base_dropped.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 109 1
-selfhost/corpus/hir/template/05_base_field_lost.ivy:4:77: error: struct 'Derived<int32_t>' has no member 'x'
+@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 31 0
+ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_class_ctor.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_dedup.ivy 31 0
@@ -1041,8 +1041,9 @@ ivy: '<OUT>\out.obj' generated
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_explicit_too_few_args.ivy 31 0
 ivy: '<OUT>\out.obj' generated
-@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 31 0
-ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 257 1
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: too many template arguments for 'Box'
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
 @@ selfhost/corpus/hir/template/05_field_in_struct.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/05_local_type_param.ivy 31 0
@@ -2509,4 +2510,14 @@ ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy 31 0
 ivy: '<OUT>\out.obj' generated
 @@ selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T4_base_class.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy 110 1
+selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy:4:24: error: too many template arguments for 'id'
+@@ selfhost/corpus/hir/template/h10_T8_template_overload.ivy 31 0
+ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 31 0
 ivy: '<OUT>\out.obj' generated

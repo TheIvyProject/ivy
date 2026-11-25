@@ -1,0 +1,9 @@
+// H10.13 (T9): a template-id parameter `Box<T>` is resolved to the
+// specialization `Box<int32_t>` when the function template is instantiated.
+template <typename T> struct Box { T value; };
+template <typename T> T unwrap(Box<T> b) { return b.value; }
+void f() {
+    Box<int32> b;
+    b.value = 7;
+    int32 r = unwrap<int32>(b);
+}

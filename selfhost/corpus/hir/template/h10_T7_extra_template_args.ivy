@@ -1,0 +1,4 @@
+// H10.13 (T7): an explicit template-id cannot carry more arguments than the
+// template has parameters.
+template <typename T> T id(T x) { return x; }
+void f() { int32 a = id<int32, int64>(1); }

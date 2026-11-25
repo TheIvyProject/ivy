@@ -1,0 +1,11 @@
+// H10.13 (T8): two function templates with the same name form an overload
+// set; the explicit argument list and the call arity select the right one.
+template <typename T> T first(T x) { return x; }
+template <typename T> T first(T x, T y) { return y; }
+void f() {
+    int32 a = first<int32>(1);
+    int64 b = first<int64>(2, 3);
+    int64 x = 6;
+    int64 y = 7;
+    int64 c = first(x, y);
+}

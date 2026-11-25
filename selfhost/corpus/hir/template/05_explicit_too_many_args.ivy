@@ -1,4 +1,4 @@
-// Too many explicit arguments on a struct template: the extra arguments
-// are silently accepted.
+// Too many explicit arguments on a struct template: H10.13 (T7) rejects the
+// extra arguments instead of silently accepting them.
 template <typename T> struct Box { T value; };
 void f() { Box<int32, int64> b; }

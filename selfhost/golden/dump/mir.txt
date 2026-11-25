@@ -13061,20 +13061,8 @@ function zero<int32_t>
 
 @@ selfhost/corpus/hir/template/02_too_few_args.ivy 116 1
 selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
-@@ selfhost/corpus/hir/template/02_too_many_args.ivy 190 0
-function f
-  return void()
-  block 0
-    alloca int32_t a
-      call : int32_t
-        int 1
-
-function identity<int32_t,int32_t>
-  return int32_t(int32_t x)
-  block 0
-    ret
-      ident x
-
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 106 1
+selfhost/corpus/hir/template/02_too_many_args.ivy:4:30: error: too many template arguments for 'identity'
 @@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 226 0
 function f
   return void()
@@ -13327,8 +13315,20 @@ function rec<int32_t>
       call : int32_t
         ident x
 
-@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 146 1
-selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
+@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 175 0
+function f
+  return void()
+  block 0
+    alloca int32_t r
+      call : int32_t
+        int 1
+
+function a<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      ident x
+
 @@ selfhost/corpus/hir/template/04_template_calls_function.ivy 285 0
 function helper
   return int32_t(int32_t x)
@@ -13424,8 +13424,19 @@ function f
   block 0
     alloca Derived<int32_t> d
 
-@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 109 1
-selfhost/corpus/hir/template/05_base_field_lost.ivy:4:77: error: struct 'Derived<int32_t>' has no member 'x'
+@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 198 0
+function f
+  return void()
+  block 0
+    alloca Derived<int32_t> d
+
+function Derived<int32_t>::get
+  return int32_t(Derived<int32_t>& this)
+  block 0
+    ret
+      member .x : int32_t
+        this
+
 @@ selfhost/corpus/hir/template/05_class_ctor.ivy 226 0
 function f
   return void()
@@ -13467,12 +13478,9 @@ function f
   block 0
     alloca Box<int32_t> b
 
-@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 72 0
-function f
-  return void()
-  block 0
-    alloca Box<int32_t,int64_t> b
-
+@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 257 1
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: too many template arguments for 'Box'
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
 @@ selfhost/corpus/hir/template/05_field_in_struct.ivy 184 0
 function Box<int32_t>::get
   return int32_t(Box<int32_t>& this)
@@ -13616,7 +13624,7 @@ function f
     ret
       ident b
 
-@@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 104 0
+@@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 230 0
 function f
   return void()
   block 0
@@ -13624,6 +13632,13 @@ function f
       int 4
     alloca int32_t a
       int 4
+
+function Box<int32_t>::get
+  return int32_t(Box<int32_t>& this)
+  block 0
+    ret
+      member .value : int32_t
+        this
 
 @@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 90 0
 function f
@@ -20422,4 +20437,116 @@ function id<int32_t>
   block 0
     ret
       ident x
+
+@@ selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy 258 0
+function f
+  return void()
+  block 0
+    alloca int32_t s1
+      int 8
+    alloca int32_t s2
+      int 8
+    alloca int32_t s3
+      call : int32_t
+    alloca int32_t s4
+      int 16
+
+function width<int64_t>
+  return int32_t()
+  block 0
+    ret
+      int 8
+
+@@ selfhost/corpus/hir/template/h10_T4_base_class.ivy 672 0
+function Base::base_value
+  return int32_t(Base& this)
+  block 0
+    ret
+      member .x : int32_t
+        this
+
+function f
+  return void()
+  block 0
+    alloca Derived<int32_t> d
+    store
+      member .x : int32_t
+        ident d
+      int 5
+    store
+      member .value : int32_t
+        ident d
+      int 7
+    alloca int32_t r
+      call : int32_t
+        ident d
+    alloca Base& b
+      ident d
+    alloca int32_t q
+      call : int32_t
+        ident b
+
+function Derived<int32_t>::total
+  return int32_t(Derived<int32_t>& this)
+  block 0
+    ret
+      binary '+' : int32_t
+        member .x : int32_t
+          this
+        member .value : int32_t
+          this
+
+@@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy 110 1
+selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy:4:24: error: too many template arguments for 'id'
+@@ selfhost/corpus/hir/template/h10_T8_template_overload.ivy 485 0
+function f
+  return void()
+  block 0
+    alloca int32_t a
+      call : int32_t
+        int 1
+    alloca int64_t b
+      call : int64_t
+        int 2
+        int 3
+    alloca int64_t x
+      int 6
+    alloca int64_t y
+      int 7
+    alloca int64_t c
+      call : int64_t
+        ident x
+        ident y
+
+function first<int32_t>
+  return int32_t(int32_t x)
+  block 0
+    ret
+      ident x
+
+function first<int64_t>
+  return int64_t(int64_t x, int64_t y)
+  block 0
+    ret
+      ident y
+
+@@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 313 0
+function f
+  return void()
+  block 0
+    alloca Box<int32_t> b
+    store
+      member .value : int32_t
+        ident b
+      int 7
+    alloca int32_t r
+      call : int32_t
+        ident b
+
+function unwrap<int32_t>
+  return int32_t(Box<int32_t> b)
+  block 0
+    ret
+      member .value : int32_t
+        ident b
 

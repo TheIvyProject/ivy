@@ -17571,26 +17571,8 @@ ret i32 0
 
 @@ selfhost/corpus/hir/template/02_too_few_args.ivy 116 1
 selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
-@@ selfhost/corpus/hir/template/02_too_many_args.ivy 362 0
-; LLVM IR emitted by ivy
-define void @"?f@@YXX@Z"() {
-%a.0 = alloca i32
-br label %bb0
-bb0:
-%tmp.0 = call i32 @"?identity_int32_t_int32_t_@@YHH@Z"(i32 1)
-store i32 %tmp.0, ptr %a.0
-ret void
-}
-
-define i32 @"?identity_int32_t_int32_t_@@YHH@Z"(i32 %arg0) {
-%x.0 = alloca i32
-store i32 %arg0, ptr %x.0
-br label %bb0
-bb0:
-%tmp.0 = load i32, ptr %x.0
-ret i32 %tmp.0
-}
-
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 106 1
+selfhost/corpus/hir/template/02_too_many_args.ivy:4:30: error: too many template arguments for 'identity'
 @@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 354 0
 ; LLVM IR emitted by ivy
 define void @"?f@@YXX@Z"() {
@@ -17939,8 +17921,26 @@ bb0:
 ret i32 %tmp.1
 }
 
-@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 146 1
-selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
+@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 332 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%r.0 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?a_int32_t_@@YHH@Z"(i32 1)
+store i32 %tmp.0, ptr %r.0
+ret void
+}
+
+define i32 @"?a_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+
 @@ selfhost/corpus/hir/template/04_template_calls_function.ivy 551 0
 ; LLVM IR emitted by ivy
 define i32 @"?helper@@YHH@Z"(i32 %arg0) {
@@ -18053,10 +18053,10 @@ store %struct.Box_int32_t_ zeroinitializer, ptr %b.0
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_base_ctor_not_inherited.ivy 493 0
+@@ selfhost/corpus/hir/template/05_base_ctor_not_inherited.ivy 498 0
 ; LLVM IR emitted by ivy
 %struct.Base = type { i32 }
-%struct.Derived_int32_t_ = type { i32 }
+%struct.Derived_int32_t_ = type { i32, i32 }
 
 define void @"?0Base@@AEXAAV@Z"(ptr %arg0) {
 %this.0 = alloca ptr
@@ -18077,9 +18077,9 @@ store %struct.Derived_int32_t_ zeroinitializer, ptr %d.0
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_base_dropped.ivy 222 0
+@@ selfhost/corpus/hir/template/05_base_dropped.ivy 227 0
 ; LLVM IR emitted by ivy
-%struct.Derived_int32_t_ = type { i32 }
+%struct.Derived_int32_t_ = type { i32, i32 }
 
 define void @"?f@@YXX@Z"() {
 %d.0 = alloca %struct.Derived_int32_t_
@@ -18089,8 +18089,29 @@ store %struct.Derived_int32_t_ zeroinitializer, ptr %d.0
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 109 1
-selfhost/corpus/hir/template/05_base_field_lost.ivy:4:77: error: struct 'Derived<int32_t>' has no member 'x'
+@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 507 0
+; LLVM IR emitted by ivy
+%struct.Derived_int32_t_ = type { i32, i32 }
+
+define void @"?f@@YXX@Z"() {
+%d.0 = alloca %struct.Derived_int32_t_
+br label %bb0
+bb0:
+store %struct.Derived_int32_t_ zeroinitializer, ptr %d.0
+ret void
+}
+
+define i32 @"?get@Derived_int32_t_@@YHAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Derived_int32_t_, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %tmp.1
+ret i32 %tmp.2
+}
+
 @@ selfhost/corpus/hir/template/05_class_ctor.ivy 573 0
 ; LLVM IR emitted by ivy
 %struct.Holder_int32_t_ = type { i32 }
@@ -18163,18 +18184,9 @@ store %struct.Box_int32_t_ zeroinitializer, ptr %b.0
 ret void
 }
 
-@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 234 0
-; LLVM IR emitted by ivy
-%struct.Box_int32_t_int64_t_ = type { i32 }
-
-define void @"?f@@YXX@Z"() {
-%b.0 = alloca %struct.Box_int32_t_int64_t_
-br label %bb0
-bb0:
-store %struct.Box_int32_t_int64_t_ zeroinitializer, ptr %b.0
-ret void
-}
-
+@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 257 1
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: too many template arguments for 'Box'
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
 @@ selfhost/corpus/hir/template/05_field_in_struct.ivy 517 0
 ; LLVM IR emitted by ivy
 %struct.Box_int32_t_ = type { i32 }
@@ -18434,8 +18446,10 @@ store %struct.Box_int32_t_ zeroinitializer, ptr %b.0
 ret %struct.Box_int32_t_ %tmp.0
 }
 
-@@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 231 0
+@@ selfhost/corpus/hir/template/05_sizeof_template_id.ivy 540 0
 ; LLVM IR emitted by ivy
+%struct.Box_int32_t_ = type { i32 }
+
 define void @"?f@@YXX@Z"() {
 %s.0 = alloca i32
 %a.1 = alloca i32
@@ -18446,6 +18460,17 @@ store i32 %tmp.0, ptr %s.0
 %tmp.1 = trunc i64 4 to i32
 store i32 %tmp.1, ptr %a.1
 ret void
+}
+
+define i32 @"?get@Box_int32_t_@@YHAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Box_int32_t_, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %tmp.1
+ret i32 %tmp.2
 }
 
 @@ selfhost/corpus/hir/template/05_specid_call_without_constructor.ivy 206 0
@@ -27090,5 +27115,161 @@ br label %bb0
 bb0:
 %tmp.0 = load i32, ptr %x.0
 ret i32 %tmp.0
+}
+
+@@ selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy 510 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%s1.0 = alloca i32
+%s2.1 = alloca i32
+%s3.2 = alloca i32
+%s4.3 = alloca i32
+br label %bb0
+bb0:
+%tmp.0 = trunc i64 8 to i32
+store i32 %tmp.0, ptr %s1.0
+%tmp.1 = trunc i64 8 to i32
+store i32 %tmp.1, ptr %s2.1
+%tmp.2 = call i32 @"?width_int64_t_@@YHX@Z"()
+store i32 %tmp.2, ptr %s3.2
+%tmp.3 = trunc i64 16 to i32
+store i32 %tmp.3, ptr %s4.3
+ret void
+}
+
+define i32 @"?width_int64_t_@@YHX@Z"() {
+br label %bb0
+bb0:
+%tmp.0 = trunc i64 8 to i32
+ret i32 %tmp.0
+}
+
+@@ selfhost/corpus/hir/template/h10_T4_base_class.ivy 1443 0
+; LLVM IR emitted by ivy
+%struct.Base = type { i32 }
+%struct.Derived_int32_t_ = type { i32, i32 }
+
+define i32 @"?base_value@Base@@YHAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Base, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %tmp.1
+ret i32 %tmp.2
+}
+
+define void @"?f@@YXX@Z"() {
+%d.0 = alloca %struct.Derived_int32_t_
+%r.1 = alloca i32
+%b.2 = alloca ptr
+%q.3 = alloca i32
+br label %bb0
+bb0:
+store %struct.Derived_int32_t_ zeroinitializer, ptr %d.0
+%tmp.0 = getelementptr %struct.Derived_int32_t_, ptr %d.0, i32 0, i32 0
+store i32 5, ptr %tmp.0
+%tmp.1 = getelementptr %struct.Derived_int32_t_, ptr %d.0, i32 0, i32 1
+store i32 7, ptr %tmp.1
+%tmp.2 = call i32 @"?total@Derived_int32_t_@@YHAAV@Z"(ptr %d.0)
+store i32 %tmp.2, ptr %r.1
+store ptr %d.0, ptr %b.2
+%tmp.3 = load ptr, ptr %b.2
+%tmp.4 = call i32 @"?base_value@Base@@YHAAV@Z"(ptr %tmp.3)
+store i32 %tmp.4, ptr %q.3
+ret void
+}
+
+define i32 @"?total@Derived_int32_t_@@YHAAV@Z"(ptr %arg0) {
+%this.0 = alloca ptr
+store ptr %arg0, ptr %this.0
+br label %bb0
+bb0:
+%tmp.0 = load ptr, ptr %this.0
+%tmp.1 = getelementptr %struct.Derived_int32_t_, ptr %tmp.0, i32 0, i32 0
+%tmp.2 = load i32, ptr %tmp.1
+%tmp.3 = load ptr, ptr %this.0
+%tmp.4 = getelementptr %struct.Derived_int32_t_, ptr %tmp.3, i32 0, i32 1
+%tmp.5 = load i32, ptr %tmp.4
+%tmp.6 = add i32 %tmp.2, %tmp.5
+ret i32 %tmp.6
+}
+
+@@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy 110 1
+selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy:4:24: error: too many template arguments for 'id'
+@@ selfhost/corpus/hir/template/h10_T8_template_overload.ivy 1046 0
+; LLVM IR emitted by ivy
+define void @"?f@@YXX@Z"() {
+%a.0 = alloca i32
+%b.1 = alloca i64
+%x.2 = alloca i64
+%y.3 = alloca i64
+%c.4 = alloca i64
+br label %bb0
+bb0:
+%tmp.0 = call i32 @"?first_int32_t_@@YHH@Z"(i32 1)
+store i32 %tmp.0, ptr %a.0
+%tmp.1 = sext i32 2 to i64
+%tmp.2 = sext i32 3 to i64
+%tmp.3 = call i64 @"?first_int64_t_@@Y_J_J_J@Z"(i64 %tmp.1, i64 %tmp.2)
+store i64 %tmp.3, ptr %b.1
+%tmp.4 = sext i32 6 to i64
+store i64 %tmp.4, ptr %x.2
+%tmp.5 = sext i32 7 to i64
+store i64 %tmp.5, ptr %y.3
+%tmp.6 = load i64, ptr %x.2
+%tmp.7 = load i64, ptr %y.3
+%tmp.8 = call i64 @"?first_int64_t_@@Y_J_J_J@Z"(i64 %tmp.6, i64 %tmp.7)
+store i64 %tmp.8, ptr %c.4
+ret void
+}
+
+define i32 @"?first_int32_t_@@YHH@Z"(i32 %arg0) {
+%x.0 = alloca i32
+store i32 %arg0, ptr %x.0
+br label %bb0
+bb0:
+%tmp.0 = load i32, ptr %x.0
+ret i32 %tmp.0
+}
+
+define i64 @"?first_int64_t_@@Y_J_J_J@Z"(i64 %arg0, i64 %arg1) {
+%x.0 = alloca i64
+store i64 %arg0, ptr %x.0
+%y.1 = alloca i64
+store i64 %arg1, ptr %y.1
+br label %bb0
+bb0:
+%tmp.0 = load i64, ptr %y.1
+ret i64 %tmp.0
+}
+
+@@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 747 0
+; LLVM IR emitted by ivy
+%struct.Box_int32_t_ = type { i32 }
+
+define void @"?f@@YXX@Z"() {
+%b.0 = alloca %struct.Box_int32_t_
+%r.1 = alloca i32
+br label %bb0
+bb0:
+store %struct.Box_int32_t_ zeroinitializer, ptr %b.0
+%tmp.0 = getelementptr %struct.Box_int32_t_, ptr %b.0, i32 0, i32 0
+store i32 7, ptr %tmp.0
+%tmp.1 = load %struct.Box_int32_t_, ptr %b.0
+%tmp.2 = call i32 @"?unwrap_int32_t_@@YHH@Z"(%struct.Box_int32_t_ %tmp.1)
+store i32 %tmp.2, ptr %r.1
+ret void
+}
+
+define i32 @"?unwrap_int32_t_@@YHH@Z"(%struct.Box_int32_t_ %arg0) {
+%b.0 = alloca %struct.Box_int32_t_
+store %struct.Box_int32_t_ %arg0, ptr %b.0
+br label %bb0
+bb0:
+%tmp.0 = getelementptr %struct.Box_int32_t_, ptr %b.0, i32 0, i32 0
+%tmp.1 = load i32, ptr %tmp.0
+ret i32 %tmp.1
 }
 

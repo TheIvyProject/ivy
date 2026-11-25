@@ -705,6 +705,65 @@
   nguyên vì `corpus.txt` không cho rename). `01_deduce_pointer`,
   `01_const_param`, `e_argument_type_mismatch` (p15) vẫn giữ hành vi cũ.
 
+### H10.13 - Template layout/args pass 2 (T3, T4, T7, T8, T9)
+
+- **ID**: T3, T4, T7, T8, T9.
+- **Code** (`selfhost/hir/hir_builder.ivy`):
+  - **T3**: nhánh `sizeof`/`alignof` (`build_expr` kind 18/19) gọi
+    `resolve_template_struct_type` trên type sau `resolve_alias`, nên
+    `sizeof(Pair<int64>)` là 16 thay vì fallback 4. `sizeof(T)` trong
+    function template cũng thấy type cụ thể vì mapping đã active (H10.12).
+  - **T4**: `instantiate_struct_template` thay base name bằng mapping rồi
+    `push_base` vào base table của parser; `rec.bstart/nbases` trỏ vào đó.
+    `layout_spec` xếp base subobject trước field (size/align, poly lan từ
+    base), và phần export sang `u.structs`/`u.bnames` cũng chép base, nên
+    `find_field`, `derives_from` và emitter thấy `Derived<int32_t>` như
+    một struct kế thừa bình thường.
+  - **T7**: `instantiate_template`/`instantiate_struct_template` từ chối
+    `n > tpl_n` khi template không variadic bằng
+    `too many template arguments for 'X'`; nhánh call báo lỗi một lần rồi
+    trả dummy type, không kèm `failed to instantiate template`.
+  - **T8**: `register_template` giữ **mọi** khai báo thay vì last-wins.
+    `find_template_explicit_call` chọn theo số template argument tường
+    minh rồi tới arity của call; `find_template_call` chọn theo arity cho
+    implicit call. Nhờ vậy hai function template cùng tên là overload set.
+  - **T9**: return type, từng parameter và từng phần tử pack sau
+    `substitute_type` đều qua `resolve_template_struct_type`, nên
+    `Box<T>` thành `Box<int32_t>` trong signature của specialization.
+- **Fixture**:
+  - Mới (`selfhost/corpus/hir/template/`):
+    - `h10_T3_sizeof_template_id.ivy` - `sizeof`/`alignof` của
+      `Pair<int32>`/`Pair<int64>` và `sizeof(T)` trong template.
+    - `h10_T4_base_class.ivy` - `Derived<T> : Base`: field/method kế thừa,
+      gọi `Base::base_value`, bind `Derived<int32_t>` vào `Base&`.
+    - `h10_T7_extra_template_args.ivy` - `id<int32, int64>(1)` báo
+      `too many template arguments for 'id'`.
+    - `h10_T8_template_overload.ivy` - hai `first` template, call 1 và 2
+      argument chọn đúng cái.
+    - `h10_T9_param_template_id.ivy` - `unwrap(Box<T>)` resolve
+      `Box<int32_t>` và gọi được.
+  - Cập nhật nội dung (giữ tên cũ):
+    - `05_sizeof_template_id.ivy` - nay resolve specialization (4 vẫn đúng
+      vì `Box<int32>` 4 byte) và specialization được instantiate.
+    - `05_base_dropped.ivy`, `05_base_field_lost.ivy`,
+      `05_base_ctor_not_inherited.ivy` - base list được giữ; field kế thừa
+      tìm thấy, layout specialization có thêm base subobject.
+    - `02_too_many_args.ivy`, `05_explicit_too_many_args.ivy` - nay là lỗi
+      `too many template arguments`.
+    - `04_same_name_templates.ivy` - hai template cùng tên là overload set,
+      call một argument chọn template một tham số và **thành công**.
+- **Golden**: 5 fixture mới × 10 mode; corpus 1103 → **1108**, link
+  289 (không đổi). 12 fixture có provenance `expected:H10.13` (5 mới + 7
+  cập nhật).
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `500FDEE496E88C70B85F9900CE5D72167EB5EC14A5AAA45E90A9D11C071D445D`
+  (27215360 B), golden 13087 checks / 0 failures (1108 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`, 3 executable).
+- **Ghi chú**: T4 chỉ áp dụng cho base **class** của struct template;
+  constructor của base vẫn không được kế thừa (giữ hành vi cũ, xem
+  `05_base_ctor_not_inherited`). T8 chỉ gộp **function** template; struct
+  template trùng tên vẫn last-wins (`05_template_redefinition`).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -721,7 +780,7 @@
 | H10.10 | H20, H21, H23, H24, H25, C9, C12, C15 | HIR/dump + quirk còn lại | ✅ |
 | H10.11 | P1, P2, P3, P4, P7, P5 | Lexer/parser: `>>`, value arg, member template, specialization | ✅ |
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ✅ |
-| H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ☐ |
+| H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ✅ |
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ☐ |
 | H10.15 | M1, M2 | `.ivm` escape | ☐ |
 | H10.16 | I1 | Interpreter CFG self-edge | ☐ |

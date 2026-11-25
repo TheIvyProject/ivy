@@ -1,0 +1,10 @@
+// H10.13 (T3): `sizeof`/`alignof` resolve a template-id to its
+// specialization, and `sizeof(T)` inside a template sees the concrete type.
+template <typename T> struct Pair { T a; T b; };
+template <typename T> int32 width() { return sizeof(T); }
+void f() {
+    int32 s1 = sizeof(Pair<int32>);
+    int32 s2 = alignof(Pair<int64>);
+    int32 s3 = width<int64>();
+    int32 s4 = sizeof(Pair<int64>);
+}

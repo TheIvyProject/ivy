@@ -1,4 +1,5 @@
-// `sizeof`/`alignof` of a template-id type is the 4-byte fallback: the
-// type is not resolved to the specialization before the size is computed.
+// `sizeof`/`alignof` of a template-id type resolve the specialization before
+// the size is computed (H10.13, T3).  `Box<int32>` is 4 bytes, so this
+// fixture stays at 4; `h10_T3_sizeof_template_id` covers a larger type.
 template <typename T> struct Box { T value; T get() { return this.value; } };
 void f() { int32 s = sizeof(Box<int32>); int32 a = alignof(Box<int32>); }

@@ -6057,7 +6057,10 @@ export struct HirBuilder {
                     e.type = this.ty_dummy();
                     return this.push_expr(e);
                 }
-                long tplIdx = this.find_template(ca.sval);
+                // H10.13 (T8): pick the overload whose template-parameter
+                // list and function arity match the call.
+                long tplIdx = this.find_template_explicit_call(ca.sval, a.tpl_n,
+                                                               e.an);
                 if (tplIdx < 0) {
                     // The oracle builds the callee expression (which reports
                     // the undeclared identifier) and then reports that the
@@ -6076,7 +6079,19 @@ export struct HirBuilder {
                 // template the arguments are substituted with the active
                 // type mapping (the oracle's `currentTypeMapping_`), so
                 // `id<T>(x)` instantiates `id<int32_t>`.
+                // H10.13 (T7): report excess explicit arguments once, here,
+                // instead of letting `instantiate_template` fail as well.
                 long fi = -1;
+                AFunction chk;
+                unsafe {
+                    chk = this.pa.get_fn(tplIdx);
+                }
+                if (this.fn_variadic_index(chk) < 0 && a.tpl_n > chk.tpl_n) {
+                    this.err_too_many_tpl_args(a.line, a.col, ca.sval);
+                    e.sval = ca.sval;
+                    e.type = this.ty_dummy();
+                    return this.push_expr(e);
+                }
                 unsafe {
                     AType* targs = this.alloc_types(a.tpl_n);
                     long k = 0;
@@ -6134,8 +6149,10 @@ export struct HirBuilder {
                 return this.push_expr(e);
             }
             // An implicit instantiation: `func(args)` where `func` is a
-            // template and there is no ordinary overload.
-            long tplIdx = this.find_template(ca.sval);
+            // template and there is no ordinary overload.  H10.13 (T8): the
+            // candidates form an overload set, so choose one whose parameter
+            // list accepts this number of arguments.
+            long tplIdx = this.find_template_call(ca.sval, e.an);
             if (tplIdx >= 0) {
                 AFunction tpl = this.pa.get_fn(tplIdx);
                 long cap = tpl.tpl_n + e.an + 4;
@@ -6377,7 +6394,10 @@ export struct HirBuilder {
             } else {
                 t = a.type;
             }
-            t = this.resolve_alias(t);
+            // H10.13 (T3): a template-id must be resolved to its
+            // specialization first, otherwise type_size falls back to 4.
+            t = this.resolve_template_struct_type(this.resolve_alias(t),
+                                                  a.line, a.col);
             HExpr e = this.new_expr(1, a.line, a.col);
             e.ival = this.type_size(t);
             e.type = this.ty_int64();
@@ -6385,7 +6405,9 @@ export struct HirBuilder {
         }
         if (a.kind == 19) {
             // 8.3: alignof(type) folds to an integer literal at build time.
-            AType t = this.resolve_alias(a.type);
+            // H10.13 (T3): resolve the template-id to its specialization.
+            AType t = this.resolve_template_struct_type(this.resolve_alias(a.type),
+                                                        a.line, a.col);
             HExpr e = this.new_expr(1, a.line, a.col);
             e.ival = this.type_align(t);
             e.type = this.ty_int64();
@@ -8273,20 +8295,11 @@ export struct HirBuilder {
         return -1;
     }
 
-    // Register the template `astIdx`.  A second template with the same
-    // name replaces the first one (the oracle keys `templates_` by name).
+    // Register the template `astIdx`.  H10.13 (T8): function templates with
+    // the same name are an overload set, so every declaration is kept (the
+    // oracle replaced the previous entry).
     void register_template(long astIdx) {
         AFunction af = this.pa.get_fn(astIdx);
-        long i = 0;
-        while (i < this.tpl_n_) {
-            unsafe {
-                if (this.seq((char*)this.tpl_name_[i], af.name)) {
-                    this.tpl_ast_[i] = astIdx;
-                    return;
-                }
-            }
-            i = i + 1;
-        }
         if (this.tpl_n_ < this.tpl_cap_) {
             unsafe {
                 this.tpl_name_[this.tpl_n_] = (long)af.name;
@@ -8294,6 +8307,129 @@ export struct HirBuilder {
             }
             this.tpl_n_ = this.tpl_n_ + 1;
         }
+    }
+
+    // H10.13 (T8): the index of the variadic template parameter, or -1.
+    long fn_variadic_index(AFunction af) {
+        long i = 0;
+        while (i < af.tpl_n) {
+            ATemplateParam tp = this.get_tpl_param(af, i);
+            if (tp.is_variadic != 0) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    long struct_variadic_index(AStruct sd) {
+        long i = 0;
+        while (i < sd.tpl_n) {
+            ATemplateParam tp = this.get_struct_tpl_param(sd, i);
+            if (tp.is_variadic != 0) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // H10.13 (T7/T8): does the template accept exactly `n` explicit template
+    // arguments?  A pack accepts every count from its own position on.
+    bool template_explicit_ok(AFunction af, long n) {
+        long vi = this.fn_variadic_index(af);
+        if (vi >= 0) {
+            return n >= vi;
+        }
+        return n == af.tpl_n;
+    }
+
+    // H10.13 (T8): the function-parameter index of the variadic pack, or -1.
+    long fn_pack_param_index(AFunction af) {
+        long vi = this.fn_variadic_index(af);
+        if (vi < 0) {
+            return -1;
+        }
+        ATemplateParam vtp = this.get_tpl_param(af, vi);
+        long j = 0;
+        while (j < af.nparams) {
+            AParam p = this.get_param(af, j);
+            if (this.seq(p.type.base, vtp.name) || this.seq(p.name, vtp.name)) {
+                return j;
+            }
+            j = j + 1;
+        }
+        return -1;
+    }
+
+    // H10.13 (T8): can a call with `n` arguments select this template?
+    bool template_call_ok(AFunction af, long n) {
+        long pk = this.fn_pack_param_index(af);
+        if (pk >= 0) {
+            return n >= pk;
+        }
+        if (n > af.nparams) {
+            return false;
+        }
+        long j = n;
+        while (j < af.nparams) {
+            AParam p = this.get_param(af, j);
+            if (p.default_value < 0) {
+                return false;
+            }
+            j = j + 1;
+        }
+        return true;
+    }
+
+    // H10.13 (T8): explicit template arguments are the same for every
+    // overload, so the call's argument count picks between them too.
+    long find_template_explicit_call(const char* name, long tn, long nargs) {
+        long any = -1;
+        long accepted = -1;
+        long i = 0;
+        while (i < this.tpl_n_) {
+            unsafe {
+                if (this.seq((char*)this.tpl_name_[i], name)) {
+                    long astIdx = this.tpl_ast_[i];
+                    any = astIdx;
+                    AFunction af = this.pa.get_fn(astIdx);
+                    if (this.template_explicit_ok(af, tn)) {
+                        accepted = astIdx;
+                        if (this.template_call_ok(af, nargs)) {
+                            return astIdx;
+                        }
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        if (accepted >= 0) {
+            return accepted;
+        }
+        return any;
+    }
+
+    // The AST index of the first template named `name` whose parameter list
+    // accepts a call with `n` arguments, or the last template with that name
+    // when none does.
+    long find_template_call(const char* name, long n) {
+        long best = -1;
+        long i = 0;
+        while (i < this.tpl_n_) {
+            unsafe {
+                if (this.seq((char*)this.tpl_name_[i], name)) {
+                    long astIdx = this.tpl_ast_[i];
+                    best = astIdx;
+                    AFunction af = this.pa.get_fn(astIdx);
+                    if (this.template_call_ok(af, n)) {
+                        return astIdx;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return best;
     }
 
     // The HIR function index of the specialization `mangled`, or -1.
@@ -8656,13 +8792,6 @@ export struct HirBuilder {
                               long line, long col) {
         unsafe {
         AFunction tpl = this.pa.get_fn(tplAstIdx);
-        // The mangled name of the specialization.
-        const char* mangled = this.mangle_args(tpl.name, args, n);
-        // A specialization that was already built is reused.
-        long cached = this.find_instantiated(mangled);
-        if (cached >= 0) {
-            return cached;
-        }
         // The variadic pack, if any.
         long variadicIdx = -1;
         long i = 0;
@@ -8673,6 +8802,19 @@ export struct HirBuilder {
                 break;
             }
             i = i + 1;
+        }
+        // H10.13 (T7): excess explicit template arguments are an error
+        // (unless they are absorbed by a pack).
+        if (variadicIdx < 0 && n > tpl.tpl_n) {
+            this.err_too_many_tpl_args(line, col, tpl.name);
+            return -1;
+        }
+        // The mangled name of the specialization.
+        const char* mangled = this.mangle_args(tpl.name, args, n);
+        // A specialization that was already built is reused.
+        long cached = this.find_instantiated(mangled);
+        if (cached >= 0) {
+            return cached;
         }
         // The mapping: the non-variadic parameters consume the arguments
         // one to one, a variadic pack takes all the remaining ones.  A
@@ -8726,12 +8868,16 @@ export struct HirBuilder {
             packTypes = this.alloc_types(packN);
             long pk = 0;
             while (pk < packN && packTypes != (AType*)0) {
-                packTypes[pk] = args[variadicIdx + pk];
+                packTypes[pk] = this.resolve_template_struct_type(
+                    args[variadicIdx + pk], line, col);
                 pk = pk + 1;
             }
         }
-        // The substituted signature.
-        AType ret = this.substitute_type(tpl.ret, mbase);
+        // The substituted signature.  H10.13 (T9): a substituted template-id
+        // parameter (e.g. `Box<T>` -> `Box<int32_t>`) must be resolved to its
+        // specialization, otherwise every call mismatches the argument.
+        AType ret = this.resolve_template_struct_type(
+            this.substitute_type(tpl.ret, mbase), line, col);
         long idx = this.add_function(mangled, ret, tpl.is_extern_c, tpl.is_constexpr,
                                      tpl.is_consteval);
         long j = 0;
@@ -8764,7 +8910,9 @@ export struct HirBuilder {
                     k = k + 1;
                 }
             } else {
-                AType pt = this.substitute_type(p.type, mbase);
+                // H10.13 (T9): resolve a template-id parameter type.
+                AType pt = this.resolve_template_struct_type(
+                    this.substitute_type(p.type, mbase), p.line, p.col);
                 this.push_param(pt, p.name, p.line, p.col);
                 pushed = pushed + 1;
             }
@@ -8912,9 +9060,9 @@ export struct HirBuilder {
     }
 
     // The layout of a struct specialization: the fields are already
-    // substituted, the base classes are lost (the oracle never copies
-    // them into the clone).  The methods are not copied into the record
-    // either, so the polymorphism is taken from the template.
+    // substituted and H10.13 (T4) keeps the base classes.  The methods are
+    // not copied into the record either, so the polymorphism is taken from
+    // the template.
     void layout_spec(long gidx, AStruct tpl) {
         AStruct sd = this.get_struct(gidx);
         long offset = 0;
@@ -8931,11 +9079,40 @@ export struct HirBuilder {
             }
             j = j + 1;
         }
+        // H10.13 (T4): a polymorphic base makes the specialization
+        // polymorphic too (mirrors layout_struct).
+        long bk = 0;
+        while (bk < sd.nbases) {
+            this.load_base(sd, bk);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                if (this.struct_poly(bi) != 0) {
+                    poly = 1;
+                }
+            }
+            bk = bk + 1;
+        }
         if (poly != 0) {
             // The vptr of a polymorphic struct (buildStruct in
             // hir_builder.cpp).
             offset = 8;
             align = 8;
+        }
+        // H10.13 (T4): the base subobjects come before the own fields.
+        bk = 0;
+        while (bk < sd.nbases) {
+            this.load_base(sd, bk);
+            long bi = this.find_struct(this.base_name_);
+            if (bi >= 0) {
+                long bsize = this.struct_size(bi);
+                long balign = this.struct_align(bi);
+                offset = this.align_up(offset, balign);
+                offset = offset + bsize;
+                if (balign > align) {
+                    align = balign;
+                }
+            }
+            bk = bk + 1;
         }
         long i = 0;
         while (i < sd.nfields) {
@@ -9107,12 +9284,11 @@ export struct HirBuilder {
     }
 
     // instantiateStructTemplate in hir_builder.cpp: build the
-    // specialization of a struct template.  The field types are
-    // substituted, the methods are renamed to "<Spec>::<method>" and their
-    // bodies are built with the type mapping active.  The base classes are
-    // lost (the oracle never copies them into the clone).  Returns the
-    // global struct index of the specialization, or -1 when a constraint is
-    // not satisfied.
+    // specialization of a struct template.  The base classes and field types
+    // are substituted, the methods are renamed to "<Spec>::<method>" and their
+    // bodies are built with the type mapping active.  Returns the global
+    // struct index of the specialization, or -1 when a constraint is not
+    // satisfied.
     long instantiate_struct_template(long tplAstIdx, const char* tplName,
                                      AType* args, long n, long line, long col) {
         unsafe {
@@ -9122,6 +9298,11 @@ export struct HirBuilder {
             return cached;
         }
         AStruct tpl = this.get_struct(tplAstIdx);
+        // H10.13 (T7): excess explicit template arguments are an error.
+        if (this.struct_variadic_index(tpl) < 0 && n > tpl.tpl_n) {
+            this.err_too_many_tpl_args(line, col, tplName);
+            return -1;
+        }
         long mbase = this.map_n_;
         // The type mapping: the template parameters consume the arguments
         // one to one; a non-type parameter is never bound.
@@ -9150,8 +9331,24 @@ export struct HirBuilder {
         // the method bodies are built (the oracle's `currentTypeMapping_`).
         long savedG = this.gmap_base_;
         this.gmap_base_ = mbase;
-        // The substituted fields.  The base classes are lost: the oracle
-        // never copies them into the clone of the template.
+        // H10.13 (T4): the base classes of the template are copied into the
+        // specialization too (the oracle dropped them).  The names are
+        // substituted and appended to the parser's base table, so
+        // `load_base`, `find_field` and `derives_from` see them like the
+        // bases of an ordinary struct.
+        long bstart = this.pa.base_count();
+        long bk = 0;
+        while (bk < tpl.nbases) {
+            this.load_base(tpl, bk);
+            AType bt = this.ty_empty();
+            bt.base = this.base_name_;
+            bt = this.resolve_template_struct_type(
+                this.substitute_type(this.resolve_alias(bt), mbase),
+                tpl.line, tpl.col);
+            this.pa.push_base(bt.base);
+            bk = bk + 1;
+        }
+        // The substituted fields.
         long nf = tpl.nfields;
         AStruct rec;
         rec.name = mangled;
@@ -9159,8 +9356,8 @@ export struct HirBuilder {
         rec.nfields = nf;
         rec.methods = (AFunction*)0;
         rec.nmethods = 0;
-        rec.bstart = 0;
-        rec.nbases = 0;
+        rec.bstart = bstart;
+        rec.nbases = this.pa.base_count() - bstart;
         rec.line = tpl.line;
         rec.col = tpl.col;
         rec.tpl_params = (ATemplateParam*)0;
@@ -9206,9 +9403,24 @@ export struct HirBuilder {
                 this.u.structs[hsi].nfields = 0;
                 this.u.structs[hsi].line = rec.line;
                 this.u.structs[hsi].col = rec.col;
-                this.u.structs[hsi].is_poly = 0;
+                this.u.structs[hsi].is_poly = this.struct_poly(gidx);
                 this.u.structs[hsi].nbases = 0;
-                this.u.structs[hsi].bstart = -1;
+                this.u.structs[hsi].bstart = this.u.bn_n;
+            }
+            // H10.13 (T4): export the (substituted) base-class names too.
+            long ebk = 0;
+            while (ebk < rec.nbases) {
+                this.load_base(rec, ebk);
+                long bn = this.u.bn_n;
+                if (bn < this.u.bn_cap) {
+                    unsafe {
+                        this.u.bnames[bn] = (long) this.base_name_;
+                        this.u.structs[hsi].nbases =
+                            this.u.structs[hsi].nbases + 1;
+                    }
+                    this.u.bn_n = bn + 1;
+                }
+                ebk = ebk + 1;
             }
             long fj = 0;
             while (fj < rec.nfields) {
@@ -9357,6 +9569,15 @@ export struct HirBuilder {
     void err_cannot_deduce(long line, long col, const char* name) {
         this.db_start_ = this.db_n_;
         this.db_put("cannot deduce template arguments for '");
+        this.db_put(name);
+        this.db_put("'");
+        this.diag(line, col, this.db_end());
+    }
+
+    // H10.13 (T7): "too many template arguments for 'X'"
+    void err_too_many_tpl_args(long line, long col, const char* name) {
+        this.db_start_ = this.db_n_;
+        this.db_put("too many template arguments for '");
         this.db_put(name);
         this.db_put("'");
         this.diag(line, col, this.db_end());

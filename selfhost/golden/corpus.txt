@@ -592,8 +592,13 @@ selfhost/corpus/hir/template/h10_C10_array_mangle.ivy
 selfhost/corpus/hir/template/h10_C11_unresolved_decl.ivy
 selfhost/corpus/hir/template/h10_T1_local_T.ivy
 selfhost/corpus/hir/template/h10_T2_nested_explicit_arg.ivy
+selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy
+selfhost/corpus/hir/template/h10_T4_base_class.ivy
 selfhost/corpus/hir/template/h10_T5_qualifier_substitution.ivy
 selfhost/corpus/hir/template/h10_T6_deduce_int32.ivy
+selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy
+selfhost/corpus/hir/template/h10_T8_template_overload.ivy
+selfhost/corpus/hir/template/h10_T9_param_template_id.ivy
 selfhost/corpus/hir/type/01_lit_int.ivy
 selfhost/corpus/hir/type/02_lit_float.ivy
 selfhost/corpus/hir/type/03_lit_char.ivy

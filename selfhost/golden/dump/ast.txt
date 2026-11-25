@@ -10272,7 +10272,7 @@ function
       call
         ident first        int 1        int 2
 selfhost/corpus/hir/template/02_too_few_args.ivy:4:38: error: argument 2 of 'first<int32_t>' expects 'U', got 'int'
-@@ selfhost/corpus/hir/template/02_too_many_args.ivy 172 0
+@@ selfhost/corpus/hir/template/02_too_many_args.ivy 278 1
 function 
   return T identity(T x)
   block
@@ -10284,6 +10284,7 @@ function
     decl int32_t a =
       call
         ident identity        int 1
+selfhost/corpus/hir/template/02_too_many_args.ivy:4:30: error: too many template arguments for 'identity'
 @@ selfhost/corpus/hir/template/02_unsigned_arg.ivy 170 0
 function 
   return T id(T x)
@@ -10519,7 +10520,7 @@ function
     decl int32_t a =
       call
         ident rec        int 1
-@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 370 1
+@@ selfhost/corpus/hir/template/04_same_name_templates.ivy 224 0
 function 
   return T a(T x)
   block
@@ -10536,7 +10537,6 @@ function
     decl int32_t r =
       call
         ident a        int 1
-selfhost/corpus/hir/template/04_same_name_templates.ivy:5:23: error: call to 'a<int32_t>' missing argument 2 (parameter 'y' has no default value)
 @@ selfhost/corpus/hir/template/04_template_calls_function.ivy 289 0
 function 
   return int32_t helper(int32_t x)
@@ -10603,13 +10603,12 @@ function
   block
     decl Derived d
 
-@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 165 1
+@@ selfhost/corpus/hir/template/05_base_field_lost.ivy 56 0
 function 
   return void f()
   block
     decl Derived d
 
-selfhost/corpus/hir/template/05_base_field_lost.ivy:4:77: error: struct 'Derived<int32_t>' has no member 'x'
 @@ selfhost/corpus/hir/template/05_class_ctor.ivy 55 0
 function 
   return void f()
@@ -10641,12 +10640,14 @@ function
   block
     decl Box b
 
-@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 52 0
+@@ selfhost/corpus/hir/template/05_explicit_too_many_args.ivy 309 1
 function 
   return void f()
   block
     decl Box b
 
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: too many template arguments for 'Box'
+selfhost/corpus/hir/template/05_explicit_too_many_args.ivy:4:12: error: variable 'b' must be initialized (uninitialized variables are not allowed)
 @@ selfhost/corpus/hir/template/05_field_in_struct.ivy 55 0
 function 
   return void f()
@@ -16765,3 +16766,94 @@ function
         ident id        int 7    decl int32_t b =
       call
         ident id        int 7
+@@ selfhost/corpus/hir/template/h10_T3_sizeof_template_id.ivy 284 0
+function 
+  return int32_t width()
+  block
+    return
+      sizeof(T)
+
+function 
+  return void f()
+  block
+    decl int32_t s1 =
+      sizeof(Pair)
+    decl int32_t s2 =
+      alignof(Pair)
+    decl int32_t s3 =
+      call
+        ident width    decl int32_t s4 =
+      sizeof(Pair)
+
+@@ selfhost/corpus/hir/template/h10_T4_base_class.ivy 386 0
+function 
+  return void f()
+  block
+    decl Derived d
+    expr
+      assign =
+        member . x
+          ident d        int 5    expr
+      assign =
+        member . value
+          ident d        int 7    decl int32_t r =
+      call
+        member . total
+          ident d    decl Base b =
+      ident d    decl int32_t q =
+      call
+        member . base_value
+          ident b
+@@ selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy 270 1
+function 
+  return T id(T x)
+  block
+    return
+      ident x
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident id        int 1
+selfhost/corpus/hir/template/h10_T7_extra_template_args.ivy:4:24: error: too many template arguments for 'id'
+@@ selfhost/corpus/hir/template/h10_T8_template_overload.ivy 458 0
+function 
+  return T first(T x)
+  block
+    return
+      ident x
+function 
+  return T first(T x, T y)
+  block
+    return
+      ident y
+function 
+  return void f()
+  block
+    decl int32_t a =
+      call
+        ident first        int 1    decl int64_t b =
+      call
+        ident first        int 2        int 3    decl int64_t x =
+      int 6    decl int64_t y =
+      int 7    decl int64_t c =
+      call
+        ident first        ident x        ident y
+@@ selfhost/corpus/hir/template/h10_T9_param_template_id.ivy 287 0
+function 
+  return T unwrap(Box b)
+  block
+    return
+      member . value
+        ident b
+function 
+  return void f()
+  block
+    decl Box b
+    expr
+      assign =
+        member . value
+          ident b        int 7    decl int32_t r =
+      call
+        ident unwrap        ident b

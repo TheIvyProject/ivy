@@ -1,5 +1,5 @@
-// Two templates with the same name: the second one silently replaces the
-// first (the registry is keyed by name).
+// Two templates with the same name form an overload set (H10.13, T8); the
+// one-argument call selects the one-parameter template.
 template <typename T> T a(T x) { return x; }
 template <typename T> T a(T x, T y) { return x; }
 void f() { int32 r = a<int32>(1); }

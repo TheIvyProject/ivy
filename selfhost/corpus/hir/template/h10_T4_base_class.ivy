@@ -1,0 +1,18 @@
+// H10.13 (T4): a struct-template specialization keeps the base classes of
+// the template, so inherited fields, methods and derived-to-base binding work.
+struct Base {
+    int32 x;
+    int32 base_value() { return this.x; }
+};
+template <typename T> struct Derived : Base {
+    T value;
+    int32 total() { return this.x + this.value; }
+};
+void f() {
+    Derived<int32> d;
+    d.x = 5;
+    d.value = 7;
+    int32 r = d.total();
+    Base& b = d;
+    int32 q = b.base_value();
+}

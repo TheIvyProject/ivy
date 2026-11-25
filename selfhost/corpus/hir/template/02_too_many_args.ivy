@@ -1,4 +1,4 @@
-// Too many explicit arguments: the extra arguments are silently accepted
-// and appear in the mangled name.
+// Too many explicit template arguments: H10.13 (T7) rejects them instead of
+// silently accepting the extras.
 template <typename T> T identity(T x) { return x; }
 void f() { int32 a = identity<int32, int32>(1); }
