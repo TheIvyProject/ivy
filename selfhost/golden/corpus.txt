@@ -750,6 +750,7 @@ selfhost/corpus/interp/21_int_status.ivy
 selfhost/corpus/interp/22_nonint_status.ivy
 selfhost/corpus/interp/23_expr_misc.ivy
 selfhost/corpus/interp/24_exit.ivy
+selfhost/corpus/interp/h10_I1_selfedge.ivy
 selfhost/corpus/lexer/err/block_unterm.ivy
 selfhost/corpus/lexer/err/char_unterm.ivy
 selfhost/corpus/lexer/err/hex_bad.ivy

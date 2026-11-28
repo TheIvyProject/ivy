@@ -2535,3 +2535,5 @@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to insta
 @@ selfhost/corpus/parser/module/17_export_long_long.ivy 80 0
 ivy: module interface written to '<OUT>\out.ivm'
 ivy: '<OUT>\out.obj' generated
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 31 0
+ivy: '<OUT>\out.obj' generated

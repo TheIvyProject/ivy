@@ -1630,10 +1630,9 @@ export struct InterpreterModel {
         return 1;
     }
 
-    // Records a CFG edge. A self-edge reproduces the oracle's execBlock quirk
-    // (interpreter.cpp:162-171): execInst resets curInst to 0 and execBlock
-    // then increments it, so execution resumes at the block's second
-    // instruction. inst_index = 1 marks that resume for the runner.
+    // Records a CFG edge. A self-edge (the destination is the block that is
+    // already executing) sets inst_index = 1 as a marker: the runner has to
+    // restart the block at its first instruction (H10.16, oracle bug I1).
     long set_frame_edge(long frame_index, long dest) {
         long marker = -1;
         if (frame_index >= 0 && frame_index < this.frame_count) {
@@ -4760,19 +4759,13 @@ export struct InterpreterModel {
                     break;
                 }
                 if (marker >= 0) {
-                    // Self-edge (see set_frame_edge): the oracle resets
-                    // curInst to 0 and execBlock increments it to 1, so the
-                    // block resumes at its second instruction.
-                    long resume = -1;
-                    unsafe {
-                        resume = u->insts[first].next;
-                    }
-                    if (resume < 0 || resume > last) {
-                        returned = 1;
-                        break;
-                    }
+                    // Self-edge (see set_frame_edge): the edge landed on the
+                    // block that is already executing, so the block restarts
+                    // at its first instruction.  The oracle reset curInst to 0
+                    // but its loop pre-incremented it, which resumed at the
+                    // second instruction instead (ORACLE_BUGS.md I1, H10.16).
                     this.set_frame_position(frame, cur_block, -1);
-                    inst = resume;
+                    inst = first;
                     continue;
                 }
                 if (inst == last) {

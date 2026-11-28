@@ -44,3 +44,5 @@ ivy: error: cannot open file '"selfhost/corpus/interp/22_nonint_status.ivy"'
 ivy: error: cannot open file '"selfhost/corpus/interp/23_expr_misc.ivy"'
 @@ selfhost/corpus/interp/24_exit.ivy 69 2
 ivy: error: cannot open file '"selfhost/corpus/interp/24_exit.ivy"'
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 77 2
+ivy: error: cannot open file '"selfhost/corpus/interp/h10_I1_selfedge.ivy"'

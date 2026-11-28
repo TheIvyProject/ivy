@@ -21315,3 +21315,56 @@ function h36_iface3::widen
     return
       ident x
 
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 964 0
+function loop_clause
+  return int32_t(int32_t n)
+  block
+    decl int32_t i =
+      int 0
+    decl int32_t x =
+      int 0
+    switch
+      ident n
+      case
+        int 1
+        expr
+          assign '=' : int32_t
+            ident i
+            binary '+' : int32_t
+              ident i
+              int 1
+        expr
+          assign '=' : int32_t
+            ident x
+            binary '/' : int
+              int 10
+              binary '-' : int32_t
+                ident i
+                int 2
+        nextcase here
+      default
+        break
+    return
+      binary '+' : int32_t
+        ident i
+        ident x
+
+function main
+  return int32_t()
+  block
+    expr
+      call 'io::println' : void
+        string "loop_clause(2)={}"
+        call 'loop_clause' : int32_t
+          int 2
+    if
+      binary '!=' : bool
+        call 'loop_clause' : int32_t
+          int 2
+        int 0
+      block
+        return
+          int 1
+    return
+      int 0
+

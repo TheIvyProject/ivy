@@ -728,11 +728,13 @@ The oracle stores `Block*` in `FrameCtx.curBlock`; the port stores unit-level bl
 | `first == -1` (empty block) | Implicit return | `execBlock`: empty instruction vector falls through, then `!returned && curBlock == blk` sets returned (`:158-175`) |
 | `last < first` or `last >= in_n` | Implicit return; no instruction executed | No oracle analogue (`Block` is just a vector); corrupt metadata is stopped instead of read |
 | `next` chain ends before `last`, leaves `[first,last]`, or is non-monotonic (`next <= inst`) | Stop the block; falling off means implicit return | The oracle iterates the block's vector exactly once; a port chain that disagrees is not a valid vector |
-| Self-edge (dest == current block) | Resume at the block's **second** instruction; a one-instruction self-jump block falls off and returns | `execInst` sets `curInst = 0`, then `execBlock` increments it to 1 (`:162-171`); probe-confirmed, including the resulting infinite loop for a self-jump that is itself instruction 1 |
+| Self-edge (dest == current block) | **H10.16:** restart at the block's **first** instruction (P3 reproduced the oracle: resume at the second instruction, so a one-instruction self-jump block fell off and returned) | `execInst` sets `curInst = 0`, then `execBlock` increments it to 1 (`:162-171`); the quirk is recorded in `ORACLE_BUGS.md` I1 and removed in H10.16 |
 | `Ret` followed by dead instructions | `Ret` returns 1 and stops the block; the trailing chain is never executed | `execInst` `Ret` sets `returned`; `execBlock` breaks (`:250-270,168`) |
 | Loop that never executes / 1000 iterations | Ordinary edges; no iteration cap in the interpreter | No cap in the oracle |
 
 Implementation points: `block_in_function` (`:2759-2781`) validates function ownership; `set_frame_edge` (`:1591-1607`) records the self-edge marker (`inst_index = 1`); the runner (`:3095-3177`) validates the current block, bounds each block to `first..last`, validates every new edge before reading it, and enforces strictly increasing `next` links. `exec_inst` still validates the frame and instruction index before touching pools.
+
+**H10.16 (I1, sửa sau self-host):** self-edge giờ chạy lại block từ instruction **đầu** (`inst = first`) thay vì instruction thứ hai, nên quy tắc "Resume at the block's **second** instruction" ở bảng trên là bug-compat đã bị bỏ. Bằng chứng: `selfhost/mir/selfedgeprobe.ivy` (MIR dựng tay `[store; condbranch -> self; exit]`; stage1 trước fix treo, sau fix `main` trả 3), fixture shape `selfhost/corpus/interp/h10_I1_selfedge.ivy`; chi tiết ở `selfhost/app/H10_NOTES.md` H10.16.
 
 ### 14.4 Fixture matrix (actual results vs oracle)
 
@@ -814,7 +816,7 @@ P3 probe PASS
 - **P6**: the fixtures are **not** added to `corpus/interp` in P3. Decision: add them at P6, when `interpdrive.ivy` can run a source through the frontend + interpreter and emit stdout/stderr/status separately, so the harness can compare them against `--run` one process per file. Adding them now would leave files that no committed driver consumes. The exact scratch sources are recorded in the P3 probe (`p3probe.ivy`/`p3files.ivy` in the scratch directory, not the repository); at P6 they can be copied verbatim to `selfhost/corpus/interp/` and driven by the same `main`-return convention (nonzero small values 0–254 fit both the oracle process status and the `IResult` int).
 - **Overloads**: still name/count-only (§13.2); no `MExpr` target pointer.
 - **Recursion depth**: the host-stack limit from §13.10 still applies (about 420 nested calls); P3 adds no depth guard.
-- **Self-jump loops**: the port reproduces the oracle quirk, including the fact that a self-jump that is itself the block's second instruction loops forever, exactly as the oracle does. P3 does not add a timeout or iteration cap.
+- **Self-jump loops**: no timeout or iteration cap. P3 reproduced the oracle quirk (a self-jump that is itself the block's second instruction loops forever); H10.16 removed the quirk, so every self-jump now loops forever, which is the intended semantics.
 - **Foreign-function block targets**: undefined in the oracle; the port normalizes them to null edges and ends the function. This is the only intentionally port-specific edge rule.
 
 ### 14.7 Measured layout

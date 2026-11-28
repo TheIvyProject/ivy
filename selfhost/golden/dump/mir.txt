@@ -20624,3 +20624,55 @@ function h36_iface3::widen
     ret
       ident x
 
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 776 0
+function loop_clause
+  return int32_t(int32_t n)
+  block 0
+    alloca int32_t i
+      int 0
+    alloca int32_t x
+      int 0
+  block 1
+    ret
+      binary '+' : int32_t
+        ident i
+        ident x
+  block 2
+    store
+      ident i
+      binary '+' : int32_t
+        ident i
+        int 1
+    store
+      ident x
+      binary '/' : int
+        int 10
+        binary '-' : int32_t
+          ident i
+          int 2
+    jump
+    jump
+  block 3
+    jump
+    jump
+
+function main
+  return int32_t()
+  block 0
+    eval
+      call : void
+        string "loop_clause(2)={}" [lt: static]
+        call : int32_t
+          int 2
+    condbranch
+      binary '!=' : bool
+        call : int32_t
+          int 2
+        int 0
+  block 1
+    ret
+      int 0
+  block 2
+    ret
+      int 1
+

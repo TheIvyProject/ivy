@@ -16929,3 +16929,39 @@ function
   block
     return
       ident x
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 909 0
+function 
+  return int32_t loop_clause(int32_t n)
+  block
+    decl int32_t i =
+      int 0    decl int32_t x =
+      int 0    switch
+      ident n      case
+        int 1        expr
+          assign =
+            ident i            binary +
+              ident i              int 1        expr
+          assign =
+            ident x            binary /
+              int 10              binary -
+                ident i                int 2        nextcase here
+      default
+        break
+    return
+      binary +
+        ident i        ident x
+function 
+  return int32_t main()
+  block
+    expr
+      call
+        member . println
+          ident io        string "loop_clause(2)={}"        call
+          ident loop_clause          int 2    if
+      binary !=
+        call
+          ident loop_clause          int 2        int 0      then
+      block
+        return
+          int 1    return
+      int 0

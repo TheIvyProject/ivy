@@ -1,0 +1,210 @@
+// selfhost/mir/selfedgeprobe.ivy - H10.16 (I1) regression probe.
+//
+// The interpreter used to copy the oracle's `execBlock` quirk described in
+// selfhost/ORACLE_BUGS.md (I1): an edge to the block that is already
+// executing resumed at the block's SECOND instruction, because the oracle
+// reset `curInst` to 0 and its loop pre-incremented it.  After H10.16 the
+// block restarts at its first instruction.
+//
+// No `.ivy` source can observe the difference.  The only self-edge the
+// frontend emits is an unconditional jump to the block itself (a labelled
+// `nextcase` back to its own clause), which loops forever under both
+// semantics; a *conditional* self-edge needs `i = i + 1` and
+// `condbranch -> self` in one block, and every compound statement is lowered
+// into its own block.  So this probe builds the terminating shape by hand:
+//
+//   block 0  alloca i = 0
+//            jump 1
+//   block 1  i = i + 1                       <- the self-edge target
+//            condbranch (i < 3) -> 1 (self), -> 2
+//   block 2  ret i
+//
+// Fixed: every pass through block 1 re-runs `i = i + 1`, so `i` reaches 3 and
+// `main` returns 3.  Pre-fix: the self-edge resumed at the `condbranch`, so
+// `i` stayed 1 and the probe never returned (the pre-H10.16 stage 1 hangs on
+// it; see H10_NOTES.md, H10.16).
+//
+// Build and run (from the repository root; `$run` is the run directory a
+// `build.ps1 -SelfLink` left behind, `$run/stage1` holds the stage 1 driver
+// and its module interfaces):
+//
+//   $env:IVYRT_LIB_PATH = "$run/rt.obj"
+//   & "$run/stage1/ivy_selfhost.exe" selfhost/mir/selfedgeprobe.ivy \
+//       -I "$run/stage1" -I selfhost/parsing -I selfhost/hir -I selfhost/mir \
+//       -I std -o <scratch>/selfedgeprobe.exe
+//   <scratch>/selfedgeprobe.exe            # exit 0 = PASS, 1 = FAIL
+//
+// The driver must be a stage 1 built from this tree: the probe links that
+// build's interpreter, it does not use the one baked into stage 0.
+#pragma ivy cnumber
+
+import ast;
+import mir;
+import interpreter;
+import io;
+
+extern "C" void* __ivy_alloc(unsigned long long n);
+extern "C" void  __ivy_free(void* p);
+
+// The record strides, spelled out instead of `sizeof(...)`: the compiler
+// under-reports a struct that embeds an imported nested struct when `ast` is
+// not resolved first (H53_NOTES.md, the `sizeof(MExpr)` caveat).  The values
+// are the ones of the compiled records: MExpr 176, MInst 152,
+// MBlock 16, MFunction 168 (the entity list in mir.ivm: fifteen 8-byte
+// fields around the 48-byte AType; `mir.ivy`'s "136" comment is stale).
+
+export struct SelfEdgeProbe {
+    void zero(char* p, long n) {
+        long i = 0;
+        unsafe {
+            while (i < n) {
+                p[i] = 0;
+                i = i + 1;
+            }
+        }
+    }
+
+    // Fill `u` with the three-block shape of the header.  `u` points at a
+    // zeroed MUnit; returns 0, or 1 when an allocation failed.
+    long fill(MUnit* u) {
+        unsafe {
+            MExpr* ex = (MExpr*) __ivy_alloc(6 * 176);
+            MInst* insts = (MInst*) __ivy_alloc(5 * 152);
+            MBlock* bl = (MBlock*) __ivy_alloc(3 * 16);
+            MFunction* fns = (MFunction*) __ivy_alloc(168);
+            if (ex == (MExpr*) 0 || insts == (MInst*) 0 ||
+                bl == (MBlock*) 0 || fns == (MFunction*) 0) {
+                return 1;
+            }
+            this.zero((char*) ex, 6 * 176);
+            this.zero((char*) insts, 5 * 152);
+            this.zero((char*) bl, 3 * 16);
+            this.zero((char*) fns, 168);
+
+            // Expressions: e0 = 0, e1 = 1, e2 = 3, e3 = `i`, e4 = `i + 1`,
+            // e5 = `i < 3` (kind 0 IntegerLit, 6 IdentRef, 9 Binary).
+            ex[0].kind = 0;
+            ex[0].ival = 0;
+            ex[0].type.base = "int32_t";
+            ex[1].kind = 0;
+            ex[1].ival = 1;
+            ex[1].type.base = "int32_t";
+            ex[2].kind = 0;
+            ex[2].ival = 3;
+            ex[2].type.base = "int32_t";
+            ex[3].kind = 6;
+            ex[3].sval = "i";
+            ex[3].type.base = "int32_t";
+            ex[4].kind = 9;
+            ex[4].sval = "+";
+            ex[4].a = 3;
+            ex[4].b = 1;
+            ex[4].type.base = "int32_t";
+            ex[5].kind = 9;
+            ex[5].sval = "<";
+            ex[5].a = 3;
+            ex[5].b = 2;
+            ex[5].type.base = "int32_t";
+
+            // Instructions: 0 alloca, 1 store, 2 eval, 3 ret, 4 condbranch,
+            // 5 jump.
+            insts[0].kind = 0;
+            insts[0].var = "i";
+            insts[0].a = 0;
+            insts[0].type.base = "int32_t";
+            insts[0].next = 1;
+            insts[1].kind = 5;
+            insts[1].b = 1;
+            insts[1].next = -1;
+            insts[2].kind = 1;
+            insts[2].a = 3;
+            insts[2].b = 4;
+            insts[2].next = 3;
+            insts[3].kind = 4;
+            insts[3].a = 5;
+            insts[3].b = 1; // the self-edge: the then-target is this block
+            insts[3].c = 2;
+            insts[3].next = -1;
+            insts[4].kind = 3;
+            insts[4].a = 3;
+            insts[4].next = -1;
+
+            bl[0].first = 0;
+            bl[0].last = 1;
+            bl[1].first = 2;
+            bl[1].last = 3;
+            bl[2].first = 4;
+            bl[2].last = 4;
+
+            fns[0].name = "main";
+            fns[0].ret.base = "int32_t";
+            fns[0].pstart = 0;
+            fns[0].pn = 0;
+            fns[0].block_start = 0;
+            fns[0].block_n = 3;
+            fns[0].has_body = 1;
+
+            u->fns = fns;
+            u->fn_n = 1;
+            u->fn_cap = 1;
+            u->exprs = ex;
+            u->ex_n = 6;
+            u->ex_cap = 6;
+            u->insts = insts;
+            u->in_n = 5;
+            u->in_cap = 5;
+            u->blocks = bl;
+            u->bl_n = 3;
+            u->bl_cap = 3;
+        }
+        return 0;
+    }
+
+    int32 run() {
+        long rc = 0;
+        long failures = 0;
+        unsafe {
+            // The interpreter takes a `MUnit*`, and Ivy rejects `&mu`, so the
+            // unit lives on the heap (the same trick as InterpRunner::exec).
+            MUnit* u = (MUnit*) __ivy_alloc(512);
+            if (u == (MUnit*) 0) {
+                io::eprintln("selfedgeprobe: out of memory");
+                return 2;
+            }
+            this.zero((char*) u, 512);
+            rc = this.fill(u);
+            if (rc != 0) {
+                io::eprintln("selfedgeprobe: out of memory");
+                return 2;
+            }
+            InterpreterModel im;
+            if (im.setup() == 0) {
+                io::eprintln("selfedgeprobe: cannot initialize the interpreter");
+                return 2;
+            }
+            IResult r = im.call_by_name(u, "main", -1, 0);
+            long diags = im.diag_count();
+            long got = -1;
+            if (r.value_index >= 0) {
+                got = im.read_int(r.value_index);
+            }
+            if (r.state != 1 || got != 3 || diags != 0) {
+                io::eprintln("FAIL: state={} value={} diags={} (want state=1 value=3 diags=0)",
+                    r.state, got, diags);
+                failures = 1;
+            }
+            im.release();
+            __ivy_free((void*) u);
+        }
+        if (failures != 0) {
+            return 1;
+        }
+        io::println("PASS: the self-edge restarted the block and main returned 3");
+        return 0;
+    }
+};
+
+int32 main() {
+    SelfEdgeProbe p;
+    return p.run();
+}

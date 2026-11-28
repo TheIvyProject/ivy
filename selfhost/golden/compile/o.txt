@@ -1170,3 +1170,4 @@ selfhost/corpus/pp/predef/undef_line.ivy:1:8: error: cannot #undef predefined ma
 @@ selfhost/corpus/hir/template/h10_T13_nontype_param.ivy 0 0
 @@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 0 0
 @@ selfhost/corpus/parser/module/17_export_long_long.ivy 0 0
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 0 0

@@ -21,3 +21,4 @@
 @@ selfhost/corpus/interp/22_nonint_status.ivy 0 2
 @@ selfhost/corpus/interp/23_expr_misc.ivy 0 2
 @@ selfhost/corpus/interp/24_exit.ivy 0 2
+@@ selfhost/corpus/interp/h10_I1_selfedge.ivy 0 2

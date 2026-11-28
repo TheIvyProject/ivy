@@ -846,6 +846,52 @@
   mới. Import thử `h36_iface3::widen(1)` và `Wide::get()` đều biên dịch
   được sau fix (trước fix `widen` bị `undeclared identifier`).
 
+### H10.16 - Interpreter CFG self-edge (I1)
+
+- **Bug**: **I1** - oracle `execBlock` (`interpreter.cpp:162-171`) đặt
+  `curInst = 0` khi một cạnh CFG trỏ về **chính block đang chạy**, rồi vòng
+  lặp `++curInst` làm block chạy lại từ **instruction thứ hai**: instruction
+  đầu bị bỏ qua (block `[jump self]` một instruction "rơi" khỏi cuối block
+  → implicit return). Port bug-compat ở `set_frame_edge` (`mir/interpreter.ivy`
+  ≈L1633, `inst_index = 1`) và runner resume ở `u->insts[first].next`.
+- **Sửa** (`mir/interpreter.ivy`): nhánh `marker >= 0` của `run_function` đặt
+  `inst = first` thay vì `u->insts[first].next` → block chạy lại từ instruction
+  đầu; `set_frame_edge` giữ marker (nay nghĩa là "cạnh về block đang chạy")
+  và comment đổi theo. Không thêm cap/timeout: self-jump đúng nghĩa là vòng
+  lặp vô hạn (H53_NOTES §14.4).
+- **Fixture**:
+  - `selfhost/corpus/interp/h10_I1_selfedge.ivy` - `nextcase here` về chính
+    clause → block `[i = i + 1; x = 10 / (i - 2); jump self; jump exit]`;
+    `main` không chọn clause 1 nên `--run` vẫn kết thúc. Fixture khoá shape và
+    chứng minh fix không đổi đường chạy thường: mọi `.ivy` sinh self-edge chỉ
+    có `nextcase`/jump vô điều kiện về chính block, mà dạng đó lặp vô hạn
+    dưới **cả hai** semantics, nên khác biệt trước/sau không quan sát được từ
+    source.
+  - `selfhost/mir/selfedgeprobe.ivy` - probe dựng tay MIR mà frontend **không**
+    sinh được (`[i = i + 1; condbranch (i < 3) -> self; exit]`), chạy
+    `InterpreterModel.call_by_name` và đòi `main` trả 3. Bằng chứng hành vi:
+    stage1 **trước** fix treo (self-edge nhảy tới `condbranch`, `i` đứng ở 1),
+    stage1 **sau** fix in `PASS ... returned 3`, exit 0. Lệnh build/run ở đầu
+    file probe.
+- **Golden**: 1 fixture mới × 10 mode = **12 record**
+  (`dump/{lex,tokens,ast,hir,mir,llvm}`, `compile/{c,o}.txt`,
+  `compile/{objects,preproc}.tsv`, `interp/{stdout,stderr}.txt`); `corpus.txt`
+  +1 (1113 → **1114**); provenance `expected:H10.16`; `~0 -0` - không record
+  cũ nào đổi. Record `interp/*` của fixture lặp đúng khuôn 23 fixture cũ: harness
+  chạy driver từ thư mục tạm nên `--run` báo `cannot open file` (exit 2) - baseline
+  đóng băng vậy từ H9.3; hành vi thật chứng minh bằng probe và bằng `--run` chạy
+  từ repo root (`loop_clause(2)=0`, exit 0).
+- **Gate**: `build.ps1 -SelfLink -Golden` trên cây của commit → bootstrap OK,
+  F2 + self-link identical SHA
+  `B021C1A404C23BD73EC9DAE61F8A2C3ECE0C524CC76196BC1D205DDB9A796263`
+  (27 220 992 B), golden **13155 checks / 0 failures** (1114 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`, 3 executable).
+- **Ghi chú**: cây này dựng lại `main` trên **H10.15** (bản trước đặt H10.16
+  trên H10.3 nên thiếu H10.4–H10.15); fix độc lập với các mục đó, nên không
+  record cũ nào đổi. Seed `ivy-stage0.exe` giữ nguyên bản H10.4: interpreter
+  nằm trong compiler nên stage 1 đã mang fix, seed chỉ cần biên dịch được cây
+  hiện tại.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -865,6 +911,6 @@
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ✅ |
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ✅ |
 | H10.15 | M1, M2 | `.ivm` escape | ✅ |
-| H10.16 | I1 | Interpreter CFG self-edge | ☐ |
+| H10.16 | I1 | Interpreter CFG self-edge | ✅ |
 | H10.17 | H27, B-P5, B-R2 | Audit bug không tái hiện / ngoại lệ | ☐ |
 | H10.18 | - | Audit cuối + `check_repro.ps1` + tag `0.6.0` (khi user yêu cầu) | ☐ |

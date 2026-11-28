@@ -131,7 +131,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 
 | ID | Loại | Triệu chứng | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|---|
-| **I1** | A | CFG **self-edge**: `execInst` reset `curInst = 0`, rồi `execBlock` `++` → lần chạy lại bắt đầu ở **instruction thứ hai** của block, không phải đầu | `interpreter.cpp:162-171` | `selfhost/mir/interpreter.ivy` `set_frame_edge` ≈L1633 (`inst_index = 1`) | `MIR_NOTES.md` |
+| **I1** | A | CFG **self-edge**: `execInst` reset `curInst = 0`, rồi `execBlock` `++` → lần chạy lại bắt đầu ở **instruction thứ hai** của block, không phải đầu | `interpreter.cpp:162-171` | `selfhost/mir/interpreter.ivy` `run_function`: **H10.16** chạy lại block từ instruction đầu (`inst = first`); `set_frame_edge` ≈L1633 giữ marker `inst_index = 1` | `H10_NOTES.md` H10.16, `selfhost/mir/selfedgeprobe.ivy`, `h10_I1_selfedge` |
 
 ### 1.7 Module I/O, driver, linker
 
@@ -387,7 +387,7 @@ Quy tắc:
       theo tên).
    3. Sai chẩn đoán/IR: C15 (`not assignable`), C5 (global trùng), C8
       (`nullptr`→`i8`).
-   4. Chỉ ảnh hưởng dump/quy ước: H14–H22, I1, M1/M2; còn lại H23–H26 xếp
+   4. Chỉ ảnh hưởng dump/quy ước: H14–H22, I1 (H10.16), M1/M2; còn lại H23–H26 xếp
       theo mức ảnh hưởng thực tế.
 
 ---
