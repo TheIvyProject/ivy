@@ -892,6 +892,44 @@
   nằm trong compiler nên stage 1 đã mang fix, seed chỉ cần biên dịch được cây
   hiện tại.
 
+### H10.17 - Audit bug loại B và `exceptions.txt`
+
+- **Bug**: không có triệu chứng mới - rà lại hai tuyên bố "port không tái hiện"
+  (**B-P5**, **B-R2**) và ngoại lệ golden **H27** trong `exceptions.txt` trước
+  khi chốt H10.18.
+- **Sửa** (chỉ tài liệu: `ORACLE_BUGS.md`, `LIFETIME_NOTES.md`,
+  `golden/exceptions.txt`; không đổi code, không đổi golden):
+  - **H27**: `exceptions.txt` chỉ còn header từ H10.9; audit chạy lại
+    `--hir`/`--mir` trên `156_struct_partial_init`, `157_struct_empty_init`,
+    `160_struct_designated_init` → exit 0, record khớp (`@@ ... 179 0`,
+    provenance `expected:H10.9`). Header ghi lại mốc này; ghi chú "Ngoại lệ
+    H9.3" ở §4 `ORACLE_BUGS.md` (từng nói gate bỏ so byte cho ba fixture) sửa
+    lại cho đúng.
+  - **B-P5**: tuyên bố cũ "port parse đúng" là **sai** - `parser.ivy` nhánh
+    `lifetime<...> template` gọi `expect("<")` rồi `parse_template_params()`
+    đòi `<` lần nữa (`parser.ivy:5377-5384`), tức **cố ý** tái hiện
+double-`<`. Snippet
+    `lifetime<$a> template<typename T> fn` in đúng ba chẩn đoán `2:10`, `2:20`,
+    `5:1` như `LIFETIME_NOTES.md` §8.4 → B-P5 là loại **A**, chuyển sang bảng
+    §1.1 của `ORACLE_BUGS.md`; corpus vẫn **cấm** dạng này.
+  - **B-R2**: xác nhận là loại **B** có chủ ý - `std/rt.ivy`
+    (`__ivy_fmt_int`/`__ivy_fmt_float`) `malloc` 32/64 B mỗi lần gọi (không có
+    static buffer), emitter truyền thẳng kết quả cho `_write` nên corpus không
+    giữ hai kết quả; `h10_R2_format_stress` (64 vòng format + print 4 arg) vẫn
+    xanh. Giữ nguyên: rò rỉ ~32/64 B mỗi lần format, đổi lại output đúng và
+    độc lập.
+- **Fixture**: không thêm - dạng B-P5 bị cấm vào corpus (`LIFETIME_NOTES.md`
+  §8.4), H27 đã có `156/157/160` là fixture thường.
+- **Golden**: không đổi byte nào (`fixtures=1114`, `interp_fixtures=24`).
+- **Gate**: `build.ps1 -SelfLink -Golden` trên cây của commit → bootstrap +
+  self-link identical SHA
+  `C5EBF6E3DBB57F272469C3AA5DEC05343796AF023C0C96AB3CF922094162E91E`
+  (27 220 992 B), golden **13155 checks / 0 failures** (1114 fixture); golden
+  không đổi byte nào (`fixtures=1114`, `interp_fixtures=24`).
+- **Ghi chú**: phạm vi audit đúng ba mục của PLAN - **B-C3**/**B-C19** không
+  rà lại (B-C3 đã có fixture `h10_B-C3_addr_of_struct` chạy trong gate).
+  `exceptions.txt` giữ header để mô tả format cho record crash tương lai.
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -912,5 +950,5 @@
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ✅ |
 | H10.15 | M1, M2 | `.ivm` escape | ✅ |
 | H10.16 | I1 | Interpreter CFG self-edge | ✅ |
-| H10.17 | H27, B-P5, B-R2 | Audit bug không tái hiện / ngoại lệ | ☐ |
+| H10.17 | H27, B-P5, B-R2 | Audit bug không tái hiện / ngoại lệ | ✅ |
 | H10.18 | - | Audit cuối + `check_repro.ps1` + tag `0.6.0` (khi user yêu cầu) | ☐ |

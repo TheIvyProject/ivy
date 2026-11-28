@@ -48,6 +48,7 @@
 | **P4** | A | `template <> ...` (explicit specialization) không được parse | `src/parsing/parser.cpp` | **H10.11**: `parse_struct` giữ argument của `template <> struct S<...>` (`AStruct.spec_args/spec_n`); `parse_function`/`parse_fn_trailing` nhận `f<...>` sau tên và đăng ký như overload thường | `TEMPLATE_NOTES.md` §10.3; `H10_NOTES.md` H10.11; `h10_P4_explicit_specialization` |
 | **P5** | A | Type C-style (`char`, `double`, `long long`, …) chỉ dùng được dưới `#pragma ivy cnumber`; hậu tố `_t` (`int32_t`) là dạng deprecated nhưng parser vẫn normalize (không phải bug, nhưng corpus phải giữ đúng quy ước) | `src/parsing/parser.cpp`, `src/parsing/preprocessor.cpp` | **H10.11**: giữ nguyên policy — `_t` là **lỗi loại bỏ** (`_t-suffixed type 'int32_t' is removed — use 'int32' instead`), không normalize; fixture khoá chẩn đoán | `PLAN.md` H5.1 (L720-722), `DEPRECATION_TRACKING.md` entry 2; `H10_NOTES.md` H10.11; `h10_P5_removed_t` |
 | **P7** | A | Chain type C-style (`int long`) là **mutually exclusive** (`else if`), không cộng dồn keyword; chỉ vào chain khi base còn rỗng | `src/parsing/parser.cpp` | **H10.11**: hành vi đã đúng từ H8.2 (`parse_type` chỉ vào chain khi `base` rỗng); thêm fixture hồi quy, không sửa logic | `H82_NOTES.md` §2 (`pp/define_obj`); `H10_NOTES.md` H10.11; `h10_P7_cstyle_chain_exclusive` |
+| **B-P5** | A | `lifetime<$a> template<...> fn` consume `<` **hai lần** → parse error (`expected '<' to start template parameter list`, `expected template parameter name`) | `src/parsing/parser.cpp:789` + `:1649` | **H10.17 audit**: `parser.ivy:5377-5384` (nhánh `lifetime<...> template`) gọi `expect("<")` rồi `parse_template_params()` đòi `<` lần nữa - **cố ý** tái hiện double-`<` để chẩn đoán khớp oracle | `LIFETIME_NOTES.md` §8.4; snippet `lifetime<$a> template<typename T> fn` in đúng 3 lỗi `2:10`/`2:20`/`5:1`; corpus **cấm** dạng này |
 
 ### 1.2 HIR — template / semantic
 
@@ -90,7 +91,7 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 | **H24** | A | `move(x)` chỉ là pass-through khi callee **không** có MIR entry; overload `move` do người dùng định nghĩa vẫn là call thật | `codegen.cpp:1539` | **H10.10**: hành vi đã đúng từ H8.2; thêm fixture hồi quy (`move` overload là call thật) | `H82_NOTES.md` §2; `H10_NOTES.md` H10.10; `h10_H24_move_overload` |
 | **H25** | A | `sizeof(<biểu thức>)` và `switch` trên `enum` bị oracle **từ chối** (không phải parse error mà là lỗi tầng sau) | `src/hir/**` | **H10.10**: `parser.ivy` nhận `sizeof(expr)` (kind 18, `flag=1`, giữ operand ở `a`); `hir_builder.ivy` fold size từ type của operand và `is_switch_integral` nhận enum | `PLAN.md` H5.1 (L720-721); `H10_NOTES.md` H10.10; `h10_H25_sizeof_expr_enum_switch` |
 | **H26** | A | `T x = {...}` (aggregate init) **bypass** constructor nhưng **vẫn** record destructor | `hir_builder.cpp` (`buildVarDecl`) | `hir_builder.ivy` `build_decl`: **H10.2** nhận đúng init-list (kind 19) và không `record_dtor_var` khi aggregate đã bypass ctor | `H62_NOTES.md` (RAII, L2516), `H10_NOTES.md` H10.2, `h10_H26_agg_ctor_dtor` |
-| **H27** | C | `--hir`/`--mir` **crash** `0xC0000005` (`exit -1073741819`) trên init-list có phần tử `<zero-init>` do HIR builder sinh ra: oracle lưu `nullptr` trong `elements` rồi `dumpHirExpr`/`buildExpr` dereference | `src/app/main.cpp` (`dumpHirExpr` InitList), `src/mir/mir_builder.cpp` (`buildExpr` InitList) | `selfhost/hir/hir.ivy`, `selfhost/mir/mir.ivy` (in `<zero-init>` / bỏ qua, **không** crash). **H10.9** full re-baseline đã đóng băng output port cho 3 fixture này, nên `exceptions.txt` chỉ còn header | `h10_H14_call_lifetime` (H10.9); `156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init` exit 0 trong `dump/hir.txt`/`dump/mir.txt` |
+| **H27** | C | `--hir`/`--mir` **crash** `0xC0000005` (`exit -1073741819`) trên init-list có phần tử `<zero-init>` do HIR builder sinh ra: oracle lưu `nullptr` trong `elements` rồi `dumpHirExpr`/`buildExpr` dereference | `src/app/main.cpp` (`dumpHirExpr` InitList), `src/mir/mir_builder.cpp` (`buildExpr` InitList) | `selfhost/hir/hir.ivy`, `selfhost/mir/mir.ivy` (in `<zero-init>` / bỏ qua, **không** crash). **H10.9** full re-baseline đã đóng băng output port cho 3 fixture này, nên `exceptions.txt` chỉ còn header; **H10.17 audit**: chạy lại cả ba, `--hir`/`--mir` exit 0 và record khớp byte | `h10_H14_call_lifetime` (H10.9); `156_struct_partial_init`, `157_struct_empty_init`, `160_struct_designated_init` exit 0 trong `dump/hir.txt`/`dump/mir.txt` |
 | **H28** | A | `move(x)` giữ lifetime `None`: `out->lifetime = arg->lifetime` chạy **sau** `call.args.push_back(std::move(arg))`, nên `if (arg)` false và call không có `[lt: ...]` trong `--mir` | `src/mir/mir_builder.cpp:578-583` | **H10.9**: `ex_call` copy `lt`/`ltname` của operand sau khi mark moved-out (thay vì luôn `None`) | `H10_NOTES.md` H10.9, `h10_H28_move_lifetime`, `codegen/245_move_pointer`, `hir/move/54_lifetime_param_moved` |
 | **H29** | A | Ghi qua **phần tử con trỏ** (`p[i] = x` với `p` là `T**`) emit GEP **không scale**: `getelementptr i8, ptr %p, iN k` (dùng `llvmElemType`) trong khi đọc `p[i]` emit `getelementptr ptr` (dùng `llvmType`) → offset `k` thay vì `k*8`. **Sai bộ nhớ ở machine-code**, không lộ ra trong dump IR so sánh được | `codegen.cpp:1046-1063` (`lowerLValue` Index, `llvmElemType` tại `:255-260`); đọc đúng ở `:1742-1765` | **H10.4**: `selfhost/codegen/emitter.ivy` `lower_index_addr` dùng `llvmType(e.type)` cho cả hai đường; workaround `__ivy_memcpy` đã xoá khỏi `selfhost/codegen/codegen.ivy` (`add_module_object`/`add_extra`/`add_cpp_header`/`add_c_header`/`hobj`) và `selfhost/app/pipeline.ivy` | `H9_NOTES.md` §H9.4; `H10_NOTES.md` H10.4; `h10_H29_pointer_store` |
 
@@ -304,10 +305,18 @@ trong corpus (xem §4).
 
 | ID | Oracle | Port | Lý do |
 |---|---|---|---|
-| **B-P5** | `lifetime<$a> template<...> fn` consume `<` **hai lần** → parse error (`parser.cpp:789` + `:1649`) | `parser.ivy` `parse_template_params` chỉ consume `<` một lần → **parse đúng** | Port không tái hiện double-`<`; corpus **không** đặt `lifetime<...>` trên template function (`LIFETIME_NOTES.md` §8.4) |
 | **B-C3** | `&<biến local kiểu struct>` làm oracle **crash** `0xC0000005` | `H10.1`: `hir_builder.ivy` `build_unary` không đòi `operator&` cho operand struct; `emitter.ivy` `lower_unary` hạ `&` về slot của local (nếu không thấy slot vẫn `fail` sạch) | Port sinh địa chỉ đúng, không crash; fixture `h10_B-C3_addr_of_struct` (`H10_NOTES.md` H10.1) |
 | **B-C19** | Record local sống qua call → machine code hỏng | Port **không** viết code theo pattern này; không tái hiện | Bug machine-code, không lộ ở IR; corpus H5.1 không có mẫu |
 | **B-R2** | `__ivy_fmt_int`/`__ivy_fmt_float` trả con trỏ vào **static buffer dùng chung** (`lib/ivyrt.c:61-69`); hai kết quả giữ lại cùng lúc sẽ thấy cùng nội dung | `std/rt.ivy` (H9.1, xác nhận H10.8) `malloc` buffer mới mỗi lần gọi → hai kết quả độc lập, nhưng **mỗi lần format là một lần cấp phát không được free** (codegen sinh ra truyền thẳng kết quả cho `_write`); fixture stress `h10_R2_format_stress` | Ivy subset **không có** biến file-scope/`static` local nên không thể tái hiện buffer dùng chung hay dựng scratch buffer/arena cố định. Khác biệt chỉ lộ khi caller giữ ≥ 2 kết quả, hoặc khi chương trình format trong vòng lặp dài (rò rỉ ~32/64 B mỗi lần). H10.8 chấp nhận **B**: output đúng/độc lập, không có fixture giữ con trỏ; follow-up (nếu cần) là cho codegen tự giữ buffer chứ không thêm static vào runtime |
+
+> **H10.17 audit (2026-11-28).** **B-P5** đã chuyển sang §1.1: port **cố ý**
+> tái hiện double-`<` của `lifetime<...> template`, chẩn đoán khớp từng chữ với
+> `LIFETIME_NOTES.md` §8.4 nên nó là loại **A**, không phải B. **B-R2** xác
+> nhận vẫn là loại B có chủ ý: `std/rt.ivy` (`__ivy_fmt_int`/`__ivy_fmt_float`)
+> `malloc` buffer 32/64 B mới mỗi lần gọi, không có static buffer để ghi đè, và
+> emitter truyền thẳng kết quả cho `_write` nên corpus không giữ hai kết quả;
+> `h10_R2_format_stress` vẫn xanh. Không mục nào khác cần đổi - xem
+> `H10_NOTES.md` H10.17.
 
 ---
 
@@ -328,11 +337,13 @@ Nested `constexpr` call trong binary expression **không** crash trong probe
 (p66, p84) nhưng **coi là không an toàn**. Nguồn:
 `TEMPLATE_NOTES.md` §10.1, `MIR_NOTES.md` §11.7.
 
-> **Ngoại lệ H9.3.** `selfhost/corpus/codegen/{156_struct_partial_init,157_struct_empty_init,160_struct_designated_init}.ivy`
-> vẫn nằm trong corpus vì **chỉ** `--hir`/`--mir` crash; `--ast`, `--lex`,
-> `--tokens`, `--llvm`, `-c`, `-o` và link đều bình thường. Ba fixture này
-> được ghi ở `selfhost/golden/exceptions.txt` (H27): gate bỏ so byte nhưng
-> **bắt buộc** port exit 0.
+> **Ngoại lệ H27 (đã đóng).** `selfhost/corpus/codegen/{156_struct_partial_init,157_struct_empty_init,160_struct_designated_init}.ivy`
+> từng chỉ có `--hir`/`--mir` crash ở oracle, nên H9.3 ghi chúng vào
+> `selfhost/golden/exceptions.txt`. **H10.9** in lại toàn bộ golden: port in
+> `<zero-init>` thay vì deref `nullptr`, output port được đóng băng thành record
+> thường (`dump/hir.txt`, `dump/mir.txt`, provenance `expected:H10.9`) và
+> `exceptions.txt` **chỉ còn header**. **H10.17 audit** chạy lại cả ba fixture
+> (`--hir`/`--mir` exit 0, record khớp byte) nên không cần mục ngoại lệ nào.
 
 > Ghi chú: §8.11 của `LIFETIME_NOTES.md` kết luận **không** tìm được input
 > lifetime nào làm crash oracle; mọi input malformed đều cho diagnostic sạch.

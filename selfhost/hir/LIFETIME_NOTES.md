@@ -1380,6 +1380,14 @@ Observed (`syntax/x10_lt_on_template.ivy`):
 
 => **Do not put `lifetime<...>` on a template function in the corpus.**
 
+**Audit H10.17 (2026-11-28):** the port does **not** fix this - it reproduces the
+oracle on purpose.  `selfhost/parsing/parser.ivy` (the `lifetime<...> template`
+branch) calls `expect("<")` and then `parse_template_params()`, which consumes a
+`<` again, so `lifetime<$a> template<typename T> fn` prints exactly the three
+errors above at `2:10`, `2:20` and `5:1`.  That makes B-P5 class **A**
+(bug-compat), not B; the entry moved to `ORACLE_BUGS.md` §1.1.  Keep the shape
+out of the corpus.
+
 ### 8.5 HIR: the outer-scope destructor is emitted twice
 
 When a `return` inside a nested block triggers the dtor compound, `emitDtorCalls()` walks

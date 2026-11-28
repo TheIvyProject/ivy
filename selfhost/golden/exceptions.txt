@@ -1,1 +1,10 @@
 # mode|fixture|reason - oracle crash records (no reference output).
+#
+# H27: the oracle crashed in `--hir`/`--mir` on an init-list holding a
+# `<zero-init>` element.  The port prints the marker instead, and H10.9 froze
+# that output as ordinary records (golden/dump/hir.txt, golden/dump/mir.txt,
+# provenance expected:H10.9), so this list has been header-only since H10.9.
+# H10.17 re-audited codegen/{156_struct_partial_init,157_struct_empty_init,
+# 160_struct_designated_init}.ivy: `--hir` and `--mir` exit 0 and the records
+# match byte for byte, so no entry is needed.  The header stays to document
+# the format for any future oracle-crash record.
