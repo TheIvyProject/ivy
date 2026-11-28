@@ -971,6 +971,7 @@ selfhost/corpus/parser/module/13_import_module_bare.ivy
 selfhost/corpus/parser/module/14_import_module_string.ivy
 selfhost/corpus/parser/module/15_mixed.ivy
 selfhost/corpus/parser/module/16_export_module_import.ivy
+selfhost/corpus/parser/module/17_export_long_long.ivy
 selfhost/corpus/parser/stmt/01_if.ivy
 selfhost/corpus/parser/stmt/02_ifelse.ivy
 selfhost/corpus/parser/stmt/03_while.ivy

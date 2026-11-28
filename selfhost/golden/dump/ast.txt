@@ -16922,3 +16922,10 @@ function
         ident fixed
 selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
 selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'
+@@ selfhost/corpus/parser/module/17_export_long_long.ivy 161 0
+ivy: module interface written to 'selfhost/corpus/parser/module\h36_iface3.ivm'
+function 
+  return long long widen(long long x)
+  block
+    return
+      ident x

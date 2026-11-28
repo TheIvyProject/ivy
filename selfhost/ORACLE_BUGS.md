@@ -137,8 +137,8 @@ B1–B13 là bug template của oracle, port **tái hiện nguyên văn**. Chi t
 
 | ID | Loại | Triệu chứng | Oracle location | Port location | Bằng chứng |
 |---|---|---|---|---|---|
-| **M1** | A | `.ivm`: return type của **free function** ghi **không escape**, trong khi `type()` escape cả tên gốc → `long long` thành `long\slong` | `module_io.cpp:132` | `selfhost/parsing/module_io.ivy` `type_raw()` ≈L235-247 | `H81_NOTES.md` §6 |
-| **M2** | A | `serializeType` escape **cả chuỗi type** (kể cả tên gốc), nên type C-style có dấu cách bị escape (`long\slong`) | `module_io.cpp` (`escape(serializeType(...))`) | `module_io.ivy` `type()` (`type_x(t, 1)`) | `H81_NOTES.md` §6 |
+| **M1** | A | `.ivm`: return type của **free function** ghi **không escape**, trong khi `type()` escape cả tên gốc → `long long` thành `long\slong` | `module_io.cpp:132` | **H10.15**: `func()` dùng `type(f.ret)` như mọi type khác (bỏ `type_raw`); reader vẫn `unesc(rets)` nên đọc lại đúng. Trước fix, dòng `func widen long long 1 ...` bị `cur.tok()` cắt tại space → ret `long`, `nparams` = 0, các cờ lệch | `H81_NOTES.md` §6, `H10_NOTES.md` H10.15, `17_export_long_long` |
+| **M2** | A (accepted) | `serializeType` escape **cả chuỗi type** (kể cả tên gốc), nên type C-style có dấu cách bị escape (`long\slong`) | `module_io.cpp` (`escape(serializeType(...))`) | **H10.15 accepted**: escape tên gốc là **quy ước bắt buộc** vì format `.ivm` phân tách token bằng space; `type()` escape ở **mọi** vị trí (field/param/method/return/tpl arg), reader unescape tương ứng. Không phải bug-compat mà là format thống nhất | `H73_NOTES.md` §2, `H10_NOTES.md` H10.15, `17_export_long_long` |
 | **M3** | D | `Linker::link_text` **không** passthrough `-l`/`-L`/`-Wl,` → không thể tự link chính compiler | `codegen.cpp:2830-2860` | `selfhost/codegen/codegen.ivy` `Linker` (`set_self_link`/`collect_self_link`, H9.4) | `PLAN.md` H9.4 — **đã sửa** bằng cờ `--self-link`, không phải bug-compat |
 
 ---

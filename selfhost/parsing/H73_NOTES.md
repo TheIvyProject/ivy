@@ -52,6 +52,12 @@ Type: `base[:unsigned][:const][:ref][:ptr<depth>][:arr<size>][:tpl{<type>}...]`
 space -> `\s`; **không** escape `\` (mirror oracle, kể cả khi điều đó làm
 `unescape` không đối xứng với `\s`).
 
+**H10.15**: `base` được escape ở **mọi** vị trí, kể cả return type của free
+function (`func()` dùng `type(f.ret)`); trước đây return type ghi raw theo
+quirk oracle `module_io.cpp:132` (M1). Vì format tách token bằng space, type
+C-style có dấu cách (`long long`) **bắt buộc** thành `long\slong`, nếu không
+reader sẽ đọc sai số param/cờ. Reader `unesc` return type như mọi type token.
+
 `IvmBuf` là buffer byte tăng trưởng (`add/ch/num/esc/type/param/func/method/
 struct_decl/enum_decl/using_decl`), dùng **một chỗ** cho cả `write` và `dump`
 nên hai đường không thể lệch nhau.

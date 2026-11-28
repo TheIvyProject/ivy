@@ -21300,3 +21300,18 @@ function Arr<7>::get
 @@ selfhost/corpus/hir/template/e_nontype_type_arg.ivy 233 1
 selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: template argument for non-type parameter 'N' must be a constant
 selfhost/corpus/hir/template/e_nontype_type_arg.ivy:3:27: error: failed to instantiate template 'fixed'
+@@ selfhost/corpus/parser/module/17_export_long_long.ivy 273 0
+ivy: module interface written to 'selfhost/corpus/parser/module\h36_iface3.ivm'
+function Wide::get
+  return long long(Wide& this)
+  block
+    return
+      member . v
+        this
+
+function h36_iface3::widen
+  return long long(long long x)
+  block
+    return
+      ident x
+

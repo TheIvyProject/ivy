@@ -1,0 +1,12 @@
+#pragma ivy cnumber
+export module h36_iface3;
+
+// H10.15 (M1): the return type of a free function is escaped like every other
+// type token, so `long long` is written as `long\slong` and the .ivm can be
+// read back.  The field/method/parameter spellings pin the M2 convention.
+export struct Wide {
+    long long v;
+    long long get() { return this.v; }
+};
+
+export fn widen(long long x) -> long long { return x; }

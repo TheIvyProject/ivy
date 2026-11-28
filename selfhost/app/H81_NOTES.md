@@ -112,13 +112,19 @@ escape **ca chuoi type**, ke ca ten goc. Type C-style `long long` chua dau
 cach, nen oracle ghi `long\slong:unsigned:n`. Port chi escape ten field/tham
 so ma **khong** escape ten goc trong `type()` -> ghi `long long:unsigned:n`.
 
-Sua: `type()` -> `type_x(t, 1)` (escape ten goc), them `type_raw()` ->
+Sua (H8.1): `type()` -> `type_x(t, 1)` (escape ten goc), them `type_raw()` ->
 `type_x(t, 0)` cho **return type cua free function**, vi oracle ghi
 `serializeType(f.returnType)` **khong** escape (`module_io.cpp:132`) - day la
 quirk phai giu de byte-identical.
 
 Bug nay chi lo ra o `codegen.ivy` (module duy nhat dung `long long`), nen cac
 module khac van khop truoc do.
+
+**H10.15** bo quirk do: `type_raw()`/`type_x(t, esc_base)` bi xoa, `func()`
+dung `type(f.ret)`, nen return type cua free function cung duoc escape nhu
+moi type token. Escape ten goc tro thanh quy uoc format bat buoc (`.ivm` tach
+token bang space), khong con la bug-compat. Xem `H10_NOTES.md` H10.15 va
+`17_export_long_long`.
 
 ## 7. Ket qua
 

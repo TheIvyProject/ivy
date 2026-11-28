@@ -813,6 +813,39 @@
   'val'`); chỉ argument tường minh dạng literal `int`/`bool` mới bind.
   T10 chỉ sửa call-arg expansion; fold `(f(args), ...)` vốn đã chạy.
 
+### H10.15 - `.ivm` escape (M1, M2)
+
+- **ID**: M1, M2.
+- **Code** (`selfhost/parsing/module_io.ivy`):
+  - **M1**: `func()` ghi return type bằng `type(f.ret)` thay vì
+    `type_raw(f.ret)`, tức return type của free function được escape như
+    mọi type token khác. Trước fix, `long long` được ghi raw
+    (`func big long long 0 ...`) nên reader cắt token tại dấu cách: ret
+    thành `long`, `nparams` đọc phải `long`, toàn bộ cờ lệch và function
+    không dùng được qua import.
+  - **M2**: `type_raw()`/`type_x(t, esc_base)` bị bỏ; `type()` escape tên
+    gốc trực tiếp. Escape tên gốc không còn là "quirk oracle" mà là **quy
+    ước format bắt buộc**: `.ivm` phân tách token bằng space, nên type
+    C-style có dấu cách (`long long`) phải thành `long\slong`. Reader đã
+    `unesc` return type (`read_func`/`read_method`) từ trước nên không đổi.
+- **Fixture** (`selfhost/corpus/parser/module/`):
+  - Mới: `17_export_long_long.ivy` - module `h36_iface3` export struct
+    `Wide` (field `long long`, method trả `long long`) và free function
+    `widen(long long) -> long long` dưới `#pragma ivy cnumber`. Golden
+    `-c` chứa `.ivm` với `func widen long\slong 1 long\slong:x 0 0 0 0`
+    và `struct Wide 1 long\slong:v ...`.
+- **Golden**: 1 fixture mới × 10 mode = 10 record; corpus 1112 → **1113**;
+  link 289 (không đổi). Provenance `expected:H10.15`.
+- **Gate**: `build.ps1 -SelfLink -Golden` → bootstrap OK, F2 + self-link
+  identical SHA `C81A2F8D65ACF00250F31AFBD7360531FF26AF97A0FDF51F8EA4F8105EE3BE79`
+  (27221504 B), golden 13142 checks / 0 failures (1113 fixture).
+  `check_repro.ps1` → PASS (83 artifact: 42 object, 38 `.ivm`, 3 executable).
+- **Ghi chú**: chỉ `codegen.ivy` dùng `long long` trong các module export,
+  và nó không export free function trả `long long`, nên `.ivm` của compiler
+  không đổi byte; bug M1 chỉ lộ ra với interface người dùng như fixture
+  mới. Import thử `h36_iface3::widen(1)` và `Wide::get()` đều biên dịch
+  được sau fix (trước fix `widen` bị `undeclared identifier`).
+
 ## 2. Trạng thái
 | Mục | ID | Nội dung | Trạng thái |
 |---|---|---|---|
@@ -831,7 +864,7 @@
 | H10.12 | T1, T2, T5, T6, T11 | Template pass 1 | ✅ |
 | H10.13 | T3, T4, T7, T8, T9 | Template pass 2 | ✅ |
 | H10.14 | T10, T12, T13 | Template pass 3 (pack/concept/non-type) | ✅ |
-| H10.15 | M1, M2 | `.ivm` escape | ☐ |
+| H10.15 | M1, M2 | `.ivm` escape | ✅ |
 | H10.16 | I1 | Interpreter CFG self-edge | ☐ |
 | H10.17 | H27, B-P5, B-R2 | Audit bug không tái hiện / ngoại lệ | ☐ |
 | H10.18 | - | Audit cuối + `check_repro.ps1` + tag `0.6.0` (khi user yêu cầu) | ☐ |
